@@ -1,0 +1,1315 @@
+{
+  "logos": {
+    "adidas.es": {
+      "source": "itunes:1266591536:adidas: Ropa y Zapatillas",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "adobe.com": {
+      "source": "itunes:469337564:Acrobat Reader Convertidor PDF",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "airbnb.es": {
+      "source": "itunes:401626263:Airbnb",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "alcampo.es": {
+      "source": "itunes:1450287430:Club Alcampo",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "aldi.es": {
+      "source": "itunes:669956906:ALDI Supermercados",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "aliexpress.com": {
+      "source": "itunes:436672029:AliExpress Shopping App",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "alsa.es": {
+      "source": "itunes:444511709:Alsa: Compra billetes de bus",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "amazon.es": {
+      "source": "itunes:335187483:Amazon Compras",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "anthropic.com": {
+      "source": "itunes:6473753684:Claude by Anthropic",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "apple.com": {
+      "source": "itunes:375380948:Apple Store",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "basic-fit.com": {
+      "source": "itunes:1588263601:Basic-Fit",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "bershka.com": {
+      "source": "itunes:427769832:Bershka",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "bizum.es": {
+      "source": "itunes:6761751498:Bizum Pay",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "blablacar.es": {
+      "source": "itunes:341329033:BlaBlaCar: Viaja por menos",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "bolt.eu": {
+      "source": "itunes:675033630:Bolt: Solicita viajes 24/7",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "booking.com": {
+      "source": "itunes:367003839:Booking.com - Ofertas de viaje",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "bp.com": {
+      "source": "itunes:6449548027:miBP ofertas y puntos gasolina",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "burgerking.es": {
+      "source": "itunes:649457639:Burger King España",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "cabify.com": {
+      "source": "itunes:476087442:Cabify, viaja como te mereces",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "carrefour.com": {
+      "source": "itunes:605788142:Mi Carrefour: Cupones y Ahorro",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "cinesa.es": {
+      "source": "itunes:6444631578:Cinesa App",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "consum.es": {
+      "source": "itunes:840969196:Mundo Consum - Compra online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "correos.es": {
+      "source": "itunes:6478281790:Correos: Envío y seguimiento",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "dazn.com": {
+      "source": "itunes:1129523589:DAZN: Deportes en Directo",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "decathlon.es": {
+      "source": "itunes:1168607403:Decathlon: Tienda de deporte",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "dia.es": {
+      "source": "itunes:660175630:Dia Supermercado online y Club",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "digimobil.es": {
+      "source": "itunes:900320479:DIGIMobile V2",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "disneyplus.com": {
+      "source": "site:touch",
+      "original": [
+        180,
+        180
+      ],
+      "stored": [
+        180,
+        180
+      ],
+      "lowres": false
+    },
+    "dominospizza.es": {
+      "source": "itunes:432951295:Domino’s Pizza España",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "dropbox.com": {
+      "source": "itunes:327630330:Dropbox: Archivos y Fotos",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "druni.es": {
+      "source": "itunes:1592321069:DRUNI - Perfumería online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "elcorteingles.es": {
+      "source": "itunes:1497498548:El Corte Inglés",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "endesa.com": {
+      "source": "itunes:602095382:Endesa Clientes, luz y gas",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "eroski.es": {
+      "source": "itunes:1071407778:EROSKI Supermercados",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "fiveguys.es": {
+      "source": "itunes:683336616:Five Guys",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "fnac.es": {
+      "source": "itunes:377379474:Fnac: Compras Online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "free-now.com": {
+      "source": "google",
+      "original": [
+        256,
+        256
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "galp.com": {
+      "source": "site:link",
+      "original": [
+        500,
+        500
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "glovoapp.com": {
+      "source": "itunes:951812684",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "goiko.com": {
+      "source": "google",
+      "original": [
+        192,
+        192
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "google.com": {
+      "source": "itunes:284815942:Google",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "hipercor.es": {
+      "source": "itunes:900396484:Publicaciones Hipercor",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "hm.com": {
+      "source": "itunes:834465911:H&M",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "iberdrola.es": {
+      "source": "itunes:883078092:Iberdrola Clientes",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "iberia.com": {
+      "source": "itunes:434825954:Iberia",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "icloud.com": {
+      "source": "google",
+      "original": [
+        180,
+        180
+      ],
+      "stored": [
+        180,
+        180
+      ],
+      "lowres": false
+    },
+    "idealista.com": {
+      "source": "itunes:465958311:idealista",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "ikea.com": {
+      "source": "site:touch",
+      "original": [
+        180,
+        180
+      ],
+      "stored": [
+        180,
+        180
+      ],
+      "lowres": false
+    },
+    "imagin.com": {
+      "source": "itunes:1069665204:imagin: Banco Móvil y Finanzas",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "just-eat.es": {
+      "source": "itunes:566347057:Just Eat - Comida a domicilio",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "kfc.com": {
+      "source": "itunes:1475071354:KFC España #PolloPollo",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "leroymerlin.es": {
+      "source": "itunes:370400343:LEROY MERLIN",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "lidl.es": {
+      "source": "itunes:1238611143:Lidl Plus",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "lowi.es": {
+      "source": "itunes:961613954:Mi Lowi",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "mango.com": {
+      "source": "itunes:372216941:MANGO - Online fashion",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "masmovil.es": {
+      "source": "itunes:734337851:MÁSMÓVIL",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "massimodutti.com": {
+      "source": "itunes:373282826:Massimo Dutti: Moda online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "max.com": {
+      "source": "itunes:1666653815:HBO Max: ve películas y TV",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "mcdonalds.es": {
+      "source": "itunes:1217507712:McDonald's",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "mcfit.com": {
+      "source": "itunes:6737349295:McFIT Klub",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "mediamarkt.es": {
+      "source": "itunes:1438532508:MediaMarkt Comprar Online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "mercadona.es": {
+      "source": "itunes:1368037685:Mercadona",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "metromadrid.es": {
+      "source": "itunes:1480608836:Metro Madrid - Tiempos espera",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "microsoft.com": {
+      "source": "itunes:541164041",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "moeveglobal.com": {
+      "source": "site:link",
+      "original": [
+        180,
+        180
+      ],
+      "stored": [
+        180,
+        180
+      ],
+      "lowres": false
+    },
+    "movistar.es": {
+      "source": "itunes:1246644017:Mi Movistar",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "naturgy.es": {
+      "source": "itunes:1053505418:Naturgy Everyday",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "netflix.com": {
+      "source": "itunes:363590051:Netflix",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "nike.com": {
+      "source": "itunes:1095459556:Nike: todo para atletas",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "nintendo.com": {
+      "source": "itunes:1234806557:Nintendo Switch App",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "openai.com": {
+      "source": "itunes:6448311069:ChatGPT",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "orange.es": {
+      "source": "itunes:379866108:Mi Orange",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "paypal.com": {
+      "source": "itunes:283646709:PayPal",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "pccomponentes.com": {
+      "source": "itunes:1175529865:PcComponentes",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "pepephone.com": {
+      "source": "itunes:508082036:Mi Pepephone",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "playstation.com": {
+      "source": "itunes:410896080:PlayStation App",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "primark.com": {
+      "source": "itunes:6745568862:Primark",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "primevideo.com": {
+      "source": "site:link",
+      "original": [
+        196,
+        196
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "primor.eu": {
+      "source": "itunes:1104772567:Perfumerías Primor",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "pullandbear.com": {
+      "source": "google",
+      "original": [
+        180,
+        180
+      ],
+      "stored": [
+        180,
+        180
+      ],
+      "lowres": false
+    },
+    "renfe.com": {
+      "source": "itunes:1544224672:Renfe",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "repsol.es": {
+      "source": "itunes:494847823:Waylet. Pagos con el móvil",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "revolut.com": {
+      "source": "itunes:932493382:Revolut — Más que un banco",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "ryanair.com": {
+      "source": "itunes:504270602:Ryanair",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "sephora.com": {
+      "source": "itunes:560058271:Sephora - Maquillaje y Belleza",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "shein.com": {
+      "source": "itunes:878577184:SHEIN - Compras Online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "shell.es": {
+      "source": "itunes:1463242152:Shell Service",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "spotify.com": {
+      "source": "itunes:324684580:Spotify: música y pódcasts",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "starbucks.es": {
+      "source": "itunes:6447769086:Starbucks España",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "steampowered.com": {
+      "source": "site:link",
+      "original": [
+        256,
+        256
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "stradivarius.com": {
+      "source": "itunes:421874087:Stradivarius - Compras Online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "tacobell.com": {
+      "source": "itunes:6477913043:Taco Bell España",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "telepizza.es": {
+      "source": "itunes:1613492214:Telepizza Pizza y Pedidos",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "temu.com": {
+      "source": "itunes:1641486558:Temu: Compra como millonario",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "tmb.cat": {
+      "source": "itunes:387847254:TMB App (Metro Bus Barcelona)",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "traderepublic.com": {
+      "source": "google",
+      "original": [
+        256,
+        256
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "uber.com": {
+      "source": "itunes:368677368:Uber - Viajes en taxi y más",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "ubereats.com": {
+      "source": "itunes:1058959277:Uber Eats: Comida a domicilio",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "vinted.es": {
+      "source": "site:link",
+      "original": [
+        192,
+        192
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "vips.es": {
+      "source": "itunes:6744138024:VIPs",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "vodafone.es": {
+      "source": "itunes:455655421:Mi Vodafone",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "vueling.com": {
+      "source": "itunes:445818820:Vueling Airlines-Cheap Flights",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "wallapop.com": {
+      "source": "site:touch",
+      "original": [
+        180,
+        180
+      ],
+      "stored": [
+        180,
+        180
+      ],
+      "lowres": false
+    },
+    "xbox.com": {
+      "source": "itunes:736179781:XBOX",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "yelmocines.es": {
+      "source": "itunes:1498225311",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "yoigo.com": {
+      "source": "itunes:1055643389:Mi Yoigo",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "youtube.com": {
+      "source": "itunes:544007664",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "zalando.es": {
+      "source": "itunes:585629514:Zalando: Tienda De Moda Online",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    },
+    "zara.com": {
+      "source": "itunes:547951480:ZARA",
+      "original": [
+        512,
+        512
+      ],
+      "stored": [
+        192,
+        192
+      ],
+      "lowres": false
+    }
+  },
+  "failed": [
+    "100montaditos.com"
+  ]
+}

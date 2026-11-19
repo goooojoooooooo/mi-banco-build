@@ -1,0 +1,135 @@
+import Foundation
+
+public struct SpendingPace: Equatable, Sendable {
+    public let thisMonthCents: Int
+    public let lastMonthSamePointCents: Int
+    public var differenceCents: Int { thisMonthCents - lastMonthSamePointCents }
+
+    public init(thisMonthCents: Int, lastMonthSamePointCents: Int) {
+        self.thisMonthCents = thisMonthCents
+        self.lastMonthSamePointCents = lastMonthSamePointCents
+    }
+}
+
+public struct WeekSummary: Equatable, Sendable {
+    public let spentCents: Int
+    public let previousWeekSpentCents: Int
+    public let movementCount: Int
+    public let topMerchant: String?
+
+    public init(spentCents: Int, previousWeekSpentCents: Int, movementCount: Int, topMerchant: String?) {
+        self.spentCents = spentCents
+        self.previousWeekSpentCents = previousWeekSpentCents
+        self.movementCount = movementCount
+        self.topMerchant = topMerchant
+    }
+}
+
+public struct MerchantHistory: Equatable, Sendable {
+    public let countThisMonth: Int
+    public let totalThisMonthCents: Int
+    public let countAllTime: Int
+    public let firstDate: Date?
+
+    public init(countThisMonth: Int, totalThisMonthCents: Int, countAllTime: Int, firstDate: Date?) {
+        self.countThisMonth = countThisMonth
+        self.totalThisMonthCents = totalThisMonthCents
+        self.countAllTime = countAllTime
+        self.firstDate = firstDate
+    }
+}
+
+/// Solo pagos no marcados como "no es mío".
+private func countedPayments(_ movements: [Movement]) -> [Movement] {
+    movements.filter { $0.kind == .payment && !$0.flaggedNotMine }
+}
+
+private func spent(_ movements: [Movement], where include: (Date) -> Bool) -> Int {
+    movements.reduce(0) { include($1.date) ? $0 + abs($1.amountCents) : $0 }
+}
+
+/// Gasto de este mes hasta `now` frente al del mes anterior hasta el mismo día y hora (el día se ajusta a la
+/// longitud de ese mes). nil si el mes anterior no tiene ningún pago.
+public func spendingPace(movements: [Movement], now: Date, calendar: Calendar) -> SpendingPace? {
+    guard let monthStart = calendar.dateInterval(of: .month, for: now)?.start,
+          let prevStart = calendar.date(byAdding: .month, value: -1, to: monthStart),
+          let prevDays = calendar.range(of: .day, in: .month, for: prevStart) else { return nil }
+    let payments = countedPayments(movements)
+    guard payments.contains(where: { $0.date >= prevStart && $0.date < monthStart }) else { return nil }
+    let clock = calendar.dateComponents([.day, .hour, .minute, .second], from: now)
+    var cutoffParts = calendar.dateComponents([.year, .month], from: prevStart)
+    cutoffParts.day = min(clock.day ?? 1, prevDays.count)
+    cutoffParts.hour = clock.hour
+    cutoffParts.minute = clock.minute
+    cutoffParts.second = clock.second
+    guard let cutoff = calendar.date(from: cutoffParts) else { return nil }
+    let thisMonth = spent(payments) { $0 >= monthStart && $0 <= now }
+    let lastMonth = spent(payments) { $0 >= prevStart && $0 <= cutoff }
+    return SpendingPace(thisMonthCents: thisMonth, lastMonthSamePointCents: lastMonth)
+}
+
+/// Semana de lunes a domingo que contiene `date`. `movementCount` cuenta los pagos de la semana.
+public func weekSummary(movements: [Movement], weekContaining date: Date, calendar: Calendar) -> WeekSummary {
+    var cal = calendar
+    cal.firstWeekday = 2
+    cal.minimumDaysInFirstWeek = 4
+    guard let week = cal.dateInterval(of: .weekOfYear, for: date),
+          let prevStart = cal.date(byAdding: .day, value: -7, to: week.start) else {
+        return WeekSummary(spentCents: 0, previousWeekSpentCents: 0, movementCount: 0, topMerchant: nil)
+    }
+    let payments = countedPayments(movements)
+    let inWeek = payments.filter { $0.date >= week.start && $0.date < week.end }
+    let previous = spent(payments) { $0 >= prevStart && $0 < week.start }
+
+    var totals: [String: (cents: Int, name: String, latest: Date)] = [:]
+    for m in inWeek {
+        guard let name = m.merchant else { continue }
+        let key = normalizeMerchant(name)
+        if key.isEmpty { continue }
+        var entry = totals[key] ?? (0, name, m.date)
+        entry.cents += abs(m.amountCents)
+        if m.date >= entry.latest { entry.latest = m.date; entry.name = name }
+        totals[key] = entry
+    }
+    let top = totals.min { a, b in
+        a.value.cents != b.value.cents ? a.value.cents > b.value.cents : a.key < b.key
+    }?.value.name
+    return WeekSummary(spentCents: spent(inWeek) { _ in true }, previousWeekSpentCents: previous,
+                       movementCount: inWeek.count, topMerchant: top)
+}
+
+/// Pagos a un comercio (por clave normalizada): este mes, en total y el primero.
+public func merchantHistory(for merchant: String, in movements: [Movement], now: Date, calendar: Calendar) -> MerchantHistory {
+    let key = normalizeMerchant(merchant)
+    let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
+    let mine = key.isEmpty ? [] : countedPayments(movements).filter { normalizeMerchant($0.merchant ?? "") == key }
+    let month = mine.filter { $0.date >= monthStart && $0.date <= now }
+    return MerchantHistory(countThisMonth: month.count, totalThisMonthCents: month.reduce(0) { $0 + abs($1.amountCents) },
+                           countAllTime: mine.count, firstDate: mine.map(\.date).min())
+}
+
+private func foldedForSearch(_ s: String) -> String {
+    s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+}
+
+/// Búsqueda sin mayúsculas ni tildes en comercio, nombre del banco y nota; y por importe tal como se escribe:
+/// "12,50" o "12.50" = exactamente 12,50 €; "12" = cualquier importe de 12 euros. Vacío devuelve todo.
+public func searchMovements(_ movements: [Movement], query: String) -> [Movement] {
+    let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.isEmpty { return movements }
+    let needle = foldedForSearch(trimmed)
+    let isAmount = trimmed.allSatisfy { $0.isASCII && ($0.isNumber || $0 == "," || $0 == ".") }
+        && trimmed.contains(where: \.isNumber)
+    let hasSeparator = trimmed.contains(",") || trimmed.contains(".")
+    let amount = isAmount ? parseAmountToCents(Substring(trimmed)) : nil
+    return movements.filter { m in
+        if foldedForSearch(m.merchant ?? "").contains(needle) { return true }
+        if foldedForSearch(m.bank.displayName).contains(needle) { return true }
+        if let note = m.note, foldedForSearch(note).contains(needle) { return true }
+        if let amount {
+            let cents = abs(m.amountCents)
+            return hasSeparator ? cents == amount : cents / 100 == amount / 100
+        }
+        return false
+    }
+}

@@ -1,0 +1,57 @@
+name: ios-build
+run-name: ios-build ${{ github.ref_name }}
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE=/Applications/Xcode_26.2.app
+          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          echo "Usando $XCODE"
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos
+      - run: brew install xcodegen && xcodegen
+      - name: Archive (sin firmar)
+        run: |
+          xcodebuild -project MiBanco.xcodeproj -scheme MiBanco -sdk iphoneos -configuration Release \
+            archive -archivePath build/MiBanco.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=""
+      - name: Sin push en entitlements ni Info.plist; acciones de Atajos dentro de la app
+        run: |
+          APP=build/MiBanco.xcarchive/Products/Applications/MiBanco.app
+          test -d "$APP"
+          if [ ! -d "$APP/Metadata.appintents" ]; then
+            echo "Falta $APP/Metadata.appintents: Atajos no veria Registrar aviso ni Registrar pago con Cartera"
+            exit 1
+          fi
+          ls -la "$APP/Metadata.appintents"
+          if plutil -p "$APP/Info.plist" | grep aps-environment >/dev/null; then echo "Info.plist menciona aps-environment"; exit 1; fi
+          if grep aps-environment App/MiBanco.entitlements >/dev/null; then echo "entitlements mencionan aps-environment"; exit 1; fi
+          if codesign -d --entitlements - "$APP" 2>&1 | grep aps-environment >/dev/null; then echo "binario con aps-environment"; exit 1; fi
+          echo ok
+      - name: Empaquetar .ipa
+        run: |
+          mkdir Payload
+          cp -R build/MiBanco.xcarchive/Products/Applications/MiBanco.app Payload/
+          zip -qry MiBanco.ipa Payload
+          unzip -l MiBanco.ipa | grep -E "Info.plist"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          name: MiBanco.ipa
+          path: MiBanco.ipa
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" MiBanco.ipa --title "$GITHUB_REF_NAME" --generate-notes

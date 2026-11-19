@@ -1,0 +1,139 @@
+import SwiftUI
+
+@main
+struct MiBancoApp: App {
+    @State private var model = LedgerModel()
+    @State private var logos = MerchantLogos()
+    @State private var preferences = AppPreferences()
+    @State private var locked = true
+    /// Arranque en frío: la marca se traza sobre negro y luego Inicio se monta por capas.
+    @State private var launching = true
+    /// Sube cuando Inicio debe montarse por capas (tras la marca del arranque y al desbloquear).
+    @State private var revealToken = 0
+    @AppStorage("lockEnabled") private var lockEnabled = true
+    @Environment(\.scenePhase) private var scenePhase
+
+    private var showsLock: Bool {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.holdsLock && locked }
+        #endif
+        return locked && lockEnabled
+    }
+    /// Tapa opaca para la captura del selector de apps; no toca `locked`.
+    private var showsPrivacyCover: Bool {
+        #if DEBUG
+        if DemoMode.isActive { return false }
+        #endif
+        return lockEnabled && scenePhase != .active
+    }
+
+    var body: some Scene {
+        WindowGroup {
+            ZStack {
+                RootView(model: model, isLocked: showsLock, revealToken: revealToken)
+                    .accessibilityHidden(showsLock)
+                    .allowsHitTesting(!showsLock)
+                if showsLock {
+                    // Entra sin animación (la captura del selector de apps nunca pilla la app a medias);
+                    // al desbloquear se desvanece, porque solo ese cambio va en `withAnimation`.
+                    LockView(locked: $locked)
+                        .transition(.opacity)
+                } else if launching {
+                    LaunchCurtain(onReveal: reveal)
+                        .transition(.opacity)
+                }
+                if showsPrivacyCover {
+                    privacyCover
+                }
+            }
+            .task {
+                await logos.prewarm(domains: [])
+                #if DEBUG
+                if DemoMode.isActive {
+                    if DemoMode.simulatesArrival {
+                        try? await Task.sleep(for: .seconds(4))
+                        model.demoSimulateArrival()
+                    }
+                    return
+                }
+                #endif
+                await AlertPoster.setup()
+            }
+            .environment(logos)
+            .environment(preferences)
+            .preferredColorScheme(.dark)
+            .environment(\.locale, Locale(identifier: "es_ES"))
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:
+                    model.reload()
+                    Task { await LiveActivityController.endStale() }
+                case .background:
+                    if lockEnabled { locked = true }
+                default:
+                    break
+                }
+            }
+            .onChange(of: lockEnabled) { _, _ in
+                // Cambiar el ajuste solo es posible con la app ya desbloqueada: no volver a pedir Face ID.
+                withAnimation(Theme.Motion.unlock) { locked = false }
+            }
+            .onChange(of: showsLock) { wasLocked, isLocked in
+                // Al desbloquear, Inicio se monta por capas mientras el bloqueo se desvanece encima.
+                if wasLocked && !isLocked {
+                    launching = false
+                    revealToken += 1
+                }
+            }
+        }
+    }
+
+    /// La marca ya está trazada: Inicio empieza a montarse debajo y el telón se aparta.
+    private func reveal() {
+        revealToken += 1
+        withAnimation(.easeOut(duration: 0.32)) { launching = false }
+    }
+
+    private var privacyCover: some View {
+        ZStack {
+            Theme.canvas.ignoresSafeArea()
+            VStack(spacing: Theme.Space.row) {
+                AppMark(size: 64)
+                Text("Mi Banco")
+                    .titan(.sheetTitle)
+                    .foregroundStyle(Theme.label)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Arranque: negro, la marca aparece y su ola se traza (≈ 0,5 s); después se aparta mientras Inicio se monta.
+/// No bloquea nada (no recibe toques) y con Reducir movimiento se aparta al instante.
+private struct LaunchCurtain: View {
+    let onReveal: () -> Void
+    @State private var drawn: CGFloat = 0
+    @State private var shown = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            Theme.canvas.ignoresSafeArea()
+            AppMark(size: 72, drawn: drawn)
+                .opacity(shown ? 1 : 0)
+                .scaleEffect(shown ? 1 : 0.92)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .task {
+            guard !reduceMotion else {
+                onReveal()
+                return
+            }
+            withAnimation(.easeOut(duration: 0.25)) { shown = true }
+            withAnimation(Theme.Motion.markDraw.delay(0.05)) { drawn = 1 }
+            try? await Task.sleep(for: .milliseconds(560))
+            onReveal()
+        }
+    }
+}

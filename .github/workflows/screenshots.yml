@@ -73,15 +73,18 @@ jobs:
           }
           shot inicio-todo 10 -MiBancoDemoCard todo
           shot inicio-revolut 10 -MiBancoDemoCard rev
+          # Arranca en Revolut y a los 2 s pasa a imagin por el mismo camino que un toque en el segmentado.
+          shot inicio-imagin 10 -MiBancoDemoCard rev -MiBancoDemoSwitch
           shot detalle 10 -MiBancoDemoDetail
           shot privado 10 -MiBancoDemoPrivate
           shot buscar 10 -MiBancoDemoSearch merca
           shot avisos 10 -MiBancoDemoScreen avisos
+          shot avisos-ajustes 10 -MiBancoDemoScreen avisos -MiBancoDemoRules
           shot ajustes 10 -MiBancoDemoScreen ajustes
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival
-          # El bloqueo se quita solo a los ~4 s: a los ~2 s todavia se ve.
-          shot bloqueo 2 -MiBancoDemoLock
+          # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.
+          shot bloqueo 3.5 -MiBancoDemoLock
           ls -l out
       - uses: actions/upload-artifact@v4
         if: always()

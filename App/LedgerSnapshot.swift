@@ -82,6 +82,15 @@ struct BalanceInfo: Equatable, Sendable {
     let fromBank: Bool
 }
 
+/// Un comercio silenciado: su clave normalizada (lo que guarda Core) y cómo se llama.
+struct MutedMerchant: Identifiable, Equatable, Sendable {
+    let key: String
+    let name: String
+    /// Lo que se le pasa a Core para dejar de silenciarlo: el nombre con que llegó (se normaliza a `key`).
+    let raw: String
+    var id: String { key }
+}
+
 /// "Este mes 412,30 €, 85,70 € menos que en octubre". Sin datos del mes anterior, solo la primera parte.
 struct PaceLine: Equatable, Sendable {
     let thisMonthCents: Int
@@ -104,6 +113,14 @@ struct LedgerSnapshot: Sendable {
     var monthSpent: [AccountCard: Int] = [:]
     var pace: PaceLine?
     var insights: [Insight] = []
+    /// Ids de los avisos de atención (ámbar) del feed: la insignia de la pestaña Avisos cuenta los no vistos.
+    var warningInsightIDs: [String] = []
+    /// Nombre a mostrar de cada comercio (clave de `normalizeMerchant` -> el nombre más reciente con que llegó).
+    var merchantNames: [String: String] = [:]
+    /// Comercios silenciados, por nombre a mostrar, ya ordenados (pantalla "Comercios silenciados").
+    var mutedList: [MutedMerchant] = []
+    /// Lo que pide la configuración de avisos (interruptores de Avisos).
+    var alertSettings = AlertSettings()
     /// Todos los movimientos, del más reciente al más antiguo: lo que recorre la búsqueda.
     var searchIndex: [Movement] = []
     /// Dominio del directorio de comercios por movimiento (su logo va en la app).
@@ -188,11 +205,17 @@ struct LedgerSnapshot: Sendable {
             }
         }
         recentPayments = payments
+        merchantNames = names
+        alertSettings = state.alertSettings
+        mutedList = state.mutedMerchants
+            .map { MutedMerchant(key: $0, name: names[$0] ?? $0.capitalized, raw: names[$0] ?? $0) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         for (key, merchant) in names {
             histories[key] = merchantHistory(for: merchant, in: state.movements, now: now, calendar: calendar)
         }
 
         insights = MiBancoCore.insights(for: state, now: now, calendar: calendar)
+        warningInsightIDs = insights.filter { $0.severity == .warning }.map(\.id)
     }
 
     func list(for card: AccountCard) -> [ListEntry] { entries[card] ?? [] }

@@ -13,5 +13,8 @@ struct MovementActivityAttributes: ActivityAttributes {
         var totalCents: Int?
         /// Título del aviso (ya redactado), para que el widget no reconstruya el texto.
         var title: String
+        /// Titanio (añadido): dominio del logo del comercio si va dentro de la app. Opcional, así que un estado
+        /// antiguo sin esta clave se sigue leyendo (nil = ficha del banco).
+        var logoDomain: String? = nil
     }
 }

@@ -141,6 +141,10 @@ enum Theme {
         static let unlock = Animation.smooth(duration: 0.3)
         /// Llegada: lo que espera el saldo nuevo para que antes se vea la tarjeta deslizarse.
         static let arrivalLead: Duration = .milliseconds(560)
+        /// Filas que dependen de un interruptor (umbral) y avisos nuevos que entran: muelle sin rebote (llevan texto).
+        static let reveal = Animation.spring(duration: 0.42, bounce: 0)
+        /// Cifras que se ocultan con el ojo: los dígitos se barajan durante este tiempo antes de difuminarse.
+        static let scramble: Duration = .milliseconds(240)
 
         // Notificación ampliada (Parte 2 la rediseña; se conservan sus tiempos).
         static let river = Animation.spring(duration: 0.7, bounce: 0.1)

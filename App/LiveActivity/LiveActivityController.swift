@@ -21,7 +21,7 @@ enum LiveActivityController {
         let state = MovementActivityAttributes.ContentState(
             bank: movement.bank.rawValue, balanceCents: balance, estimated: estimated,
             lastAmountCents: movement.amountCents, merchant: movement.merchant, kind: movement.kind.rawValue,
-            totalCents: total, title: text.title)
+            totalCents: total, title: text.title, logoDomain: movement.logoDomain)
         let content = ActivityContent(state: state, staleDate: Date.now.addingTimeInterval(staleAfter))
 
         let current = live

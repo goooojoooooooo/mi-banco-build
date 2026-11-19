@@ -33,15 +33,19 @@ struct TitleCompression: ViewModifier {
 }
 
 /// El carrusel se queda algo atrás (paralaje), se encoge y se apaga mientras la lista sube por encima.
+/// Al tirar hacia abajo desde arriba, se estira un poco (hasta un 4 %, anclado arriba), como una goma.
 struct CarouselParallax: ViewModifier {
     let motion: HomeMotion
     let enabled: Bool
 
     func body(content: Content) -> some View {
-        let y = enabled ? max(motion.listOffset, 0) : 0
+        let y: CGFloat = enabled ? max(motion.listOffset, 0) : 0
+        let pull: CGFloat = enabled ? max(-motion.listOffset, 0) : 0
+        // Resistencia: crece rápido al principio y se frena (nunca pasa del 4 %).
+        let stretch: CGFloat = 0.04 * (1 - 1 / (pull / 120 + 1))
         content
             .offset(y: y * 0.32)
-            .scaleEffect(1 - min(y / 1_400, 0.06), anchor: .top)
+            .scaleEffect(1 - min(y / 1_400, 0.06) + stretch, anchor: .top)
             .opacity(1 - min(y / 420, 0.45))
     }
 }

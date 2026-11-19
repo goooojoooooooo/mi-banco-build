@@ -7,7 +7,8 @@ import MiBancoCore
 /// `-MiBancoDemoScreen inicio|avisos|ajustes`, `-MiBancoDemoCard todo|rev|ima|tr`, `-MiBancoDemoDetail`
 /// (hoja del movimiento más reciente), `-MiBancoDemoPrivate` (modo privado), `-MiBancoDemoSearch <texto>`,
 /// `-MiBancoDemoArrival` (llega un pago a los ~4 s), `-MiBancoDemoLock` (bloqueo y desbloqueo a los ~4 s),
-/// `-MiBancoDemoOnlineLogo` (una tienda fuera del directorio, para la descarga del logo).
+/// `-MiBancoDemoOnlineLogo` (una tienda fuera del directorio, para la descarga del logo),
+/// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores).
 /// En la demo nada se escribe en el almacén ni en UserDefaults: los cambios viven en memoria.
 enum DemoMode {
     enum Screen { case home, alerts, settings }
@@ -40,7 +41,12 @@ enum DemoMode {
         }
     }
 
+    /// `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente como lo haría un toque en el segmentado.
+    static var switchesCard: Bool { arguments.contains("-MiBancoDemoSwitch") }
+
     static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
+    /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".
+    static var showsAlertRules: Bool { arguments.contains("-MiBancoDemoRules") }
     static var startsPrivate: Bool { arguments.contains("-MiBancoDemoPrivate") }
     static var searchQuery: String? { value(after: "-MiBancoDemoSearch") }
 
@@ -95,6 +101,9 @@ enum DemoMode {
             movement(.tr, -4_995, "Zara", day(5, hour: 18, minute: 20)),
             movement(.ima, -2_340, "Lidl", day(5, hour: 11, minute: 5)),
             movement(.rev, -1_830, "Glovo", day(6, hour: 21, minute: 40)),
+            // Dos cargos iguales en Amazon con tres minutos de diferencia: "Posible cobro duplicado" (ámbar) en Avisos.
+            movement(.ima, -2_499, "Amazon", day(1, hour: 16, minute: 2)),
+            movement(.ima, -2_499, "Amazon", day(1, hour: 16, minute: 5)),
         ]
 
         // Spotify: 9,99 los tres meses anteriores y 10,99 ayer (una subida de 1 €).

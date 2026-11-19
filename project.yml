@@ -105,6 +105,11 @@ targets:
           - "*.entitlements"
       - Shared/MovementActivityAttributes.swift
       - App/Theme.swift
+      - App/Logos/BundledLogos.swift
+      # Logos para la Live Activity y la Dynamic Island (los mismos que la app).
+      - path: App/Resources/Logos
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: Core
         product: MiBancoCore

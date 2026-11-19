@@ -20,13 +20,17 @@ struct CountingAmount: View {
     }
 
     @State private var shown: Double?
+    /// Mientras el ojo cambia, las cifras se barajan un instante (0 = quietas).
+    @State private var scramble = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppPreferences.self) private var preferences
     /// Al montar Inicio por capas (arranque, desbloqueo) o abrir la hoja, la cifra vuelve a contar desde 0.
     @Environment(\.entrance) private var entrance
 
     var body: some View {
-        AmountFigure(value: shown ?? (countsUp && !reduceMotion ? 0 : Double(cents)), style: style)
+        AmountFigure(value: shown ?? (countsUp && !reduceMotion ? 0 : Double(cents)), style: style, scramble: scramble)
             .onAppear(perform: start)
+            .onChange(of: preferences.privateMode) { _, _ in shuffleDigits() }
             .onChange(of: revealed) { _, _ in start() }
             .onChange(of: entrance.token) { _, _ in recount() }
             .onChange(of: cents) { _, new in
@@ -38,6 +42,19 @@ struct CountingAmount: View {
                     withAnimation(Theme.Motion.roll) { shown = Double(new) }
                 }
             }
+    }
+
+    /// El ojo: durante 240 ms los dígitos cambian cada 40 ms mientras el desenfoque entra o sale. Sin Reducir movimiento.
+    private func shuffleDigits() {
+        guard !reduceMotion else { return }
+        Task {
+            let steps = 6
+            for step in 1...steps {
+                scramble = step
+                try? await Task.sleep(for: Theme.Motion.scramble / steps)
+            }
+            scramble = 0
+        }
     }
 
     /// Dos pasos: primero 0 (sin animación, la capa aún está oculta) y en el siguiente ciclo, la cuenta.
@@ -66,6 +83,7 @@ struct CountingAmount: View {
 private struct AmountFigure: View, Animatable {
     var value: Double
     let style: CountingAmount.Style
+    var scramble = 0
 
     nonisolated var animatableData: Double {
         get { value }
@@ -76,12 +94,29 @@ private struct AmountFigure: View, Animatable {
         let cents = Int(value.rounded())
         switch style {
         case .plain(let sign):
-            Text(sign ? signedEUR(cents) : formatEUR(cents).replacingOccurrences(of: "-", with: "−"))
+            Text(scrambled(sign ? signedEUR(cents) : formatEUR(cents).replacingOccurrences(of: "-", with: "−")))
         case let .hero(euros, small, color):
-            let parts = splitEUR(cents)
+            let split = splitEUR(cents)
+            let parts = (main: scrambled(split.main), small: scrambled(split.small))
             Text("\(Text(parts.main).font(.system(size: euros, weight: .semibold)))\(Text(parts.small).font(.system(size: small, weight: .semibold)).foregroundStyle(color))")
                 .tracking(-euros * 0.03)
         }
+    }
+}
+
+extension AmountFigure {
+    /// Con `scramble` > 0, cada dígito pasa a otro (determinista por posición y paso): mismo ancho, cifras tabulares.
+    fileprivate func scrambled(_ text: String) -> String {
+        guard scramble > 0 else { return text }
+        var out = ""
+        for (i, ch) in text.enumerated() {
+            if let d = ch.wholeNumberValue, ch.isASCII {
+                out.append(Character(String((d * 7 + scramble * 3 + i * 5) % 10)))
+            } else {
+                out.append(ch)
+            }
+        }
+        return out
     }
 }
 

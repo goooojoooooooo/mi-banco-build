@@ -33,6 +33,8 @@ struct HomeView: View {
     @State private var detentTick = 0
     /// Durante el deslizamiento de una llegada, el tope no suena (ya suena la llegada).
     @State private var quietSelection = false
+    /// Número del último cambio de lista pedido.
+    @State private var listSwap = 0
     @Namespace private var zoom
 
     var body: some View {
@@ -107,9 +109,11 @@ struct HomeView: View {
             guard let new, isVisible, scenePhase == .active else { return nil }
             return Haptics.arrival(isIncome: new.isIncome)
         }
-        .onChange(of: selection) { _, new in
+        .onChange(of: selection) { old, new in
+            // `nil` nunca cambia la lista (el carrusel ya no lo escribe, pero así es imposible un vaivén).
+            guard let new, new != old else { return }
             if !quietSelection { detentTick += 1 }
-            showList(for: new ?? .all)
+            showList(for: new)
         }
         .onChange(of: model.arrival) { _, new in
             if let new { choreograph(new) }
@@ -140,18 +144,35 @@ struct HomeView: View {
     // MARK: - Lista que sigue a la tarjeta
 
     /// La lista sale con un fundido de 150 ms, cambia, y la nueva entra escalonada (60 ms entre filas).
+    /// Un cambio rápido de tarjeta deja sin efecto el anterior (`listSwap`), y si la animación de salida no termina
+    /// (p. ej. otra transacción la interrumpe), un respaldo a los 0,4 s vuelve a enseñar la lista: nunca se queda oculta.
     private func showList(for card: AccountCard) {
         guard card != listCard || listHidden else { return }
+        listSwap += 1
+        let swapID = listSwap
+        if reduceMotion {
+            listCard = card
+            return
+        }
         withAnimation(Theme.Motion.listFade) {
             listHidden = true
         } completion: {
-            // El cambio de lista va sin animación (la vieja ya es invisible): nada se queda ocupando sitio.
-            var swap = Transaction()
-            swap.disablesAnimations = true
-            withTransaction(swap) { listCard = selection ?? .all }
-            beginEntrance(.list)
-            withAnimation(Theme.Motion.listFade) { listHidden = false }
+            swapList(swapID)
         }
+        Task {
+            try? await Task.sleep(for: .milliseconds(400))
+            swapList(swapID)
+        }
+    }
+
+    private func swapList(_ swapID: Int) {
+        guard swapID == listSwap, listHidden || listCard != (selection ?? .all) else { return }
+        // El cambio de lista va sin animación (la vieja ya es invisible): nada se queda ocupando sitio.
+        var swap = Transaction()
+        swap.disablesAnimations = true
+        withTransaction(swap) { listCard = selection ?? .all }
+        beginEntrance(.list)
+        withAnimation(Theme.Motion.listFade) { listHidden = false }
     }
 
     // MARK: - Montaje y llegada
@@ -234,10 +255,20 @@ struct HomeView: View {
     #if DEBUG
     private func applyDemoLaunchState() {
         guard DemoMode.isActive else { return }
+        // `-MiBancoDemoCard`: arranca ya en esa tarjeta (el carrusel se coloca en cuanto tiene ancho).
         if let card = DemoMode.initialCard, card != .all {
+            quietSelection = true
+            selection = card
+            listCard = card
+            quietSelection = false
+        }
+        // `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente por el mismo camino que un toque en el segmentado.
+        if DemoMode.switchesCard {
             Task {
                 try? await Task.sleep(for: .seconds(2))
-                withAnimation(Theme.Motion.cardSettle) { selection = card }
+                let all = AccountCard.allCases
+                let next = all[min((selection ?? .all).index + 1, all.count - 1)]
+                withAnimation(Theme.Motion.cardSettle) { selection = next }
             }
         }
         if let text = DemoMode.searchQuery {

@@ -14,6 +14,11 @@ struct CardCarousel: View {
 
     /// Tarjetas que ya se han visto: su cifra contó desde 0 la primera vez.
     @State private var seen: Set<AccountCard> = []
+    /// Lo que enseña el scroll. Va aparte de `selection` a propósito: antes de que el carrusel tenga ancho
+    /// (primer pase de maquetación) no se le pide ir a ninguna tarjeta y lo que escriba el scroll se ignora;
+    /// después, cada lado solo copia al otro un valor distinto y nunca `nil`, así que no puede haber eco.
+    @State private var scrolledID: AccountCard?
+    @State private var measured = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppPreferences.self) private var preferences
 
@@ -48,13 +53,14 @@ struct CardCarousel: View {
         }
         .safeAreaPadding(.horizontal, CarouselMetrics.inset)
         .scrollTargetBehavior(.viewAligned(limitBehavior: .always))
-        .scrollPosition(id: $selection)
+        .scrollPosition(id: $scrolledID)
         .scrollIndicators(.hidden)
         .scrollClipDisabled()
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             let step = geometry.containerSize.width - 2 * CarouselMetrics.inset + CarouselMetrics.spacing
             return step > 0 ? (geometry.contentOffset.x + geometry.contentInsets.leading) / step : 0
         } action: { _, position in
+            guard position.isFinite else { return }
             motion.carouselPosition = position
             let last = CGFloat(AccountCard.allCases.count - 1)
             let over = position < -0.04 || position > last + 0.04
@@ -62,8 +68,27 @@ struct CardCarousel: View {
         }
         .sensoryFeedback(Haptics.edge, trigger: motion.carouselOverscrolled) { _, new in new }
         .sensoryFeedback(Haptics.flip, trigger: flipped)
-        .onChange(of: selection) { _, _ in
+        .onScrollGeometryChange(for: Bool.self) { geometry in
+            geometry.containerSize.width > 0
+        } action: { _, hasWidth in
+            if hasWidth { settleInitialPosition() }
+        }
+        // Respaldo: si el cambio de geometría no llega (el primer valor ya era el bueno), tras el primer pase igual.
+        .task {
+            try? await Task.sleep(for: .milliseconds(60))
+            settleInitialPosition()
+        }
+        .onChange(of: scrolledID) { _, new in
+            // El dedo (o el sistema) dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
+            guard measured, let new, new != selection else { return }
+            selection = new
+        }
+        .onChange(of: selection) { _, new in
             if flipped != nil { flipped = nil }
+            if let new { seen.insert(new) }
+            // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
+            guard measured, let new, new != scrolledID else { return }
+            withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { scrolledID = new }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenLabel)
@@ -77,6 +102,15 @@ struct CardCarousel: View {
         }
         .accessibilityAction(named: flipped == current ? "Ver el saldo" : "Ver detalles de la cuenta") { tap(current) }
         .accessibilityAction(named: current == .all ? "Editar saldos" : "Editar saldo") { onEdit(current.bank) }
+    }
+
+    /// Una sola vez, con el carrusel ya maquetado: se coloca en la tarjeta elegida sin animación (p. ej. la demo con Revolut).
+    private func settleInitialPosition() {
+        guard !measured else { return }
+        measured = true
+        // La tarjeta de delante cuenta su cifra aunque el aviso de visibilidad no llegue.
+        seen.insert(current)
+        if current != .all { scrolledID = current }
     }
 
     private func tap(_ card: AccountCard) {

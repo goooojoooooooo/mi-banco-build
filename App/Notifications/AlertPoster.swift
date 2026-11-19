@@ -12,12 +12,15 @@ enum AlertPoster {
         _ = try? await center.requestAuthorization(options: [.alert, .sound, .badge])
         center.setNotificationCategories([
             UNNotificationCategory(identifier: category, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: InsightNotifier.category, actions: [], intentIdentifiers: [], options: []),
         ])
     }
 
     /// `balances`: saldo de cada banco con saldo, DESPUÉS del movimiento. `previousBalance`: saldo de este banco antes.
     /// `estimated`: el saldo de este banco es una estimación; el cuerpo dice "Te quedan unos".
-    static func post(movement m: Movement, balance: Int?, estimated: Bool, balances: [String: Int], previousBalance: Int?) async {
+    /// `merchantMonth`: compras y gasto de este mes en ese comercio (con este pago). `todaySpentCents`: gastado hoy.
+    static func post(movement m: Movement, balance: Int?, estimated: Bool, balances: [String: Int], previousBalance: Int?,
+                     merchantMonth: MerchantHistory? = nil, todaySpentCents: Int? = nil) async {
         let text = alertText(for: m, balance: balance, estimated: estimated)
         let content = UNMutableNotificationContent()
         content.title = text.title
@@ -29,6 +32,15 @@ enum AlertPoster {
         var info: [String: Any] = ["bank": m.bank.rawValue, "amountCents": m.amountCents, "balances": balances, "isShop": m.isShop]
         if let merchant = m.merchant { info["merchant"] = merchant }
         if let previousBalance { info["previousBalance"] = previousBalance }
+        // Claves añadidas en Titanio (las anteriores no cambian): la vista ampliada y el toque en el aviso.
+        info[AlertRoute.Keys.route] = AlertRoute.Keys.movementRoute
+        info[AlertRoute.Keys.movementID] = m.id.uuidString
+        info["estimated"] = estimated
+        if let merchantMonth, merchantMonth.countThisMonth > 0 {
+            info["monthCount"] = merchantMonth.countThisMonth
+            info["monthCents"] = merchantMonth.totalThisMonthCents
+        }
+        if let todaySpentCents { info["todaySpent"] = todaySpentCents }
         content.userInfo = info
         await add(content, id: m.id.uuidString)
     }

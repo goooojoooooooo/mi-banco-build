@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct MiBancoApp: App {
@@ -12,6 +13,11 @@ struct MiBancoApp: App {
     @State private var revealToken = 0
     @AppStorage("lockEnabled") private var lockEnabled = true
     @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        // Antes de terminar el arranque: así un toque en un aviso que abre la app en frío también llega al router.
+        UNUserNotificationCenter.current().delegate = ForegroundPresenter.shared
+    }
 
     private var showsLock: Bool {
         #if DEBUG
@@ -46,6 +52,11 @@ struct MiBancoApp: App {
                     privacyCover
                 }
             }
+            // Respaldo del telón: pase lo que pase con su animación, a los 1,5 s Inicio está a la vista.
+            .task {
+                try? await Task.sleep(for: .milliseconds(1_500))
+                if launching && !showsLock { reveal() }
+            }
             .task {
                 await logos.prewarm(domains: [])
                 #if DEBUG
@@ -58,6 +69,8 @@ struct MiBancoApp: App {
                 }
                 #endif
                 await AlertPoster.setup()
+                // Con el permiso ya pedido: resumen semanal y recordatorios de suscripciones al día.
+                await AlertScheduler.reschedule(for: model.state)
             }
             .environment(logos)
             .environment(preferences)

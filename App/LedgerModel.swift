@@ -78,6 +78,15 @@ final class LedgerModel {
         staged = nil
         state = next
         snapshot = LedgerSnapshot(state: next)
+        reschedule(next)
+    }
+
+    /// Resumen semanal y recordatorios de suscripciones: se rehacen con cada cambio del libro (nunca en la demo).
+    private func reschedule(_ next: LedgerState) {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
+        Task { await AlertScheduler.reschedule(for: next) }
     }
 
     /// Solo desde el aviso de los intents. Si entre lo nuevo hay un movimiento que no estaba, es una llegada:
@@ -105,6 +114,7 @@ final class LedgerModel {
                 self.snapshot = LedgerSnapshot(state: next)
             }
             self.staged = nil
+            self.reschedule(next)
         }
     }
 
@@ -144,6 +154,14 @@ final class LedgerModel {
 
     func deleteMovement(_ id: UUID) throws {
         try mutate { $0.deleteMovement(id: id) }
+    }
+
+    func updateAlertSettings(_ body: (inout AlertSettings) -> Void) throws {
+        try mutate { $0.updateAlertSettings(body) }
+    }
+
+    func unmute(_ merchant: MutedMerchant) throws {
+        try mutate { $0.setMuted(false, merchant: merchant.raw) }
     }
 
     func movement(_ id: UUID) -> Movement? {

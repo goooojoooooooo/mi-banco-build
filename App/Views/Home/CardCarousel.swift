@@ -57,7 +57,10 @@ struct CardCarousel: View {
         .scrollIndicators(.hidden)
         .scrollClipDisabled()
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            let step = geometry.containerSize.width - 2 * CarouselMetrics.inset + CarouselMetrics.spacing
+            // Paso entre tarjetas medido en el contenido (n tarjetas + n−1 huecos), no en el contenedor: el ancho del
+            // contenedor ya viene sin el margen lateral y restarlo otra vez desplazaba el indicador (1,2 en vez de 1).
+            let count = CGFloat(AccountCard.allCases.count)
+            let step = (geometry.contentSize.width + CarouselMetrics.spacing) / count
             return step > 0 ? (geometry.contentOffset.x + geometry.contentInsets.leading) / step : 0
         } action: { _, position in
             guard position.isFinite else { return }

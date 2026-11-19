@@ -327,7 +327,8 @@ struct AmountSplit: Equatable {
 
 /// "Pago grande: 320,00 € en MediaMarkt" -> "Pago grande: ••• € en MediaMarkt" (modo privado).
 /// Con `replacement`, sustituye también el "€" (para VoiceOver: "importe oculto").
-func maskingAmounts(_ text: String, with replacement: String? = nil) -> String {
+/// `everyNumber`: para textos de banco sin formato conocido ("12,50EUR", "-12.50 €"): oculta cualquier cifra.
+func maskingAmounts(_ text: String, with replacement: String? = nil, everyNumber: Bool = false) -> String {
     let chars = Array(text)
     var out = ""
     var i = 0
@@ -340,7 +341,9 @@ func maskingAmounts(_ text: String, with replacement: String? = nil) -> String {
         var j = i
         while j < chars.count, chars[j].isASCII, chars[j].isNumber || chars[j] == "." || chars[j] == "," { j += 1 }
         let followedByEuro = j + 1 < chars.count && (chars[j] == "\u{00A0}" || chars[j] == " ") && chars[j + 1] == "€"
-        if followedByEuro {
+        if everyNumber && !followedByEuro {
+            out += replacement ?? "•••"
+        } else if followedByEuro {
             if let replacement {
                 out += replacement
                 j += 2

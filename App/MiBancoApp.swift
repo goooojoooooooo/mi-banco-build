@@ -42,7 +42,7 @@ struct MiBancoApp: App {
                 if showsLock {
                     // Entra sin animación (la captura del selector de apps nunca pilla la app a medias);
                     // al desbloquear se desvanece, porque solo ese cambio va en `withAnimation`.
-                    LockView(locked: $locked)
+                    LockView(locked: unlockBinding)
                         .transition(.opacity)
                 } else if launching {
                     LaunchCurtain(onReveal: reveal)
@@ -89,7 +89,10 @@ struct MiBancoApp: App {
             }
             .onChange(of: lockEnabled) { _, _ in
                 // Cambiar el ajuste solo es posible con la app ya desbloqueada: no volver a pedir Face ID.
-                withAnimation(Theme.Motion.unlock) { locked = false }
+                withAnimation(Theme.Motion.unlock) {
+                    locked = false
+                    launching = false
+                }
             }
             .onChange(of: showsLock) { wasLocked, isLocked in
                 // Al desbloquear, Inicio se monta por capas mientras el bloqueo se desvanece encima.
@@ -99,6 +102,15 @@ struct MiBancoApp: App {
                 }
             }
         }
+    }
+
+    /// El bloqueo escribe `locked = false` dentro de su animación de salida: en esa misma transacción se da por
+    /// terminado el arranque, así el telón nunca asoma un instante entre el bloqueo y Inicio.
+    private var unlockBinding: Binding<Bool> {
+        Binding(get: { locked }, set: { value in
+            locked = value
+            if !value { launching = false }
+        })
     }
 
     /// La marca ya está trazada: Inicio empieza a montarse debajo y el telón se aparta.
@@ -146,6 +158,8 @@ private struct LaunchCurtain: View {
             withAnimation(.easeOut(duration: 0.25)) { shown = true }
             withAnimation(Theme.Motion.markDraw.delay(0.05)) { drawn = 1 }
             try? await Task.sleep(for: .milliseconds(560))
+            // Si el telón ya se fue (p. ej. desbloqueo), la tarea se cancela: no se vuelve a montar Inicio.
+            guard !Task.isCancelled else { return }
             onReveal()
         }
     }

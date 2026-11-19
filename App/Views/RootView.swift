@@ -15,17 +15,23 @@ struct RootView: View {
     @State private var detail: DetailRoute?
     @State private var pendingDelete: UUID?
     @State private var seen = SeenInsights()
+    /// Borrar un movimiento falló: aviso breve arriba (sin modal) y háptica de error.
+    @State private var deleteFailed = false
+    @State private var deleteErrorTick = 0
+    @Namespace private var zoom
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     private var router: AlertRouter { AlertRouter.shared }
 
     var body: some View {
         let warnings = model.snapshot.warningInsightIDs
         TabView(selection: $tab) {
             Tab("Inicio", systemImage: "house", value: AppTab.home) {
-                HomeView(model: model, isVisible: tab == .home && !isLocked, revealToken: revealToken, openSettings: openSettings)
+                HomeView(model: model, isVisible: tab == .home && !isLocked, revealToken: revealToken, zoom: zoom,
+                         detailOpen: detail != nil, openDetail: { openDetail($0, zooms: true) }, openSettings: openSettings)
             }
             Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
-                AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: openDetail)
+                AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) })
             }
             .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
             Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
@@ -37,12 +43,32 @@ struct RootView: View {
         .overlay(alignment: .bottom) {
             TabBarCurtain(token: revealToken)
         }
+        // La única hoja de la app. Se cierra al bloquear y en cuanto la app deja de estar activa (selector de apps,
+        // segundo plano): nunca queda encima del bloqueo ni en la captura del selector, y no se vuelve a abrir sola.
         .sheet(item: $detail, onDismiss: deletePending) { route in
             MovementDetailSheet(model: model, id: route.id) { id in
                 pendingDelete = id
                 detail = nil
             }
+            .modifier(ZoomFromRow(route: route, namespace: zoom))
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { detail = nil }
+        }
+        .overlay(alignment: .top) {
+            if deleteFailed {
+                Text("No se pudo borrar el movimiento. Inténtalo de nuevo.")
+                    .titan(.meta)
+                    .foregroundStyle(Theme.warning)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Theme.raised, in: Capsule())
+                    .padding(.top, 8)
+                    .transition(.opacity)
+                    .accessibilityAddTraits(.isStaticText)
+            }
+        }
+        .sensoryFeedback(.error, trigger: deleteErrorTick)
         // Entrar en Avisos (o ver avisos nuevos estando en ella) los da por vistos: la insignia se va.
         .onChange(of: tab) { _, new in
             if new == .alerts && !isLocked { seen.markSeen(warnings) }
@@ -71,9 +97,10 @@ struct RootView: View {
         tab = .settings
     }
 
-    private func openDetail(_ id: UUID) {
-        guard model.movement(id) != nil else { return }
-        detail = DetailRoute(id: id)
+    /// Nunca con el bloqueo delante ni con la app fuera de primer plano.
+    private func openDetail(_ id: UUID, zooms: Bool = false) {
+        guard !isLocked, scenePhase == .active, model.movement(id) != nil else { return }
+        detail = DetailRoute(id: id, zooms: zooms)
     }
 
     private func applyRoute() {
@@ -96,8 +123,17 @@ struct RootView: View {
     private func deletePending() {
         guard let id = pendingDelete else { return }
         pendingDelete = nil
-        withAnimation(reduceMotion ? nil : Theme.Motion.rowSettle) {
-            try? model.deleteMovement(id)
+        do {
+            try withAnimation(reduceMotion ? nil : Theme.Motion.rowSettle) {
+                try model.deleteMovement(id)
+            }
+        } catch {
+            deleteErrorTick += 1
+            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { deleteFailed = true }
+            Task {
+                try? await Task.sleep(for: .seconds(2.5))
+                withAnimation(.easeOut(duration: 0.3)) { deleteFailed = false }
+            }
         }
     }
 
@@ -111,6 +147,20 @@ struct RootView: View {
         }
     }
     #endif
+}
+
+/// Desde una fila de Inicio, la hoja sale con zoom desde el logo; desde Avisos o un aviso tocado, la subida normal.
+private struct ZoomFromRow: ViewModifier {
+    let route: DetailRoute
+    let namespace: Namespace.ID
+
+    func body(content: Content) -> some View {
+        if route.zooms {
+            content.navigationTransition(.zoom(sourceID: route.id, in: namespace))
+        } else {
+            content
+        }
+    }
 }
 
 /// iOS 26+: la barra de cristal se recoge al bajar la lista y vuelve al subir.

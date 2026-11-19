@@ -159,6 +159,20 @@ private func kinds(_ list: [Insight]) -> [InsightKind] { list.map(\.kind) }
         #expect(none == MerchantHistory(countThisMonth: 0, totalThisMonthCents: 0, countAllTime: 0, firstDate: nil))
     }
 
+    @Test func historialesEnUnaPasadaIgualQueUnoAUno() {
+        let ms = [
+            pay(1_000, "Mercadona", date(9, 3)), pay(1_250, "MERCADONA Torrejón S.A.", nov(2)), pay(750, "Mercadona", nov(10)),
+            pay(300, "Zara", nov(11)), pay(900, "Mercadona", nov(12), flagged: true), pay(100, "Mercadona", nov(25)),
+            pay(500, nil, nov(3)), income(5_000, "Mercadona", nov(4)), pay(450, "Zara", date(10, 30)),
+        ]
+        let all = merchantHistories(in: ms, now: nov(19), calendar: cal)
+        #expect(Set(all.keys) == ["mercadona", "mercadona torrejon", "zara"])
+        for key in all.keys {
+            #expect(all[key] == merchantHistory(for: key, in: ms, now: nov(19), calendar: cal))
+        }
+        #expect(all["nada"] == nil)
+    }
+
     @Test func busquedaSinTildesNiMayusculas() {
         var withNote = pay(1_250, "Mercadona", nov(1))
         withNote.note = "Café con María"

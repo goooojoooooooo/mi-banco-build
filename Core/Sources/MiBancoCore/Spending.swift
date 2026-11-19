@@ -108,6 +108,32 @@ public func merchantHistory(for merchant: String, in movements: [Movement], now:
                            countAllTime: mine.count, firstDate: mine.map(\.date).min())
 }
 
+/// El historial de todos los comercios con pagos, en una sola pasada (cada movimiento se normaliza una vez).
+/// Para cada clave da exactamente lo mismo que `merchantHistory(for:in:now:calendar:)`.
+public func merchantHistories(in movements: [Movement], now: Date, calendar: Calendar) -> [String: MerchantHistory] {
+    let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
+    var count: [String: Int] = [:]
+    var monthCount: [String: Int] = [:]
+    var monthTotal: [String: Int] = [:]
+    var first: [String: Date] = [:]
+    for m in countedPayments(movements) {
+        let key = normalizeMerchant(m.merchant ?? "")
+        if key.isEmpty { continue }
+        count[key, default: 0] += 1
+        if let known = first[key] { first[key] = min(known, m.date) } else { first[key] = m.date }
+        if m.date >= monthStart && m.date <= now {
+            monthCount[key, default: 0] += 1
+            monthTotal[key, default: 0] += abs(m.amountCents)
+        }
+    }
+    var out: [String: MerchantHistory] = [:]
+    for (key, all) in count {
+        out[key] = MerchantHistory(countThisMonth: monthCount[key] ?? 0, totalThisMonthCents: monthTotal[key] ?? 0,
+                                   countAllTime: all, firstDate: first[key])
+    }
+    return out
+}
+
 private func foldedForSearch(_ s: String) -> String {
     s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
 }

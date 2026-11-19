@@ -182,11 +182,15 @@ struct LedgerSnapshot: Sendable {
             pace = PaceLine(thisMonthCents: month, differenceCents: nil, previousMonthName: monthName)
         }
 
-        // "Te quedaban": saldo actual menos lo que pasó después de cada movimiento, banco a banco.
+        // "Te quedaban": saldo actual menos lo que pasó después de cada movimiento, banco a banco. Solo para
+        // movimientos desde la base del saldo (`setAt`; el del propio aviso que trajo el saldo cae justo en `setAt`
+        // y el saldo del banco ya lo incluye), que son los que `Ledger.balance` tiene en cuenta;
+        // de los anteriores no se sabe y no se enseña nada.
         for bank in BankID.allCases {
-            guard let current = balances[bank]?.cents else { continue }
+            guard let current = balances[bank]?.cents, let base = balances[bank]?.setAt else { continue }
             var later = 0
             for m in byDate where m.bank == bank {
+                guard m.date >= base else { break }
                 balanceAfter[m.id] = current - later
                 later += m.amountCents
             }
@@ -206,13 +210,16 @@ struct LedgerSnapshot: Sendable {
         }
         recentPayments = payments
         merchantNames = names
+        // Una sola pasada para todos los comercios (antes: una pasada completa por comercio).
+        let all = merchantHistories(in: state.movements, now: now, calendar: calendar)
+        let empty = MerchantHistory(countThisMonth: 0, totalThisMonthCents: 0, countAllTime: 0, firstDate: nil)
+        for key in names.keys {
+            histories[key] = all[key] ?? empty
+        }
         alertSettings = state.alertSettings
         mutedList = state.mutedMerchants
             .map { MutedMerchant(key: $0, name: names[$0] ?? $0.capitalized, raw: names[$0] ?? $0) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        for (key, merchant) in names {
-            histories[key] = merchantHistory(for: merchant, in: state.movements, now: now, calendar: calendar)
-        }
 
         insights = MiBancoCore.insights(for: state, now: now, calendar: calendar)
         warningInsightIDs = insights.filter { $0.severity == .warning }.map(\.id)

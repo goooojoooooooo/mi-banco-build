@@ -84,7 +84,8 @@ enum DemoMode {
         }
 
         let balances: [BankID: ManualBalance] = [
-            .rev: ManualBalance(cents: 34_020, setAt: now, fromBank: true),
+            // Revolut dio el saldo en el propio aviso de Mercadona (mismo instante): su "Te quedaban" se conoce.
+            .rev: ManualBalance(cents: 34_020, setAt: day(0), fromBank: true),
             .ima: ManualBalance(cents: 128_455, setAt: now, fromBank: false),
             .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
         ]

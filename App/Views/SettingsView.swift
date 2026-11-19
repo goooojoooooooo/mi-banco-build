@@ -252,7 +252,7 @@ private struct BalanceRow: View {
                         .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
                         .background(Color(hex: "#2A2A2D").opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                         .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
-                        .privateAmount()
+                        .privateField(editing: focused.wrappedValue == bank)
                         .accessibilityLabel("Saldo de \(bank.displayName)")
                 }
             }

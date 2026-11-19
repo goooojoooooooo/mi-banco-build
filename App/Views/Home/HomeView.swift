@@ -9,6 +9,12 @@ struct HomeView: View {
     var isVisible = true
     /// Sube al arrancar (tras la marca) y al desbloquear: Inicio se monta por capas.
     var revealToken = 0
+    /// Origen de la transición de zoom fila → hoja. La hoja la presenta `RootView` (una sola hoja en toda la app,
+    /// que se cierra al bloquear o al salir de la app).
+    let zoom: Namespace.ID
+    /// Hay una hoja de movimiento abierta: la llegada no mueve nada debajo.
+    var detailOpen = false
+    let openDetail: (UUID) -> Void
     let openSettings: (BankID?) -> Void
 
     @Environment(MerchantLogos.self) private var logos
@@ -27,15 +33,12 @@ struct HomeView: View {
     @State private var scroll = ScrollPosition(edge: .top)
     @State private var searching = false
     @State private var query = ""
-    @State private var detail: DetailRoute?
-    @State private var pendingDelete: UUID?
     @State private var freshID: UUID?
     @State private var detentTick = 0
     /// Durante el deslizamiento de una llegada, el tope no suena (ya suena la llegada).
     @State private var quietSelection = false
     /// Número del último cambio de lista pedido.
     @State private var listSwap = 0
-    @Namespace private var zoom
 
     var body: some View {
         let snapshot = model.snapshot
@@ -99,10 +102,6 @@ struct HomeView: View {
         }
         .background(Theme.canvas.ignoresSafeArea())
         .environment(\.entrance, entrance)
-        .sheet(item: $detail, onDismiss: deletePending) { route in
-            MovementDetailSheet(model: model, id: route.id, onDelete: requestDelete)
-                .navigationTransition(.zoom(sourceID: route.id, in: zoom))
-        }
         .sensoryFeedback(Haptics.detent, trigger: detentTick)
         // Solo un movimiento que llega de verdad, con Inicio delante: un toque suave por un pago, éxito por un ingreso.
         .sensoryFeedback(trigger: model.arrival) { _, new in
@@ -119,6 +118,14 @@ struct HomeView: View {
             if let new { choreograph(new) }
         }
         .onChange(of: revealToken) { _, _ in assemble() }
+        // Otra pestaña, bloqueo o app fuera de primer plano: la búsqueda se cierra y el teclado se va
+        // (nunca se queda encima del bloqueo ni en la captura del selector de apps).
+        .onChange(of: isVisible) { _, visible in
+            if !visible { closeSearch() }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { closeSearch() }
+        }
         .onChange(of: searching) { _, on in
             if !on { query = "" }
         }
@@ -209,7 +216,7 @@ struct HomeView: View {
             let amount = spokenAmount(abs(arrival.amountCents), hidden: preferences.privateMode)
             AccessibilityNotification.Announcement("Nuevo movimiento: \(arrival.title), \(what) \(amount)").post()
         }
-        guard !searching, detail == nil else { return }
+        guard !searching, !detailOpen else { return }
         if motion.listOffset > 4 {
             withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { scroll.scrollTo(edge: .top) }
         }
@@ -228,21 +235,14 @@ struct HomeView: View {
     // MARK: - Acciones
 
     private func open(_ id: UUID) {
-        detail = DetailRoute(id: id)
+        openDetail(id)
     }
 
-    private func requestDelete(_ id: UUID) {
-        pendingDelete = id
-        detail = nil
-    }
-
-    /// Se borra al cerrarse la hoja, para que la fila se vaya a la vista.
-    private func deletePending() {
-        guard let id = pendingDelete else { return }
-        pendingDelete = nil
-        withAnimation(reduceMotion ? nil : Theme.Motion.rowSettle) {
-            try? model.deleteMovement(id)
-        }
+    private func closeSearch() {
+        guard searching || !query.isEmpty else { return }
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        searching = false
+        query = ""
     }
 
     /// Si falla, el aviso sigue en la lista y se puede volver a intentar.
@@ -278,7 +278,7 @@ struct HomeView: View {
         if DemoMode.opensDetail, let first = model.snapshot.searchIndex.first {
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
-                detail = DetailRoute(id: first.id)
+                openDetail(first.id)
             }
         }
     }
@@ -288,4 +288,6 @@ struct HomeView: View {
 /// La hoja de detalle abierta para un movimiento.
 struct DetailRoute: Identifiable, Hashable {
     let id: UUID
+    /// Viene de una fila de Inicio: la hoja sale con zoom desde su logo.
+    var zooms = false
 }

@@ -10,6 +10,7 @@ struct MovementDetailSheet: View {
     let onDelete: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var entrance = Entrance()
 
     var body: some View {
@@ -22,6 +23,14 @@ struct MovementDetailSheet: View {
             }
         }
         .environment(\.entrance, entrance)
+        // Segunda línea de defensa (la primera: RootView cierra la hoja): fuera de primer plano, la hoja es negra.
+        .overlay {
+            if scenePhase != .active {
+                Theme.canvas
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
+            }
+        }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .onAppear {

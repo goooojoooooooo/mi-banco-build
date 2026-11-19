@@ -163,6 +163,7 @@ private struct ThresholdRow: View {
     @State private var errorTick = 0
     @FocusState private var focused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.tight) {
@@ -190,7 +191,7 @@ private struct ThresholdRow: View {
                     .frame(minWidth: 96, maxWidth: 128, minHeight: 40)
                     .background(Color(hex: "#2A2A2D").opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                     .animation(Theme.Motion.quick, value: focused)
-                    .privateAmount()
+                    .privateField(editing: focused)
                     .accessibilityLabel(title)
             }
             if let problem {
@@ -213,6 +214,10 @@ private struct ThresholdRow: View {
             if !isFocused { commit() }
         }
         .onDisappear { if dirty { commit() } }
+        // Fuera de primer plano el teclado se va (y lo escrito se guarda): nunca queda encima del bloqueo.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { focused = false }
+        }
         .sensoryFeedback(.success, trigger: saveTick)
         .sensoryFeedback(.error, trigger: errorTick)
     }

@@ -158,7 +158,16 @@ struct UnreadRowView: View {
 
     @State private var expanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppPreferences.self) private var preferences
     @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 40
+
+    /// En modo privado, el texto del banco sin cifras (no se sabe en qué formato trae el importe).
+    private var shownText: String {
+        preferences.privateMode ? maskingAmounts(notice.text, everyNumber: true) : notice.text
+    }
+    private var spokenText: String {
+        preferences.privateMode ? maskingAmounts(notice.text, with: "importe oculto", everyNumber: true) : notice.text
+    }
 
     var body: some View {
         HStack(alignment: .top, spacing: Theme.Space.small) {
@@ -169,7 +178,8 @@ struct UnreadRowView: View {
                         Text("No se pudo leer este aviso")
                             .titan(.row)
                             .foregroundStyle(Theme.label)
-                        Text(notice.text)
+                        Text(shownText)
+                            .contentTransition(.opacity)
                             .titan(.subtitle)
                             .foregroundStyle(Theme.label3)
                             .lineLimit(expanded ? nil : 2)
@@ -207,7 +217,7 @@ struct UnreadRowView: View {
             Button("Borrar", systemImage: "trash", role: .destructive, action: onDelete)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("No se pudo leer este aviso. \(notice.text). \(notice.bank.displayName), \(DateText.moment(notice.date))")
+        .accessibilityLabel("No se pudo leer este aviso. \(spokenText). \(notice.bank.displayName), \(DateText.moment(notice.date))")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint(expanded ? "Toca para resumir" : "Toca para ver el aviso entero")
         .accessibilityAction(.default) { toggle() }

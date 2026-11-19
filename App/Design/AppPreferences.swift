@@ -44,9 +44,27 @@ private struct PrivateAmount: ViewModifier {
     }
 }
 
+/// Un campo editable con un importe (saldos, umbrales): con el modo privado se difumina solo mientras no se edita,
+/// y nunca se oculta a VoiceOver (tiene que poder encontrarse y editarse).
+private struct PrivateField: ViewModifier {
+    let editing: Bool
+    @Environment(AppPreferences.self) private var preferences
+
+    func body(content: Content) -> some View {
+        let hidden = preferences.privateMode && !editing
+        content
+            .blur(radius: hidden ? 9 : 0, opaque: false)
+            .opacity(hidden ? 0.75 : 1)
+            .privacySensitive()
+    }
+}
+
 extension View {
     /// `radius`: 9 para importes de fila, más para las cifras grandes.
     func privateAmount(radius: CGFloat = 9) -> some View { modifier(PrivateAmount(radius: radius)) }
+
+    /// Para campos de texto con importe: ver `PrivateField`.
+    func privateField(editing: Bool) -> some View { modifier(PrivateField(editing: editing)) }
 }
 
 /// "340,20 euros" o "importe oculto": lo que dice VoiceOver de un importe según el modo privado.

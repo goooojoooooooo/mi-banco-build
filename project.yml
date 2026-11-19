@@ -63,7 +63,6 @@ targets:
           - Info.plist
           - "*.entitlements"
       - App/Theme.swift
-      - App/Views/RiverBar.swift
       - App/Logos/BundledLogos.swift
       - path: App/Resources/Logos
         type: folder

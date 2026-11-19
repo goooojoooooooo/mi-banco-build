@@ -29,6 +29,8 @@ struct CountingAmount: View {
 
     var body: some View {
         AmountFigure(value: shown ?? (countsUp && !reduceMotion ? 0 : Double(cents)), style: style, scramble: scramble)
+            // Antes de empezar a contar (tarjeta vecina aún sin ver) no se enseña un 0 falso: la cifra no se ve.
+            .opacity(shown == nil && countsUp && !reduceMotion ? 0 : 1)
             .onAppear(perform: start)
             .onChange(of: preferences.privateMode) { _, _ in shuffleDigits() }
             .onChange(of: revealed) { _, _ in start() }

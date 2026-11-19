@@ -19,6 +19,10 @@ struct CardCarousel: View {
     /// después, cada lado solo copia al otro un valor distinto y nunca `nil`, así que no puede haber eco.
     @State private var scrolledID: AccountCard?
     @State private var measured = false
+    /// Destino de un desplazamiento programado en curso (segmentado, VoiceOver, llegada). Mientras dura, las tarjetas
+    /// intermedias que informe el scroll ("Todo" → Trade Republic pasa por Revolut e imagin) no cambian la elegida.
+    @State private var scrollTarget: AccountCard?
+    @State private var scrollTargetToken = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppPreferences.self) private var preferences
 
@@ -82,16 +86,31 @@ struct CardCarousel: View {
             settleInitialPosition()
         }
         .onChange(of: scrolledID) { _, new in
-            // El dedo (o el sistema) dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
-            guard measured, let new, new != selection else { return }
-            selection = new
+            guard measured, let new else { return }
+            // Desplazamiento programado en curso (incluida nuestra propia asignación): nada de lo que informe el scroll
+            // cambia la elegida; al terminar (o a los 0,9 s) `releaseTarget` pone todo de acuerdo.
+            if scrollTarget != nil { return }
+            // El dedo dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
+            if new != selection { selection = new }
         }
         .onChange(of: selection) { _, new in
             if flipped != nil { flipped = nil }
             if let new { seen.insert(new) }
             // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
             guard measured, let new, new != scrolledID else { return }
-            withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { scrolledID = new }
+            scrollTarget = new
+            scrollTargetToken += 1
+            let token = scrollTargetToken
+            withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) {
+                scrolledID = new
+            } completion: {
+                releaseTarget(token)
+            }
+            // Por si la animación no informa de su final (el usuario la interrumpe con el dedo): se suelta igual.
+            Task {
+                try? await Task.sleep(for: .milliseconds(900))
+                releaseTarget(token)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenLabel)
@@ -105,6 +124,14 @@ struct CardCarousel: View {
         }
         .accessibilityAction(named: flipped == current ? "Ver el saldo" : "Ver detalles de la cuenta") { tap(current) }
         .accessibilityAction(named: current == .all ? "Editar saldos" : "Editar saldo") { onEdit(current.bank) }
+    }
+
+    /// Fin de un desplazamiento programado. Si el dedo lo interrumpió y dejó el carrusel en otra tarjeta, esa pasa a ser
+    /// la elegida (así carrusel, segmentado y lista nunca se quedan en desacuerdo).
+    private func releaseTarget(_ token: Int) {
+        guard scrollTargetToken == token, scrollTarget != nil else { return }
+        scrollTarget = nil
+        if let shown = scrolledID, shown != selection { selection = shown }
     }
 
     /// Una sola vez, con el carrusel ya maquetado: se coloca en la tarjeta elegida sin animación (p. ej. la demo con Revolut).

@@ -10,8 +10,6 @@ extension Color {
 }
 
 extension BankID {
-    /// Color de marca del banco (solo para la barra de la notificación ampliada; la app usa logos y materiales).
-    var color: Color { Color(hex: hexColor) }
     /// Nombre corto para tres columnas ("Trade Rep.").
     var shortName: String { self == .tr ? "Trade Rep." : displayName }
     /// Material de su tarjeta.
@@ -98,8 +96,6 @@ enum Theme {
         static let logo: CGFloat = 10
         static let logoLarge: CGFloat = 15
         static let field: CGFloat = 10
-        /// Barra de la notificación ampliada.
-        static let river: CGFloat = 16
     }
 
     /// Todo el movimiento en un sitio. Muelles para objetos (sin rebote en el texto), curvas de desaceleración para cifras.
@@ -145,13 +141,6 @@ enum Theme {
         static let reveal = Animation.spring(duration: 0.42, bounce: 0)
         /// Cifras que se ocultan con el ojo: los dígitos se barajan durante este tiempo antes de difuminarse.
         static let scramble: Duration = .milliseconds(240)
-
-        // Notificación ampliada (Parte 2 la rediseña; se conservan sus tiempos).
-        static let river = Animation.spring(duration: 0.7, bounce: 0.1)
-        static let pulseAttack = Animation.easeOut(duration: 0.16)
-        static let pulseRelease = Animation.easeOut(duration: 0.65)
-        static let alertPreRoll: Duration = .milliseconds(350)
-        static let alertLand = Animation.spring(duration: 0.65, bounce: 0.1)
     }
 
     /// Papeles de texto con estilos del sistema (SF Pro, Dynamic Type, cifras tabulares).

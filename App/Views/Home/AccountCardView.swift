@@ -73,8 +73,18 @@ private struct CardFront: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-            HeroBalance(cents: heroCents, revealed: revealed, centsColor: secondary)
-                .padding(.top, 14)
+            Group {
+                if let cents = heroCents {
+                    HeroBalance(cents: cents, revealed: revealed, centsColor: secondary)
+                } else {
+                    // Sin saldo: una raya, nunca "0,00 €" (no es que haya cero, es que no se sabe).
+                    Text("—")
+                        .font(.system(size: 50, weight: .semibold))
+                        .foregroundStyle(secondary)
+                        .accessibilityLabel("Sin saldo")
+                }
+            }
+            .padding(.top, 14)
             Spacer(minLength: 18)
             if card == .all {
                 banks
@@ -83,9 +93,13 @@ private struct CardFront: View {
                     Text("Total en los tres bancos")
                         .titan(.meta)
                         .foregroundStyle(secondary)
-                    CountingAmount(cents: total ?? 0, revealed: revealed)
-                        .titan(.cardTitle)
-                        .privateAmount()
+                    if let total {
+                        CountingAmount(cents: total, revealed: revealed)
+                            .titan(.cardTitle)
+                            .privateAmount()
+                    } else {
+                        Text("—").titan(.cardTitle)
+                    }
                 }
             }
         }
@@ -96,8 +110,9 @@ private struct CardFront: View {
         .background(CardSurface(material: card.material))
     }
 
-    private var heroCents: Int {
-        card.bank.flatMap { balances[$0]?.cents } ?? (card == .all ? total ?? 0 : 0)
+    private var heroCents: Int? {
+        if let bank = card.bank { return balances[bank]?.cents }
+        return total
     }
 
     @ViewBuilder

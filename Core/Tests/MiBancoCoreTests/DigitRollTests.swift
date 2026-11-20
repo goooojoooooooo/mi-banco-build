@@ -59,7 +59,7 @@ import Testing
     @Test func maskNeverContainsDigitsNorDependsOnTheAmount() {
         for negative in [true, false] {
             let text = AmountMask.text(negative: negative, showsPlus: false)
-            #expect(!text.contains(where: \.isNumber))
+            #expect(text.allSatisfy { !$0.isNumber })
             #expect(text.hasSuffix("•••,••\u{00A0}€"))
         }
         #expect(AmountMask.text(negative: true, showsPlus: false).hasPrefix("−"))

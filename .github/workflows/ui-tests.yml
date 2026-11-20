@@ -1,0 +1,64 @@
+name: ui-tests
+run-name: ui-tests ${{ github.ref_name }}
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ui:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE=/Applications/Xcode_26.2.app
+          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          echo "Usando $XCODE"
+          sudo xcode-select -s "$XCODE"
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - run: brew install xcodegen && xcodegen
+      - name: Crear y arrancar el simulador (maximo 10 min)
+        timeout-minutes: 14
+        run: |
+          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
+          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
+          DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          echo "Runtime: $RUNTIME_LINE"
+          echo "Dispositivo: $DEVICETYPE"
+          UDID=$(xcrun simctl create "MiBancoUI" "$DEVICETYPE" "$RUNTIME")
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          if ! perl -e 'alarm 600; exec @ARGV' xcrun simctl bootstatus "$UDID" -b; then
+            echo "El simulador no arranco en 10 minutos"
+            exit 1
+          fi
+          echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
+      - name: Pruebas de toques
+        run: |
+          mkdir -p build
+          set +e
+          xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
+            -only-testing:MiBancoUITests CODE_SIGNING_ALLOWED=NO > build/ui.log 2>&1
+          echo "$?" > build/status.txt
+          tail -n 60 build/ui.log
+          exit 0
+      - name: Resumen por prueba
+        run: |
+          echo "== Resultado por prueba =="
+          grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
+          { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          echo "xcodebuild exit: $(cat build/status.txt)"
+          test "$(cat build/status.txt)" = "0"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ui-xcresult
+          path: |
+            build/ui.xcresult
+            build/ui.log
+          if-no-files-found: warn

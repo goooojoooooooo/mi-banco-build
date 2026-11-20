@@ -31,6 +31,9 @@ targets:
         product: MiBancoCore
       - target: MiBancoNotification
       - target: MiBancoWidgets
+    scheme:
+      testTargets:
+        - MiBancoUITests
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mibanco.app
@@ -136,3 +139,15 @@ targets:
       path: Widgets/MiBancoWidgets.entitlements
       properties:
         com.apple.security.application-groups: [group.com.mibanco.shared]
+  MiBancoUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - Shared/UITests
+    dependencies:
+      - target: MiBanco
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mibanco.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: MiBanco

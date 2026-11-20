@@ -127,6 +127,7 @@ struct MovementRowView: View {
         .accessibilityLabel(spoken)
         .accessibilityHint("Abre el detalle")
         .accessibilityAddTraits(.isButton)
+        .accessibilityIdentifier("movementRow")
     }
 
     private var amountColor: Color {

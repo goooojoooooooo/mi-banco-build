@@ -11,11 +11,29 @@ public struct OwnTransferPair: Equatable, Sendable {
     }
 }
 
-/// Ventana máxima entre el pago y el ingreso de un traspaso: 3 días.
-private let transferWindow: TimeInterval = 259_200
+/// Un traspaso cuenta si pago e ingreso están a 36 horas o menos; hasta 3 días solo si alguno de los dos textos
+/// habla de traspasos o nombra un banco (con muchos meses de historial, "mismo importe en 3 días" solo daría falsos pares).
+private let transferWindow: TimeInterval = 129_600
+private let transferWindowWithWording: TimeInterval = 259_200
+
+/// Palabras (ya sin mayúsculas ni tildes) que delatan un traspaso entre cuentas o el nombre de un banco.
+private let transferWording: [[String]] = [
+    ["transferencia"], ["traspaso"], ["transfer"], ["recarga"], ["top", "up"], ["anadir", "dinero"],
+    ["revolut"], ["imagin"], ["caixabank"], ["trade", "republic"],
+]
+
+private func hasTransferWording(_ merchant: String?) -> Bool {
+    let tokens = normalizeMerchant(merchant ?? "").split(separator: " ").map(String.init)
+    guard !tokens.isEmpty else { return false }
+    return transferWording.contains { words in
+        words.count <= tokens.count
+            && (0...(tokens.count - words.count)).contains { Array(tokens[$0..<($0 + words.count)]) == words }
+    }
+}
 
 /// Emparejado voraz de traspasos entre tus cuentas. Candidatos: pagos que no son de tienda, no "no es mío" y sin
-/// `ownTransfer == false`, e ingresos de OTRO banco con el mismo importe, sin `ownTransfer == false`, a 3 días o menos.
+/// `ownTransfer == false`, e ingresos de OTRO banco con el mismo importe, sin `ownTransfer == false`, a 36 horas o menos
+/// (3 días si alguno de los dos textos habla de traspasos o nombra un banco).
 /// Se toman los pares de menor distancia en el tiempo primero (empate: el más antiguo), y cada movimiento entra en un
 /// solo par.
 public func ownTransferPairs(in movements: [Movement]) -> [OwnTransferPair] {
@@ -33,7 +51,9 @@ public func ownTransferPairs(in movements: [Movement]) -> [OwnTransferPair] {
     for payment in payments {
         for income in incomes[abs(payment.amountCents)] ?? [] where income.bank != payment.bank {
             let gap = abs(income.date.timeIntervalSince(payment.date))
-            if gap <= transferWindow { candidates.append((payment, income, gap)) }
+            let close = gap <= transferWindow
+                || (gap <= transferWindowWithWording && (hasTransferWording(payment.merchant) || hasTransferWording(income.merchant)))
+            if close { candidates.append((payment, income, gap)) }
         }
     }
     candidates.sort { a, b in
@@ -62,8 +82,9 @@ public func ownTransferIDs(in movements: [Movement]) -> Set<UUID> {
     return ids
 }
 
-/// Lo que cuenta como gasto: pagos, sin los "no es mío" y sin los traspasos entre tus cuentas.
-public func spendingMovements(in movements: [Movement]) -> [Movement] {
-    let transfers = ownTransferIDs(in: movements)
+/// Lo que cuenta como gasto: pagos, sin los "no es mío" y sin los traspasos entre tus cuentas. Quien lo llama varias veces
+/// sobre los mismos movimientos calcula `ownTransferIDs(in:)` una vez y lo pasa en `excluding`.
+public func spendingMovements(in movements: [Movement], excluding ownTransfers: Set<UUID>? = nil) -> [Movement] {
+    let transfers = ownTransfers ?? ownTransferIDs(in: movements)
     return movements.filter { $0.kind == .payment && !$0.flaggedNotMine && !transfers.contains($0.id) }
 }

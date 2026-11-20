@@ -75,9 +75,9 @@ private func precedes(_ a: Movement, _ b: Movement) -> Bool {
 struct MerchantIndex {
     private let groups: [String: [Movement]]
 
-    init(_ movements: [Movement]) {
+    init(_ movements: [Movement], ownTransferIDs: Set<UUID>? = nil) {
         var groups: [String: [Movement]] = [:]
-        for m in spendingMovements(in: movements) {
+        for m in spendingMovements(in: movements, excluding: ownTransferIDs) {
             let key = normalizeMerchant(m.merchant ?? "")
             if key.isEmpty { continue }
             groups[key, default: []].append(m)
@@ -155,8 +155,10 @@ private func movementInsights(_ m: Movement, in state: LedgerState, index: Merch
 }
 
 /// Textos del aviso semanal programado; mismo texto que el resumen del feed.
-public func weeklyDigestText(for state: LedgerState, weekContaining date: Date, calendar: Calendar) -> (title: String, body: String) {
-    let week = weekSummary(movements: state.movements, weekContaining: date, calendar: calendar)
+public func weeklyDigestText(for state: LedgerState, weekContaining date: Date, calendar: Calendar,
+                             ownTransferIDs: Set<UUID>? = nil) -> (title: String, body: String) {
+    let week = weekSummary(movements: state.movements, weekContaining: date, calendar: calendar,
+                           ownTransferIDs: ownTransferIDs)
     let diff = week.spentCents - week.previousWeekSpentCents
     let body: String
     if diff < 0 {
@@ -186,10 +188,12 @@ public func immediateAlerts(afterStoring movement: Movement, in state: LedgerSta
         }
     }
     if isMuted(movement.merchant, in: state) { return out }
-    let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar)
-    out += movementInsights(movement, in: state, index: MerchantIndex(state.movements), subscriptions: subs,
-                            ownTransfers: ownTransferIDs(in: state.movements),
-                            calendar: calendar)
+    // El primer tramo de un traspaso real puede avisar antes de que exista su pareja (el segundo aún no ha llegado):
+    // ese aviso ya salió y no se puede retirar. Se acepta; una vez emparejados, ningún tramo cuenta.
+    let transfers = ownTransferIDs(in: state.movements)
+    let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
+    out += movementInsights(movement, in: state, index: MerchantIndex(state.movements, ownTransferIDs: transfers),
+                            subscriptions: subs, ownTransfers: transfers, calendar: calendar)
     return out
 }
 
@@ -197,7 +201,8 @@ public func immediateAlerts(afterStoring movement: Movement, in state: LedgerSta
 public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [Insight] {
     let settings = state.alertSettings
     let ledger = Ledger(state: state)
-    let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar)
+    let transfers = ownTransferIDs(in: state.movements)
+    let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
     var out: [Insight] = []
 
     if settings.lowBalance {
@@ -208,8 +213,7 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [
         }
     }
 
-    let index = MerchantIndex(state.movements)
-    let transfers = ownTransferIDs(in: state.movements)
+    let index = MerchantIndex(state.movements, ownTransferIDs: transfers)
     for m in state.movements where m.date <= now && now.timeIntervalSince(m.date) < recentWindow {
         out += movementInsights(m, in: state, index: index, subscriptions: subs, ownTransfers: transfers, calendar: calendar)
     }
@@ -232,7 +236,7 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [
     }
 
     if settings.spendingPace, calendar.component(.day, from: now) > 5,
-       let pace = spendingPace(movements: state.movements, now: now, calendar: calendar),
+       let pace = spendingPace(movements: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers),
        abs(pace.differenceCents) >= 1_000 {
         let below = pace.differenceCents < 0
         out.append(make(.spendingPace, below ? .positive : .info, subject: "month",
@@ -244,9 +248,10 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [
     if settings.weeklyDigest, weekday == 1 || weekday == 2 {
         // El lunes la semana en curso acaba de empezar: se resume la que terminó ayer.
         let reference = weekday == 1 ? now : (calendar.date(byAdding: .day, value: -1, to: now) ?? now)
-        let week = weekSummary(movements: state.movements, weekContaining: reference, calendar: calendar)
+        let week = weekSummary(movements: state.movements, weekContaining: reference, calendar: calendar,
+                               ownTransferIDs: transfers)
         if week.spentCents > 0 || week.previousWeekSpentCents > 0 {
-            let text = weeklyDigestText(for: state, weekContaining: reference, calendar: calendar)
+            let text = weeklyDigestText(for: state, weekContaining: reference, calendar: calendar, ownTransferIDs: transfers)
             out.append(make(.weeklyDigest, .info, subject: "week", title: text.title, detail: text.body, date: now,
                             calendar: calendar))
         }

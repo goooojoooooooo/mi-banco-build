@@ -24,9 +24,10 @@ public struct Subscription: Equatable, Sendable, Identifiable {
 
 /// Pagos (no ingresos, no marcados como "no es mío") al mismo comercio normalizado y banco: al menos 2 cargos seguidos
 /// con 26–35 días entre sí e importes dentro de ±25 %. Si el último cargo tiene 45 días o más, se da por cancelada.
-public func detectSubscriptions(in movements: [Movement], now: Date, calendar: Calendar) -> [Subscription] {
+public func detectSubscriptions(in movements: [Movement], now: Date, calendar: Calendar,
+                                ownTransferIDs: Set<UUID>? = nil) -> [Subscription] {
     var groups: [String: [Movement]] = [:]
-    for m in spendingMovements(in: movements) {
+    for m in spendingMovements(in: movements, excluding: ownTransferIDs) {
         guard let merchant = m.merchant else { continue }
         let key = normalizeMerchant(merchant)
         if key.isEmpty { continue }

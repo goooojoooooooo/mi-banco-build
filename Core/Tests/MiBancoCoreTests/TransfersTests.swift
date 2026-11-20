@@ -89,16 +89,45 @@ private func t(_ bank: BankID, _ cents: Int, _ merchant: String?, _ when: Date, 
     }
 
     @Test func traspasoMensualNoEsSuscripcion() {
+        // 1000 EUR: por encima del umbral de pago grande (150 EUR) y del de ingreso grande (800 EUR).
         var all: [Movement] = []
         for when in [date(9, 1), date(10, 1), nov(1)] {
-            all.append(t(.rev, -20000, "Transferencia a imagin", when))
-            all.append(t(.ima, 20000, "Transferencia de Revolut", when.addingTimeInterval(300)))
+            all.append(t(.rev, -100_000, "Transferencia a imagin", when))
+            all.append(t(.ima, 100_000, "Transferencia de Revolut", when.addingTimeInterval(300)))
         }
         #expect(detectSubscriptions(in: all, now: nov(19), calendar: cal).isEmpty)
+
         let state = LedgerState(movements: all)
-        let found = insights(for: state, now: nov(19), calendar: cal)
-        let ids = Set(all.map(\.id))
-        #expect(!found.contains { ($0.kind == .largeIncome || $0.kind == .largePayment) && $0.movementID.map(ids.contains) == true })
+        let now = nov(1, 12, 10)
+        let big: Set<InsightKind> = [.largePayment, .largeIncome, .unusualPayment]
+        // Cada tramo del par de hoy, ya emparejado: ni aviso inmediato ni feed.
+        for leg in all.suffix(2) {
+            #expect(immediateAlerts(afterStoring: leg, in: state, now: now, calendar: cal).filter { big.contains($0.kind) }.isEmpty)
+        }
+        #expect(insights(for: state, now: now, calendar: cal).filter { big.contains($0.kind) }.isEmpty)
+
+        // Control: sin su pareja, el mismo pago sí avisa (así el test fallaría si no se excluyeran los traspasos).
+        let alone = LedgerState(movements: [all[4]])
+        #expect(immediateAlerts(afterStoring: all[4], in: alone, now: now, calendar: cal).contains { $0.kind == .largePayment })
+        #expect(insights(for: alone, now: now, calendar: cal).contains { $0.kind == .largePayment })
+    }
+
+    @Test func treintaHorasSinPalabrasEmpareja() {
+        let out = t(.rev, -4000, "Carlos", nov(10, 12))
+        let inc = t(.ima, 4000, "Laura", nov(11, 18))
+        #expect(ownTransferPairs(in: [out, inc]).count == 1)
+    }
+
+    @Test func cuarentaYOchoHorasSinPalabrasNoEmpareja() {
+        let out = t(.rev, -4000, "Carlos", nov(10, 12))
+        let inc = t(.ima, 4000, "Laura", nov(12, 12))
+        #expect(ownTransferPairs(in: [out, inc]).isEmpty)
+    }
+
+    @Test func cuarentaYOchoHorasConPalabrasEmpareja() {
+        let out = t(.rev, -4000, "Transferencia a imagin", nov(10, 12))
+        let inc = t(.ima, 4000, "Laura", nov(12, 12))
+        #expect(ownTransferPairs(in: [out, inc]).count == 1)
     }
 
     @Test func setOwnTransferGuardaYVuelveANil() {

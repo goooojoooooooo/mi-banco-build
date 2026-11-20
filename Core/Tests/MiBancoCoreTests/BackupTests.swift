@@ -197,4 +197,36 @@ private func tempDirectory() -> URL {
         let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
         #expect(names == ["copia.json", "ledger.json"])
     }
+
+    @Test func restaurarGuardaCopiaYSustituye() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        #expect(try store.load() == b)
+        let saved = try Data(contentsOf: dir.appendingPathComponent("antes.json"))
+        #expect(try JSONDecoder().decode(LedgerState.self, from: saved) == a)
+    }
+
+    @Test func siFallaLaCopiaPreviaNoSeRestauraNada() throws {
+        struct Boom: Error {}
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(a)
+        #expect(throws: RestoreError.safetyCopyFailed) {
+            try store.restoreKeepingCopy(b, copyName: "antes.json", makeCopy: { _, _ in throw Boom() })
+        }
+        #expect(try store.load() == a)
+    }
 }
+

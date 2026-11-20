@@ -7,6 +7,9 @@ struct SettingsView: View {
     let model: LedgerModel
     /// Pedido desde la tarjeta de Inicio ("Editar saldo"): enfoca ese banco y se vacía.
     @Binding var focusRequest: BankID?
+    /// Copia de seguridad: abre una hoja de la raíz (compartir) y el selector de archivos (restaurar).
+    var present: (RootSheet) -> Void = { _ in }
+    var importBackup: () -> Void = {}
 
     @AppStorage("lockEnabled") private var lockEnabled = true
     @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
@@ -66,6 +69,8 @@ struct SettingsView: View {
                 } footer: {
                     SettingsFooter("Al volver a la app te pedirá Face ID o tu código. El ojo de Inicio es el mismo modo privado.")
                 }
+
+                BackupSection(model: model, present: present, importBackup: importBackup)
 
                 Section {
                     Toggle(isOn: $logoDownloads) {

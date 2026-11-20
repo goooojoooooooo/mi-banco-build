@@ -164,6 +164,19 @@ final class LedgerModel {
         try mutate { $0.setMuted(false, merchant: merchant.raw) }
     }
 
+    /// Restaura una copia: antes guarda lo actual como `ledger-antes-de-restaurar.json`, las dos cosas dentro de una sola
+    /// actualización coordinada. Si esa copia falla no se restaura nada y lanza `RestoreError.safetyCopyFailed`.
+    func restore(_ file: BackupFile) throws {
+        #if DEBUG
+        if DemoMode.isActive {
+            publish(file.ledger)
+            return
+        }
+        #endif
+        try store.restoreKeepingCopy(file.ledger, copyName: "ledger-antes-de-restaurar.json")
+        reload()
+    }
+
     func movement(_ id: UUID) -> Movement? {
         state.movements.first { $0.id == id }
     }

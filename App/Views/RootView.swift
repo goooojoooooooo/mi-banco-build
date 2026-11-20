@@ -11,8 +11,20 @@ struct RootView: View {
     var revealToken = 0
     @State private var tab: AppTab = .home
     @State private var settingsFocus: BankID?
+    /// La única hoja de la app: un movimiento, la hoja de compartir o la confirmación de restaurar.
+    @State private var sheet: RootSheet?
+    /// Selector de archivos de "Restaurar una copia…" (se cierra igual que la hoja).
+    @State private var importing = false
+    @State private var importNotice: String?
+    /// Sube al restaurar: Inicio se vuelve a montar con lo restaurado.
+    @State private var restoreToken = 0
     /// Hoja de un movimiento abierta desde Avisos o desde un aviso tocado.
-    @State private var detail: DetailRoute?
+    private var detail: DetailRoute? {
+        get { if case .movement(let route) = sheet { route } else { nil } }
+        nonmutating set {
+            if let newValue { sheet = .movement(newValue) } else if case .movement = sheet { sheet = nil }
+        }
+    }
     @State private var pendingDelete: UUID?
     @State private var seen = SeenInsights()
     /// Borrar un movimiento falló: aviso breve arriba (sin modal) y háptica de error.
@@ -29,13 +41,16 @@ struct RootView: View {
             Tab("Inicio", systemImage: "house", value: AppTab.home) {
                 HomeView(model: model, isVisible: tab == .home && !isLocked, revealToken: revealToken, zoom: zoom,
                          detailOpen: detail != nil, openDetail: { openDetail($0, zooms: true) }, openSettings: openSettings)
+                    .id(restoreToken)
             }
             Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                 AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) })
             }
             .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
             Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
-                SettingsView(model: model, focusRequest: $settingsFocus)
+                SettingsScrollHost {
+                    SettingsView(model: model, focusRequest: $settingsFocus, present: present, importBackup: { importing = true })
+                }
             }
         }
         .tint(Theme.label)
@@ -45,15 +60,43 @@ struct RootView: View {
         }
         // La única hoja de la app. Se cierra al bloquear y en cuanto la app deja de estar activa (selector de apps,
         // segundo plano): nunca queda encima del bloqueo ni en la captura del selector, y no se vuelve a abrir sola.
-        .sheet(item: $detail, onDismiss: deletePending) { route in
-            MovementDetailSheet(model: model, id: route.id) { id in
-                pendingDelete = id
-                detail = nil
+        .sheet(item: $sheet, onDismiss: deletePending) { item in
+            switch item {
+            case .movement(let route):
+                MovementDetailSheet(model: model, id: route.id) { id in
+                    pendingDelete = id
+                    detail = nil
+                }
+                .modifier(ZoomFromRow(route: route, namespace: zoom))
+            case .share(let share):
+                ShareSheet(url: share.url, onFinish: { sheet = nil })
+                    .ignoresSafeArea()
+                    .presentationDetents([.medium, .large])
+                    .onDisappear { BackupService.remove(share.url) }
+            case .restore(let preview):
+                RestoreConfirmView(preview: preview, restore: { try model.restore(preview.file) }, finished: finishRestore)
             }
-            .modifier(ZoomFromRow(route: route, namespace: zoom))
         }
+        // Selector de archivos para restaurar: se cierra como la hoja (nunca queda encima del bloqueo).
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+            handleImport(result)
+        }
+        .overlay(alignment: .top) {
+            if let importNotice {
+                Text(importNotice)
+                    .titan(.meta)
+                    .foregroundStyle(Theme.warning)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Theme.raised, in: Capsule())
+                    .padding(.top, 8)
+                    .transition(.opacity)
+                    .accessibilityAddTraits(.isStaticText)
+            }
+        }
+        .task { BackupService.sweep() }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { detail = nil }
+            if phase != .active { closeEverything() }
         }
         .overlay(alignment: .top) {
             if deleteFailed {
@@ -80,7 +123,7 @@ struct RootView: View {
         .onChange(of: router.pending) { _, _ in applyRoute() }
         .onChange(of: isLocked) { _, locked in
             if locked {
-                detail = nil
+                closeEverything()
             } else {
                 applyRoute()
                 if tab == .alerts { seen.markSeen(warnings) }
@@ -90,6 +133,49 @@ struct RootView: View {
         #if DEBUG
         .onAppear(perform: applyDemoTab)
         #endif
+    }
+
+    /// Hoja y selector de archivos fuera: al bloquear y al salir de primer plano.
+    private func closeEverything() {
+        sheet = nil
+        importing = false
+    }
+
+    /// Las hojas nuevas (compartir, restaurar) nunca suben con el bloqueo delante ni fuera de primer plano.
+    private func present(_ item: RootSheet) {
+        guard !isLocked, scenePhase == .active else {
+            if case .share(let share) = item { BackupService.remove(share.url) }
+            return
+        }
+        sheet = item
+    }
+
+    private func handleImport(_ result: Result<URL, Error>) {
+        guard !isLocked, scenePhase == .active, case .success(let url) = result else { return }
+        do {
+            sheet = .restore(try BackupService.preview(url, current: model.state))
+        } catch BackupError.notABackup {
+            showImportNotice("Ese fichero no es una copia de Mi Banco.")
+        } catch BackupError.newerVersion {
+            showImportNotice("Esa copia es de una versión más nueva de Mi Banco.")
+        } catch {
+            showImportNotice("No se pudo leer ese fichero.")
+        }
+    }
+
+    private func showImportNotice(_ text: String) {
+        deleteErrorTick += 1
+        withAnimation(reduceMotion ? nil : Theme.Motion.quick) { importNotice = text }
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            withAnimation(.easeOut(duration: 0.3)) { importNotice = nil }
+        }
+    }
+
+    /// Tras restaurar: la hoja se cierra y Inicio se vuelve a montar con lo restaurado.
+    private func finishRestore() {
+        sheet = nil
+        restoreToken += 1
     }
 
     private func openSettings(_ bank: BankID?) {
@@ -145,8 +231,29 @@ struct RootView: View {
         case .alerts: tab = .alerts
         case .settings: tab = .settings
         }
+        if DemoMode.opensRestorePreview {
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                sheet = .restore(DemoMode.demoRestorePreview(currentCount: model.state.movements.count))
+            }
+        }
     }
     #endif
+}
+
+/// Lo que puede enseñar la única hoja de la app. `RootView` es su único dueño.
+enum RootSheet: Identifiable {
+    case movement(DetailRoute)
+    case share(ShareItem)
+    case restore(RestorePreview)
+
+    var id: String {
+        switch self {
+        case .movement(let route): "movement-\(route.id)"
+        case .share(let item): "share-\(item.id)"
+        case .restore(let preview): "restore-\(preview.id)"
+        }
+    }
 }
 
 /// Desde una fila de Inicio, la hoja sale con zoom desde el logo; desde Avisos o un aviso tocado, la subida normal.

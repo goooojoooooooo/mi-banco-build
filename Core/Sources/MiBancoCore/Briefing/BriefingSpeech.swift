@@ -2,7 +2,7 @@ import Foundation
 
 private func spoken(_ text: String) -> String {
     var s = text.replacingOccurrences(of: "\u{00A0}", with: " ")
-    s = s.replacingOccurrences(of: "\+(?=[0-9])", with: "más ", options: .regularExpression)
+    s = s.replacingOccurrences(of: "\\+(?=[0-9])", with: "más ", options: .regularExpression)
     s = s.replacingOccurrences(of: "-(?=[0-9])", with: "menos ", options: .regularExpression)
     s = s.replacingOccurrences(of: " (", with: ", ").replacingOccurrences(of: ")", with: "")
     s = s.replacingOccurrences(of: " · ", with: ". ")

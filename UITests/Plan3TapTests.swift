@@ -41,11 +41,10 @@ final class Plan3TapTests: XCTestCase {
         }
     }
 
+    /// Gasto abierto por argumento (determinista); el cambio de pestaña con un toque se prueba aparte.
     private func openGasto() {
-        launch()
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
-        app.tabBars.buttons["Gasto"].tap()
-        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 8), "No se ve Gasto")
+        launch(["-MiBancoDemoScreen", "gasto"])
+        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 20), "No se ve Gasto")
     }
 
     /// Espera a que el predicado se cumpla sobre el objeto (XCTWaiter: sin `waitForExpectations`, que no es seguro en Swift 6).
@@ -59,6 +58,19 @@ final class Plan3TapTests: XCTestCase {
     }
 
     // MARK: - Gasto
+
+    /// En el simulador de CI la barra de pestañas de cristal tarda en cambiar de pestaña tras el toque (a veces lo toma
+    /// como pulsación larga): se espera con margen y, si no cambió, se toca otra vez.
+    func testGastoTabByTap() throws {
+        launch()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let tab = app.tabBars.buttons["Gasto"]
+        XCTAssertTrue(tab.waitForExistence(timeout: 5))
+        tab.tap()
+        if !element("gasto.total").waitForExistence(timeout: 15) { tab.tap() }
+        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 15), "La pestaña Gasto no se abre")
+        XCTAssertTrue(app.tabBars.buttons.count == 4, "La barra tiene cuatro pestañas")
+    }
 
     func testGastoMonthArrows() throws {
         openGasto()

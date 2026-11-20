@@ -202,6 +202,31 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         #expect(input(state, since: nov(20, 6), now: nov(20, 7)).payments.isEmpty)
     }
 
+    // MARK: J14 — el historial importado no inunda el resumen
+
+    @Test func unaImportacionDeUnAnioSoloAnadeLoDeLosUltimosSieteDias() {
+        var state = LedgerState()
+        let morning = nov(20, 7)
+        // Un extracto de 12 meses importado esta mañana: una fila por semana, más una de hace 30 días y otra de 2 días antes del «desde».
+        state.movements = (0..<52).map { week in
+            imported(.rev, -1_000 - week, "Hist\(week)", date: nov(20, 7).addingTimeInterval(-Double(week + 5) * 7 * 86_400), at: morning)
+        }
+        state.movements.append(imported(.rev, 77_700, "Nomina vieja", date: nov(20, 7).addingTimeInterval(-30 * 86_400), at: morning))
+        state.movements.append(imported(.rev, -2_222, "Hace dos dias", date: nov(17, 20), at: morning))
+        // since = 19 nov 22:10; límite = 12 nov 22:10.
+        let i = input(state)
+        #expect(i.payments.map(\.name) == ["Hace dos dias"])
+        #expect(i.income.isEmpty)
+        #expect(i.banks.first?.changeCents == -2_222)
+        #expect(render(makeBriefing(i, calendar: cal).headline, .plain) == nb("Desde ayer a las 22:10 gastaste 22,22 € en 1 pago."))
+        // Justo dentro del límite entra; justo en él, no.
+        var edge = LedgerState()
+        let limit = nov(19, 22, 10).addingTimeInterval(-7 * 86_400)
+        edge.movements = [imported(.rev, -500, "Dentro", date: limit.addingTimeInterval(1), at: morning),
+                          imported(.rev, -600, "Limite", date: limit, at: morning)]
+        #expect(input(edge).payments.map(\.name) == ["Dentro"])
+    }
+
     // MARK: J4 — el total solo suma bancos con saldo conocido
 
     @Test func elCambioTotalNoCuentaBancosSinSaldo() {

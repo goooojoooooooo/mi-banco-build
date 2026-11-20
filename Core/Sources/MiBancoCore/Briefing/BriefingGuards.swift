@@ -83,23 +83,6 @@ public func containsNumber(_ text: String) -> Bool {
     }
 }
 
-private let numberPattern = "[0-9][0-9.,]*[0-9]|[0-9]"
-
-private func numberTokens(_ text: String) -> [String] {
-    var tokens: [String] = []
-    var search = text.startIndex..<text.endIndex
-    while let range = text.range(of: numberPattern, options: .regularExpression, range: search) {
-        tokens.append(String(text[range]))
-        search = range.upperBound..<text.endIndex
-    }
-    return tokens
-}
-
-/// true si cada número del texto es, escrito igual, un número de los hechos. Un texto sin números cumple.
-public func numbersAreGrounded(_ text: String, in facts: [String]) -> Bool {
-    let known = Set(numberTokens(facts.joined(separator: "\n").replacingOccurrences(of: "\u{00A0}", with: " ")))
-    return numberTokens(text.replacingOccurrences(of: "\u{00A0}", with: " ")).allSatisfy { known.contains($0) }
-}
 
 /// Lo más largo que puede ser la frase de un modelo.
 let maxModelIntroLength = 300

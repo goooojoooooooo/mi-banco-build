@@ -168,9 +168,12 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     let since = record.since
     // Un movimiento pertenece al periodo por cuándo SE ENTERÓ la app (la fecha del banco puede ser anterior al resumen
     // pasado y haber llegado después): así ninguno se pierde ni sale en dos resúmenes.
+    // Límite: solo entra si su propia fecha no es anterior a 7 días antes del «desde» (una importación de meses de historial
+    // no inunda el resumen).
+    let lateLimit = since.addingTimeInterval(-7 * 86_400)
     func inPeriod(_ m: Movement) -> Bool {
         let knownAt = max(m.date, m.importedAt ?? m.date)
-        return knownAt > since && knownAt <= now && !m.flaggedNotMine
+        return knownAt > since && knownAt <= now && m.date > lateLimit && !m.flaggedNotMine
     }
     let ledger = Ledger(state: state)
     // Se calcula una vez y se pasa a todas las sumas de gasto (traspasos, capturados sin confirmar y gemelos).

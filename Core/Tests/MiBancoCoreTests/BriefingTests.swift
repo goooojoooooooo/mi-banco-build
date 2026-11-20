@@ -456,7 +456,6 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         #expect(acceptModelIntro(String(repeating: "a", count: 300), facts: facts))
         #expect(!acceptModelIntro("Mira http://ejemplo.invalid", facts: facts))
         #expect(acceptModelIntro("Buenos días, hoy no hay sorpresas.", facts: facts))
-        #expect(numbersAreGrounded("Sin cifras", in: facts))
     }
 
     @Test func modeloConConsejo() {

@@ -135,6 +135,14 @@ struct LedgerSnapshot: Sendable {
     /// Pestaña Gasto: inicio de cada mes (del más antiguo al actual, máx. 13) y su página.
     var spendingMonths: [Date] = []
     var spendingPages: [Date: SpendingPage] = [:]
+    /// Presupuestos del mes en curso, medias de 3 meses (clave "month" o "cat-<raw>"), movimientos por categoría y mes
+    /// (clave "<año>-<mes>|<raw>"), traspasos y las filas finales de Gasto.
+    var budgets: [BudgetStatus] = []
+    var budgetSuggestions: [String: Int] = [:]
+    var categoryEntries: [String: [ListEntry]] = [:]
+    var categoryHeaders: [String: CategoryHeader] = [:]
+    var transferEntries: [ListEntry] = []
+    var spendingLinks = SpendingLinkTexts()
     /// Día en que se calculó; al cambiar de día hay que recalcular aunque el estado no cambie.
     var day = Date.distantPast
 
@@ -237,6 +245,14 @@ struct LedgerSnapshot: Sendable {
                                        subscriptions: subscriptions, pace: corePace)
         spendingMonths = built.months
         spendingPages = built.pages
+        let extras = Self.budgetExtras(state: state, now: now, calendar: calendar, transfers: transfers,
+                                       subscriptions: subscriptions, months: built.months, pages: built.pages)
+        budgets = extras.budgets
+        budgetSuggestions = extras.suggestions
+        categoryEntries = extras.categoryEntries
+        categoryHeaders = extras.categoryHeaders
+        transferEntries = extras.transferEntries
+        spendingLinks = extras.links
     }
 
     func list(for card: AccountCard) -> [ListEntry] { entries[card] ?? [] }

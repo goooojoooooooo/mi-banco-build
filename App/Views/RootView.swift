@@ -31,7 +31,7 @@ struct RootView: View {
                          detailOpen: detail != nil, openDetail: { openDetail($0, zooms: true) }, openSettings: openSettings)
             }
             Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
-                SpendingView(model: model, isVisible: tab == .spending && !isLocked)
+                SpendingView(model: model, isVisible: tab == .spending && !isLocked, openDetail: { openDetail($0) })
             }
             Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                 AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) })

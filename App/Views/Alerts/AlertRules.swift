@@ -54,6 +54,8 @@ struct AlertRules: View {
                 RuleDivider()
                 rule("Ritmo de gasto", "Si vas por encima o por debajo del mes pasado.", "gauge.with.dots.needle.33percent",
                      .spendingPace)
+                RuleDivider()
+                rule("Presupuestos", "Cuando llegas al 80 % y cuando te pasas.", "gauge.with.dots.needle.67percent", .budgets)
             }
             .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
@@ -113,7 +115,7 @@ struct AlertRules: View {
 
 /// Cada interruptor de "Qué quieres que te avise" y el campo de `AlertSettings` que gobierna.
 enum AlertRule: Sendable {
-    case everyMovement, lowBalance, largePayment, income, subscriptions, duplicateCharge, weeklyDigest, spendingPace
+    case everyMovement, lowBalance, largePayment, income, subscriptions, duplicateCharge, weeklyDigest, spendingPace, budgets
 
     func isOn(in s: AlertSettings) -> Bool {
         switch self {
@@ -125,6 +127,7 @@ enum AlertRule: Sendable {
         case .duplicateCharge: s.duplicateCharge
         case .weeklyDigest: s.weeklyDigest
         case .spendingPace: s.spendingPace
+        case .budgets: s.budgets
         }
     }
 
@@ -138,6 +141,7 @@ enum AlertRule: Sendable {
         case .duplicateCharge: s.duplicateCharge = on
         case .weeklyDigest: s.weeklyDigest = on
         case .spendingPace: s.spendingPace = on
+        case .budgets: s.budgets = on
         }
     }
 }

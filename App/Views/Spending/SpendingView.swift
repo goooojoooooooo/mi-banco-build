@@ -6,6 +6,8 @@ import MiBancoCore
 struct SpendingView: View {
     let model: LedgerModel
     var isVisible = false
+    /// Abre el detalle de un movimiento (la hoja de `RootView`).
+    var openDetail: (UUID) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// El mes elegido (su inicio) y hacia dónde se fue, en un solo valor: cambian en la misma transacción.
@@ -13,6 +15,7 @@ struct SpendingView: View {
     @State private var selection = Selection()
     @State private var entrance = Entrance()
     @State private var tick = 0
+    @State private var path: [SpendingRoute] = []
 
     var body: some View {
         let snapshot = model.snapshot
@@ -20,7 +23,7 @@ struct SpendingView: View {
         let index = selection.month.flatMap { months.firstIndex(of: $0) } ?? (months.count - 1)
         let page = index >= 0 ? months[index] : nil
         let content = page.flatMap { snapshot.spendingPages[$0] }
-        NavigationStack {
+        NavigationStack(path: $path) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     if let content, let page {
@@ -41,6 +44,15 @@ struct SpendingView: View {
                                 .padding(.horizontal, Theme.Space.gutter)
                                 .padding(.top, 8)
                                 .staggeredEntrance(2, listIndex: 0)
+
+                            // El presupuesto del mes («412 de 700 €  59 %»), solo en el mes en curso.
+                            if index == months.count - 1, let budget = snapshot.budgets.first(where: { $0.scope == .month }) {
+                                BudgetBar(status: budget, name: "Presupuesto del mes")
+                                    .padding(.horizontal, Theme.Space.gutter)
+                                    .padding(.top, 14)
+                                    .accessibilityIdentifier("gasto.presupuestoMes")
+                                    .staggeredEntrance(2, listIndex: 0)
+                            }
 
                             Text("Por categoría")
                                 .titan(.header)
@@ -73,13 +85,20 @@ struct SpendingView: View {
                                     .accessibilityIdentifier("gasto.vacio")
                             } else {
                                 ForEach(Array(content.rows.enumerated()), id: \.element.id) { i, row in
-                                    CategoryRow(row: row, index: i, markName: content.markName)
-                                        .staggeredEntrance(4 + i, listIndex: 1 + i)
+                                    NavigationLink(value: SpendingRoute.category(row.category, page)) {
+                                        CategoryRow(row: row, index: i, markName: content.markName)
+                                    }
+                                    .buttonStyle(.row)
+                                    .staggeredEntrance(4 + i, listIndex: 1 + i)
                                 }
                             }
                         }
                         .id(page)
                         .transition(blockTransition)
+
+                        SpendingLinkRows(links: snapshot.spendingLinks)
+                            .padding(.top, Theme.Space.section)
+                            .staggeredEntrance(5, listIndex: 3)
                     }
                 }
                 .padding(.bottom, Theme.Space.section)
@@ -87,6 +106,13 @@ struct SpendingView: View {
             .scrollIndicators(.hidden)
             .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Gasto")
+            .navigationDestination(for: SpendingRoute.self) { route in
+                switch route {
+                case let .category(category, month): CategoryDetailView(model: model, category: category, month: month, openDetail: openDetail)
+                case .budgets: BudgetsView(model: model)
+                case .transfers: TransfersView(model: model, openDetail: openDetail)
+                }
+            }
             // Deslizar en horizontal cambia de mes (umbral 60 pt, y más horizontal que vertical).
             .simultaneousGesture(
                 DragGesture(minimumDistance: 24)
@@ -101,7 +127,13 @@ struct SpendingView: View {
         .environment(\.entrance, entrance)
         #if DEBUG
         .onAppear {
-            guard DemoMode.isActive, DemoMode.monthOffset != 0 else { return }
+            guard DemoMode.isActive else { return }
+            if let category = DemoMode.openCategory, let current = model.snapshot.spendingMonths.last {
+                path = [.category(category, current)]
+            } else if DemoMode.opensBudgets {
+                path = [.budgets]
+            }
+            guard DemoMode.monthOffset != 0 else { return }
             let months = model.snapshot.spendingMonths
             guard !months.isEmpty else { return }
             selection.month = months[max(0, min(months.count - 1, months.count - 1 + DemoMode.monthOffset))]

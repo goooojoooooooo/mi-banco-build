@@ -48,6 +48,10 @@ enum DemoMode {
     /// `-MiBancoDemoMonth <n>`: en Gasto, desplazamiento de meses respecto al actual (p. ej. `-1` = el mes anterior).
     static var monthOffset: Int { value(after: "-MiBancoDemoMonth").flatMap(Int.init) ?? 0 }
 
+    /// `-MiBancoDemoCategory <raw>`: en Gasto, abre esa categoría del mes en curso. `-MiBancoDemoBudgets`: abre Presupuestos.
+    static var openCategory: SpendingCategory? { value(after: "-MiBancoDemoCategory").flatMap(SpendingCategory.init(rawValue:)) }
+    static var opensBudgets: Bool { arguments.contains("-MiBancoDemoBudgets") }
+
     static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".
     static var showsAlertRules: Bool { arguments.contains("-MiBancoDemoRules") }
@@ -166,7 +170,8 @@ enum DemoMode {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.
             movements.append(movement(.ima, -3_900, "Tesla", day(0).addingTimeInterval(-120)))
         }
-        return LedgerState(balances: balances, movements: movements, unread: [])
+        return LedgerState(balances: balances, movements: movements, unread: [],
+                           budgets: Budgets(monthlyCents: 70_000, byCategory: [.comerFuera: 9_000]))
     }
 }
 #endif

@@ -88,7 +88,7 @@ import Testing
         s.movements.append(Movement(bank: .rev, amountCents: -500, merchant: nil, kind: .payment, source: .bank,
                                     date: t + 3600, bankRef: "x", dayOnly: true))
         s.movements.append(Movement(bank: .rev, amountCents: -300, merchant: nil, kind: .payment, source: .wallet,
-                                    date: t + 60, bankRef: "y"))
+                                    date: t - 60, bankRef: "y"))  // R21: enlazado y anterior a la lectura
         let b = Ledger(state: s).balance(.rev)
         #expect(b?.cents == 100_000)
         #expect(b?.estimated == false)

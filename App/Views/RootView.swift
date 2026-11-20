@@ -49,9 +49,6 @@ struct RootView: View {
                          detailOpen: detail != nil, openDetail: { openDetail($0, zooms: true) }, openSettings: openSettings)
                     .id(restoreToken)
             }
-            Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
-                SpendingView(model: model, isVisible: tab == .spending && !isLocked, openDetail: { openDetail($0) })
-            }
             Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                 AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) })
             }
@@ -107,16 +104,16 @@ struct RootView: View {
         .task { BackupService.sweep() }
         .onAppear {
             gate.isLocked = isLocked
-            gate.isActive = isForeground
+            gate.isActive = scenePhase == .active
         }
         .onChange(of: scenePhase) { _, phase in
-            gate.isActive = phase == .active || demoKeepsSheet
-            if !(phase == .active || demoKeepsSheet) { closeEverything() }
+            gate.isActive = phase == .active
+            if phase != .active { closeEverything() }
         }
         // Red de seguridad: si por cualquier camino sube una hoja (o el selector) con el bloqueo puesto o fuera de
         // primer plano, se cierra al instante y se borra el fichero temporal.
         .onChange(of: sheet?.id) { _, id in
-            if id != nil && (isLocked || !isForeground || !gate.canPresent) { closeEverything() }
+            if id != nil && (isLocked || scenePhase != .active || !gate.canPresent) { closeEverything() }
         }
         .onChange(of: importing) { _, on in
             if on && (isLocked || scenePhase != .active || !gate.canPresent) { importing = false }
@@ -156,19 +153,6 @@ struct RootView: View {
         .onAppear(perform: applyRoute)
         #if DEBUG
         .onAppear(perform: applyDemoTab)
-        #endif
-    }
-
-    /// Primer plano a efectos de la hoja de un movimiento. En Release es exactamente `scenePhase == .active`.
-    private var isForeground: Bool { scenePhase == .active || demoKeepsSheet }
-
-    /// Solo DEBUG, demo de capturas con la hoja abierta por argumento: en el simulador de CI la fase de escena parpadea
-    /// y cerraría la hoja. El bloqueo sigue mandando (`gate.isLocked`). En Release es siempre `false`.
-    private var demoKeepsSheet: Bool {
-        #if DEBUG
-        DemoMode.isActive && DemoMode.opensDetail
-        #else
-        false
         #endif
     }
 
@@ -235,7 +219,7 @@ struct RootView: View {
 
     /// Nunca con el bloqueo delante ni con la app fuera de primer plano.
     private func openDetail(_ id: UUID, zooms: Bool = false) {
-        guard gate.canPresent, !isLocked, isForeground, model.movement(id) != nil else { return }
+        guard gate.canPresent, !isLocked, scenePhase == .active, model.movement(id) != nil else { return }
         detail = DetailRoute(id: id, zooms: zooms)
     }
 
@@ -280,7 +264,6 @@ struct RootView: View {
         guard DemoMode.isActive else { return }
         switch DemoMode.screen {
         case .home: tab = .home
-        case .spending: tab = .spending
         case .alerts: tab = .alerts
         case .settings: tab = .settings
         }

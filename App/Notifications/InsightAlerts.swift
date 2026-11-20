@@ -78,9 +78,9 @@ enum AlertScheduler {
                 if week == 0 {
                     // Esta semana: con sus cifras, y nada si no has gastado (ni esta ni la anterior).
                     let summary = weekSummary(movements: state.movements, weekContaining: fire, calendar: calendar,
-                                              ownTransferIDs: notSpending)
+                                              notSpending: notSpending)
                     guard summary.spentCents > 0 || summary.previousWeekSpentCents > 0 else { continue }
-                    let text = weeklyDigestText(for: state, weekContaining: fire, calendar: calendar, ownTransferIDs: notSpending)
+                    let text = weeklyDigestText(for: state, weekContaining: fire, calendar: calendar, notSpending: notSpending)
                     out.append(request(id: weeklyIDs[week], title: text.title, body: text.body, kind: .weeklyDigest,
                                        at: fire, calendar: calendar))
                 } else {
@@ -93,7 +93,7 @@ enum AlertScheduler {
 
         if settings.subscriptions {
             let horizon = now.addingTimeInterval(30 * 86_400)
-            let subs = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: notSpending)
+            let subs = activeSubscriptions(in: state, now: now, calendar: calendar, notSpending: notSpending)
                 .filter { $0.nextDate > now && $0.nextDate <= horizon && !Ledger(state: state).isMuted(merchant: $0.merchant) }
             var index = 0
             for sub in subs where index < subscriptionLimit {

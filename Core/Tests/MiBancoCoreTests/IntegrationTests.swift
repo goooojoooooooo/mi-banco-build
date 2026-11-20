@@ -106,7 +106,7 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
         #expect(monthSpending(in: state, month: now, now: now, calendar: madrid).totalCents == 5500)
         #expect(budgetStatuses(in: state, month: now, now: now, calendar: madrid).first?.spentCents == 5500)
         #expect(monthForecast(in: state, now: now, calendar: madrid)?.spentCents == 5500)
-        #expect(spendingMovements(in: state.movements, excluding: spendingExclusions(in: state, now: now)).map(\.id) == [row.id])
+        #expect(spendingMovements(in: state.movements, notSpending: spendingExclusions(in: state, now: now)).map(\.id) == [row.id])
     }
 
     @Test func i2SinDatosDelBancoDeEseDiaElCapturadoCuentaComoAntes() {
@@ -215,10 +215,22 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
 
     @Test func i5RestaurarNuncaTraeLasConexiones() throws {
         let backup = bankState()
-        var device = Ledger(state: LedgerState(links: [.ima: link(lastSuccessAt: at(11, 20, 7))]))
-        let deviceLinks = device.state.links
+        var info = link(lastSuccessAt: at(11, 20, 7))
+        info.historyLoaded = true
+        info.problem = .rateLimited
+        info.fetchLog = [at(11, 20, 7)]
+        info.lastAttemptAt = at(11, 20, 7)
+        var device = Ledger(state: LedgerState(links: [.ima: info]))
         device.restore(try decodeBackup(encodeBackup(backup, exportedAt: at(11, 20, 9))).ledger)
-        #expect(device.state.links == deviceLinks)
+        // R36: la conexión se queda con el cursor rebobinado y todo lo demás intacto.
+        var expected = info
+        expected.lastSuccessAt = nil
+        expected.historyLoaded = false
+        #expect(device.state.links == [.ima: expected])
+        #expect(device.state.links[.ima]?.consentValidUntil == info.consentValidUntil)
+        #expect(device.state.links[.ima]?.problem == .rateLimited)
+        #expect(device.state.links[.ima]?.fetchLog == [at(11, 20, 7)])
+        // La de la copia (.rev) no viene.
         #expect(device.state.links[.rev] == nil)
         // Los movimientos y saldos del banco que trae la copia se restauran como cualquier otro.
         #expect(device.state.movements == backup.movements)
@@ -228,6 +240,28 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
         fresh.restore(backup)
         #expect(fresh.state.links.isEmpty)
         #expect(fresh.state.movements == backup.movements)
+    }
+
+    /// R36: tras restaurar, la siguiente sincronización pide el historial entero y los capturados de la última semana de
+    /// la copia no se dan por «sin confirmar» (con el cursor sin tocar, entre la copia y el cursor no se volvería a pedir nada).
+    @Test func r36RestaurarRebobinaElCursorYNoDejaCapturadosSinConfirmar() throws {
+        let week = captured(.rev, -4000, "Cafeteria", at(11, 12, 9))
+        var firstRow = bankRow(.rev, -1500, "Bolt", at(11, 5), ref: "b-1", importedAt: at(11, 6, 8))
+        firstRow.dayOnly = true
+        var info = link(lastSuccessAt: at(11, 20, 8))
+        info.historyLoaded = true
+        var device = Ledger(state: LedgerState(links: [.rev: info]))
+        let backup = LedgerState(movements: [firstRow, week])
+        // Con el cursor sin tocar el capturado se daría por sin confirmar (más de 7 días antes de la última consulta).
+        #expect(unconfirmedCaptureIDs(in: LedgerState(movements: backup.movements, links: [.rev: info]), now: at(11, 20, 18)) == [week.id])
+        device.restore(backup)
+        #expect(unconfirmedCaptureIDs(in: device.state, now: at(11, 20, 18)).isEmpty)
+        #expect(spendingMovements(in: device.state.movements,
+                                  notSpending: spendingExclusions(in: device.state, now: at(11, 20, 18))).map(\.id).contains(week.id))
+        let rewound = try #require(device.state.links[.rev])
+        let decision = SyncPolicy.decide(rewound, trigger: .manual, now: at(11, 20, 18), calendar: madrid)
+        guard case let .fetch(_, strategy) = decision else { Issue.record("esperaba .fetch: \(decision)"); return }
+        #expect(strategy == .longest)
     }
 
     @Test func i5CopiaDeAntesDeLosCamposDelBancoSeRestaura() throws {
@@ -363,7 +397,7 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
         let now = at(11, 18, 18)  // 8 días después
         #expect(l.state.links[.rev] == nil)
         #expect(unconfirmedCaptureIDs(in: l.state, now: now) == [tip.id])
-        let counted = spendingMovements(in: l.state.movements, excluding: spendingExclusions(in: l.state, now: now))
+        let counted = spendingMovements(in: l.state.movements, notSpending: spendingExclusions(in: l.state, now: now))
             .filter { madrid.isDate($0.date, inSameDayAs: at(11, 10)) }
         #expect(counted.map(\.amountCents) == [-5500])
         // Con 3 días de margen todavía no (definición de Plan 2: más de 7 días).
@@ -420,7 +454,7 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
     // MARK: R35 — un capturado con pareja probable en una fila del banco no suma desde el primer día
 
     private func countedCents(_ state: LedgerState, now: Date) -> [Int] {
-        spendingMovements(in: state.movements, excluding: spendingExclusions(in: state, now: now)).map(\.amountCents).sorted()
+        spendingMovements(in: state.movements, notSpending: spendingExclusions(in: state, now: now)).map(\.amountCents).sorted()
     }
 
     @Test func r35PropinaCuentaLaFilaDelBancoYaElMismoDia() {

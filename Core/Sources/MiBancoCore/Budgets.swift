@@ -54,9 +54,9 @@ public struct BudgetStatus: Equatable, Sendable, Identifiable {
 }
 
 /// Estado de cada presupuesto en `month`: primero el del mes, luego las categorías en el orden de `allCases`.
-/// Quien lo llama varias veces calcula `ownTransferIDs(in:)` y `subscriptionKeys(...)` una vez y los pasa.
+/// Quien lo llama varias veces calcula `spendingExclusions(in:now:)` y `subscriptionKeys(...)` una vez y los pasa.
 public func budgetStatuses(in state: LedgerState, month: Date, now: Date, calendar: Calendar,
-                           ownTransferIDs ownTransfers: Set<UUID>? = nil,
+                           notSpending ownTransfers: Set<UUID>? = nil,
                            subscriptionKeys keys: Set<String>? = nil) -> [BudgetStatus] {
     let budgets = state.budgets
     let monthLimit = budgets.monthlyCents.flatMap { $0 > 0 ? $0 : nil }
@@ -65,7 +65,7 @@ public func budgetStatuses(in state: LedgerState, month: Date, now: Date, calend
     }
     if monthLimit == nil && categoryLimits.isEmpty { return [] }
     let spending = monthSpending(in: state, month: month, now: now, calendar: calendar,
-                                 ownTransferIDs: ownTransfers, subscriptionKeys: keys)
+                                 notSpending: ownTransfers, subscriptionKeys: keys)
     var out: [BudgetStatus] = []
     if let monthLimit {
         out.append(BudgetStatus(scope: .month, limitCents: monthLimit, spentCents: spending.totalCents))

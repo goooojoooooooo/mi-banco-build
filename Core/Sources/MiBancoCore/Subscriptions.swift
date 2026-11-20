@@ -25,9 +25,9 @@ public struct Subscription: Equatable, Sendable, Identifiable {
 /// Pagos (no ingresos, no marcados como "no es mío") al mismo comercio normalizado y banco: al menos 2 cargos seguidos
 /// con 26–35 días entre sí e importes dentro de ±25 %. Si el último cargo tiene 45 días o más, se da por cancelada.
 public func detectSubscriptions(in movements: [Movement], now: Date, calendar: Calendar,
-                                ownTransferIDs: Set<UUID>? = nil) -> [Subscription] {
+                                notSpending: Set<UUID>? = nil) -> [Subscription] {
     var groups: [String: [Movement]] = [:]
-    for m in spendingMovements(in: movements, excluding: ownTransferIDs) {
+    for m in spendingMovements(in: movements, notSpending: notSpending) {
         guard let merchant = m.merchant else { continue }
         let key = normalizeMerchant(merchant)
         if key.isEmpty { continue }
@@ -69,9 +69,9 @@ public func detectSubscriptions(in movements: [Movement], now: Date, calendar: C
 
 /// Las suscripciones detectadas sin las que el dueño ocultó (id `"<banco>|<clave>"` en `dismissedSubscriptions`).
 public func activeSubscriptions(in state: LedgerState, now: Date, calendar: Calendar,
-                                ownTransferIDs: Set<UUID>? = nil) -> [Subscription] {
+                                notSpending: Set<UUID>? = nil) -> [Subscription] {
     detectSubscriptions(in: state.movements, now: now, calendar: calendar,
-                        ownTransferIDs: ownTransferIDs ?? spendingExclusions(in: state, now: now))
+                        notSpending: notSpending ?? spendingExclusions(in: state, now: now))
         .filter { !state.dismissedSubscriptions.contains("\($0.bank.rawValue)|\($0.id)") }
 }
 

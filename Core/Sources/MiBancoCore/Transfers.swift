@@ -98,8 +98,8 @@ public func ownTransferIDs(in movements: [Movement]) -> Set<UUID> {
 
 /// Lo que cuenta como gasto: pagos, sin los "no es mío", sin las operaciones de valores (`excludedFromSpending`) y sin
 /// los traspasos entre tus cuentas. Quien lo llama varias veces sobre los mismos movimientos calcula el conjunto una vez y
-/// lo pasa en `excluding` (con el libro entero, `spendingExclusions(in:now:)`, que también quita los capturados sin confirmar).
-public func spendingMovements(in movements: [Movement], excluding ownTransfers: Set<UUID>? = nil) -> [Movement] {
+/// lo pasa en `notSpending` (con el libro entero, `spendingExclusions(in:now:)`, que también quita los capturados sin confirmar).
+public func spendingMovements(in movements: [Movement], notSpending ownTransfers: Set<UUID>? = nil) -> [Movement] {
     let transfers = ownTransfers ?? ownTransferIDs(in: movements)
     return movements.filter {
         $0.kind == .payment && !$0.flaggedNotMine && !$0.excludedFromSpending && !transfers.contains($0.id)
@@ -163,7 +163,7 @@ public func probableTwinCaptureIDs(in movements: [Movement], skipping skip: Set<
 
 /// Ids que nunca suman como gasto aunque sean pagos: los traspasos entre tus cuentas, los capturados sin confirmar
 /// (definición de 7 días de Plan 2) y los capturados con pareja probable en una fila del banco (R35, ya el mismo día).
-/// Se calcula una vez por reconstrucción y se pasa a todas las sumas (parámetros `ownTransferIDs:` / `excluding:`).
+/// Se calcula una vez por reconstrucción y se pasa a todas las sumas (parámetros `notSpending:`).
 public func spendingExclusions(in state: LedgerState, now: Date) -> Set<UUID> {
     let transfers = ownTransferIDs(in: state.movements)
     let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)

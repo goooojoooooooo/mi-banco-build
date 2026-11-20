@@ -346,8 +346,17 @@ public struct Ledger: Sendable {
     /// con bancos, ligadas al Llavero) NO se restauran: para excluir uno, añade una línea `restored.x = state.x` aquí.
     public mutating func restore(_ backup: LedgerState) {
         var restored = backup
-        // La conexión con cada banco es de este aparato (su sesión vive en el Llavero): nunca sale de una copia.
-        restored.links = state.links
+        // La conexión con cada banco es de este aparato (su sesión vive en el Llavero): nunca sale de una copia. Se queda,
+        // pero con el cursor de sincronización REBOBINADO (sin última consulta con éxito y sin historial cargado): la
+        // siguiente sincronización vuelve a pedir todo el historial. Si no, lo ocurrido entre la fecha de la copia y el
+        // cursor no se pediría nunca, y los capturados de la última semana de la copia se darían por «sin confirmar».
+        // Se conservan el consentimiento, el problema, la espera y el registro de consultas (el límite diario sigue).
+        restored.links = state.links.mapValues { link in
+            var rewound = link
+            rewound.lastSuccessAt = nil
+            rewound.historyLoaded = false
+            return rewound
+        }
         state = restored
     }
 

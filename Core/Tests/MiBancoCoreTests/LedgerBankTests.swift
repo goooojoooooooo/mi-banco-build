@@ -70,7 +70,8 @@ import Testing
 
     @Test func capturedAfterBankBalanceMakesEstimate() {
         var l = Ledger()
-        #expect(l.adoptBalance(.rev, cents: 100_000, at: t, origin: .bank))
+        let adopted0 = l.adoptBalance(.rev, cents: 100_000, at: t, origin: .bank)
+        #expect(adopted0)
         let b0 = l.balance(.rev)
         #expect(b0?.cents == 100_000)
         #expect(b0?.estimated == false)
@@ -141,14 +142,17 @@ import Testing
     @Test func olderReadingIsRejected() {
         var l = Ledger()
         l.adoptBalance(.rev, cents: 100, at: t, origin: .bank)
-        #expect(l.adoptBalance(.rev, cents: 1, at: t - 60, origin: .notice) == false)
+        let stale = l.adoptBalance(.rev, cents: 1, at: t - 60, origin: .notice)
+        #expect(stale == false)
         #expect(l.balance(.rev)?.cents == 100)
         #expect(l.state.balances[.rev]?.origin == .bank)
-        #expect(l.adoptBalance(.rev, cents: 1, at: t + 60, origin: .notice))
+        let fresh = l.adoptBalance(.rev, cents: 1, at: t + 60, origin: .notice)
+        #expect(fresh)
         #expect(l.balance(.rev)?.cents == 1)
 
         var m = Ledger(state: LedgerState(balances: [.rev: ManualBalance(cents: 5, setAt: t + 3600, origin: .manual)]))
-        #expect(m.adoptBalance(.rev, cents: 100, at: t, origin: .bank))
+        let manualYields = m.adoptBalance(.rev, cents: 100, at: t, origin: .bank)
+        #expect(manualYields)
         #expect(m.state.balances[.rev]?.origin == .bank)
     }
 
@@ -213,8 +217,10 @@ import Testing
 
     @Test func noMergeAcrossBanksOrAmounts() {
         var l = bankFirstLedger(bankDate: iso("2026-11-20T11:00:00Z"))
-        #expect(isStored(l.ingest(.wallet(bank: .ima, amount: "12,50", merchant: "Mercadona"), now: iso("2026-11-20T17:00:00Z"))))
-        #expect(isStored(l.ingest(.wallet(bank: .rev, amount: "12,51", merchant: "Mercadona"), now: iso("2026-11-20T17:00:00Z"))))
+        let o1 = l.ingest(.wallet(bank: .ima, amount: "12,50", merchant: "Mercadona"), now: iso("2026-11-20T17:00:00Z"))
+        #expect(isStored(o1))
+        let o2 = l.ingest(.wallet(bank: .rev, amount: "12,51", merchant: "Mercadona"), now: iso("2026-11-20T17:00:00Z"))
+        #expect(isStored(o2))
         #expect(l.state.movements.count == 3)
     }
 

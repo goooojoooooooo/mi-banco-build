@@ -91,7 +91,8 @@ struct MerchantIndex {
 /// Alertas que dependen solo del movimiento y de los anteriores (todas menos el saldo bajo).
 private func movementInsights(_ m: Movement, in state: LedgerState, index: MerchantIndex, subscriptions: [Subscription],
                               calendar: Calendar) -> [Insight] {
-    if m.flaggedNotMine || isMuted(m.merchant, in: state) { return [] }
+    // Lo que ya existía antes de importarse (historial del banco) no avisa ni cuenta como novedad.
+    if m.isHistorical || m.flaggedNotMine || isMuted(m.merchant, in: state) { return [] }
     let settings = state.alertSettings
     let cents = abs(m.amountCents)
     let amount = formatEUR(cents)
@@ -130,7 +131,7 @@ private func movementInsights(_ m: Movement, in state: LedgerState, index: Merch
         }
         if settings.duplicateCharge, !key.isEmpty {
             let twin = index.payments(for: key).contains {
-                $0.id != m.id && $0.bank == m.bank && $0.amountCents == m.amountCents
+                $0.id != m.id && !$0.isHistorical && $0.bank == m.bank && $0.amountCents == m.amountCents
                     && precedes($0, m) && m.date.timeIntervalSince($0.date) <= duplicateWindow
             }
             if twin {

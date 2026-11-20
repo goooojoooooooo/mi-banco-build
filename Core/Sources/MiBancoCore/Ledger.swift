@@ -35,6 +35,12 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public var importedAt: Date?
     /// true = la fecha es un día sin hora (se guarda al mediodía de Madrid).
     public var dayOnly: Bool
+    /// Nombre que da el banco cuando se enlazó a un capturado. NUNCA sustituye a `merchant` (de él salen las
+    /// categorías, los silenciados y las suscripciones); solo se muestra si el capturado no trae nombre útil.
+    public var bankMerchant: String?
+
+    /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
+    public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
 
     /// Movimiento que ya existía de antes de importarse: no debe avisar ni contar como novedad.
     public var isHistorical: Bool { importedAt.map { date < $0.addingTimeInterval(-48 * 3600) } ?? false }
@@ -43,7 +49,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 pairedAcrossSources: Bool = false, fingerprint: String? = nil, pairedFingerprint: String? = nil,
                 isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false,
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
-                importedAt: Date? = nil, dayOnly: Bool = false) {
+                importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -62,12 +68,13 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.bankStatus = bankStatus
         self.importedAt = importedAt
         self.dayOnly = dayOnly
+        self.bankMerchant = bankMerchant
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
         case note, flaggedNotMine
-        case bankRef, statementRef, bankStatus, importedAt, dayOnly
+        case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -91,6 +98,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         bankStatus = try c.decodeIfPresent(BankStatus.self, forKey: .bankStatus)
         importedAt = try c.decodeIfPresent(Date.self, forKey: .importedAt)
         dayOnly = try c.decodeIfPresent(Bool.self, forKey: .dayOnly) ?? false
+        bankMerchant = try c.decodeIfPresent(String.self, forKey: .bankMerchant)
     }
 }
 
@@ -220,7 +228,7 @@ extension Movement.Source {
 }
 
 public struct Ledger: Sendable {
-    public private(set) var state: LedgerState
+    public internal(set) var state: LedgerState
 
     /// Cartera y aviso del mismo banco con el mismo importe firmado dentro de esta ventana = el mismo pago.
     static let duplicateWindow: TimeInterval = 180
@@ -359,8 +367,10 @@ public struct Ledger: Sendable {
             state.movements[i].date = now
             state.movements[i].dayOnly = false
             state.movements[i].fingerprint = fingerprint
-            // Hasta que la Tarea 5 defina `richerMerchant`: el comercio del aviso si trae uno.
-            if let captured = parsed.merchant, !captured.isEmpty { state.movements[i].merchant = captured }
+            // El nombre del banco pasa a su campo propio; `merchant` queda con el del aviso si es útil.
+            let bankName = state.movements[i].merchant
+            state.movements[i].merchant = richerMerchant(captured: parsed.merchant, bank: bankName)
+            state.movements[i].bankMerchant = bankName
             state.movements[i].isShop = state.movements[i].isShop || parsed.merchantIsShop
             return .merged(state.movements[i])
         }

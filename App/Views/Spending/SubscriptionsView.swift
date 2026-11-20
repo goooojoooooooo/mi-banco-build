@@ -30,7 +30,7 @@ struct SubscriptionsView: View {
                         .padding(.bottom, 10)
                         .staggeredEntrance(0, rise: 8)
                     ForEach(Array(snapshot.subscriptions.enumerated()), id: \.element.id) { i, row in
-                        SubscriptionRowView(row: row, isLast: i == snapshot.subscriptions.count - 1) { hide(row) }
+                        SubscriptionRowView(row: row, isLast: i == snapshot.subscriptions.count - 1, hideAction: { hide(row) })
                             .staggeredEntrance(1 + i)
                             .transition(rowTransition)
                     }

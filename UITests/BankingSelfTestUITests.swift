@@ -7,7 +7,11 @@ final class BankingSelfTestUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-MiBancoSelfTest", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
         app.launch()
-        XCTAssertTrue(app.staticTexts["Autoprueba: OK"].waitForExistence(timeout: 20),
-                      "La autoprueba no termina en OK")
+        let ok = app.staticTexts["Autoprueba: OK"]
+        if !ok.waitForExistence(timeout: 20) {
+            // Dice en qué paso falla (o si la pantalla ni apareció) en vez de un fallo mudo.
+            let shown = app.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")
+            XCTFail("La autoprueba no termina en OK. Texto en pantalla: \(shown)")
+        }
     }
 }

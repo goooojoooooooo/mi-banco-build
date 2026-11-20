@@ -156,7 +156,10 @@ final class GuideUITests: XCTestCase {
             XCTAssertLessThanOrEqual(instruction.frame.maxY, open.frame.minY,
                                      "La instrucción del paso \(step) queda bajo «Abrir Atajos»")
             XCTAssertLessThanOrEqual(help.frame.maxY, open.frame.minY, "La ayuda del paso \(step) queda bajo «Abrir Atajos»")
-            XCTAssertTrue(app.buttons["guide-restart"].exists, "Falta «Empezar desde el principio» al retomar el paso \(step)")
+            let restart = app.buttons["guide-restart"]
+            XCTAssertTrue(restart.exists, "Falta «Empezar desde el principio» al retomar el paso \(step)")
+            XCTAssertLessThanOrEqual(restart.frame.maxY, open.frame.minY,
+                                     "«Empezar desde el principio» del paso \(step) queda bajo «Abrir Atajos»")
         }
     }
 

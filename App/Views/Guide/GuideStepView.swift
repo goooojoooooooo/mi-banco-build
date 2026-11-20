@@ -134,9 +134,13 @@ struct GuideStepView: View {
             .scrollIndicatorsFlash(onAppear: true)
         } else {
             ViewThatFits(in: .vertical) {
-                GuideFitLayout(spacing: Theme.Space.gutter, minDrawing: Self.minDrawing, maxDrawing: 395) {
+                // El texto toma su alto; el dibujo, lo que queda (entre minDrawing y 395 pt). Sin alto propuesto,
+                // ViewThatFits ve el mínimo (minDrawing + texto) y decide si cabe.
+                VStack(spacing: Theme.Space.gutter) {
                     GuideIllustrationView(step: step, track: track, fitted: true)
+                        .frame(minHeight: Self.minDrawing, maxHeight: 395)
                     stepText
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.bottom, Theme.Space.small)
@@ -370,35 +374,5 @@ struct GuideStepView: View {
         }
         flush()
         return out
-    }
-}
-
-/// Dibujo flexible arriba y texto debajo: el texto toma su alto y el dibujo, lo que queda (entre `minDrawing` y
-/// `maxDrawing`). Sin alto propuesto devuelve el mínimo, que es lo que `ViewThatFits` necesita para decidir si cabe.
-private struct GuideFitLayout: Layout {
-    let spacing: CGFloat
-    let minDrawing: CGFloat
-    let maxDrawing: CGFloat
-
-    private func drawingHeight(room: CGFloat?, text: CGFloat) -> CGFloat {
-        guard let room else { return minDrawing }
-        return min(max(room - text - spacing, minDrawing), maxDrawing)
-    }
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard subviews.count == 2 else { return .zero }
-        let width = proposal.width ?? 295
-        let text = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
-        return CGSize(width: width, height: drawingHeight(room: proposal.height, text: text) + spacing + text)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard subviews.count == 2 else { return }
-        let text = subviews[1].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
-        let drawing = drawingHeight(room: bounds.height, text: text)
-        subviews[0].place(at: bounds.origin, anchor: .topLeading,
-                          proposal: ProposedViewSize(width: bounds.width, height: drawing))
-        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + drawing + spacing), anchor: .topLeading,
-                          proposal: ProposedViewSize(width: bounds.width, height: text))
     }
 }

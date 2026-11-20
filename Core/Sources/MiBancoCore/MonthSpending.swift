@@ -42,10 +42,10 @@ public struct MonthForecast: Equatable, Sendable {
     }
 }
 
-/// Claves (comercio normalizado) de las suscripciones detectadas. Quien suma varios meses la calcula una vez y la pasa.
+/// Claves (comercio normalizado) de las suscripciones activas (detectadas y no ocultas). Quien suma varios meses la calcula una vez y la pasa.
 public func subscriptionKeys(in state: LedgerState, now: Date, calendar: Calendar,
                              ownTransferIDs: Set<UUID>? = nil) -> Set<String> {
-    Set(detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: ownTransferIDs).map(\.id))
+    Set(activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: ownTransferIDs).map(\.id))
 }
 
 /// Categoría de un pago con las categorías recordadas del libro; nil para ingresos.
@@ -146,7 +146,7 @@ public func monthForecast(in state: LedgerState, now: Date, calendar: Calendar,
     guard day >= 5, let interval = calendar.dateInterval(of: .month, for: now),
           let days = calendar.range(of: .day, in: .month, for: now)?.count else { return nil }
     let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
-    let subscriptions = subs ?? detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
+    let subscriptions = subs ?? activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     let keys = Set(subscriptions.map(\.id))
     var spent = 0
     var fromSubscriptions = 0

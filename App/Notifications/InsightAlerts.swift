@@ -90,7 +90,7 @@ enum AlertScheduler {
 
         if settings.subscriptions {
             let horizon = now.addingTimeInterval(30 * 86_400)
-            let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar)
+            let subs = activeSubscriptions(in: state, now: now, calendar: calendar)
                 .filter { $0.nextDate > now && $0.nextDate <= horizon && !Ledger(state: state).isMuted(merchant: $0.merchant) }
             var index = 0
             for sub in subs where index < subscriptionLimit {

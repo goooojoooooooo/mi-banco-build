@@ -112,19 +112,25 @@ public struct LedgerState: Codable, Equatable, Sendable {
     public var mutedMerchants: Set<String>
     /// Categoría recordada por comercio (clave de `normalizeMerchant`).
     public var categoryOverrides: [String: SpendingCategory]
+    public var budgets: Budgets
+    /// Suscripciones que el dueño ocultó, con id `"<banco>|<clave del comercio>"`.
+    public var dismissedSubscriptions: Set<String>
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
                 alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
-                categoryOverrides: [String: SpendingCategory] = [:]) {
+                categoryOverrides: [String: SpendingCategory] = [:], budgets: Budgets = Budgets(),
+                dismissedSubscriptions: Set<String> = []) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
         self.alertSettings = alertSettings
         self.mutedMerchants = mutedMerchants
         self.categoryOverrides = categoryOverrides
+        self.budgets = budgets
+        self.dismissedSubscriptions = dismissedSubscriptions
     }
 
-    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides }
+    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides, budgets, dismissedSubscriptions }
 
     /// Los libros guardados antes de los avisos no traen ajustes ni silenciados: valores por defecto.
     public init(from decoder: any Decoder) throws {
@@ -135,6 +141,8 @@ public struct LedgerState: Codable, Equatable, Sendable {
         alertSettings = try c.decodeIfPresent(AlertSettings.self, forKey: .alertSettings) ?? AlertSettings()
         mutedMerchants = try c.decodeIfPresent(Set<String>.self, forKey: .mutedMerchants) ?? []
         categoryOverrides = try c.decodeIfPresent([String: SpendingCategory].self, forKey: .categoryOverrides) ?? [:]
+        budgets = try c.decodeIfPresent(Budgets.self, forKey: .budgets) ?? Budgets()
+        dismissedSubscriptions = try c.decodeIfPresent(Set<String>.self, forKey: .dismissedSubscriptions) ?? []
     }
 }
 
@@ -205,6 +213,20 @@ public struct Ledger: Sendable {
     public mutating func setOwnTransfer(_ value: Bool?, for id: UUID) {
         guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
         state.movements[i].ownTransfer = value
+    }
+
+    /// Presupuesto mensual total; un importe de 0 o menos lo quita.
+    public mutating func setMonthlyBudget(_ cents: Int?) {
+        state.budgets.monthlyCents = cents.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// Presupuesto mensual de una categoría; un importe de 0 o menos lo quita.
+    public mutating func setBudget(_ cents: Int?, for category: SpendingCategory) {
+        if let cents, cents > 0 { state.budgets.byCategory[category] = cents } else { state.budgets.byCategory[category] = nil }
+    }
+
+    public mutating func setSubscriptionDismissed(_ dismissed: Bool, id: String) {
+        if dismissed { state.dismissedSubscriptions.insert(id) } else { state.dismissedSubscriptions.remove(id) }
     }
 
     public mutating func setMuted(_ muted: Bool, merchant: String) {

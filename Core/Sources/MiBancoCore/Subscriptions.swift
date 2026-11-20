@@ -66,3 +66,16 @@ public func detectSubscriptions(in movements: [Movement], now: Date, calendar: C
         return a.bank.rawValue < b.bank.rawValue
     }
 }
+
+/// Las suscripciones detectadas sin las que el dueño ocultó (id `"<banco>|<clave>"` en `dismissedSubscriptions`).
+public func activeSubscriptions(in state: LedgerState, now: Date, calendar: Calendar,
+                                ownTransferIDs: Set<UUID>? = nil) -> [Subscription] {
+    detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: ownTransferIDs)
+        .filter { !state.dismissedSubscriptions.contains("\($0.bank.rawValue)|\($0.id)") }
+}
+
+/// Lo que cuestan al mes y al año (12 cuotas) las suscripciones dadas.
+public func subscriptionTotals(_ subscriptions: [Subscription]) -> (monthlyCents: Int, yearlyCents: Int) {
+    let monthly = subscriptions.reduce(0) { $0 + $1.amountCents }
+    return (monthly, monthly * 12)
+}

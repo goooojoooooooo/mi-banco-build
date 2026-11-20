@@ -4,6 +4,7 @@ public enum InsightKind: String, Codable, Sendable {
     case lowBalance, largePayment, unusualPayment, salary, duplicateCharge
     case subscriptionUpcoming, subscriptionPriceChange, spendingPace, weeklyDigest
     case largeIncome
+    case budgetWarning, budgetExceeded
 }
 
 public enum InsightSeverity: String, Codable, Sendable { case info, warning, positive }
@@ -154,6 +155,57 @@ private func movementInsights(_ m: Movement, in state: LedgerState, index: Merch
     return out
 }
 
+private func monthKey(_ date: Date, _ calendar: Calendar) -> String {
+    let c = calendar.dateComponents([.year, .month], from: date)
+    return "\(c.year ?? 0)-\(c.month ?? 0)"
+}
+
+/// Aviso de presupuesto (80 % o superado): el mismo texto en el aviso inmediato y en el feed.
+private func budgetInsight(_ status: BudgetStatus, exceeded: Bool, date: Date, movement: Movement?, calendar: Calendar) -> Insight {
+    let label: String
+    switch status.scope {
+    case .month: label = "del mes"
+    case .category(let c): label = "de \(c.displayName)"
+    }
+    let title: String
+    let detail: String
+    if exceeded {
+        title = "Te has pasado del presupuesto \(label)"
+        detail = "Llevas \(formatEUR(status.spentCents)) de \(formatEUR(status.limitCents))"
+    } else {
+        title = "Llevas el \(status.percent)\u{00A0}% de tu presupuesto \(label)"
+        detail = "Te quedan \(formatEUR(status.remainingCents)) para lo que queda de mes"
+    }
+    return make(exceeded ? .budgetExceeded : .budgetWarning, .warning, subject: "\(status.id)|\(monthKey(date, calendar))",
+                title: title, detail: detail, date: date, bank: movement?.bank, merchant: movement?.merchant,
+                movementID: movement?.id, calendar: calendar)
+}
+
+/// Presupuestos (el del mes y el de su categoría) que este pago cruza: del 80 % hacia arriba o del 100 % hacia arriba.
+/// Un salto directo por encima del 100 % da un solo aviso, el de superado. `state` es el libro DESPUÉS de guardarlo.
+private func budgetCrossings(of movement: Movement, in state: LedgerState, now: Date, ownTransfers: Set<UUID>,
+                             subscriptionKeys keys: Set<String>, calendar: Calendar) -> [Insight] {
+    guard state.budgets.monthlyCents != nil || !state.budgets.byCategory.isEmpty else { return [] }
+    var withoutIt = state
+    withoutIt.movements.removeAll { $0.id == movement.id }
+    let after = budgetStatuses(in: state, month: movement.date, now: now, calendar: calendar,
+                               ownTransferIDs: ownTransfers, subscriptionKeys: keys)
+    let before = budgetStatuses(in: withoutIt, month: movement.date, now: now, calendar: calendar,
+                                ownTransferIDs: ownTransfers, subscriptionKeys: keys)
+    let category = categoryOf(movement, in: state, subscriptionKeys: keys) ?? .sinCategoria
+    var out: [Insight] = []
+    for scope in [BudgetScope.month, .category(category)] {
+        guard let current = after.first(where: { $0.scope == scope }),
+              let was = before.first(where: { $0.scope == scope }) else { continue }
+        if current.percent >= 100, was.percent < 100 {
+            out.append(budgetInsight(current, exceeded: true, date: movement.date, movement: movement, calendar: calendar))
+        } else if current.percent >= 80, was.percent < 80 {
+            out.append(budgetInsight(current, exceeded: false, date: movement.date, movement: movement, calendar: calendar))
+        }
+    }
+    return out
+}
+
 /// Textos del aviso semanal programado; mismo texto que el resumen del feed.
 public func weeklyDigestText(for state: LedgerState, weekContaining date: Date, calendar: Calendar,
                              ownTransferIDs: Set<UUID>? = nil) -> (title: String, body: String) {
@@ -191,9 +243,17 @@ public func immediateAlerts(afterStoring movement: Movement, in state: LedgerSta
     // El primer tramo de un traspaso real puede avisar antes de que exista su pareja (el segundo aún no ha llegado):
     // ese aviso ya salió y no se puede retirar. Se acepta; una vez emparejados, ningún tramo cuenta.
     let transfers = ownTransferIDs(in: state.movements)
-    let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
+    let subs = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     out += movementInsights(movement, in: state, index: MerchantIndex(state.movements, ownTransferIDs: transfers),
                             subscriptions: subs, ownTransfers: transfers, calendar: calendar)
+    // Presupuestos: solo avisan los pagos que llegan por la vía instantánea (aviso o Cartera). Lo que entra por una
+    // sincronización o una importación del banco no avisa aquí; la pantalla de presupuestos y el siguiente aviso
+    // instantáneo ya cuentan el total real.
+    if settings.budgets, movement.kind == .payment, !transfers.contains(movement.id),
+       calendar.isDate(movement.date, equalTo: now, toGranularity: .month) {
+        out += budgetCrossings(of: movement, in: state, now: now, ownTransfers: transfers,
+                               subscriptionKeys: Set(subs.map(\.id)), calendar: calendar)
+    }
     return out
 }
 
@@ -202,7 +262,7 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [
     let settings = state.alertSettings
     let ledger = Ledger(state: state)
     let transfers = ownTransferIDs(in: state.movements)
-    let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
+    let subs = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     var out: [Insight] = []
 
     if settings.lowBalance {
@@ -232,6 +292,13 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [
             out.append(make(.subscriptionUpcoming, .info, subject: "\(sub.bank.rawValue)|\(sub.id)",
                             title: "\(sub.merchant) se cobra \(when): \(formatEUR(sub.amountCents))",
                             date: sub.nextDate, bank: sub.bank, merchant: sub.merchant, calendar: calendar))
+        }
+    }
+
+    if settings.budgets {
+        for status in budgetStatuses(in: state, month: now, now: now, calendar: calendar, ownTransferIDs: transfers,
+                                     subscriptionKeys: Set(subs.map(\.id))) where status.level != .ok {
+            out.append(budgetInsight(status, exceeded: status.level == .exceeded, date: now, movement: nil, calendar: calendar))
         }
     }
 

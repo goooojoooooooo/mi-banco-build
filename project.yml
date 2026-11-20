@@ -41,6 +41,8 @@ targets:
     info:
       path: App/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: Mi Banco
         NSFaceIDUsageDescription: Para que solo tú veas tu dinero
         NSSupportsLiveActivities: true
@@ -80,6 +82,8 @@ targets:
     info:
       path: NotificationExt/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: Mi Banco
         ALTAppGroups: [group.com.mibanco.shared]
         NSExtension:
@@ -122,6 +126,8 @@ targets:
     info:
       path: Widgets/Info.plist
       properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: Mi Banco
         ALTAppGroups: [group.com.mibanco.shared]
         NSExtension:

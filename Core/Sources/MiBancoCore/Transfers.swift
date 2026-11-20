@@ -14,9 +14,10 @@ public struct OwnTransferPair: Equatable, Sendable {
 /// Ventana máxima entre el pago y el ingreso de un traspaso: 3 días.
 private let transferWindow: TimeInterval = 259_200
 
-/// Emparejado voraz de traspasos entre tus cuentas. Pagos candidatos (no tienda, no "no es mío", sin `ownTransfer == false`)
-/// por fecha ascendente; cada uno toma el ingreso libre de OTRO banco con el mismo importe, a menos de 3 días, que esté
-/// más cerca en el tiempo (empate: el más antiguo). Cada movimiento entra en un solo par.
+/// Emparejado voraz de traspasos entre tus cuentas. Candidatos: pagos que no son de tienda, no "no es mío" y sin
+/// `ownTransfer == false`, e ingresos de OTRO banco con el mismo importe, sin `ownTransfer == false`, a 3 días o menos.
+/// Se toman los pares de menor distancia en el tiempo primero (empate: el más antiguo), y cada movimiento entra en un
+/// solo par.
 public func ownTransferPairs(in movements: [Movement]) -> [OwnTransferPair] {
     func order(_ a: Movement, _ b: Movement) -> Bool {
         a.date != b.date ? a.date < b.date : a.id.uuidString < b.id.uuidString
@@ -28,20 +29,24 @@ public func ownTransferPairs(in movements: [Movement]) -> [OwnTransferPair] {
     for m in movements where m.kind == .income && !m.flaggedNotMine && m.ownTransfer != false {
         incomes[abs(m.amountCents), default: []].append(m)
     }
+    var candidates: [(payment: Movement, income: Movement, gap: TimeInterval)] = []
+    for payment in payments {
+        for income in incomes[abs(payment.amountCents)] ?? [] where income.bank != payment.bank {
+            let gap = abs(income.date.timeIntervalSince(payment.date))
+            if gap <= transferWindow { candidates.append((payment, income, gap)) }
+        }
+    }
+    candidates.sort { a, b in
+        if a.gap != b.gap { return a.gap < b.gap }
+        if a.payment.id != b.payment.id { return order(a.payment, b.payment) }
+        return order(a.income, b.income)
+    }
     var used = Set<UUID>()
     var pairs: [OwnTransferPair] = []
-    for payment in payments {
-        let candidates = (incomes[abs(payment.amountCents)] ?? []).filter {
-            !used.contains($0.id) && $0.bank != payment.bank
-                && abs($0.date.timeIntervalSince(payment.date)) <= transferWindow
-        }
-        let best = candidates.min { a, b in
-            let da = abs(a.date.timeIntervalSince(payment.date)), db = abs(b.date.timeIntervalSince(payment.date))
-            return da != db ? da < db : order(a, b)
-        }
-        guard let best else { continue }
-        used.insert(best.id)
-        pairs.append(OwnTransferPair(paymentID: payment.id, incomeID: best.id))
+    for c in candidates where !used.contains(c.payment.id) && !used.contains(c.income.id) {
+        used.insert(c.payment.id)
+        used.insert(c.income.id)
+        pairs.append(OwnTransferPair(paymentID: c.payment.id, incomeID: c.income.id))
     }
     return pairs
 }

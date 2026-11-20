@@ -63,6 +63,12 @@ def check(name: str) -> list[str]:
     wave = lum[512, 300:725].max()
     if wave <= 215:
         errors.append(f"{name}: la ola llega a {wave:.1f} en la fila 512, debe superar 215")
+    # La ola del icono ocupa ~54 % del ancho (trazo incluido) para leerse a tamaño de pantalla de inicio.
+    band = lum[300:725, 60:SIZE - 60] > 128  # sin el canto
+    cols = np.where(band.any(axis=0))[0]
+    fraction = (cols.max() - cols.min() + 1) / SIZE if len(cols) else 0
+    if not 0.51 <= fraction <= 0.57:
+        errors.append(f"{name}: la ola ocupa {fraction:.3f} del ancho, debe estar entre 0,51 y 0,57")
     ring = edge_ring_samples(lum, EDGE_INSET, EDGE_RADIUS).mean()
     if not 40 <= ring <= 150:
         errors.append(f"{name}: el canto mide {ring:.1f}, debe estar entre 40 y 150")

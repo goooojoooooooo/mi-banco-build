@@ -23,13 +23,14 @@ struct RollingAmount: View {
     var revealed = true
     var style: AmountStyle = .plain(sign: false)
 
-    @Environment(AppPreferences.self) private var preferences
+    /// Opcional: sin preferencias (extensión, vista previa) el importe se ve y no se cierra la app.
+    @Environment(AppPreferences.self) private var preferences: AppPreferences?
     @Environment(\.motion) private var motion
     @Environment(\.entrance) private var entrance
 
     var body: some View {
         RollingDigits(
-            cents: cents, style: style, hidden: preferences.privateMode, countsUp: countsUp,
+            cents: cents, style: style, hidden: preferences?.privateMode ?? false, countsUp: countsUp,
             revealed: revealed, motion: motion,
             restartToken: entrance.token, restartsOnToken: entrance.active && entrance.scope == .assembly)
     }
@@ -68,6 +69,7 @@ struct RollingDigits: View {
         self.restartsOnToken = restartsOnToken
         // Con el modo privado puesto desde el principio, el primer fotograma ya son puntos (nunca cifras).
         _mode = State(initialValue: hidden ? .dots(Self.dotCount) : .real)
+        _latestCents = State(initialValue: cents)
     }
 
     private enum Mode: Equatable {
@@ -89,6 +91,10 @@ struct RollingDigits: View {
     @State private var seed = Int.random(in: 1...1_000_000)
     @State private var idealWidth: CGFloat = 0
     @State private var availableWidth: CGFloat = 0
+    /// El importe más reciente, también el que llega mientras el ojo está cambiando (la rodada final lo lee de aquí).
+    @State private var latestCents: Int
+    @ScaledMetric(relativeTo: .largeTitle) private var heroScale = 1.0
+    @ScaledMetric(relativeTo: .body) private var plainSize = 17.0
 
     // MARK: Cuerpo
 
@@ -110,17 +116,20 @@ struct RollingDigits: View {
     /// Lo que se dibuja ahora. Si `hidden` ya es true pero el estado aún enseña cifras (el primer fotograma tras tocar
     /// el ojo), se dibujan dígitos al azar: una cifra real no se dibuja nunca con el modo privado puesto.
     private var effectiveMode: Mode {
-        if hidden, mode == .real { return .scramble(0) }
+        // Con Reducir movimiento nunca hay un fotograma de barajado: directo a los puntos.
+        if hidden, mode == .real { return motion.reduce ? .dots(Self.dotCount) : .scramble(0) }
         return mode
     }
 
     @ViewBuilder private var content: some View {
         switch effectiveMode {
         case .real:
+            // Los glifos se calculan una vez, fuera del cierre que se ejecuta en cada fotograma.
+            let figures = glyphs(of: shownValue)
             ZStack {
                 TimelineView(.animation(paused: !rolling)) { context in
                     let t = rolling ? context.date.timeIntervalSince(planStart) : Double.infinity
-                    row(glyphs(of: shownValue), at: t)
+                    row(figures, at: t)
                 }
                 .id(motion.reduce ? shownValue : 0)
                 .transition(.opacity)
@@ -212,7 +221,15 @@ struct RollingDigits: View {
     private func font(_ small: Bool) -> Font? {
         switch style {
         case .plain: nil
-        case let .hero(euros, cents, _): .system(size: small ? cents : euros, weight: .semibold)
+        case .hero: .system(size: baseSize(small), weight: .semibold)
+        }
+    }
+
+    /// Cuerpo del texto de una parte; el protagonista crece con el tamaño de texto (hasta 1,35 y luego se encoge para caber).
+    private func baseSize(_ small: Bool) -> CGFloat {
+        switch style {
+        case .plain: plainSize
+        case let .hero(euros, cents, _): (small ? cents : euros) * min(heroScale, 1.35)
         }
     }
 
@@ -225,7 +242,7 @@ struct RollingDigits: View {
     private func blurRadius(_ small: Bool) -> CGFloat {
         switch style {
         case .plain: 1
-        case let .hero(euros, cents, _): (small ? cents : euros) * 0.055
+        case .hero: baseSize(small) * 0.055
         }
     }
 
@@ -251,11 +268,8 @@ struct RollingDigits: View {
                         .font(font(g.small))
                         .foregroundStyle(glyphStyle(g.small))
                 } else if let dot = g.dot {
-                    Text(String(g.char))
-                        .font(font(g.small))
+                    DotCell(font: font(g.small), size: baseSize(g.small), visible: dotVisible(dot))
                         .foregroundStyle(glyphStyle(g.small))
-                        .scaleEffect(dotVisible(dot) ? 1 : 0.3)
-                        .opacity(dotVisible(dot) ? 1 : 0)
                 } else {
                     Text(String(g.char))
                         .font(font(g.small))
@@ -289,7 +303,7 @@ struct RollingDigits: View {
 
     private var fitScale: CGFloat {
         guard idealWidth > 0, availableWidth > 0 else { return 1 }
-        return min(1, max(0.6, availableWidth / idealWidth))
+        return min(1, max(0.5, availableWidth / idealWidth))
     }
 
     // MARK: Estados
@@ -316,6 +330,7 @@ struct RollingDigits: View {
     }
 
     private func changed(to new: Int) {
+        latestCents = new
         // Con el modo privado puesto no se toca nada visible: al mostrar, se rueda hasta la cifra de entonces.
         guard !hidden, mode == .real else { return }
         guard let old = value else { return start() }
@@ -373,7 +388,7 @@ struct RollingDigits: View {
                     mode = .dots(Self.dotCount)
                 } else {
                     mode = .real
-                    value = cents
+                    value = latestCents
                     plan = []
                     rolling = false
                 }
@@ -396,7 +411,8 @@ struct RollingDigits: View {
             } else {
                 let random = AmountMask.scrambledDigits(count: Self.dotCount, step: 6, seed: seed)
                 let from = random.reduce(0) { $0 * 10 + $1 }
-                roll(to: cents, from: from, positions: random.map(Double.init), base: 0.38, perColumn: 0.03, stagger: 0.014)
+                // El importe de AHORA, no el del toque: un cambio durante el barajado no se pierde.
+                roll(to: latestCents, from: from, positions: random.map(Double.init), base: 0.38, perColumn: 0.03, stagger: 0.014)
                 mode = .real
             }
         }
@@ -448,5 +464,27 @@ private struct DigitCell: View {
             ForEach(0..<11, id: \.self) { Text(String($0 % 10)) }
         }
         .fixedSize()
+    }
+}
+
+/// Un punto de la máscara: ocupa el ancho de un dígito, descansa sobre la línea base (centrado a media altura de las
+/// cifras) y pesa como un trazo de cifra (13 % del cuerpo). Aparece con un pequeño salto.
+private struct DotCell: View {
+    let font: Font?
+    let size: CGFloat
+    let visible: Bool
+
+    var body: some View {
+        Text("0")
+            .font(font)
+            .monospacedDigit()
+            .hidden()
+            .overlay(alignment: .bottom) {
+                Circle()
+                    .frame(width: size * 0.13, height: size * 0.13)
+                    .padding(.bottom, size * 0.5)
+                    .scaleEffect(visible ? 1 : 0.3)
+                    .opacity(visible ? 0.9 : 0)
+            }
     }
 }

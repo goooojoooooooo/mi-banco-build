@@ -43,6 +43,19 @@ import Testing
         #expect(c.to == 7.0)
     }
 
+    /// Un valor nuevo a mitad de una rodada, con la columna sin cambio de dígito: la columna se asienta en su dígito
+    /// por el camino más corto (3,4 -> 3 baja 0,4; 9,08 -> 9 baja 0,08; 8,9 -> 9 sube 0,1; 0,3 -> 0 baja 0,3).
+    @Test(arguments: [(3.4, 3.0), (9.08, 9.0), (8.9, 9.0), (0.3, 0.0)])
+    func zeroDeltaColumnSettlesOnItsDigit(start: Double, digit: Double) {
+        let top = Int(digit)
+        let old = top * 1000
+        let c = DigitRoll.columns(from: old, to: old + 500, digitCount: 4, startingAt: [start, 0, 0, 0])[0]
+        #expect(c.from == start)
+        #expect(c.to == digit)
+        // Y la tira queda exactamente en su sitio al final.
+        #expect(DigitRoll.position(c, at: 10, overshoot: 0.17) == digit)
+    }
+
     @Test func widerNumberKeepsRightAlignment() {
         let c = DigitRoll.columns(from: 99900, to: 144900, digitCount: 6)[0]
         #expect(c.from == 0)

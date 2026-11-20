@@ -49,7 +49,10 @@ public enum DigitRoll {
             } else if delta < 0 {
                 distance = -mod10(current - target) - turns
             } else {
-                distance = 0
+                // Sin cambio de dígito: si la tira va por un punto intermedio (se interrumpió una rodada), se asienta
+                // en su dígito por el camino más corto (con signo); si ya está en él, no se mueve.
+                let d = mod10(target - current)
+                distance = d > 5 ? d - 10 : d
             }
             var to = from + distance
             if abs(to - to.rounded()) < 1e-9 { to = to.rounded() }

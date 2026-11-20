@@ -17,6 +17,9 @@ struct MorphingButton: View {
     @State private var doneCount = 0
     @State private var failCount = 0
     @Environment(\.motion) private var motion
+    /// Alto y ancho de la cápsula crecen con el tamaño de texto.
+    @ScaledMetric(relativeTo: .body) private var height = 52.0
+    @ScaledMetric(relativeTo: .body) private var width = 220.0
 
     private var isCircle: Bool { phase != .idle && !motion.reduce }
 
@@ -50,25 +53,32 @@ struct MorphingButton: View {
     }
 
     private var face: some View {
-        ZStack {
-            Capsule().fill(.white)
-            Text(title)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(.black)
-                .lineLimit(1)
-                .opacity(phase == .idle ? 1 : 0)
-            ProgressView()
-                .tint(.black)
-                .opacity(phase == .loading ? 1 : 0)
-            if phase == .done {
-                DrawnCheck(lineWidth: 2.8, color: .black)
-                    .frame(width: 24, height: 24)
-                    .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+        // La cápsula marca el tamaño; el contenido va encima y no lo cambia (el título no estira el círculo).
+        Capsule()
+            .fill(.white)
+            .frame(minWidth: isCircle ? height : width, maxWidth: isCircle ? height : width, minHeight: height)
+            .overlay {
+                ZStack {
+                    Text(title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.black)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .opacity(phase == .idle ? 1 : 0)
+                    ProgressView()
+                        .tint(.black)
+                        .opacity(phase == .loading ? 1 : 0)
+                    if phase == .done {
+                        DrawnCheck(lineWidth: 2.8, color: .black)
+                            .frame(width: 24, height: 24)
+                            .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+                    }
+                }
             }
-        }
-        .frame(width: isCircle ? 52 : 220, height: 52)
-        .contentShape(Capsule())
-        .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Capsule())
+            .frame(minWidth: 44, minHeight: 44)
     }
 
     private func run() async {

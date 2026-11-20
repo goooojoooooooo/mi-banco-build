@@ -92,12 +92,13 @@ extension EnvironmentValues {
 /// Va una sola vez en la raíz de la app (después de inyectar `AppPreferences`).
 struct MotionEnvironment: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(AppPreferences.self) private var preferences
+    /// Opcional: un anfitrión sin preferencias (extensión, vista previa) usa el nivel por defecto en vez de cerrarse.
+    @Environment(AppPreferences.self) private var preferences: AppPreferences?
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     func body(content: Content) -> some View {
         content
-            .environment(\.motion, MotionContext(level: preferences.motionLevel, reduce: reduceMotion, lowPower: lowPower))
+            .environment(\.motion, MotionContext(level: preferences?.motionLevel ?? AppPreferences.defaultMotionLevel, reduce: reduceMotion, lowPower: lowPower))
             .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
                 lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }

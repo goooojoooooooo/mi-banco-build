@@ -1,7 +1,7 @@
 """Genera el icono de la app (1024x1024, sin alfa, sin esquinas: iOS aplica la máscara).
 
 Marca negra de titanio (la del prototipo de movimiento): cuerpo negro puro con un degradado vertical
-#18181B -> #070708 (55 %) -> #000, la ola "M4 16c3-6 5-6 8-2s5 4 8-2" (caja de 24) con degradado de titanio
+#18181B -> #070708 (55 %) -> #000, la ola "M4 16c3-6 5-6 8-2s5 4 8-2" (caja de 24, ~54 % del ancho) con degradado de titanio
 #FFFFFF -> #D7DADF (45 %) -> #9DA2AA (75 %) -> #F3F4F6 y un canto fino de luz (2,2/120 del ancho, a 1/120 del borde,
 sobre la esquina de iOS 26/120) para que el icono se lea sobre fondos oscuros y claros.
 
@@ -22,9 +22,11 @@ OUT = Path(__file__).resolve().parent.parent / "App" / "Assets.xcassets" / "AppI
 EDGE_INSET = 1.0 * UNIT          # separación del canto al borde
 EDGE_WIDTH = 2.2 * UNIT          # grosor del canto
 CORNER = 26.0 * UNIT             # esquina de iOS en el prototipo (26/120)
-# La ola: caja de 24 unidades a escala 3,2 y desplazada (21,6; 15,2) dentro de la caja de 120, como en el prototipo.
-WAVE_SCALE = 3.2 * UNIT
-WAVE_ORIGIN = (21.6 * UNIT, 15.2 * UNIT)
+# La ola del ICONO ocupa ~54 % del ancho (trazo incluido: 17,9 unidades de la caja de 24) para leerse a tamaño de
+# pantalla de inicio; la marca dentro de la app mantiene la proporción del prototipo (~43 %). Centro de la ola (12, 14)
+# en el centro del icono.
+WAVE_SCALE = 0.54 * SIZE / 17.9
+WAVE_ORIGIN = (SIZE / 2 - 12 * WAVE_SCALE, SIZE / 2 - 14 * WAVE_SCALE)
 WAVE_STROKE = 1.9 * WAVE_SCALE
 
 

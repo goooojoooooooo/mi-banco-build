@@ -4,15 +4,16 @@ import MiBancoCore
 
 /// Galería de movimiento solo para compilaciones DEBUG: enseña, sobre negro, cada pieza del kit sin enlazarla a ninguna
 /// pantalla. Se abre con `-MiBancoMotionGallery` (junto a `-MiBancoDemo`, para que nada toque datos ni UserDefaults).
-/// `-MiBancoMotionGalleryPage controles` baja hasta las piezas de abajo; `-MiBancoMotionReduce` la abre con Reducir
+/// `-MiBancoMotionGalleryPage controles|pasos` baja hasta las piezas de abajo; `-MiBancoMotionReduce` la abre con Reducir
 /// movimiento simulado. Datos inventados.
 enum MotionGalleryLaunch {
     private static var arguments: [String] { ProcessInfo.processInfo.arguments }
     static var isActive: Bool { arguments.contains("-MiBancoMotionGallery") }
     static var startsReduced: Bool { arguments.contains("-MiBancoMotionReduce") }
-    static var scrollsToControls: Bool {
-        guard let i = arguments.firstIndex(of: "-MiBancoMotionGalleryPage"), i + 1 < arguments.count else { return false }
-        return arguments[i + 1] == "controles"
+    /// Hasta dónde baja al abrir: «controles», «pasos» (o nada).
+    static var page: String? {
+        guard let i = arguments.firstIndex(of: "-MiBancoMotionGalleryPage"), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1]
     }
 }
 
@@ -37,7 +38,8 @@ private struct MotionGalleryOverlay: ViewModifier {
 }
 
 struct MotionGallery: View {
-    @Environment(AppPreferences.self) private var preferences
+    /// Opcional: sin preferencias la galería usa su propio nivel local y no se cierra.
+    @Environment(AppPreferences.self) private var preferences: AppPreferences?
     @Environment(\.motion) private var baseMotion
 
     @State private var forceReduce = MotionGalleryLaunch.startsReduced
@@ -50,6 +52,8 @@ struct MotionGallery: View {
     @State private var step = 0
     @State private var stepsDone = false
     @State private var period = 1
+    @State private var localLevel = AppPreferences.defaultMotionLevel
+    @State private var localPrivate = false
 
     private var motion: MotionContext {
         var m = baseMotion
@@ -58,7 +62,9 @@ struct MotionGallery: View {
     }
 
     private var levelBinding: Binding<MotionLevel> {
-        Binding(get: { preferences.motionLevel }, set: { preferences.motionLevel = $0 })
+        Binding(
+            get: { preferences?.motionLevel ?? localLevel },
+            set: { if let preferences { preferences.motionLevel = $0 } else { localLevel = $0 } })
     }
 
     var body: some View {
@@ -80,6 +86,7 @@ struct MotionGallery: View {
                     morphSection
                     segmentedSection
                     fillSection
+                    Color.clear.frame(height: 1).id("pasos")
                     stepperSection
                 }
                 .padding(.horizontal, Theme.Space.gutter)
@@ -87,9 +94,9 @@ struct MotionGallery: View {
             }
             .scrollIndicators(.hidden)
             .task {
-                guard MotionGalleryLaunch.scrollsToControls else { return }
+                guard let page = MotionGalleryLaunch.page else { return }
                 try? await Task.sleep(for: .milliseconds(300))
-                proxy.scrollTo("controles", anchor: .top)
+                proxy.scrollTo(page, anchor: .top)
             }
         }
         .environment(\.motion, motion)
@@ -128,8 +135,7 @@ struct MotionGallery: View {
                 selection: levelBinding,
                 options: [(.subtle, "Sutil"), (.balanced, "Equilibrado"), (.expressive, "Expresivo")])
             Toggle("Reducir movimiento", isOn: $forceReduce)
-                .font(.system(size: 16))
-                .frame(minHeight: 44)
+                .toggleStyle(TitanToggleStyle())
                 .accessibilityIdentifier("gallery.reduce")
         }
     }
@@ -152,7 +158,9 @@ struct MotionGallery: View {
                 chip("Pago", id: "gallery.pay") { cents -= 480 }
                 chip("Ingreso", id: "gallery.income") { cents += 124_500 }
                 chip("Ojo", id: "gallery.eye") {
-                    withAnimation(motion.fade) { preferences.privateMode.toggle() }
+                    withAnimation(motion.fade) {
+                        if let preferences { preferences.privateMode.toggle() } else { localPrivate.toggle() }
+                    }
                 }
             }
         }
@@ -230,7 +238,7 @@ struct MotionGallery: View {
 
     private var fillSection: some View {
         section("Presupuesto") {
-            FillBar(fraction: fraction)
+            FillBar(fraction: fraction, label: "Gasto en comida")
                 .accessibilityIdentifier("gallery.fill")
             HStack(spacing: 10) {
                 chip("Llenar 95 %", id: "gallery.fill.up") { fraction = 0.95 }

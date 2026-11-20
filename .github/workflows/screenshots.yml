@@ -90,6 +90,10 @@ jobs:
           shot motion-galeria-controles 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage controles
           shot motion-galeria-privado 10 -MiBancoMotionGallery -MiBancoDemoPrivate
           shot motion-galeria-reducido 10 -MiBancoMotionGallery -MiBancoMotionReduce
+          # Tamaño de texto más grande de accesibilidad: nada se recorta ni se pisa.
+          shot motion-galeria-texto-grande 10 -MiBancoMotionGallery -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          shot motion-galeria-controles-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage controles -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          shot motion-galeria-pasos-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage pasos -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           ls -l out
       - uses: actions/upload-artifact@v4
         if: always()

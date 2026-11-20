@@ -83,13 +83,15 @@ jobs:
           shot ajustes 10 -MiBancoDemoScreen ajustes
           # La guia de avisos: la lista y pasos de Revolut (apagar «Notificar al ejecutar», rellenar «Titulo») y de Apple Pay.
           shot guia-avisos 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
-          shot guia-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 9
-          shot guia-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 17
-          shot guia-cartera 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 5
-          shot guia-cartera-banco 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 15
+          shot guia-lista-media 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0 -MiBancoDemoGuideHalfway
+          shot guia-escribir 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 4
+          shot guia-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 10
+          shot guia-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
+          shot guia-cartera 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 6
+          shot guia-cartera-banco 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 17
           # Con letra de accesibilidad el bloque de botones no debe apretar el contenido.
           xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
-          shot guia-letra-grande 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 17
+          shot guia-letra-grande 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
           xcrun simctl ui "$UDID" content_size large
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival

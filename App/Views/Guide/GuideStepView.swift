@@ -13,17 +13,21 @@ struct GuideStepView: View {
     @State private var helpOpen = false
     @State private var firstNoticeSeen = false
     @State private var shortcutsUnavailable = false
+    /// Se abrió retomando una guía a medias: se ofrece «Empezar desde el principio».
+    @State private var resumed: Bool
+    @Environment(AppPreferences.self) private var preferences
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    /// `start` es el paso de partida, contando desde 0.
-    init(track: GuideTrack, model: LedgerModel, start: Int = 0) {
+    /// `start` es el paso de partida (demo), contando desde 0; `resume`, el paso en que se dejó la guía a medias.
+    init(track: GuideTrack, model: LedgerModel, start: Int? = nil, resume: Int? = nil) {
         self.track = track
         self.model = model
         let count = guideSteps(for: track).count
-        _index = State(initialValue: min(max(start, 0), count - 1))
+        _index = State(initialValue: min(max(start ?? resume ?? 0, 0), count - 1))
+        _resumed = State(initialValue: start == nil && resume != nil)
     }
 
     private var steps: [GuideStep] { guideSteps(for: track) }
@@ -56,8 +60,7 @@ struct GuideStepView: View {
                     guard abs(dx) > 70, abs(dx) > abs(value.translation.height) * 1.5 else { return }
                     if dx < 0 { advance() } else { goBack() }
                 })
-            // Con letra grande los botones fijos se comerían la pantalla: pasan al final del contenido y se desplazan.
-            if !bigText { controls }
+            controls
         }
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Avisos al instante")
@@ -65,6 +68,7 @@ struct GuideStepView: View {
         .onChange(of: pendingStep) { _, target in
             if let target { applyPending(target) }
         }
+        .onChange(of: index) { _, now in preferences.setGuideStep(track, now) }
         .onChange(of: status) { old, new in
             if case .notYet = old, case .working = new {
                 withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) { firstNoticeSeen = true }
@@ -73,29 +77,54 @@ struct GuideStepView: View {
         .sensoryFeedback(trigger: firstNoticeSeen) { _, seen in seen ? SensoryFeedback.success : nil }
     }
 
-    // MARK: Cabecera: «Revolut · Paso 9 de 11» y los puntos de avance
+    // MARK: Cabecera: «Parte 2 de 4 · Paso 9 de 22», la parte y los puntos de avance agrupados por parte
 
     private var header: some View {
         VStack(spacing: Theme.Space.small) {
-            Text("\(track.title) · Paso \(index + 1) de \(steps.count)")
+            Text(guideProgressLabel(step, number: index + 1, total: steps.count))
                 .font(.system(.subheadline, weight: .semibold))
-                .foregroundStyle(Theme.label2)
+                .foregroundStyle(Theme.label)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, Theme.Space.gutter)
                 .accessibilityIdentifier("guide-step-counter")
-                // El contador es una guía de orientación: con letra enorme se queda en un tamaño que no come la pantalla.
-                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-            HStack(spacing: 6) {
-                ForEach(0..<steps.count, id: \.self) { i in
-                    Capsule()
-                        .fill(i == index ? Theme.label : (i < index ? Theme.label2 : Theme.passive))
-                        .frame(width: i == index ? 18 : 6, height: 6)
+            Text("\(guideParts[step.part - 1]) · \(track.title)")
+                .font(.system(.footnote))
+                .foregroundStyle(Theme.label2)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Theme.Space.gutter)
+                .accessibilityIdentifier("guide-step-part")
+            HStack(spacing: 12) {
+                ForEach(1...guideParts.count, id: \.self) { part in
+                    HStack(spacing: 5) {
+                        ForEach(steps.indices.filter { steps[$0].part == part }, id: \.self) { i in
+                            Capsule()
+                                .fill(i == index ? Theme.label : (i < index ? Theme.label2 : Theme.passive))
+                                .frame(width: i == index ? 18 : 6, height: 6)
+                        }
+                    }
                 }
             }
             .animation(reduceMotion ? nil : Theme.Motion.morph, value: index)
             .accessibilityHidden(true)
+            if resumed {
+                Button {
+                    resumed = false
+                    if index > 0 { move(to: 0) }
+                } label: {
+                    Text("Empezar desde el principio")
+                        .font(.system(.callout, weight: .semibold))
+                        .foregroundStyle(Theme.label)
+                        .frame(minHeight: 44)
+                        .padding(.horizontal, Theme.Space.row)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("guide-restart")
+            }
         }
         .frame(maxWidth: .infinity)
+        // La cabecera es una guía de orientación: con letra enorme se queda en un tamaño que no come la pantalla.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .padding(.top, Theme.Space.small)
         .padding(.bottom, Theme.Space.row)
     }
@@ -106,24 +135,33 @@ struct GuideStepView: View {
         ScrollView {
             VStack(spacing: Theme.Space.gutter) {
                 if firstNoticeSeen { workingBanner.transition(.opacity.combined(with: .scale(scale: 0.96))) }
-                GuideIllustrationView(step: step, track: track)
-                VStack(alignment: .leading, spacing: Theme.Space.row) {
-                    Text(step.title)
-                        .font(.system(.title, weight: .bold))
-                        .foregroundStyle(Theme.label)
-                        .accessibilityAddTraits(.isHeader)
-                    Text(Self.styled(step.instruction))
-                        .font(.body)
-                        .fixedSize(horizontal: false, vertical: true)
-                    helpDisclosure
+                // Con letra de accesibilidad primero lo que hay que hacer y después el dibujo.
+                if bigText {
+                    textBlock
+                    GuideIllustrationView(step: step, track: track)
+                } else {
+                    GuideIllustrationView(step: step, track: track)
+                    textBlock
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if bigText { controls }
             }
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, Theme.Space.gutter)
         }
         .scrollIndicators(.hidden)
+    }
+
+    private var textBlock: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.row) {
+            Text(step.title)
+                .font(.system(.title, weight: .bold))
+                .foregroundStyle(Theme.label)
+                .accessibilityAddTraits(.isHeader)
+            Text(Self.styled(step.instruction))
+                .font(.body)
+                .fixedSize(horizontal: false, vertical: true)
+            helpDisclosure
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// «¡Funciona!»: el ✓ se traza cuando llega el primer aviso real con la guía abierta.
@@ -241,6 +279,8 @@ struct GuideStepView: View {
         }
         .padding(.horizontal, Theme.Space.gutter)
         .padding(.top, Theme.Space.row)
+        // Los botones van siempre fijos abajo; con letra enorme se quedan en un tamaño que deja sitio al contenido.
+        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
         .padding(.bottom, Theme.Space.row)
         .background(Theme.canvas)
         .sensoryFeedback(Haptics.detent, trigger: index)
@@ -249,7 +289,10 @@ struct GuideStepView: View {
     // MARK: Navegación entre pasos
 
     private func advance() {
-        if isLast { dismiss() } else { move(to: index + 1) }
+        if isLast {
+            preferences.setGuideStep(track, nil)
+            dismiss()
+        } else { move(to: index + 1) }
     }
 
     private func goBack() {
@@ -268,6 +311,7 @@ struct GuideStepView: View {
         withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.45, bounce: 0.18)) {
             index = target
             helpOpen = false
+            shortcutsUnavailable = false
         }
     }
 

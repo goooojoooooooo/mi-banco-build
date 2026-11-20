@@ -149,6 +149,8 @@ private struct MockActionCard: View {
     let highlight: String
     /// Todos los campos con su dato (el paso final).
     var allFilled = false
+    /// La ficha que se abre bajo el campo resaltado (la que hay que tocar); sin ella se resalta el propio campo.
+    var tray: String?
 
     private var fields: [String] {
         track.isApplePay
@@ -165,7 +167,8 @@ private struct MockActionCard: View {
         if field == GuideNames.bankField { return highlight == field ? nil : track.bankName }
         let index = fields.firstIndex(of: field) ?? 0
         let reached = fields.firstIndex(of: highlight) ?? -1
-        return allFilled || index <= reached ? "\(variable) › \(field)" : nil
+        // Con la ficha abierta, el campo resaltado aún está vacío: solo los anteriores llevan su dato.
+        return allFilled || index < reached || (tray == nil && index == reached) ? "\(variable) › \(field)" : nil
     }
 
     var body: some View {
@@ -193,7 +196,22 @@ private struct MockActionCard: View {
                 .padding(.horizontal, 8)
                 .frame(height: 28)
                 .background(Mock.screen, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .pulse(field == highlight, radius: 9)
+                .pulse(field == highlight && tray == nil, radius: 9)
+                if field == highlight, let tray {
+                    // La lista que se abre bajo el campo: la ficha que hay que tocar y otra de relleno.
+                    HStack(spacing: 6) {
+                        Text(tray)
+                            .font(Mock.small).foregroundStyle(Theme.label)
+                            .padding(.horizontal, 8).frame(height: 22)
+                            .background(Mock.bar, in: Capsule())
+                            .lineLimit(1).minimumScaleFactor(0.6)
+                            .pulse(true, radius: 11)
+                        Capsule().fill(Mock.bar).frame(width: 44, height: 22)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                }
             }
         }
         .padding(8)
@@ -205,14 +223,15 @@ private struct MockButton: View {
     let text: String
     var highlighted = false
 
+    /// Dibujado como contorno, para que no parezca el botón «Siguiente» de verdad de la guía.
     var body: some View {
         Text(text)
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(Color.black)
+            .foregroundStyle(Theme.label)
             .lineLimit(1).minimumScaleFactor(0.6)
             .padding(.horizontal, 14)
             .frame(height: 30)
-            .background(Color.white, in: Capsule())
+            .overlay(Capsule().stroke(Theme.label2, lineWidth: 1))
             .pulse(highlighted, radius: 15)
     }
 }
@@ -246,7 +265,7 @@ struct GuideIllustrationView: View {
     var body: some View {
         PhoneFrame { mock }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Dibujo de la pantalla. Toca «\(step.tapTarget)», \(step.place).")
+            .accessibilityLabel(step.spokenLabel)
     }
 
     @ViewBuilder private var mock: some View {
@@ -292,6 +311,15 @@ struct GuideIllustrationView: View {
                 Spacer(minLength: 0)
                 MockTabBar(highlighted: 1)
             }
+        case .triggerType:
+            // Hay que escribir en el buscador: es lo que se resalta; todavía no hay resultados que tocar.
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation)
+                MockRow(text: target, symbol: "magnifyingglass", highlighted: true)
+                MockRow()
+                MockRow()
+                Spacer(minLength: 0)
+            }
         case .triggerSearch:
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.newAutomation)
@@ -330,10 +358,10 @@ struct GuideIllustrationView: View {
         case .walletCards, .walletNext:
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.walletApp)
-                MockRow(text: track.bankName, symbol: "creditcard", checked: true,
+                // Tarjetas con su nombre y sus últimos números (no hay una fila que se llame como el banco).
+                MockRow(text: "Tarjeta  •••• 1234", symbol: "creditcard", checked: true,
                         highlighted: step.illustration == .walletCards)
-                MockRow(symbol: "creditcard")
-                MockRow(symbol: "creditcard")
+                MockRow(text: "Otra tarjeta  •••• 5678", symbol: "creditcard")
                 Spacer(minLength: 0)
                 MockButton(text: GuideNames.next, highlighted: step.illustration == .walletNext)
             }
@@ -381,6 +409,15 @@ struct GuideIllustrationView: View {
                 Spacer(minLength: 0)
             }
         case .addActionSearch:
+            // Tocar el buscador: aún vacío.
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.addAction)
+                MockRow(text: "Buscar", symbol: "magnifyingglass", highlighted: true)
+                MockRow()
+                MockRow()
+                Spacer(minLength: 0)
+            }
+        case .addActionType:
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.addAction)
                 MockRow(text: target, symbol: "magnifyingglass", highlighted: true)
@@ -419,7 +456,7 @@ struct GuideIllustrationView: View {
         case .variablePicker:
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.newAutomation)
-                MockActionCard(track: track, highlight: target)
+                MockActionCard(track: track, highlight: step.focus, tray: target)
                 Spacer(minLength: 0)
             }
         case .done:

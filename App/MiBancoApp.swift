@@ -73,11 +73,12 @@ struct MiBancoApp: App {
                 await AlertScheduler.reschedule(for: model.state)
             }
             .environment(logos)
-            .environment(preferences)
+            // El entorno de movimiento va DENTRO de `.environment(preferences)`: lee las preferencias.
             .motionEnvironment()
             #if DEBUG
             .motionGalleryOverlay()
             #endif
+            .environment(preferences)
             .preferredColorScheme(.dark)
             .environment(\.locale, Locale(identifier: "es_ES"))
             .onChange(of: scenePhase) { _, phase in

@@ -30,7 +30,9 @@ private struct MotionGalleryOverlay: ViewModifier {
             .accessibilityHidden(active)
             .overlay {
                 if active {
+                    // La superposición no ve el `\.motion` del contenido: lo pone ella misma.
                     MotionGallery()
+                        .motionEnvironment()
                         .background(Color.black.ignoresSafeArea())
                 }
             }

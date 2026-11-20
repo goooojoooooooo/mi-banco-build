@@ -91,3 +91,32 @@ private func link(validUntil: Date) -> BankLinkInfo {
         #expect(shortSpanishDate(at(2027, 1, 3), calendar: madrid, withYear: true) == "3 ene 2027")
     }
 }
+
+@Suite struct BankStatusRound1Tests {
+    @Test func revokedEarlyShowsToday() {
+        var l = link(validUntil: at(2027, 5, 19))
+        l.problem = .consentExpired
+        let s = status(l)
+        #expect(s.primary == "La conexión caducó el 20 nov")
+        #expect(s.action == .renew)
+    }
+
+    @Test func expiredInEarlierYearShowsYear() {
+        #expect(status(link(validUntil: at(2025, 12, 31))).primary == "La conexión caducó el 31 dic 2025")
+    }
+
+    @Test func unknownWithWaitSaysLater() {
+        var l = link(validUntil: at(2027, 5, 19))
+        l = l.recordingFailure(.unknown, at: now)
+        #expect(status(l).primary == "No se pudo actualizar · lo intentamos más tarde")
+    }
+
+    @Test func relativeBoundaries() {
+        func r(_ s: TimeInterval) -> String { relativeUpdated(now.addingTimeInterval(-s), now: now, calendar: madrid) }
+        #expect(r(59) == "hace un momento")
+        #expect(r(60) == "hace 1 min")
+        #expect(r(3_599) == "hace 59 min")
+        #expect(r(3_600) == "hace 1 h")
+        #expect(r(86_400) == "ayer a las 12:00")
+    }
+}

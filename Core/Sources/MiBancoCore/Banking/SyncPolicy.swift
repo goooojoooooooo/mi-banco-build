@@ -98,3 +98,59 @@ public func consentReminderDate(validUntil: Date, now: Date, calendar: Calendar)
     guard let at = calendar.date(from: parts), at > now else { return nil }
     return at
 }
+
+/// Qué hay que consultar ahora de un banco.
+public struct BankFetchPlan: Equatable, Sendable {
+    public let bank: BankID
+    public let dateFrom: Date
+    public let strategy: TransactionStrategy
+
+    public init(bank: BankID, dateFrom: Date, strategy: TransactionStrategy) {
+        self.bank = bank
+        self.dateFrom = dateFrom
+        self.strategy = strategy
+    }
+}
+
+/// Bancos a consultar ahora, en orden estable (el de `BankID.allCases`). La app solo ejecuta esta lista.
+public func banksToFetch(
+    links: [BankID: BankLinkInfo], trigger: SyncTrigger, now: Date, calendar: Calendar
+) -> [BankFetchPlan] {
+    BankID.allCases.compactMap { bank in
+        guard case let .fetch(dateFrom, strategy) = SyncPolicy.decide(links[bank], trigger: trigger, now: now, calendar: calendar)
+        else { return nil }
+        return BankFetchPlan(bank: bank, dateFrom: dateFrom, strategy: strategy)
+    }
+}
+
+/// Convierte un error de la consulta en el problema que se muestra y se recuerda.
+public func syncProblem(for error: Error) -> SyncProblem {
+    if let known = error as? BankingClientError {
+        switch known {
+        case let .api(problem, _): return problem
+        case .offline: return .offline
+        case .tooManyPages, .badResponse: return .unknown
+        }
+    }
+    return error is URLError ? .offline : .unknown
+}
+
+extension BankLinkInfo {
+    /// Aplica el resultado de una consulta: éxito o el fallo clasificado.
+    public func applying(_ outcome: Result<Void, Error>, at: Date) -> BankLinkInfo {
+        switch outcome {
+        case .success: return recordingSuccess(at: at)
+        case let .failure(error): return recordingFailure(syncProblem(for: error), at: at)
+        }
+    }
+
+    /// Tras (re)conectar con éxito: nueva caducidad, sin problema ni espera. Se conservan las consultas anotadas.
+    public func renewed(consentValidUntil: Date, at: Date) -> BankLinkInfo {
+        var copy = self
+        copy.connectedAt = at
+        copy.consentValidUntil = consentValidUntil
+        copy.problem = nil
+        copy.backoffUntil = nil
+        return copy
+    }
+}

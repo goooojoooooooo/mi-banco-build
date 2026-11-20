@@ -97,3 +97,64 @@ private func link(validUntil: Date = at(2027, 5, 19)) -> BankLinkInfo {
         #expect(consentReminderDate(validUntil: now.addingTimeInterval(5 * 86_400), now: now, calendar: madrid) == nil)
     }
 }
+
+@Suite struct SyncPolicyRound1Tests {
+    @Test func budgetWalk() {
+        var l = link()
+        for t in [at(2026, 11, 20, 8), at(2026, 11, 20, 11, 5), at(2026, 11, 20, 14, 10), at(2026, 11, 20, 17, 20)] {
+            l = l.recordingAttempt(at: t)
+        }
+        let expected = SyncDecision.skip(.budgetUsed(nextAt: at(2026, 11, 21, 8)))
+        #expect(SyncPolicy.decide(l, trigger: .appOpen, now: at(2026, 11, 20, 20, 30), calendar: madrid) == expected)
+        #expect(SyncPolicy.decide(l, trigger: .appOpen, now: at(2026, 11, 21, 0, 5), calendar: madrid) == expected)
+    }
+
+    @Test func backoffBlocksAfterConnect() {
+        let l = link().recordingFailure(.rateLimited, at: now)
+        #expect(SyncPolicy.decide(l, trigger: .afterConnect, now: now, calendar: madrid)
+            == .skip(.waiting(until: at(2026, 11, 20, 18))))
+    }
+
+    @Test func consentExpiredProblemSkipsEvenWithFutureValidity() {
+        var l = link(validUntil: at(2027, 5, 19))
+        l.problem = .consentExpired
+        for t in [SyncTrigger.afterConnect, .appOpen, .background, .manual] {
+            #expect(SyncPolicy.decide(l, trigger: t, now: now, calendar: madrid) == .skip(.consentExpired))
+        }
+    }
+
+    @Test func banksToFetchIsStableAndFiltered() {
+        var ok = link()
+        ok.lastSuccessAt = now.addingTimeInterval(-60)
+        let links: [BankID: BankLinkInfo] = [.tr: link(), .rev: link(), .ima: ok]
+        let plans = banksToFetch(links: links, trigger: .appOpen, now: now, calendar: madrid)
+        #expect(plans.map(\.bank) == [.rev, .tr])
+        #expect(banksToFetch(links: [:], trigger: .appOpen, now: now, calendar: madrid).isEmpty)
+    }
+
+    @Test func outcomeMapsOntoLink() {
+        let base = link()
+        #expect(base.applying(.success(()), at: now).lastSuccessAt == now)
+        #expect(base.applying(.failure(BankingClientError.api(.rateLimited, code: nil)), at: now).backoffUntil
+            == at(2026, 11, 20, 18))
+        #expect(base.applying(.failure(BankingClientError.offline), at: now).problem == .offline)
+        #expect(base.applying(.failure(BankingClientError.badResponse), at: now).backoffUntil
+            == now.addingTimeInterval(10_800))
+        #expect(base.applying(.failure(URLError(.notConnectedToInternet)), at: now).problem == .offline)
+        for code in ["EXPIRED_SESSION", "REVOKED_SESSION", "CLOSED_SESSION", "SESSION_DOES_NOT_EXIST"] {
+            let problem = classifyEnableBankingError(status: 400, body: Data("{\"error\":\"\(code)\"}".utf8))
+            #expect(base.applying(.failure(BankingClientError.api(problem, code: code)), at: now).problem == .consentExpired)
+        }
+    }
+
+    @Test func renewalUnblocksExpiredBank() {
+        var l = link(validUntil: now.addingTimeInterval(-1)).recordingAttempt(at: at(2026, 11, 20, 9))
+        l.problem = .consentExpired
+        #expect(SyncPolicy.decide(l, trigger: .afterConnect, now: now, calendar: madrid) == .skip(.consentExpired))
+        let r = l.renewed(consentValidUntil: at(2027, 5, 19), at: now)
+        #expect(r.fetchLog == l.fetchLog)
+        #expect(r.problem == nil && r.backoffUntil == nil)
+        #expect(SyncPolicy.decide(r, trigger: .afterConnect, now: now, calendar: madrid)
+            == .fetch(dateFrom: at(2025, 11, 20), strategy: .longest))
+    }
+}

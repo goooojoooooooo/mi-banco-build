@@ -60,8 +60,11 @@ public func bankStatusLines(
             : BankStatusLines(primary: "Importa su extracto", secondary: nil, action: .importStatement)
     }
     if now >= link.consentValidUntil || link.problem == .consentExpired {
+        // Si el banco la revocó antes de la fecha prevista, la caducidad real es hoy.
+        let expiredOn = min(link.consentValidUntil, now)
+        let sameYear = calendar.component(.year, from: expiredOn) == calendar.component(.year, from: now)
         return BankStatusLines(
-            primary: "La conexión caducó el " + shortSpanishDate(link.consentValidUntil, calendar: calendar, withYear: false),
+            primary: "La conexión caducó el " + shortSpanishDate(expiredOn, calendar: calendar, withYear: !sameYear),
             secondary: "Renuévala para ver el saldo exacto", action: .renew)
     }
     if link.problem == .keyRejected {
@@ -73,6 +76,10 @@ public func bankStatusLines(
         return BankStatusLines(
             primary: "El banco ha pedido esperar · vuelve a las \(clock(until, calendar: calendar))",
             secondary: expiry, action: nil)
+    }
+    if link.problem == .unknown, let until = link.backoffUntil, until > now {
+        return BankStatusLines(
+            primary: "No se pudo actualizar · lo intentamos más tarde", secondary: expiry, action: .refresh)
     }
     if link.problem != nil {
         return BankStatusLines(

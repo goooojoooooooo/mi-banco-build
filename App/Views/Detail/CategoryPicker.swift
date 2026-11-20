@@ -47,6 +47,15 @@ struct CategoryPickerRow: View {
         return merchant
     }
 
+    /// Con elección propia en el pago, el botón quita solo esa; sin ella y con una para todo el comercio, quita la del
+    /// comercio y lo dice con su nombre (el mismo que muestra «Aplicar a todo lo de …»).
+    private var resetTitle: String {
+        if !model.hasOwnCategory(movement.id), let merchant = merchantName {
+            return "Quitar mi categoría de todo \(merchant)"
+        }
+        return "Volver a la categoría automática"
+    }
+
     private var fold: Animation { reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal }
 
     var body: some View {
@@ -122,7 +131,7 @@ struct CategoryPickerRow: View {
             }
             if model.hasChosenCategory(movement.id) {
                 Button(action: resetToAutomatic) {
-                    Text("Volver a la categoría automática")
+                    Text(resetTitle)
                         .titan(.option)
                         .foregroundStyle(Theme.label)
                         .multilineTextAlignment(.center)

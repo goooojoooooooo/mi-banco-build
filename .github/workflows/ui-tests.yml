@@ -2,6 +2,11 @@ name: ui-tests
 run-name: ui-tests ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      test_class:
+        description: "Clase de pruebas a ejecutar sola (vacio = todas)"
+        required: false
+        default: ""
 permissions:
   contents: read
 jobs:
@@ -38,12 +43,22 @@ jobs:
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
       - name: Pruebas de toques
+        env:
+          TEST_CLASS: ${{ github.event.inputs.test_class }}
         run: |
           mkdir -p build
           set +e
+          if [ -n "$TEST_CLASS" ]; then
+            case "$TEST_CLASS" in
+              *[!A-Za-z0-9_]*) echo "test_class solo admite letras, numeros y _"; echo "2" > build/status.txt; tail -n 1 build/status.txt; exit 1 ;;
+            esac
+            SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
+          else
+            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests"
+          fi
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
-            -only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/ui.log 2>&1
+            $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
           exit 0

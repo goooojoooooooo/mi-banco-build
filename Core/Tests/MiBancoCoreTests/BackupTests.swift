@@ -46,6 +46,16 @@ private func tempDirectory() -> URL {
                                         subscriptions: false, duplicateCharge: false, weeklyDigest: false,
                                         spendingPace: false, budgets: false)
         s.budgets = Budgets(monthlyCents: 90_000, byCategory: [.supermercado: 30_000, .ocio: 5_000])
+        // Campos de Plan 2: conexión con un banco, tramos cubiertos por extractos y un movimiento que viene del banco.
+        var link = BankLinkInfo(connectedAt: nov(2), consentValidUntil: nov(30))
+        link.lastSuccessAt = nov(19, 8)
+        link.historyLoaded = true
+        s.links = [.rev: link]
+        s.statementCoverage = [.rev: [DateInterval(start: nov(1), end: nov(10))]]
+        s.movements.append(Movement(bank: .rev, amountCents: -6_000, merchant: "Recibo luz", kind: .payment, source: .bank,
+                                    date: nov(18, 12), bankRef: "ref-1", statementRef: "fila-1", bankStatus: .booked,
+                                    importedAt: nov(19, 8), dayOnly: true, bankMerchant: "ELECTRICA SA",
+                                    excludedFromSpending: false, linkedAt: nov(19, 8)))
         return s
     }
 
@@ -53,6 +63,11 @@ private func tempDirectory() -> URL {
         let s = fullState()
         let file = try decodeBackup(encodeBackup(s, exportedAt: nov(20, 9)))
         #expect(file.ledger == s)
+        #expect(file.ledger.links[.rev]?.historyLoaded == true)
+        #expect(file.ledger.statementCoverage[.rev]?.count == 1)
+        let fromBank = file.ledger.movements.first { $0.source == .bank }
+        #expect(fromBank?.dayOnly == true && fromBank?.bankRef == "ref-1" && fromBank?.statementRef == "fila-1")
+        #expect(fromBank?.bankMerchant == "ELECTRICA SA" && fromBank?.bankStatus == .booked)
         #expect(file.ledger.alertSettings != AlertSettings())
         #expect(file.ledger.alertSettings.largePaymentThresholdCents == 33_300)
         #expect(file.version == 1)

@@ -65,7 +65,7 @@ extension LedgerSnapshot {
         var grouped: [String: [Movement]] = [:]
         for m in spendingMovements(in: state.movements, notSpending: notSpending) {
             guard let start = calendar.dateInterval(of: .month, for: m.date)?.start, monthSet.contains(start) else { continue }
-            if start == currentStart && m.date > now { continue }
+            if start == currentStart && !movementCounts(m, upTo: now, calendar: calendar) { continue }
             let category = categoryOf(m, in: state, subscriptionKeys: keys) ?? .sinCategoria
             grouped[categoryKey(month: start, category: category, calendar: calendar), default: []].append(m)
         }

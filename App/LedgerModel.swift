@@ -182,6 +182,11 @@ final class LedgerModel {
         Ledger(state: state).hasChosenCategory(id)
     }
 
+    /// true si el pago tiene categoría elegida en él mismo (no solo la de su comercio).
+    func hasOwnCategory(_ id: UUID) -> Bool {
+        Ledger(state: state).hasOwnCategory(id)
+    }
+
     /// true = traspaso entre tus cuentas; false = no lo es (aunque lo parezca); nil = que lo decida la app.
     func setOwnTransfer(_ value: Bool?, for id: UUID) throws {
         try mutate { $0.setOwnTransfer(value, for: id) }

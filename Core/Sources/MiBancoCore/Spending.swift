@@ -62,7 +62,9 @@ public func spendingPace(movements: [Movement], now: Date, calendar: Calendar, n
     let payments = spendingMovements(in: movements, notSpending: notSpending)
     guard payments.contains(where: { $0.date >= prevStart && $0.date < monthStart }) else { return nil }
     guard let cutoff = sameDayCutoff(now: now, previousMonthStart: prevStart, calendar: calendar) else { return nil }
-    let thisMonth = spent(payments) { $0 >= monthStart && $0 <= now }
+    let thisMonth = payments.reduce(0) { sum, m in
+        m.date >= monthStart && movementCounts(m, upTo: now, calendar: calendar) ? sum + abs(m.amountCents) : sum
+    }
     let lastMonth = spent(payments) { $0 >= prevStart && $0 < cutoff }
     return SpendingPace(thisMonthCents: thisMonth, lastMonthSamePointCents: lastMonth)
 }
@@ -104,7 +106,7 @@ public func merchantHistory(for merchant: String, in movements: [Movement], now:
     let key = normalizeMerchant(merchant)
     let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
     let mine = key.isEmpty ? [] : spendingMovements(in: movements, notSpending: notSpending).filter { normalizeMerchant($0.merchant ?? "") == key }
-    let month = mine.filter { $0.date >= monthStart && $0.date <= now }
+    let month = mine.filter { $0.date >= monthStart && movementCounts($0, upTo: now, calendar: calendar) }
     return MerchantHistory(countThisMonth: month.count, totalThisMonthCents: month.reduce(0) { $0 + abs($1.amountCents) },
                            countAllTime: mine.count, firstDate: mine.map(\.date).min())
 }
@@ -123,7 +125,7 @@ public func merchantHistories(in movements: [Movement], now: Date, calendar: Cal
         if key.isEmpty { continue }
         count[key, default: 0] += 1
         if let known = first[key] { first[key] = min(known, m.date) } else { first[key] = m.date }
-        if m.date >= monthStart && m.date <= now {
+        if m.date >= monthStart && movementCounts(m, upTo: now, calendar: calendar) {
             monthCount[key, default: 0] += 1
             monthTotal[key, default: 0] += abs(m.amountCents)
         }

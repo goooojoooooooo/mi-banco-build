@@ -141,4 +141,152 @@ private func income(_ cents: Int, _ merchant: String, _ when: Date, bank: BankID
         // Lo elegido a mano en b se queda.
         #expect(categoryOf(ledger.state.movements[1], in: ledger.state, subscriptionKeys: keys) == .casa)
     }
+
+    /// R22: volver a lo automático en un pago con elección propia quita solo esa; la del comercio no se toca.
+    @Test func volverALaCategoriaAutomaticaQuitaSoloLaDelPago() {
+        let a = pay(1_250, "Mercadona", at(11, 10))
+        let b = pay(900, "Mercadona", at(11, 12))
+        var ledger = Ledger(state: LedgerState(movements: [a, b]))
+        ledger.setCategory(.casa, for: a.id, applyToMerchant: true)
+        ledger.setCategory(.ocio, for: b.id, applyToMerchant: false)
+        let keys = Set<String>()
+        #expect(categoryOf(ledger.state.movements[1], in: ledger.state, subscriptionKeys: keys) == .ocio)
+        #expect(ledger.hasOwnCategory(b.id))
+        ledger.resetCategoryToAutomatic(for: b.id)
+        #expect(categoryOf(ledger.state.movements[0], in: ledger.state, subscriptionKeys: keys) == .casa)
+        #expect(categoryOf(ledger.state.movements[1], in: ledger.state, subscriptionKeys: keys) == .casa)
+        #expect(!ledger.hasOwnCategory(b.id))
+        #expect(ledger.hasChosenCategory(b.id))
+    }
+
+    /// R22: sin elección propia, el botón quita la del comercio y todos vuelven a lo automático.
+    @Test func volverALaCategoriaAutomaticaSinEleccionPropiaQuitaLaDelComercio() {
+        let a = pay(1_250, "Mercadona", at(11, 10))
+        let b = pay(900, "Mercadona", at(11, 12))
+        var ledger = Ledger(state: LedgerState(movements: [a, b]))
+        ledger.setCategory(.casa, for: a.id, applyToMerchant: true)
+        #expect(!ledger.hasOwnCategory(a.id))
+        #expect(ledger.hasChosenCategory(a.id))
+        ledger.resetCategoryToAutomatic(for: a.id)
+        let keys = Set<String>()
+        #expect(categoryOf(ledger.state.movements[0], in: ledger.state, subscriptionKeys: keys) == .supermercado)
+        #expect(categoryOf(ledger.state.movements[1], in: ledger.state, subscriptionKeys: keys) == .supermercado)
+        #expect(!ledger.hasChosenCategory(a.id) && !ledger.hasChosenCategory(b.id))
+    }
+
+    // MARK: R23 — las filas de solo día cuentan desde el inicio de su día
+
+    private func bankDay(_ cents: Int, _ merchant: String, _ month: Int, _ day: Int) -> Movement {
+        Movement(bank: .rev, amountCents: -cents, merchant: merchant, kind: .payment, source: .bank, date: at(month, day, 12),
+                 importedAt: at(month, day, 6), dayOnly: true)
+    }
+
+    @Test func r23FilaDeSoloDiaDeHoyCuentaAntesDeLasDoce() {
+        let state = LedgerState(movements: [
+            pay(1_000, "Mercadona", at(11, 8)),
+            pay(2_000, "Mercadona", at(10, 8)),
+            bankDay(6_000, "Endesa", 11, 19),
+        ])
+        for hour in [9, 13] {
+            let now = at(11, 19, hour)
+            let month = monthSpending(in: state, month: now, now: now, calendar: cal)
+            #expect(month.totalCents == 7_000)
+            #expect(month.byCategory.reduce(0) { $0 + $1.count } == 2)
+            var budgeted = state
+            budgeted.budgets = Budgets(monthlyCents: 50_000)
+            #expect(budgetStatuses(in: budgeted, month: now, now: now, calendar: cal).first?.spentCents == 7_000)
+            let listed = month.byCategory.reduce(0) {
+                $0 + spendingMovements(in: state, category: $1.category, month: now, now: now, calendar: cal).count
+            }
+            #expect(listed == 2)
+            #expect(spendingPace(movements: state.movements, now: now, calendar: cal)?.thisMonthCents == 7_000)
+            #expect(merchantHistory(for: "Endesa", in: state.movements, now: now, calendar: cal).totalThisMonthCents == 6_000)
+            #expect(merchantHistories(in: state.movements, now: now, calendar: cal)["endesa"]?.totalThisMonthCents == 6_000)
+        }
+    }
+
+    @Test func r23SoloUnaFilaDeHoyEs6000EnElMes() {
+        let state = LedgerState(movements: [bankDay(6_000, "Endesa", 11, 19)])
+        let now = at(11, 19, 9)
+        #expect(monthSpending(in: state, month: now, now: now, calendar: cal).totalCents == 6_000)
+        #expect(monthSpending(in: state, month: now, now: now, calendar: cal).byCategory.count == 1)
+    }
+
+    @Test func r23LaPrevisionUsaLaFilaDeHoy() {
+        let state = LedgerState(movements: [bankDay(6_000, "Endesa", 11, 19)])
+        let now = at(11, 19, 9)
+        let forecast = monthForecast(in: state, now: now, calendar: cal)
+        #expect(forecast?.spentCents == 6_000)
+        // 6 000 en 19 días, 11 por delante (30 días en noviembre): 6 000 + 6 000 * 11 / 19.
+        #expect(forecast?.projectedCents == 6_000 + 6_000 * 11 / 19)
+    }
+
+    @Test func r23FilaDeMananaSigueFueraALasVeintitresCincuentaYNueve() {
+        let state = LedgerState(movements: [bankDay(6_000, "Endesa", 11, 20)])
+        let now = at(11, 19, 23, 59)
+        #expect(monthSpending(in: state, month: now, now: now, calendar: cal).totalCents == 0)
+        #expect(spendingPace(movements: state.movements, now: now, calendar: cal) == nil
+                || spendingPace(movements: state.movements, now: now, calendar: cal)?.thisMonthCents == 0)
+        #expect(monthForecast(in: state, now: now, calendar: cal)?.spentCents == 0)
+        // Y entra al empezar su día.
+        let next = at(11, 20, 0, 5)
+        #expect(monthSpending(in: state, month: next, now: next, calendar: cal).totalCents == 6_000)
+    }
+
+    @Test func r23DiaUnoDelMesAMedianoche() {
+        let state = LedgerState(movements: [bankDay(6_000, "Endesa", 11, 1), bankDay(900, "Bar", 10, 1)])
+        let now = at(11, 1, 0, 30)
+        let month = monthSpending(in: state, month: now, now: now, calendar: cal)
+        #expect(month.totalCents == 6_000)
+        // Frente al día 1 entero del mes anterior (R19).
+        #expect(month.previousTotalCents == 900)
+        #expect(spendingPace(movements: state.movements, now: now, calendar: cal)?.thisMonthCents == 6_000)
+    }
+
+    // MARK: R27 (20) — R19 en el día 1, al final de marzo frente a febrero y en el cambio de hora
+
+    @Test func r19DiaUnoCompruebaElDiaUnoEnteroDelMesAnterior() {
+        let state = LedgerState(movements: [
+            pay(1_000, "Mercadona", at(10, 1, 8)),
+            pay(2_000, "Mercadona", at(10, 1, 23, 50)),
+            pay(4_000, "Mercadona", at(10, 2, 0, 10)),
+        ])
+        let now = at(11, 1, 0, 5)
+        #expect(monthSpending(in: state, month: now, now: now, calendar: cal).previousTotalCents == 3_000)
+        #expect(spendingPace(movements: state.movements, now: now, calendar: cal)?.lastMonthSamePointCents == 3_000)
+    }
+
+    @Test func r19FinalDeMarzoComparaConFebreroEntero() {
+        func march(_ day: Int, _ hour: Int = 12) -> Date {
+            cal.date(from: DateComponents(year: 2026, month: 3, day: day, hour: hour))!
+        }
+        func feb(_ day: Int, _ hour: Int = 12) -> Date {
+            cal.date(from: DateComponents(year: 2026, month: 2, day: day, hour: hour))!
+        }
+        let state = LedgerState(movements: [
+            pay(1_000, "Mercadona", feb(10)),
+            pay(2_000, "Mercadona", feb(28, 23)),
+            pay(500, "Mercadona", march(1)),
+        ])
+        for day in [29, 30, 31] {
+            let now = march(day, 9)
+            #expect(monthSpending(in: state, month: now, now: now, calendar: cal).previousTotalCents == 3_000)
+            #expect(spendingPace(movements: state.movements, now: now, calendar: cal)?.lastMonthSamePointCents == 3_000)
+        }
+    }
+
+    @Test func r19DiaDelCambioDeHoraCuentaEntero() {
+        // 25 de octubre de 2026: el día de 25 horas (acaba el horario de verano). Sus pagos cuentan enteros.
+        func oct(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+            cal.date(from: DateComponents(year: 2026, month: 10, day: day, hour: hour, minute: minute))!
+        }
+        let state = LedgerState(movements: [
+            pay(1_000, "Mercadona", oct(25, 0, 30)),
+            pay(2_000, "Mercadona", oct(25, 23, 45)),
+            pay(4_000, "Mercadona", oct(26, 0, 10)),
+        ])
+        let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 25, hour: 8))!
+        #expect(monthSpending(in: state, month: now, now: now, calendar: cal).previousTotalCents == 3_000)
+        #expect(spendingPace(movements: state.movements, now: now, calendar: cal)?.lastMonthSamePointCents == 3_000)
+    }
 }

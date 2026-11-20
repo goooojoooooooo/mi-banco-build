@@ -196,7 +196,7 @@ struct LedgerSnapshot: Sendable {
         // Gasto del mes por tarjeta.
         let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
         var spent: [AccountCard: Int] = [:]
-        for m in spendingMovements(in: state.movements, notSpending: notSpending) where m.date >= monthStart && m.date <= now {
+        for m in spendingMovements(in: state.movements, notSpending: notSpending) where m.date >= monthStart && movementCounts(m, upTo: now, calendar: calendar) {
             spent[.all, default: 0] += abs(m.amountCents)
             spent[AccountCard(bank: m.bank), default: 0] += abs(m.amountCents)
         }

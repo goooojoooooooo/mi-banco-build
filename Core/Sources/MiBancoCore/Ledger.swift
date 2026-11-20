@@ -345,11 +345,20 @@ public struct Ledger: Sendable {
         return !key.isEmpty && state.categoryOverrides[key] != nil
     }
 
-    /// «Volver a la categoría automática»: quita la elegida en el pago y, si la había para todo su comercio, también esa
-    /// (sin tocar lo elegido a mano en otros pagos de ese comercio).
+    /// true si este pago tiene categoría elegida en él mismo (no solo la de su comercio).
+    public func hasOwnCategory(_ id: UUID) -> Bool {
+        state.movements.first(where: { $0.id == id })?.category != nil
+    }
+
+    /// «Volver a la categoría automática». Si el pago tiene elección propia, quita solo esa (el pago pasa a seguir la
+    /// del comercio, si la hay, o la automática; la del comercio NO se toca). Solo si no tiene elección propia y hay una
+    /// para todo su comercio, quita esa.
     public mutating func resetCategoryToAutomatic(for id: UUID) {
         guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
-        state.movements[i].category = nil
+        if state.movements[i].category != nil {
+            state.movements[i].category = nil
+            return
+        }
         let key = normalizeMerchant(state.movements[i].merchant ?? "")
         if !key.isEmpty { state.categoryOverrides[key] = nil }
     }

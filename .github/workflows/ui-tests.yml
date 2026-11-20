@@ -43,7 +43,7 @@ jobs:
           set +e
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
-            -only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/ui.log 2>&1
+            -only-testing:MiBancoUITests CODE_SIGNING_ALLOWED=NO > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
           exit 0
@@ -53,10 +53,6 @@ jobs:
           grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "xcodebuild exit: $(cat build/status.txt)"
-          if [ "$(cat build/status.txt)" != "0" ]; then
-            echo "== Lineas con error: de build/ui.log =="
-            grep -E "error:" build/ui.log | sort -u | head -n 40 || true
-          fi
           test "$(cat build/status.txt)" = "0"
       - uses: actions/upload-artifact@v4
         if: failure()

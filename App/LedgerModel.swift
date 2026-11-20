@@ -164,6 +164,16 @@ final class LedgerModel {
         try mutate { $0.setMuted(false, merchant: merchant.raw) }
     }
 
+    /// Categoría de un pago; con `applyToMerchant` se recuerda para todo el comercio. nil devuelve la que decide la app.
+    func setCategory(_ category: SpendingCategory?, for id: UUID, applyToMerchant: Bool) throws {
+        try mutate { $0.setCategory(category, for: id, applyToMerchant: applyToMerchant) }
+    }
+
+    /// true = traspaso entre tus cuentas; false = no lo es (aunque lo parezca); nil = que lo decida la app.
+    func setOwnTransfer(_ value: Bool?, for id: UUID) throws {
+        try mutate { $0.setOwnTransfer(value, for: id) }
+    }
+
     func movement(_ id: UUID) -> Movement? {
         state.movements.first { $0.id == id }
     }

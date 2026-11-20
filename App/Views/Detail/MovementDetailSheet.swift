@@ -130,6 +130,10 @@ private struct DetailContent: View {
                         }
                     }
                     DetailPair(key: "Tipo", divided: true) { Text(kindText) }
+                    if movement.kind == .payment {
+                        CategoryPickerRow(movement: movement, current: snapshot.categories[movement.id] ?? .sinCategoria, model: model)
+                    }
+                    OwnTransferRow(movement: movement, isOn: snapshot.ownTransfers.contains(movement.id), model: model)
                 }
                 .staggeredEntrance(7)
 
@@ -196,8 +200,6 @@ private struct DetailContent: View {
 
     private var kindText: String {
         if movement.source == .wallet { return "Apple Pay" }
-        if movement.source == .bank { return "Tu banco" }
-        if movement.source == .statement { return "Extracto importado" }
         if movement.kind == .income { return "Ingreso" }
         return movement.isShop ? "Compra con tarjeta" : "Pago"
     }

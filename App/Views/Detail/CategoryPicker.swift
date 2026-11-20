@@ -164,7 +164,7 @@ private struct CategoryTile: View {
             .foregroundStyle(selected ? Color.black : Theme.label)
             .padding(.horizontal, 4)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: height)
+            .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
             .background(selected ? Color.white : Color.white.opacity(0.10), in: shape)
             .overlay(alignment: .topTrailing) {
                 if selected {

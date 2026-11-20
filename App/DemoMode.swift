@@ -141,9 +141,9 @@ enum DemoMode {
             movements.append(movement(bank, cents, merchant, date))
         }
 
-        // Un traspaso de Revolut a imagin (mismo importe, a un minuto): Inicio lo lista como "Traspaso" y no cuenta como gasto.
+        // Un traspaso de Revolut a imagin ayer por la noche (mismo importe, a un minuto): Inicio lo lista como "Traspaso" y no cuenta como gasto.
         // Los textos hablan de transferencias y no son compras en tienda (`isShop` falso).
-        let transferDate = day(3, hour: 20)
+        let transferDate = day(1, hour: 22)
         movements.append(Movement(bank: .rev, amountCents: -5_000, merchant: "Transferencia a imagin", kind: .payment,
                                   source: .notification, date: transferDate))
         movements.append(Movement(bank: .ima, amountCents: 5_000, merchant: "Transferencia de Revolut", kind: .income,

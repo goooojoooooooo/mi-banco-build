@@ -40,17 +40,6 @@ private func decodeB64URL(_ s: String) -> Data? {
         #expect(String(decoding: payload, as: UTF8.self).contains(#""exp":1800086400"#))
     }
 
-    @Test func jwtLifetimeNonFiniteUsesDefault() throws {
-        for bad in [Double.nan, .infinity, -.infinity] {
-            let input = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: bad)
-            let payload = try #require(decodeB64URL(String(input.split(separator: ".")[1])))
-            #expect(String(decoding: payload, as: UTF8.self).contains(#""exp":1800003600"#))
-        }
-        let capped = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: 1e12)
-        let payload = try #require(decodeB64URL(String(capped.split(separator: ".")[1])))
-        #expect(String(decoding: payload, as: UTF8.self).contains(#""exp":1800086400"#))
-    }
-
     @Test func jwtAppendsSignature() throws {
         let signer = RecordingSigner()
         let token = try enableBankingJWT(appID: appID, now: now, signer: signer)

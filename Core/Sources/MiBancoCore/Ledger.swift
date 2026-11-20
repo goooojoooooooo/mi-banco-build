@@ -344,15 +344,12 @@ public struct Ledger: Sendable {
 
         // 4. Un registro del banco (o de un extracto) del mismo pago que aún no se había visto por aviso: se completa
         // en lugar de duplicarlo. Gana el más cercano en el tiempo.
-        // Solo filas del MISMO día de Madrid; las del día anterior solo si el aviso llega antes de las 03:00
-        // (las fechas del banco suelen venir en UTC o ser el día de autorización).
         let nowDay = madridCalendar.startOfDay(for: now)
-        let justAfterMidnight = madridCalendar.component(.hour, from: now) < 3
         let bankMatch = state.movements.indices.filter { i in
             let m = state.movements[i]
             guard m.source.isBankSourced, m.fingerprint == nil, m.bank == bank, m.amountCents == signed else { return false }
             let days = madridCalendar.dateComponents([.day], from: madridCalendar.startOfDay(for: m.date), to: nowDay).day ?? Int.max
-            return days == 0 || (days == 1 && justAfterMidnight)
+            return abs(days) <= 1
         }.min { abs(state.movements[$0].date.timeIntervalSince(now)) < abs(state.movements[$1].date.timeIntervalSince(now)) }
         if let i = bankMatch {
             state.movements[i].source = source
@@ -390,19 +387,15 @@ public struct Ledger: Sendable {
     }
 
     /// El ÚNICO criterio de qué movimientos se suman sobre una lectura de saldo (lo usan `balance` y "Te quedaban"):
-    /// posteriores a la lectura y capturados (no los del banco: su saldo ya los incluye). Un capturado enlazado a un
-    /// registro del banco cuenta solo si su hora precisa es posterior a la lectura; los de extracto solo cuentan sobre
-    /// un saldo puesto a mano.
+    /// posteriores a la lectura y capturados (no los del banco ni los ya enlazados a un registro suyo, que el saldo
+    /// del banco ya incluye); los de extracto solo cuentan sobre un saldo puesto a mano.
     public static func countsTowardBalance(_ m: Movement, base: ManualBalance) -> Bool {
         m.date > base.setAt && isBalanceEligible(m, origin: base.origin)
     }
 
-    /// La parte del criterio que no mira la fecha. Un capturado enlazado a un registro del banco (`bankRef`) con hora
-    /// precisa es elegible: solo cuenta si es posterior a la lectura (lo exige `countsTowardBalance`), porque entonces
-    /// el saldo del banco todavía no lo incluía. Una fila de solo día nunca tiene hora real.
+    /// La parte del criterio que no mira la fecha.
     public static func isBalanceEligible(_ m: Movement, origin: BalanceOrigin) -> Bool {
-        guard m.source != .bank, m.source != .statement || origin == .manual else { return false }
-        return m.bankRef == nil || !m.dayOnly
+        m.bankRef == nil && m.source != .bank && (m.source != .statement || origin == .manual)
     }
 
     public func total() -> Int? {

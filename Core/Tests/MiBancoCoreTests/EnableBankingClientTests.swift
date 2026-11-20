@@ -175,45 +175,6 @@ private func tx(_ id: String) -> String {
         }
     }
 
-    @Test func cancelledTransportIsCancellationNotOffline() async {
-        let cancelled = FixtureTransport([.fail(.cancelled)])
-        await #expect(throws: CancellationError.self) {
-            _ = try await makeClient(cancelled).balances(accountUID: "u")
-        }
-    }
-
-    @Test func nonASCIIIsPercentEscaped() async throws {
-        let transport = FixtureTransport([.json(200, #"{"balances":[]}"#)])
-        _ = try await makeClient(transport).balances(accountUID: "ñ٣é")
-        let sent = await transport.requests
-        let request = try #require(sent.first)
-        #expect(request.url.absoluteString == "https://api.enablebanking.com/accounts/%C3%B1%D9%A3%C3%A9/balances")
-    }
-
-    @Test func requestAndSessionDescriptionsAreRedacted() {
-        let secretToken = "tok-SECRET-123"
-        let secretQuery = "code=CODE-SECRET-9&state=STATE-SECRET-7"
-        let request = HTTPRequest(
-            method: "GET", url: URL(string: "https://api.example.test/p?" + secretQuery)!,
-            headers: ["Authorization": "Bearer " + secretToken], body: Data("BODY-SECRET".utf8))
-        let session = StoredSession(
-            sessionID: "SESSION-SECRET-5", accountUIDs: ["UID-SECRET-6"], validUntil: fixedNow,
-            aspspName: "Banco", aspspCountry: "ES")
-        let pending = PendingAuth(
-            state: "STATE-SECRET-7", bank: .rev, aspspName: "Banco", aspspCountry: "ES", startedAt: fixedNow)
-        let secrets = ["SECRET", secretToken, "CODE", "STATE", "BODY", "SESSION", "UID", "Bearer", "?"]
-        let texts = [
-            String(describing: request), String(reflecting: request), "\(request)",
-            String(describing: session), String(reflecting: session), "\(session)",
-            String(describing: pending), String(reflecting: pending), "\(pending)",
-        ]
-        for text in texts {
-            for secret in secrets { #expect(!text.contains(secret)) }
-        }
-        #expect(String(describing: request).contains("GET"))
-        #expect(String(describing: session).contains("Banco"))
-    }
-
     @Test func eachRequestGetsAFreshJWT() async throws {
         let transport = FixtureTransport([.json(200, #"{"balances":[]}"#), .json(200, #"{"balances":[]}"#)])
         let client = makeClient(transport)

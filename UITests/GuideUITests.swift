@@ -18,6 +18,15 @@ final class GuideUITests: XCTestCase {
         app.launch()
     }
 
+    /// El contador lleva identificador, así que se lee su etiqueta («Revolut · Paso 3 de 11»), no se busca por texto.
+    private func waitForStep(_ n: Int, _ message: String) {
+        let counter = app.staticTexts["guide-step-counter"]
+        XCTAssertTrue(counter.waitForExistence(timeout: 10), message)
+        let expected = "Revolut · Paso \(n) de 11"
+        let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", expected), object: counter)
+        XCTAssertEqual(XCTWaiter().wait(for: [reached], timeout: 6), .completed, "\(message) (se esperaba «\(expected)»)")
+    }
+
     private func openRevolutGuide() {
         let link = app.buttons["settings-alerts-guide"]
         XCTAssertTrue(link.waitForExistence(timeout: 15), "Ajustes no muestra «Avisos al instante»")
@@ -25,7 +34,7 @@ final class GuideUITests: XCTestCase {
         let revolut = app.buttons["guide-track-revolut"]
         XCTAssertTrue(revolut.waitForExistence(timeout: 5), "La lista de guías no aparece")
         revolut.tap()
-        XCTAssertTrue(app.staticTexts["Revolut · Paso 1 de 11"].waitForExistence(timeout: 5), "No abrió el paso 1")
+        waitForStep(1, "No abrió el paso 1")
     }
 
     func testStepsAndHelp() throws {
@@ -33,16 +42,16 @@ final class GuideUITests: XCTestCase {
         let next = app.buttons["guide-next"]
         XCTAssertTrue(next.exists)
         next.tap()
-        XCTAssertTrue(app.staticTexts["Revolut · Paso 2 de 11"].waitForExistence(timeout: 5), "Siguiente no avanzó al paso 2")
+        waitForStep(2, "Siguiente no avanzó al paso 2")
         next.tap()
-        XCTAssertTrue(app.staticTexts["Revolut · Paso 3 de 11"].waitForExistence(timeout: 5), "Siguiente no avanzó al paso 3")
+        waitForStep(3, "Siguiente no avanzó al paso 3")
 
         let back = app.buttons["guide-back"]
         XCTAssertTrue(back.waitForExistence(timeout: 5))
         back.tap()
-        XCTAssertTrue(app.staticTexts["Revolut · Paso 2 de 11"].waitForExistence(timeout: 5), "Atrás no volvió al paso 2")
+        waitForStep(2, "Atrás no volvió al paso 2")
         next.tap()
-        XCTAssertTrue(app.staticTexts["Revolut · Paso 3 de 11"].waitForExistence(timeout: 5))
+        waitForStep(3, "Siguiente no avanzó otra vez al paso 3")
 
         XCTAssertFalse(app.staticTexts["guide-help-text"].exists)
         let help = app.buttons["guide-help"]
@@ -57,7 +66,7 @@ final class GuideUITests: XCTestCase {
         let next = app.buttons["guide-next"]
         for step in 2...11 {
             next.tap()
-            XCTAssertTrue(app.staticTexts["Revolut · Paso \(step) de 11"].waitForExistence(timeout: 5), "No llegó al paso \(step)")
+            waitForStep(step, "No llegó al paso \(step)")
         }
         XCTAssertEqual(next.label, "Hecho")
         next.tap()

@@ -7,4 +7,6 @@ enum SpendingRoute: Hashable {
     case category(SpendingCategory, Date)
     case budgets
     case transfers
+    case subscriptions
+    case hiddenSubscriptions
 }

@@ -51,6 +51,8 @@ enum DemoMode {
     /// `-MiBancoDemoCategory <raw>`: en Gasto, abre esa categoría del mes en curso. `-MiBancoDemoBudgets`: abre Presupuestos.
     static var openCategory: SpendingCategory? { value(after: "-MiBancoDemoCategory").flatMap(SpendingCategory.init(rawValue:)) }
     static var opensBudgets: Bool { arguments.contains("-MiBancoDemoBudgets") }
+    /// `-MiBancoDemoSubscriptions`: abre Suscripciones.
+    static var opensSubscriptions: Bool { arguments.contains("-MiBancoDemoSubscriptions") }
 
     static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".

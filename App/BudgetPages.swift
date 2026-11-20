@@ -14,6 +14,8 @@ struct SpendingLinkTexts: Equatable, Sendable {
     var budgets = "Sin presupuestos"
     /// "2 · no cuentan"; nil si no hay traspasos (la fila se oculta).
     var transfers: String?
+    /// "2 · 24,98 € al mes"; "Ninguna todavía".
+    var subscriptions = "Ninguna todavía"
 }
 
 /// Todo lo que añaden las pantallas de presupuestos y categorías al snapshot.

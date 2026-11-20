@@ -168,6 +168,10 @@ final class LedgerModel {
         try mutate { $0.setMonthlyBudget(cents) }
     }
 
+    func setSubscriptionDismissed(_ dismissed: Bool, id: String) throws {
+        try mutate { $0.setSubscriptionDismissed(dismissed, id: id) }
+    }
+
     func setBudget(_ cents: Int?, for category: SpendingCategory) throws {
         try mutate { $0.setBudget(cents, for: category) }
     }

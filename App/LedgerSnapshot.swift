@@ -143,6 +143,11 @@ struct LedgerSnapshot: Sendable {
     var categoryHeaders: [String: CategoryHeader] = [:]
     var transferEntries: [ListEntry] = []
     var spendingLinks = SpendingLinkTexts()
+    /// Suscripciones activas y ocultas, y lo que cuestan al mes y al año.
+    var subscriptions: [SubscriptionRow] = []
+    var hiddenSubscriptions: [SubscriptionRow] = []
+    var subscriptionsMonthlyCents = 0
+    var subscriptionsYearlyCents = 0
     /// Día en que se calculó; al cambiar de día hay que recalcular aunque el estado no cambie.
     var day = Date.distantPast
 
@@ -240,7 +245,11 @@ struct LedgerSnapshot: Sendable {
 
         // Pestaña Gasto: todas las páginas aquí, nunca en un `body`.
         // Las suscripciones activas se detectan una sola vez y sirven a todas las pantallas de Gasto.
-        let subscriptions = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
+        // Las ocultas salen de la misma detección: no se repite.
+        let detected = detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
+        let dismissed = state.dismissedSubscriptions
+        let subscriptions = detected.filter { !dismissed.contains("\($0.bank.rawValue)|\($0.id)") }
+        let hiddenDetected = detected.filter { dismissed.contains("\($0.bank.rawValue)|\($0.id)") }
         let built = Self.spendingPages(state: state, now: now, calendar: calendar, transfers: transfers,
                                        subscriptions: subscriptions, pace: corePace)
         spendingMonths = built.months
@@ -253,6 +262,13 @@ struct LedgerSnapshot: Sendable {
         categoryHeaders = extras.categoryHeaders
         transferEntries = extras.transferEntries
         spendingLinks = extras.links
+        let subs = Self.subscriptionExtras(state: state, now: now, calendar: calendar, transfers: transfers,
+                                           subscriptions: subscriptions, hidden: hiddenDetected)
+        self.subscriptions = subs.subscriptions
+        hiddenSubscriptions = subs.hidden
+        subscriptionsMonthlyCents = subs.monthlyCents
+        subscriptionsYearlyCents = subs.yearlyCents
+        spendingLinks.subscriptions = subs.summary
     }
 
     func list(for card: AccountCard) -> [ListEntry] { entries[card] ?? [] }

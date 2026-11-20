@@ -30,7 +30,7 @@ struct SpendingView: View {
                         MonthSelector(title: content.title, canGoBack: index > 0, canGoForward: index < months.count - 1) { step in
                             move(by: step, months: months, from: index)
                         }
-                        .padding(.horizontal, 6)
+                        .padding(.horizontal, 4)
                         .staggeredEntrance(0, rise: 8)
 
                         SpendingTotal(cents: content.month.totalCents, monthName: content.title)
@@ -111,6 +111,8 @@ struct SpendingView: View {
                 case let .category(category, month): CategoryDetailView(model: model, category: category, month: month, openDetail: openDetail)
                 case .budgets: BudgetsView(model: model)
                 case .transfers: TransfersView(model: model, openDetail: openDetail)
+                case .subscriptions: SubscriptionsView(model: model)
+                case .hiddenSubscriptions: HiddenSubscriptionsView(model: model)
                 }
             }
             // Deslizar en horizontal cambia de mes (umbral 60 pt, y más horizontal que vertical).
@@ -130,6 +132,8 @@ struct SpendingView: View {
             guard DemoMode.isActive else { return }
             if let category = DemoMode.openCategory, let current = model.snapshot.spendingMonths.last {
                 path = [.category(category, current)]
+            } else if DemoMode.opensSubscriptions {
+                path = [.subscriptions]
             } else if DemoMode.opensBudgets {
                 path = [.budgets]
             }

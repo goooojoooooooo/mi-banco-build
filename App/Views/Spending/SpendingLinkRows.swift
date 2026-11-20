@@ -8,6 +8,9 @@ struct SpendingLinkRows: View {
     var body: some View {
         VStack(spacing: Theme.Space.gutter) {
             card {
+                link(.subscriptions, "Suscripciones", links.subscriptions, "repeat", id: "gasto.suscripciones")
+            }
+            card {
                 link(.budgets, "Presupuestos", links.budgets, "gauge.with.dots.needle.67percent", id: "gasto.presupuestos")
             }
             if let transfers = links.transfers {

@@ -305,3 +305,51 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("cinesa.es", ["Cinesa"]),
     ("yelmocines.es", ["Yelmo", "Yelmo Cines"]),
 ]
+
+/// Dominio -> categoría de gasto. Una entrada por cada dominio de `merchantAliases` (PayPal no: depende de lo que se pague).
+let merchantDomainCategories: [String: SpendingCategory] = [
+    // Supermercados
+    "mercadona.es": .supermercado, "lidl.es": .supermercado, "carrefour.com": .supermercado, "dia.es": .supermercado,
+    "aldi.es": .supermercado, "alcampo.es": .supermercado, "eroski.es": .supermercado, "consum.es": .supermercado,
+    "elcorteingles.es": .compras, "hipercor.es": .supermercado,
+    // Transporte y combustible
+    "renfe.com": .transporte, "cabify.com": .transporte, "uber.com": .transporte, "bolt.eu": .transporte,
+    "alsa.es": .transporte, "metromadrid.es": .transporte, "tmb.cat": .transporte, "blablacar.es": .transporte,
+    "free-now.com": .transporte, "repsol.es": .transporte, "moeveglobal.com": .transporte, "bp.com": .transporte,
+    "shell.es": .transporte, "galp.com": .transporte,
+    // Viajes
+    "iberia.com": .viajes, "vueling.com": .viajes, "ryanair.com": .viajes, "booking.com": .viajes, "airbnb.es": .viajes,
+    // Comer fuera
+    "ubereats.com": .comerFuera, "glovoapp.com": .comerFuera, "just-eat.es": .comerFuera, "mcdonalds.es": .comerFuera,
+    "burgerking.es": .comerFuera, "kfc.com": .comerFuera, "telepizza.es": .comerFuera, "dominospizza.es": .comerFuera,
+    "starbucks.es": .comerFuera, "vips.es": .comerFuera, "100montaditos.com": .comerFuera, "fiveguys.es": .comerFuera,
+    "goiko.com": .comerFuera, "tacobell.com": .comerFuera,
+    // Suscripciones
+    "spotify.com": .suscripciones, "netflix.com": .suscripciones, "disneyplus.com": .suscripciones,
+    "max.com": .suscripciones, "primevideo.com": .suscripciones, "apple.com": .suscripciones,
+    "google.com": .suscripciones, "youtube.com": .suscripciones, "dazn.com": .suscripciones,
+    "icloud.com": .suscripciones, "playstation.com": .suscripciones, "xbox.com": .suscripciones,
+    "nintendo.com": .suscripciones, "steampowered.com": .suscripciones, "adobe.com": .suscripciones,
+    "microsoft.com": .suscripciones, "dropbox.com": .suscripciones, "openai.com": .suscripciones,
+    "anthropic.com": .suscripciones,
+    // Casa y facturas (telefonía, luz, gas, hogar)
+    "movistar.es": .casa, "vodafone.es": .casa, "orange.es": .casa, "masmovil.es": .casa, "yoigo.com": .casa,
+    "digimobil.es": .casa, "pepephone.com": .casa, "lowi.es": .casa, "endesa.com": .casa, "iberdrola.es": .casa,
+    "naturgy.es": .casa, "ikea.com": .casa, "leroymerlin.es": .casa, "idealista.com": .casa,
+    // Compras
+    "amazon.es": .compras, "zara.com": .compras, "bershka.com": .compras, "pullandbear.com": .compras,
+    "stradivarius.com": .compras, "massimodutti.com": .compras, "mango.com": .compras, "hm.com": .compras,
+    "primark.com": .compras, "decathlon.es": .compras, "mediamarkt.es": .compras, "pccomponentes.com": .compras,
+    "fnac.es": .compras, "aliexpress.com": .compras, "shein.com": .compras, "temu.com": .compras,
+    "zalando.es": .compras, "nike.com": .compras, "adidas.es": .compras, "druni.es": .compras, "primor.eu": .compras,
+    "sephora.com": .compras, "wallapop.com": .compras, "vinted.es": .compras, "correos.es": .compras,
+    // Ocio
+    "basic-fit.com": .ocio, "mcfit.com": .ocio, "cinesa.es": .ocio, "yelmocines.es": .ocio,
+    // Personas
+    "bizum.es": .personas,
+]
+
+/// Categoría del dominio del directorio; nil si no se conoce o depende de lo que se pague (PayPal).
+public func directoryCategory(forDomain domain: String) -> SpendingCategory? {
+    merchantDomainCategories[domain]
+}

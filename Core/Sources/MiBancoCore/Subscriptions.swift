@@ -24,9 +24,10 @@ public struct Subscription: Equatable, Sendable, Identifiable {
 
 /// Pagos (no ingresos, no marcados como "no es mío") al mismo comercio normalizado y banco: al menos 2 cargos seguidos
 /// con 26–35 días entre sí e importes dentro de ±25 %. Si el último cargo tiene 45 días o más, se da por cancelada.
-public func detectSubscriptions(in movements: [Movement], now: Date, calendar: Calendar) -> [Subscription] {
+public func detectSubscriptions(in movements: [Movement], now: Date, calendar: Calendar,
+                                ownTransferIDs: Set<UUID>? = nil) -> [Subscription] {
     var groups: [String: [Movement]] = [:]
-    for m in movements where m.kind == .payment && !m.flaggedNotMine {
+    for m in spendingMovements(in: movements, excluding: ownTransferIDs) {
         guard let merchant = m.merchant else { continue }
         let key = normalizeMerchant(merchant)
         if key.isEmpty { continue }
@@ -64,4 +65,17 @@ public func detectSubscriptions(in movements: [Movement], now: Date, calendar: C
         if a.id != b.id { return a.id < b.id }
         return a.bank.rawValue < b.bank.rawValue
     }
+}
+
+/// Las suscripciones detectadas sin las que el dueño ocultó (id `"<banco>|<clave>"` en `dismissedSubscriptions`).
+public func activeSubscriptions(in state: LedgerState, now: Date, calendar: Calendar,
+                                ownTransferIDs: Set<UUID>? = nil) -> [Subscription] {
+    detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: ownTransferIDs)
+        .filter { !state.dismissedSubscriptions.contains("\($0.bank.rawValue)|\($0.id)") }
+}
+
+/// Lo que cuestan al mes y al año (12 cuotas) las suscripciones dadas.
+public func subscriptionTotals(_ subscriptions: [Subscription]) -> (monthlyCents: Int, yearlyCents: Int) {
+    let monthly = subscriptions.reduce(0) { $0 + $1.amountCents }
+    return (monthly, monthly * 12)
 }

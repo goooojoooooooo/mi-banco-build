@@ -24,6 +24,10 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public var note: String?
     /// true = el usuario dice que este movimiento no es suyo: se excluye de sumas, detecciones y avisos.
     public var flaggedNotMine: Bool
+    /// La categoría que el dueño puso a este movimiento (nil = la decide la app).
+    public var category: SpendingCategory?
+    /// nil = lo decide la app (ver `ownTransferPairs`); true = el dueño dice que es un traspaso entre sus cuentas; false = dice que no.
+    public var ownTransfer: Bool?
 
     // MARK: Datos del banco (Plan 2)
     /// Clave del registro de la API del banco una vez enlazado.
@@ -51,6 +55,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public init(id: UUID = UUID(), bank: BankID, amountCents: Int, merchant: String?, kind: MovementKind, source: Source, date: Date,
                 pairedAcrossSources: Bool = false, fingerprint: String? = nil, pairedFingerprint: String? = nil,
                 isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false,
+                category: SpendingCategory? = nil, ownTransfer: Bool? = nil,
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
                 importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
                 excludedFromSpending: Bool = false) {
@@ -67,6 +72,8 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.isShop = isShop
         self.note = note
         self.flaggedNotMine = flaggedNotMine
+        self.category = category
+        self.ownTransfer = ownTransfer
         self.bankRef = bankRef
         self.statementRef = statementRef
         self.bankStatus = bankStatus
@@ -78,7 +85,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
-        case note, flaggedNotMine
+        case note, flaggedNotMine, category, ownTransfer
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending
     }
 
@@ -98,6 +105,8 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         isShop = try c.decodeIfPresent(Bool.self, forKey: .isShop) ?? false
         note = try c.decodeIfPresent(String.self, forKey: .note)
         flaggedNotMine = try c.decodeIfPresent(Bool.self, forKey: .flaggedNotMine) ?? false
+        category = try c.decodeIfPresent(SpendingCategory.self, forKey: .category)
+        ownTransfer = try c.decodeIfPresent(Bool.self, forKey: .ownTransfer)
         bankRef = try c.decodeIfPresent(String.self, forKey: .bankRef)
         statementRef = try c.decodeIfPresent(String.self, forKey: .statementRef)
         bankStatus = try c.decodeIfPresent(BankStatus.self, forKey: .bankStatus)
@@ -176,22 +185,32 @@ public struct LedgerState: Codable, Equatable, Sendable {
     public var alertSettings: AlertSettings
     /// Comercios silenciados, con la clave de `normalizeMerchant`.
     public var mutedMerchants: Set<String>
+    /// Categoría recordada por comercio (clave de `normalizeMerchant`).
+    public var categoryOverrides: [String: SpendingCategory]
+    public var budgets: Budgets
+    /// Suscripciones que el dueño ocultó, con id `"<banco>|<clave del comercio>"`.
+    public var dismissedSubscriptions: Set<String>
     // MARK: Datos del banco (Plan 2)
     /// Estado (sin secretos) de la conexión de cada banco.
     public var links: [BankID: BankLinkInfo]
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
                 alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
+                categoryOverrides: [String: SpendingCategory] = [:], budgets: Budgets = Budgets(),
+                dismissedSubscriptions: Set<String> = [],
                 links: [BankID: BankLinkInfo] = [:]) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
         self.alertSettings = alertSettings
         self.mutedMerchants = mutedMerchants
+        self.categoryOverrides = categoryOverrides
+        self.budgets = budgets
+        self.dismissedSubscriptions = dismissedSubscriptions
         self.links = links
     }
 
-    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants
+    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides, budgets, dismissedSubscriptions
         case links
     }
 
@@ -203,6 +222,9 @@ public struct LedgerState: Codable, Equatable, Sendable {
         unread = try c.decode([UnreadNotice].self, forKey: .unread)
         alertSettings = try c.decodeIfPresent(AlertSettings.self, forKey: .alertSettings) ?? AlertSettings()
         mutedMerchants = try c.decodeIfPresent(Set<String>.self, forKey: .mutedMerchants) ?? []
+        categoryOverrides = try c.decodeIfPresent([String: SpendingCategory].self, forKey: .categoryOverrides) ?? [:]
+        budgets = try c.decodeIfPresent(Budgets.self, forKey: .budgets) ?? Budgets()
+        dismissedSubscriptions = try c.decodeIfPresent(Set<String>.self, forKey: .dismissedSubscriptions) ?? []
         links = try c.decodeIfPresent([BankID: BankLinkInfo].self, forKey: .links) ?? [:]
     }
 }
@@ -280,6 +302,48 @@ public struct Ledger: Sendable {
     public mutating func setFlaggedNotMine(_ flagged: Bool, for id: UUID) {
         guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
         state.movements[i].flaggedNotMine = flagged
+    }
+
+    /// Pone (o quita, con nil) la categoría de un movimiento. Con `applyToMerchant` se recuerda para todo el
+    /// comercio y se limpian las categorías sueltas de sus movimientos.
+    public mutating func setCategory(_ category: SpendingCategory?, for id: UUID, applyToMerchant: Bool) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        let key = normalizeMerchant(state.movements[i].merchant ?? "")
+        if applyToMerchant, !key.isEmpty {
+            state.categoryOverrides[key] = category
+            for j in state.movements.indices where normalizeMerchant(state.movements[j].merchant ?? "") == key {
+                state.movements[j].category = nil
+            }
+        } else {
+            state.movements[i].category = category
+        }
+    }
+
+    public mutating func setOwnTransfer(_ value: Bool?, for id: UUID) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        state.movements[i].ownTransfer = value
+    }
+
+    /// Presupuesto mensual total; un importe de 0 o menos lo quita.
+    public mutating func setMonthlyBudget(_ cents: Int?) {
+        state.budgets.monthlyCents = cents.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// Presupuesto mensual de una categoría; un importe de 0 o menos lo quita.
+    public mutating func setBudget(_ cents: Int?, for category: SpendingCategory) {
+        if let cents, cents > 0 { state.budgets.byCategory[category] = cents } else { state.budgets.byCategory[category] = nil }
+    }
+
+    /// Sustituye todo el libro por el de una copia. Los campos que dependen de este dispositivo (p. ej. las conexiones
+    /// con bancos, ligadas al Llavero) NO se restauran: para excluir uno, añade una línea `restored.x = state.x` aquí.
+    public mutating func restore(_ backup: LedgerState) {
+        let restored = backup
+        // (sin campos excluidos todavía)
+        state = restored
+    }
+
+    public mutating func setSubscriptionDismissed(_ dismissed: Bool, id: String) {
+        if dismissed { state.dismissedSubscriptions.insert(id) } else { state.dismissedSubscriptions.remove(id) }
     }
 
     public mutating func setMuted(_ muted: Bool, merchant: String) {

@@ -323,7 +323,7 @@ private func parse(_ csv: String, _ bank: BankID, now: Date = at(11, 20)) throws
     @Test func dayOnlyRowsSayTheyHaveNoRealTime() throws {
         var caixa = Ledger()
         caixa.importStatement(try parse(caixaCSV, .ima), now: at(11, 20), calendar: madrid)
-        #expect(caixa.state.movements.allSatisfy(\.dayOnly))
+        #expect(caixa.state.movements.allSatisfy { $0.dayOnly })
         var rev = Ledger()
         rev.importStatement(try parse(revolutCSV, .rev), now: at(11, 20), calendar: madrid)
         #expect(rev.state.movements.allSatisfy { !$0.dayOnly })

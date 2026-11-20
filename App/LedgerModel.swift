@@ -170,11 +170,31 @@ final class LedgerModel {
         #if DEBUG
         if DemoMode.isActive {
             publish(file.ledger)
+            restoreCount += 1
             return
         }
         #endif
-        try store.restoreKeepingCopy(file.ledger, copyName: "ledger-antes-de-restaurar.json")
-        reload()
+        try store.restoreKeepingCopy(file.ledger, copyName: Self.safetyCopyName)
+        // Se publica lo que quedó en disco aunque coincida con lo anterior: así se rehacen siempre el snapshot y los
+        // recordatorios (`reschedule`) con los datos restaurados.
+        publish(try store.load())
+        restoreCount += 1
+    }
+
+    /// Nombre de la copia que se guarda antes de cada restauración.
+    static let safetyCopyName = "ledger-antes-de-restaurar.json"
+
+    /// Sube con cada restauración: Ajustes relee la copia previa.
+    private(set) var restoreCount = 0
+
+    /// La copia guardada antes de la última restauración, lista para "Volver a lo de antes" (nil si no hay).
+    func previousPreview() -> RestorePreview? {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.scrollsToBackup ? DemoMode.demoPreviousPreview(currentCount: state.movements.count) : nil }
+        #endif
+        guard let info = store.copyInfo(named: Self.safetyCopyName) else { return nil }
+        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state),
+                              currentCount: state.movements.count, isPrevious: true)
     }
 
     func movement(_ id: UUID) -> Movement? {

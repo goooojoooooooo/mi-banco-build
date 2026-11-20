@@ -21,7 +21,7 @@ struct RestoreConfirmView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Restaurar una copia")
+            Text(preview.isPrevious ? "Volver a lo de antes" : "Restaurar una copia")
                 .titan(.sheetTitle)
                 .foregroundStyle(Theme.label)
                 .accessibilityAddTraits(.isHeader)
@@ -29,9 +29,9 @@ struct RestoreConfirmView: View {
             Text(summary)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
-            Text("Antes de cambiarlo, lo que hay ahora se guarda como copia en este iPhone, por si te arrepientes. Si restauras otra vez, esa copia se sustituye.")
-                .titan(.meta)
-                .foregroundStyle(Theme.label3)
+            Text("Antes de cambiarlo, lo que hay ahora se guarda como copia en este iPhone y podrás volver a ello desde Copia de seguridad. Esa copia se sustituye cada vez que restauras.")
+                .titan(.callout)
+                .foregroundStyle(Theme.label2)
             Spacer(minLength: 8)
             switch phase {
             case .restored:
@@ -48,7 +48,7 @@ struct RestoreConfirmView: View {
             case .asking:
                 EmptyView()
             }
-            SlideToConfirm(title: "Desliza para restaurar", systemImage: "arrow.counterclockwise", tint: Theme.label,
+            SlideToConfirm(title: preview.isPrevious ? "Desliza para volver" : "Desliza para restaurar", systemImage: "arrow.counterclockwise", tint: Theme.label,
                            action: run)
                 .id(attempt)
                 .accessibilityIdentifier("restore-slide")
@@ -81,9 +81,9 @@ struct RestoreConfirmView: View {
 
     /// "Esto cambia todo lo que hay ahora (182 movimientos) por la copia del 19 nov 2026 (175 movimientos)."
     private var summary: String {
-        let date = preview.file.exportedAt.formatted(
-            Date.FormatStyle(locale: Locale(identifier: "es_ES")).day().month(.abbreviated).year()).replacing(".", with: "")
-        return "Esto cambia todo lo que hay ahora (\(count(preview.currentCount))) por la copia del \(date) (\(count(preview.file.ledger.movements.count)))."
+        let date = BackupSection.dayText(preview.file.exportedAt)
+        let what = preview.isPrevious ? "los datos que tenías el \(date)" : "la copia del \(date)"
+        return "Esto cambia todo lo que hay ahora (\(count(preview.currentCount))) por \(what) (\(count(preview.file.ledger.movements.count)))."
     }
 
     private func count(_ n: Int) -> String { n == 1 ? "1 movimiento" : "\(n) movimientos" }

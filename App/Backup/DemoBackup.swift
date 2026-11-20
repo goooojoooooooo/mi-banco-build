@@ -10,6 +10,13 @@ extension DemoMode {
     static var scrollsToBackup: Bool { args.contains("-MiBancoDemoBackup") }
     static var opensRestorePreview: Bool { args.contains("-MiBancoDemoRestorePreview") }
 
+    /// "Volver a lo de antes": la copia previa inventada, de hace dos días.
+    static func demoPreviousPreview(currentCount: Int) -> RestorePreview {
+        let base = demoRestorePreview(currentCount: currentCount)
+        let date = Calendar.current.date(byAdding: .day, value: -2, to: Date()) ?? Date()
+        return RestorePreview(file: BackupFile(exportedAt: date, ledger: base.file.ledger), currentCount: currentCount, isPrevious: true)
+    }
+
     /// Copia inventada: 175 pagos e ingresos repartidos por los tres bancos, exportada el 19 de noviembre de 2026.
     static func demoRestorePreview(currentCount: Int) -> RestorePreview {
         var calendar = Calendar(identifier: .gregorian)

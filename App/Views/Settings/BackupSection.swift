@@ -13,6 +13,8 @@ struct BackupSection: View {
 
     @State private var phase: [Int: Phase] = [:]
     @State private var failed = false
+    /// La copia previa a la última restauración, si existe: se relee al aparecer y tras cada restauración.
+    @State private var previous: RestorePreview?
     @State private var doneTick = 0
     @State private var errorTick = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -33,6 +35,21 @@ struct BackupSection: View {
             .accessibilityIdentifier("backup-restore")
             .listRowBackground(Theme.grouped)
             .listRowSeparatorTint(Theme.separator)
+            if let previous {
+                Button {
+                    // Se vuelve a leer al tocar: así el recuento de "lo de ahora" es el de ese momento.
+                    if let fresh = model.previousPreview() { present(.restore(fresh)) }
+                } label: {
+                    OptionLabel(title: "Volver a lo de antes de restaurar", detail: "Datos del \(Self.dayText(previous.file.exportedAt))",
+                                systemImage: "clock.arrow.circlepath")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("backup-previous")
+                .listRowBackground(Theme.grouped)
+                .listRowSeparatorTint(Theme.separator)
+            }
             if failed {
                 Text("No se pudo preparar el fichero. Inténtalo de nuevo.")
                     .titan(.meta)
@@ -45,9 +62,15 @@ struct BackupSection: View {
         } footer: {
             SettingsFooter("La copia lleva todos tus movimientos, saldos y notas. Guárdala en un sitio tuyo: quien la tenga puede leerla.")
         }
+        .task(id: model.restoreCount) { previous = model.previousPreview() }
         .animation(reduceMotion ? nil : Theme.Motion.quick, value: failed)
         .sensoryFeedback(.success, trigger: doneTick)
         .sensoryFeedback(.error, trigger: errorTick)
+    }
+
+    /// "19 nov 2026"
+    static func dayText(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(locale: Locale(identifier: "es_ES")).day().month(.abbreviated).year()).replacing(".", with: "")
     }
 
     private func key(_ kind: Kind) -> Int { kind == .backup ? 0 : 1 }
@@ -63,7 +86,7 @@ struct BackupSection: View {
                     case .idle:
                         Image(systemName: systemImage)
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(Color(hex: "#D1D1D6"))
+                            .foregroundStyle(Theme.card2High)
                             .transition(.opacity)
                     case .working:
                         ProgressView().tint(Theme.label).transition(.opacity)
@@ -74,7 +97,7 @@ struct BackupSection: View {
                     }
                 }
                 .frame(width: 30, height: 30)
-                .background(state == .done ? Color.white : Color(hex: "#232325"), in: .rect(cornerRadius: 8, style: .continuous))
+                .background(state == .done ? Color.white : Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
                 .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph, value: state)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {

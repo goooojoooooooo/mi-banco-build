@@ -18,6 +18,9 @@ struct RootView: View {
     @State private var importNotice: String?
     /// Sube al restaurar: Inicio se vuelve a montar con lo restaurado.
     @State private var restoreToken = 0
+    /// Bloqueo y primer plano en vivo, para los cierres que llevan una copia de esta vista (ver `PresentationGate`).
+    @State private var gate = PresentationGate()
+    @State private var noticeTask: Task<Void, Never>?
     /// Hoja de un movimiento abierta desde Avisos o desde un aviso tocado.
     private var detail: DetailRoute? {
         get { if case .movement(let route) = sheet { route } else { nil } }
@@ -95,8 +98,21 @@ struct RootView: View {
             }
         }
         .task { BackupService.sweep() }
+        .onAppear {
+            gate.isLocked = isLocked
+            gate.isActive = scenePhase == .active
+        }
         .onChange(of: scenePhase) { _, phase in
+            gate.isActive = phase == .active
             if phase != .active { closeEverything() }
+        }
+        // Red de seguridad: si por cualquier camino sube una hoja (o el selector) con el bloqueo puesto o fuera de
+        // primer plano, se cierra al instante y se borra el fichero temporal.
+        .onChange(of: sheet?.id) { _, id in
+            if id != nil && (isLocked || scenePhase != .active || !gate.canPresent) { closeEverything() }
+        }
+        .onChange(of: importing) { _, on in
+            if on && (isLocked || scenePhase != .active || !gate.canPresent) { importing = false }
         }
         .overlay(alignment: .top) {
             if deleteFailed {
@@ -122,6 +138,7 @@ struct RootView: View {
         // Un aviso tocado: se aplica en cuanto no hay bloqueo delante (nunca se abre una hoja encima del bloqueo).
         .onChange(of: router.pending) { _, _ in applyRoute() }
         .onChange(of: isLocked) { _, locked in
+            gate.isLocked = locked
             if locked {
                 closeEverything()
             } else {
@@ -137,13 +154,15 @@ struct RootView: View {
 
     /// Hoja y selector de archivos fuera: al bloquear y al salir de primer plano.
     private func closeEverything() {
+        if case .share(let share) = sheet { BackupService.remove(share.url) }
         sheet = nil
         importing = false
     }
 
     /// Las hojas nuevas (compartir, restaurar) nunca suben con el bloqueo delante ni fuera de primer plano.
     private func present(_ item: RootSheet) {
-        guard !isLocked, scenePhase == .active else {
+        // `gate` es vivo; `isLocked` y `scenePhase` de esta copia de la vista pueden ser de antes del toque.
+        guard gate.canPresent, !isLocked, scenePhase == .active else {
             if case .share(let share) = item { BackupService.remove(share.url) }
             return
         }
@@ -151,7 +170,7 @@ struct RootView: View {
     }
 
     private func handleImport(_ result: Result<URL, Error>) {
-        guard !isLocked, scenePhase == .active, case .success(let url) = result else { return }
+        guard gate.canPresent, !isLocked, scenePhase == .active, case .success(let url) = result else { return }
         do {
             sheet = .restore(try BackupService.preview(url, current: model.state))
         } catch BackupError.notABackup {
@@ -166,8 +185,10 @@ struct RootView: View {
     private func showImportNotice(_ text: String) {
         deleteErrorTick += 1
         withAnimation(reduceMotion ? nil : Theme.Motion.quick) { importNotice = text }
-        Task {
+        noticeTask?.cancel()
+        noticeTask = Task {
             try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.3)) { importNotice = nil }
         }
     }

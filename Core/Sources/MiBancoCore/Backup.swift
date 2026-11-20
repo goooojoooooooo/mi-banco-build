@@ -78,14 +78,6 @@ private func csvField(_ value: String) -> String {
     return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
 }
 
-/// Texto libre (comercio, nota, categoría, banco) que un banco o un tercero puede haber escrito: si empieza por `=`, `+`, `-`,
-/// `@`, tabulador o retorno de carro, una hoja de cálculo lo evaluaría como fórmula. Se neutraliza con un apóstrofo delante.
-/// Solo para columnas de texto: el importe no pasa por aquí (un `-12,50` legítimo debe seguir siendo numérico).
-func csvText(_ value: String) -> String {
-    guard let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) else { return value }
-    return "'" + value
-}
-
 /// Todos los movimientos, por fecha ascendente, separados por `;` (Excel en español), con fin de línea CRLF.
 public func movementsCSV(_ state: LedgerState, now: Date, calendar: Calendar) -> String {
     let transfers = ownTransferIDs(in: state.movements)
@@ -99,12 +91,12 @@ public func movementsCSV(_ state: LedgerState, now: Date, calendar: Calendar) ->
         let fields = [
             datePart(m.date, calendar: calendar),
             csvTime(of: m, calendar: calendar),
-            csvText(m.bank.displayName),
+            m.bank.displayName,
             m.kind == .payment ? "Pago" : "Ingreso",
-            csvText(m.merchant ?? ""),
-            csvText(category),
+            m.merchant ?? "",
+            category,
             csvAmount(m.amountCents),
-            csvText(m.note ?? ""),
+            m.note ?? "",
             m.flaggedNotMine ? "sí" : "",
             transfers.contains(m.id) ? "sí" : "",
         ]

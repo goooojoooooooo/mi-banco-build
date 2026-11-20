@@ -78,6 +78,8 @@ jobs:
           shot detalle 10 -MiBancoDemoDetail
           shot privado 10 -MiBancoDemoPrivate
           shot buscar 10 -MiBancoDemoSearch merca
+          shot gasto 10 -MiBancoDemoScreen gasto
+          shot gasto-mes-anterior 10 -MiBancoDemoScreen gasto -MiBancoDemoMonth -1
           shot avisos 10 -MiBancoDemoScreen avisos
           shot avisos-ajustes 10 -MiBancoDemoScreen avisos -MiBancoDemoRules
           shot ajustes 10 -MiBancoDemoScreen ajustes

@@ -4,14 +4,14 @@ import MiBancoCore
 
 /// Modo demo solo para compilaciones DEBUG: datos ficticios en memoria para las capturas del simulador.
 /// Se activa con `-MiBancoDemo`. Argumentos para abrir estados concretos:
-/// `-MiBancoDemoScreen inicio|avisos|ajustes`, `-MiBancoDemoCard todo|rev|ima|tr`, `-MiBancoDemoDetail`
+/// `-MiBancoDemoScreen inicio|gasto|avisos|ajustes`, `-MiBancoDemoCard todo|rev|ima|tr`, `-MiBancoDemoDetail`
 /// (hoja del movimiento más reciente), `-MiBancoDemoPrivate` (modo privado), `-MiBancoDemoSearch <texto>`,
 /// `-MiBancoDemoArrival` (llega un pago a los ~4 s), `-MiBancoDemoLock` (bloqueo y desbloqueo a los ~4 s),
 /// `-MiBancoDemoOnlineLogo` (una tienda fuera del directorio, para la descarga del logo),
 /// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores).
 /// En la demo nada se escribe en el almacén ni en UserDefaults: los cambios viven en memoria.
 enum DemoMode {
-    enum Screen { case home, alerts, settings }
+    enum Screen { case home, spending, alerts, settings }
 
     private static var arguments: [String] { ProcessInfo.processInfo.arguments }
 
@@ -25,6 +25,7 @@ enum DemoMode {
 
     static var screen: Screen {
         switch value(after: "-MiBancoDemoScreen") ?? "" {
+        case "gasto": .spending
         case "avisos": .alerts
         case "ajustes": .settings
         default: .home
@@ -43,6 +44,9 @@ enum DemoMode {
 
     /// `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente como lo haría un toque en el segmentado.
     static var switchesCard: Bool { arguments.contains("-MiBancoDemoSwitch") }
+
+    /// `-MiBancoDemoMonth <n>`: en Gasto, desplazamiento de meses respecto al actual (p. ej. `-1` = el mes anterior).
+    static var monthOffset: Int { value(after: "-MiBancoDemoMonth").flatMap(Int.init) ?? 0 }
 
     static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".
@@ -138,6 +142,16 @@ enum DemoMode {
                   date < monthStart else { continue }
             movements.append(movement(bank, cents, merchant, date))
         }
+
+        // Gasto: un traspaso entre tus bancos (no cuenta como gasto) y dos comidas fuera este mes.
+        func transfer(_ bank: BankID, _ cents: Int, _ merchant: String) -> Movement {
+            Movement(bank: bank, amountCents: cents, merchant: merchant, kind: cents < 0 ? .payment : .income,
+                     source: .notification, date: day(8, hour: 10, minute: 15), isShop: false)
+        }
+        movements.append(transfer(.rev, -20_000, "Transferencia a imagin"))
+        movements.append(transfer(.ima, 20_000, "Transferencia de Revolut"))
+        movements.append(movement(.rev, -4_650, "Restaurante Lateral", day(9, hour: 21, minute: 5)))
+        movements.append(movement(.rev, -1_240, "Bar Pepe", day(10, hour: 13, minute: 30)))
 
         if includesUnknownShop {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.

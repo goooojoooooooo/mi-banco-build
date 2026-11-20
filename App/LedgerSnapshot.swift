@@ -132,6 +132,9 @@ struct LedgerSnapshot: Sendable {
     var recentPayments: [String: [Movement]] = [:]
     var mutedMerchants: Set<String> = []
     var hasItems = false
+    /// Pestaña Gasto: inicio de cada mes (del más antiguo al actual, máx. 13) y su página.
+    var spendingMonths: [Date] = []
+    var spendingPages: [Date: SpendingPage] = [:]
     /// Día en que se calculó; al cambiar de día hay que recalcular aunque el estado no cambie.
     var day = Date.distantPast
 
@@ -178,7 +181,8 @@ struct LedgerSnapshot: Sendable {
 
         let previousMonth = calendar.date(byAdding: .day, value: -1, to: monthStart) ?? monthStart
         let monthName = previousMonth.formatted(Date.FormatStyle(locale: Locale(identifier: "es_ES")).month(.wide))
-        if let p = spendingPace(movements: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers) {
+        let corePace = spendingPace(movements: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
+        if let p = corePace {
             pace = PaceLine(thisMonthCents: p.thisMonthCents, differenceCents: p.differenceCents, previousMonthName: monthName)
         } else if let month = spent[.all] {
             pace = PaceLine(thisMonthCents: month, differenceCents: nil, previousMonthName: monthName)
@@ -225,6 +229,11 @@ struct LedgerSnapshot: Sendable {
 
         insights = MiBancoCore.insights(for: state, now: now, calendar: calendar)
         warningInsightIDs = insights.filter { $0.severity == .warning }.map(\.id)
+
+        // Pestaña Gasto: todas las páginas aquí, nunca en un `body`.
+        let built = Self.spendingPages(state: state, now: now, calendar: calendar, transfers: transfers, pace: corePace)
+        spendingMonths = built.months
+        spendingPages = built.pages
     }
 
     func list(for card: AccountCard) -> [ListEntry] { entries[card] ?? [] }

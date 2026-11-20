@@ -57,8 +57,14 @@ extension Ledger {
         }
 
         for r in records where r.bank == bank {
-            // 1. La misma clave ya está en un movimiento.
-            if let i = state.movements.firstIndex(where: { $0.bank == bank && ref(of: $0) == r.ref }) {
+            // 1. La misma clave ya está en un movimiento (o la que daba una versión anterior de la app a esta misma fila de
+            // extracto: se pasa a la clave nueva y no se duplica).
+            let sameKey = state.movements.firstIndex(where: { $0.bank == bank && ref(of: $0) == r.ref })
+            let oldKey = r.legacyRefs.isEmpty ? nil : state.movements.firstIndex(where: {
+                $0.bank == bank && ref(of: $0).map { r.legacyRefs.contains($0) } == true
+            })
+            if let i = sameKey ?? oldKey {
+                if sameKey == nil { setRef(r.ref, on: i) }
                 var changed = false
                 if channel == .bank, state.movements[i].bankStatus != r.status {
                     state.movements[i].bankStatus = r.status
@@ -128,7 +134,7 @@ extension Ledger {
                     state.movements[i].bankRef = nil
                     state.movements[i].bankStatus = nil
                     // Si el mismo pago ya llegó apuntado como fila propia del banco, se funden en UN movimiento.
-                    if let j = foldCandidate(for: state.movements[i], excluding: toDelete, calendar: calendar) {
+                    if let j = foldCandidate(for: state.movements[i], excluding: toDelete, batchRefs: batchRefs, calendar: calendar) {
                         let row = state.movements[j]
                         state.movements[i].bankRef = row.bankRef
                         state.movements[i].bankStatus = row.bankStatus
@@ -149,30 +155,51 @@ extension Ledger {
         return report
     }
 
-    /// Capturados (aviso o Cartera) que el banco debería haber confirmado ya y no lo han hecho: más de 7 días antes de
-    /// la última consulta con éxito, y no antes del primer movimiento con clave del banco (ahí empieza lo que se ve).
+    /// Capturados (aviso o Cartera) que el banco debería haber confirmado ya y no lo han hecho. Dos fuentes de cobertura:
+    /// - Banco conectado: más de 7 días antes de la última consulta con éxito, y no antes del primer movimiento con clave
+    ///   del banco (ahí empieza lo que se ve).
+    /// - Extractos importados (también de un banco sin conexión): el periodo entre la primera y la última fila de sus
+    ///   extractos; dentro de él, más de 7 días antes de `now`.
     /// Comparación por día de Madrid (las filas de solo día se guardan a mediodía).
     public func unconfirmedCaptures(bank: BankID, now: Date) -> Set<UUID> {
-        guard let last = state.links[bank]?.lastSuccessAt else { return [] }
-        let cutoff = last.addingTimeInterval(-7 * 86_400)
-        let linked = state.movements.filter { $0.bank == bank && $0.bankRef != nil }
-        guard let earliest = linked.map(\.date).min() else { return [] }
-        let firstDay = madridCalendar.startOfDay(for: earliest)
-        return Set(state.movements.filter { m in
+        func unlinkedCapture(_ m: Movement) -> Bool {
             m.bank == bank && !m.source.isBankSourced && m.bankRef == nil && m.statementRef == nil
-                && m.date <= cutoff && madridCalendar.startOfDay(for: m.date) >= firstDay
-        }.map(\.id))
+        }
+        var ids = Set<UUID>()
+        if let last = state.links[bank]?.lastSuccessAt {
+            let cutoff = last.addingTimeInterval(-7 * 86_400)
+            let linked = state.movements.filter { $0.bank == bank && $0.bankRef != nil }
+            if let earliest = linked.map(\.date).min() {
+                let firstDay = madridCalendar.startOfDay(for: earliest)
+                ids.formUnion(state.movements.filter { m in
+                    unlinkedCapture(m) && m.date <= cutoff && madridCalendar.startOfDay(for: m.date) >= firstDay
+                }.map(\.id))
+            }
+        }
+        let statementDates = state.movements.filter { $0.bank == bank && $0.statementRef != nil }.map(\.date)
+        if let first = statementDates.min(), let last = statementDates.max() {
+            let firstDay = madridCalendar.startOfDay(for: first)
+            let lastDay = madridCalendar.startOfDay(for: last)
+            let cutoff = now.addingTimeInterval(-7 * 86_400)
+            ids.formUnion(state.movements.filter { m in
+                let day = madridCalendar.startOfDay(for: m.date)
+                return unlinkedCapture(m) && m.date <= cutoff && day >= firstDay && day <= lastDay
+            }.map(\.id))
+        }
+        return ids
     }
 
     /// Fila propia del banco (apuntada, sin enlazar a nada) que es el mismo pago que un capturado que acaba de perder
     /// su pendiente: mismo banco e importe, con el día del banco entre 1 día antes y 5 días después del capturado.
-    /// Gana la de menor distancia en días y luego en tiempo.
-    private func foldCandidate(for capture: Movement, excluding deleted: Set<UUID>, calendar: Calendar) -> Int? {
+    /// Gana la de menor distancia en días y luego en tiempo. Solo vale una fila cuya clave viene en el lote que se está
+    /// conciliando: un apuntado de otra consulta no es la pareja de este pendiente.
+    private func foldCandidate(for capture: Movement, excluding deleted: Set<UUID>, batchRefs: Set<String>,
+                               calendar: Calendar) -> Int? {
         let day = calendar.startOfDay(for: capture.date)
         var winner: (index: Int, days: Int, seconds: TimeInterval)?
         for (j, row) in state.movements.enumerated() {
-            guard row.source == .bank, row.bankStatus == .booked, row.bankRef != nil, row.bank == capture.bank,
-                  row.amountCents == capture.amountCents, !deleted.contains(row.id) else { continue }
+            guard row.source == .bank, row.bankStatus == .booked, let rowRef = row.bankRef, batchRefs.contains(rowRef),
+                  row.bank == capture.bank, row.amountCents == capture.amountCents, !deleted.contains(row.id) else { continue }
             let diff = calendar.dateComponents([.day], from: day, to: calendar.startOfDay(for: row.date)).day ?? Int.max
             guard (-1...5).contains(diff) else { continue }
             let seconds = abs(row.date.timeIntervalSince(capture.date))

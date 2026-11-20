@@ -128,6 +128,9 @@ public struct ManualBalance: Codable, Equatable, Sendable {
     public var setAt: Date
     /// De dónde salió la lectura (a mano, aviso, API del banco o extracto).
     public var origin: BalanceOrigin
+    /// Cuándo se consultó al banco para obtener esta lectura (puede ser posterior a `setAt`, la hora de referencia del
+    /// saldo). nil = no se sabe: se usa `setAt`.
+    public var fetchedAt: Date?
     /// true = el saldo lo comunicó el banco (aviso, API o extracto); false = puesto a mano.
     public var fromBank: Bool { origin != .manual }
 
@@ -135,13 +138,14 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         self.init(cents: cents, setAt: setAt, origin: fromBank ? .notice : .manual)
     }
 
-    public init(cents: Int, setAt: Date, origin: BalanceOrigin) {
+    public init(cents: Int, setAt: Date, origin: BalanceOrigin, fetchedAt: Date? = nil) {
         self.cents = cents
         self.setAt = setAt
         self.origin = origin
+        self.fetchedAt = fetchedAt
     }
 
-    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank }
+    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank, fetchedAt }
 
     /// Los libros anteriores solo traen `fromBank`: true era un aviso.
     public init(from decoder: any Decoder) throws {
@@ -153,6 +157,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         } else {
             origin = (try c.decodeIfPresent(Bool.self, forKey: .fromBank) ?? false) ? .notice : .manual
         }
+        fetchedAt = try c.decodeIfPresent(Date.self, forKey: .fetchedAt)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -161,6 +166,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         try c.encode(setAt, forKey: .setAt)
         try c.encode(origin, forKey: .origin)
         try c.encode(fromBank, forKey: .fromBank)
+        try c.encodeIfPresent(fetchedAt, forKey: .fetchedAt)
     }
 }
 
@@ -274,10 +280,12 @@ public struct Ledger: Sendable {
     }
 
     /// Adopta una lectura de saldo si no hay otra, si la actual es a mano (el banco siempre manda) o si no es más antigua.
+    /// `fetchedAt`: cuándo se consultó al banco (la API); los avisos y extractos no lo pasan.
     @discardableResult
-    public mutating func adoptBalance(_ bank: BankID, cents: Int, at: Date, origin: BalanceOrigin) -> Bool {
+    public mutating func adoptBalance(_ bank: BankID, cents: Int, at: Date, origin: BalanceOrigin,
+                                      fetchedAt: Date? = nil) -> Bool {
         if let current = state.balances[bank], current.origin != .manual, at < current.setAt { return false }
-        state.balances[bank] = ManualBalance(cents: cents, setAt: at, origin: origin)
+        state.balances[bank] = ManualBalance(cents: cents, setAt: at, origin: origin, fetchedAt: fetchedAt)
         return true
     }
 
@@ -473,11 +481,12 @@ public struct Ledger: Sendable {
     /// El ÚNICO criterio de qué movimientos se suman sobre una lectura de saldo (lo usan `balance` y "Te quedaban"):
     /// posteriores a la lectura y capturados (no los del banco: su saldo ya los incluye). Un capturado enlazado a un
     /// registro del banco o de un extracto cuenta solo si su hora precisa es posterior a la lectura Y su registro no
-    /// se conocía ya cuando se tomó la lectura (`importedAt` nil o posterior): un aviso tardío fusionado en una fila
-    /// que el banco ya había dado está dentro de ese saldo. Los de extracto solo cuentan sobre un saldo puesto a mano.
+    /// se conocía ya cuando se tomó la lectura (`importedAt` nil o posterior a la CONSULTA, `fetchedAt ?? setAt`, no a la
+    /// hora de referencia del saldo, que puede ser anterior): un aviso tardío fusionado en una fila que el banco ya
+    /// había dado está dentro de ese saldo. Los de extracto solo cuentan sobre un saldo puesto a mano.
     public static func countsTowardBalance(_ m: Movement, base: ManualBalance) -> Bool {
         guard m.date > base.setAt, isBalanceEligible(m, origin: base.origin) else { return false }
-        if isLinked(m), let imported = m.importedAt, imported <= base.setAt { return false }
+        if isLinked(m), let imported = m.importedAt, imported <= (base.fetchedAt ?? base.setAt) { return false }
         return true
     }
 

@@ -113,6 +113,9 @@ private func movementInsights(_ m: Movement, in state: LedgerState, index: Merch
                             date: m.date, bank: m.bank, merchant: m.merchant, movementID: m.id, calendar: calendar))
         }
     case .payment:
+        // Una compra o venta de valores mueve el saldo pero no es un pago: ni pago grande, ni poco habitual, ni cobro
+        // duplicado, ni cambio de suscripción.
+        guard !m.excludedFromSpending else { break }
         let isLarge = cents >= settings.largePaymentThresholdCents
         if settings.largePayment, isLarge {
             out.append(make(.largePayment, .warning, subject: m.id.uuidString,

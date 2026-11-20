@@ -4,12 +4,20 @@ import Foundation
 /// posición, y las desconocidas se ignoran: ningún formato de banco está confirmado con un fichero real.
 public struct CSVTable: Equatable, Sendable {
     public let headers: [String]
+    /// Solo las filas con tantas celdas como la cabecera: una fila con más o menos nunca se lee por posición desplazada.
     public let rows: [[String]]
+    /// Cuántas filas se descartaron por no tener el mismo número de celdas que la cabecera (quien lee el fichero las suma
+    /// a las filas ignoradas).
+    public let malformedRows: Int
 
-    public init(headers: [String], rows: [[String]]) {
+    public init(headers: [String], rows: [[String]], malformedRows: Int = 0) {
         self.headers = headers
         self.rows = rows
+        self.malformedRows = malformedRows
     }
+
+    /// Celda recortada de la columna, o "" si no hay columna o la fila es más corta.
+    func cell(_ row: [String], _ column: Int?) -> String { row.cell(column) }
 
     /// UTF-8 (sin BOM) o, si no lo es, Windows-1252; UTF-16 con BOM también. El separador es el más frecuente de la
     /// cabecera (`,`, `;` o tabulador) fuera de comillas. Comillas RFC 4180 (`""`), `\r\n` o `\n`, líneas en blanco fuera.
@@ -18,9 +26,12 @@ public struct CSVTable: Equatable, Sendable {
         guard let text = decodeCSVText(data) else { throw StatementError.unreadable }
         let scalars = Array(text.unicodeScalars)
         let delimiter = detectDelimiter(scalars)
-        let records = splitRecords(scalars, delimiter: delimiter)
+        let records = try splitRecords(scalars, delimiter: delimiter)
         guard let header = records.first else { throw StatementError.empty }
-        return CSVTable(headers: header.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, rows: Array(records.dropFirst()))
+        let body = records.dropFirst()
+        let aligned = body.filter { $0.count == header.count }
+        return CSVTable(headers: header.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, rows: Array(aligned),
+                        malformedRows: body.count - aligned.count)
     }
 
     /// Índice de la primera columna cuyo nombre normalizado coincide con algún alias (se prueban en orden).
@@ -66,7 +77,7 @@ func parseStatementDecimal(_ raw: String) -> Int? {
     return centsFromDecimalString(s)
 }
 
-extension Array where Element == String {
+private extension Array where Element == String {
     /// Celda recortada de la columna, o "" si no hay columna o la fila es más corta.
     func cell(_ column: Int?) -> String {
         guard let column, column < count else { return "" }
@@ -114,7 +125,7 @@ private func detectDelimiter(_ scalars: [Unicode.Scalar]) -> Unicode.Scalar {
     return best
 }
 
-private func splitRecords(_ scalars: [Unicode.Scalar], delimiter: Unicode.Scalar) -> [[String]] {
+private func splitRecords(_ scalars: [Unicode.Scalar], delimiter: Unicode.Scalar) throws -> [[String]] {
     var records: [[String]] = []
     var row: [String] = []
     var field = String.UnicodeScalarView()
@@ -162,6 +173,8 @@ private func splitRecords(_ scalars: [Unicode.Scalar], delimiter: Unicode.Scalar
         }
         i += 1
     }
+    // Una comilla abierta que no se cierra: el fichero está cortado y lo que quedó dentro no es de fiar.
+    if inQuotes { throw StatementError.unreadable }
     if !field.isEmpty || !row.isEmpty || quoted { endRecord() }
     return records
 }

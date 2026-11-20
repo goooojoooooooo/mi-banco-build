@@ -341,4 +341,79 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
                                    now: at(10, 15, 13), calendar: madrid)
         #expect(live.contains { $0.kind == .subscriptionPriceChange })
     }
+
+    // MARK: R33 — un banco conocido solo por extractos también tiene cobertura
+
+    private func revolutStatement(_ rows: [(String, String)]) -> String {
+        let header = "Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance"
+        return ([header] + rows.map { "Card Payment,Current,\($0.0),\($0.0),Restaurante,\($0.1),0.00,EUR,COMPLETED,100.00" })
+            .joined(separator: "\n") + "\n"
+    }
+
+    @Test func r33CapturadoSinConfirmarDentroDelPeriodoDeUnExtractoNoSumaDosVeces() throws {
+        // Capturado 50,00 € el día D (10 nov); el extracto trae 55,00 € ese día y cubre D-10 ... D+10.
+        let tip = captured(.rev, -5000, "Restaurante Lua", at(11, 10, 22))
+        let csv = revolutStatement([("2026-10-31 10:00:00", "-1.00"), ("2026-11-10 12:00:00", "-55.00"),
+                                    ("2026-11-20 10:00:00", "-2.00")])
+        var l = Ledger(state: LedgerState(movements: [tip]))
+        let report = l.importStatement(try parseStatement(Data(csv.utf8), expected: .rev, now: at(11, 18, 18), calendar: madrid),
+                                       now: at(11, 18, 18), calendar: madrid)
+        #expect(report.added == 3)
+        #expect(report.linked == 0)
+        let now = at(11, 18, 18)  // 8 días después
+        #expect(l.state.links[.rev] == nil)
+        #expect(unconfirmedCaptureIDs(in: l.state, now: now) == [tip.id])
+        let counted = spendingMovements(in: l.state.movements, excluding: spendingExclusions(in: l.state, now: now))
+            .filter { madrid.isDate($0.date, inSameDayAs: at(11, 10)) }
+        #expect(counted.map(\.amountCents) == [-5500])
+        // Con 3 días de margen todavía no (definición de Plan 2: más de 7 días).
+        #expect(unconfirmedCaptureIDs(in: l.state, now: at(11, 13, 18)).isEmpty)
+        // Fuera del periodo del extracto no se reclama, ni en otro banco.
+        let before = captured(.rev, -300, "Cafe", at(10, 20, 10))
+        let other = captured(.ima, -5000, "Restaurante Lua", at(11, 10, 22))
+        var more = l
+        more.state.movements.append(contentsOf: [before, other])
+        #expect(unconfirmedCaptureIDs(in: more.state, now: now) == [tip.id])
+    }
+
+    // MARK: R34 — una operación de valores nunca genera avisos de pago
+
+    private func insightKinds(_ m: Movement, others: [Movement], now: Date) -> Set<InsightKind> {
+        let state = LedgerState(movements: others + [m])
+        let kinds = immediateAlerts(afterStoring: m, in: state, now: now, calendar: madrid).map(\.kind)
+            + insights(for: state, now: now, calendar: madrid).map(\.kind)
+        return Set(kinds).intersection([.largePayment, .unusualPayment, .duplicateCharge, .subscriptionPriceChange,
+                                        .subscriptionUpcoming])
+    }
+
+    @Test func r34CompraDeFondoDeHoyNoGeneraAvisosDePago() {
+        let now = at(11, 20, 18)
+        var buy = captured(.tr, -150_000, "Test World Fund", at(11, 20, 17), isShop: false)
+        // Control: el mismo cargo sin la marca sí es un pago grande.
+        #expect(insightKinds(buy, others: [], now: now).contains(.largePayment))
+        buy.excludedFromSpending = true
+        #expect(insightKinds(buy, others: [], now: now).isEmpty)
+
+        // Poco habitual: tres pagos normales de 40 € al mismo comercio y uno de 130 € (por debajo del umbral de pago grande).
+        let usual = [at(10, 1, 10), at(10, 8, 10), at(10, 15, 10)].map { captured(.tr, -4000, "Fondo X", $0, isShop: false) }
+        var unusual = captured(.tr, -13_000, "Fondo X", at(11, 20, 17), isShop: false)
+        #expect(insightKinds(unusual, others: usual, now: now).contains(.unusualPayment))
+        unusual.excludedFromSpending = true
+        #expect(insightKinds(unusual, others: usual, now: now).isEmpty)
+
+        // Cobro duplicado: dos cargos iguales con minutos de diferencia.
+        let first = captured(.tr, -13_000, "Fondo Y", at(11, 20, 16, 55), isShop: false)
+        var second = captured(.tr, -13_000, "Fondo Y", at(11, 20, 17, 0), isShop: false)
+        #expect(insightKinds(second, others: [first], now: now).contains(.duplicateCharge))
+        second.excludedFromSpending = true
+        #expect(insightKinds(second, others: [first], now: now).isEmpty)
+
+        // Suscripción: una compra mensual del mismo fondo, con cambio de importe, no es una suscripción.
+        var oct = captured(.tr, -15_100, "Fondo Z", at(10, 20, 10), isShop: false)
+        var nov = captured(.tr, -17_100, "Fondo Z", at(11, 20, 10), isShop: false)
+        #expect(insightKinds(nov, others: [oct], now: now).contains(.subscriptionPriceChange))
+        oct.excludedFromSpending = true
+        nov.excludedFromSpending = true
+        #expect(insightKinds(nov, others: [oct], now: now).isEmpty)
+    }
 }

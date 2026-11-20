@@ -7,13 +7,15 @@ extension Ledger {
         return copy.importStatement(statement, now: now, calendar: calendar)
     }
 
-    /// Concilia las filas del extracto (sin duplicar lo que ya hay, de la API o capturado) y adopta su último saldo.
+    /// Concilia las filas del extracto (sin duplicar lo que ya hay, de la API o capturado) y adopta su último saldo,
+    /// salvo que la lectura de saldo que ya hay (de cualquier origen, también la puesta a mano) sea más reciente: importar
+    /// el extracto de un periodo pasado no debe pisar el saldo de hoy.
     @discardableResult
     public mutating func importStatement(_ statement: ParsedStatement, now: Date, calendar: Calendar) -> ReconcileReport {
         let bank = statement.format.bank
         var report = reconcile(statement.records, bank: bank, channel: .statement, coverage: nil, now: now, calendar: calendar)
         report.ignoredRows = statement.ignoredRows
-        if let balance = statement.latestBalance {
+        if let balance = statement.latestBalance, state.balances[bank].map({ balance.at >= $0.setAt }) ?? true {
             adoptBalance(bank, cents: balance.cents, at: balance.at, origin: .statement)
         }
         return report

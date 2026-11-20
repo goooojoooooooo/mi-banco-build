@@ -50,14 +50,16 @@ enum DemoMode {
     static var guideStart: (track: GuideTrack?, step: Int)? {
         guard let flag = arguments.firstIndex(of: "-MiBancoDemoAlertsGuide"), flag + 1 < arguments.count else { return nil }
         let track: GuideTrack?
+        let number = flag + 2 < arguments.count ? Int(arguments[flag + 2]) ?? 1 : 1
+        // Paso 0: solo la lista de guías (sin entrar en ninguna).
+        if number <= 0 { return (nil, 0) }
         switch arguments[flag + 1] {
         case "rev": track = .revolut
         case "tr": track = .tradeRepublic
         case "wallet": track = .wallet
         default: track = nil
         }
-        let number = flag + 2 < arguments.count ? Int(arguments[flag + 2]) ?? 1 : 1
-        return (track, max(number, 1) - 1)
+        return (track, number - 1)
     }
 
     static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }

@@ -16,7 +16,7 @@ private struct PulseRing: ViewModifier {
                 RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .stroke(Color.white, lineWidth: 2)
                     .padding(-4)
-                    .opacity(reduceMotion || on ? 1 : 0.3)
+                    .opacity(reduceMotion || on ? 1 : 0.5)
                     .scaleEffect(reduceMotion || !on ? 1 : 1.04)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: on)
             }
@@ -55,6 +55,9 @@ private struct PhoneFrame<Content: View>: View {
         .overlay { RoundedRectangle(cornerRadius: 34, style: .continuous).stroke(Color.white.opacity(0.22), lineWidth: 1.5) }
         .frame(width: 236, height: 316)
         .clipShape(RoundedRectangle(cornerRadius: 34, style: .continuous))
+        // El dibujo se agranda un 25 %: se lee de un vistazo sin llenar la pantalla de negro.
+        .scaleEffect(1.25)
+        .frame(width: 295, height: 395)
     }
 }
 

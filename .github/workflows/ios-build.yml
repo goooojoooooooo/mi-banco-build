@@ -21,6 +21,15 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos
       - run: brew install xcodegen && xcodegen
+      - name: La guia de avisos usa los mismos nombres que los Atajos
+        run: |
+          fail() { echo "La guía y los Atajos no usan los mismos nombres: $1"; exit 1; }
+          grep -q 'title: LocalizedStringResource = "Registrar aviso"' App/Intents/RegisterNoticeIntent.swift || fail "Registrar aviso"
+          grep -q '"Registrar pago con Cartera"' App/Intents/RegisterWalletIntent.swift || fail "Registrar pago con Cartera"
+          for name in Banco Título Subtítulo Cuerpo Importe Comercio; do
+            grep -q "\"$name\"" App/Intents/*.swift || fail "$name"
+          done
+          echo ok
       - name: Archive (sin firmar)
         run: |
           xcodebuild -project MiBanco.xcodeproj -scheme MiBanco -sdk iphoneos -configuration Release \

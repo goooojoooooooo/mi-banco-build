@@ -8,7 +8,9 @@ import MiBancoCore
 /// (hoja del movimiento más reciente), `-MiBancoDemoPrivate` (modo privado), `-MiBancoDemoSearch <texto>`,
 /// `-MiBancoDemoArrival` (llega un pago a los ~4 s), `-MiBancoDemoLock` (bloqueo y desbloqueo a los ~4 s),
 /// `-MiBancoDemoOnlineLogo` (una tienda fuera del directorio, para la descarga del logo),
-/// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores).
+/// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores),
+/// `-MiBancoDemoAlertsGuide <rev|tr|wallet> <paso>` (con `-MiBancoDemoScreen ajustes`: abre la guía de avisos en ese paso,
+/// contando desde 1; con paso 0 solo abre la lista de guías).
 /// En la demo nada se escribe en el almacén ni en UserDefaults: los cambios viven en memoria.
 enum DemoMode {
     enum Screen { case home, alerts, settings }
@@ -43,6 +45,20 @@ enum DemoMode {
 
     /// `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente como lo haría un toque en el segmentado.
     static var switchesCard: Bool { arguments.contains("-MiBancoDemoSwitch") }
+
+    /// `-MiBancoDemoAlertsGuide <rev|tr|wallet> <paso>`: paso desde 1 (0 = solo la lista); el paso en `step` cuenta desde 0.
+    static var guideStart: (track: GuideTrack?, step: Int)? {
+        guard let flag = arguments.firstIndex(of: "-MiBancoDemoAlertsGuide"), flag + 1 < arguments.count else { return nil }
+        let track: GuideTrack?
+        switch arguments[flag + 1] {
+        case "rev": track = .revolut
+        case "tr": track = .tradeRepublic
+        case "wallet": track = .wallet
+        default: track = nil
+        }
+        let number = flag + 2 < arguments.count ? Int(arguments[flag + 2]) ?? 1 : 1
+        return (track, max(number, 1) - 1)
+    }
 
     static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".

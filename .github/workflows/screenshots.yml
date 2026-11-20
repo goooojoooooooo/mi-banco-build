@@ -81,6 +81,10 @@ jobs:
           shot avisos 10 -MiBancoDemoScreen avisos
           shot avisos-ajustes 10 -MiBancoDemoScreen avisos -MiBancoDemoRules
           shot ajustes 10 -MiBancoDemoScreen ajustes
+          # La guia de avisos: la lista, un paso de Revolut (9 de 11) y el de Apple Pay (4 de 11).
+          shot guia-avisos 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
+          shot guia-paso 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 9
+          shot guia-cartera 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 4
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.

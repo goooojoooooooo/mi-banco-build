@@ -116,7 +116,7 @@ private func pay(_ cents: Int, _ merchant: String?, _ when: Date, isShop: Bool =
 
     @Test func leeLibrosAntiguos() throws {
         let json = """
-        {"balances":{},"movements":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","bank":"rev","amountCents":-500,
+        {"balances":[],"movements":[{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","bank":"rev","amountCents":-500,
         "kind":"payment","source":"notification","date":0}],"unread":[]}
         """
         let state = try JSONDecoder().decode(LedgerState.self, from: Data(json.utf8))

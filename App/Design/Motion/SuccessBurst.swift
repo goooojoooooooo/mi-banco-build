@@ -10,17 +10,25 @@ struct SuccessBurst: View {
 
     private static let rays = 10
 
+    @State private var startedAt: Date?
+
     var body: some View {
         if motion.richEffects {
-            Color.clear
-                .frame(width: 1, height: 1)
-                .keyframeAnimator(initialValue: 0.0, trigger: trigger) { _, progress in
-                    burst(progress)
-                } keyframes: { _ in
-                    KeyframeTrack { LinearKeyframe(1.0, duration: 0.64 * motion.timeMultiplier) }
-                }
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
+            // Una sola TimelineView, en pausa mientras no hay destello.
+            TimelineView(.animation(paused: startedAt == nil)) { context in
+                let elapsed = startedAt.map { context.date.timeIntervalSince($0) } ?? 0
+                burst(elapsed / (0.64 * motion.timeMultiplier))
+            }
+            .frame(width: 1, height: 1)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onChange(of: trigger) { _, _ in startedAt = Date() }
+            .task(id: startedAt) {
+                guard startedAt != nil else { return }
+                try? await Task.sleep(for: .seconds(0.7 * motion.timeMultiplier))
+                guard !Task.isCancelled else { return }
+                startedAt = nil
+            }
         }
     }
 

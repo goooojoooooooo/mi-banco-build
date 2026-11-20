@@ -77,14 +77,16 @@ final class TapSmokeTests: XCTestCase {
     }
 
     func testTabsAndRowOpenDetail() throws {
-        // Con cuatro pestañas, la barra de cristal del simulador de CI tarda en cambiar tras el toque: margen de 15 s y,
-        // si no cambió, un segundo toque (la comprobación es la misma).
+        // Con cuatro pestañas, la barra de cristal del simulador de CI a veces no toma el toque sintético: toque, pulsación
+        // corta y otro toque (la comprobación es la misma).
         let tabs = app.tabBars.buttons
         func open(_ name: String, until target: XCUIElement) -> Bool {
             tabs[name].tap()
-            if target.waitForExistence(timeout: 15) { return true }
+            if target.waitForExistence(timeout: 8) { return true }
+            tabs[name].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
+            if target.waitForExistence(timeout: 8) { return true }
             tabs[name].tap()
-            return target.waitForExistence(timeout: 15)
+            return target.waitForExistence(timeout: 10)
         }
         XCTAssertTrue(open("Avisos", until: app.navigationBars["Avisos"]), "No se ve Avisos")
         XCTAssertTrue(open("Ajustes", until: app.navigationBars["Ajustes"]), "No se ve Ajustes")

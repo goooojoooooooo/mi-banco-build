@@ -53,6 +53,17 @@ final class Plan3TapTests: XCTestCase {
         return XCTWaiter().wait(for: [exp], timeout: timeout) == .completed
     }
 
+    /// Cambia de pestaña tocando la barra. En el simulador de CI (Intel) la barra de cristal con cuatro pestañas a veces
+    /// no toma el toque sintético; se prueba toque, pulsación corta y toque otra vez.
+    private func selectTab(_ tab: XCUIElement, until target: XCUIElement) -> Bool {
+        tab.tap()
+        if target.waitForExistence(timeout: 8) { return true }
+        tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
+        if target.waitForExistence(timeout: 8) { return true }
+        tab.tap()
+        return target.waitForExistence(timeout: 10)
+    }
+
     private func goBack() {
         app.navigationBars.buttons.element(boundBy: 0).tap()
     }
@@ -66,9 +77,7 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
         let tab = app.tabBars.buttons["Gasto"]
         XCTAssertTrue(tab.waitForExistence(timeout: 5))
-        tab.tap()
-        if !element("gasto.total").waitForExistence(timeout: 15) { tab.tap() }
-        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 15), "La pestaña Gasto no se abre")
+        XCTAssertTrue(selectTab(tab, until: element("gasto.total")), "La pestaña Gasto no se abre")
         XCTAssertTrue(app.tabBars.buttons.count == 4, "La barra tiene cuatro pestañas")
     }
 
@@ -240,10 +249,16 @@ final class Plan3TapTests: XCTestCase {
         launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoRestorePreview"])
         let slide = element("restore-slide")
         XCTAssertTrue(slide.waitForExistence(timeout: 15))
-        let frame = slide.frame
-        let start = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 28, dy: frame.height / 2))
-        let end = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
-        start.press(forDuration: 0.1, thenDragTo: end)
-        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), slide, timeout: 10))
+        // La hoja termina de subir antes de arrastrar (si no, el arrastre se lo lleva la hoja); un segundo intento si hace falta.
+        Thread.sleep(forTimeInterval: 1.5)
+        let gone = NSPredicate(format: "exists == false")
+        for _ in 0..<2 where slide.exists {
+            let frame = slide.frame
+            let start = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 28, dy: frame.height / 2))
+            let end = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
+            start.press(forDuration: 0.3, thenDragTo: end, withVelocity: 300, thenHoldForDuration: 0.2)
+            if waitFor(gone, slide, timeout: 10) { break }
+        }
+        XCTAssertTrue(waitFor(gone, slide, timeout: 5), "Deslizar no restauró la copia")
     }
 }

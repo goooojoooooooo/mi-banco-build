@@ -268,6 +268,7 @@ extension Movement {
         if name.contains("interes") { return "percent" }
         if name.contains("bizum") || name.contains("transferencia") { return "arrow.left.arrow.right" }
         if source == .wallet { return "wave.3.right" }
+        if source == .bank || source == .statement { return "building.columns" }
         return kind == .income ? "arrow.down.left" : "creditcard"
     }
 }

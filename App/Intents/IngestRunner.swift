@@ -34,7 +34,8 @@ enum IngestRunner {
         // Si la app está abierta, Home se recarga con esto.
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         switch snap.outcome {
-        case .stored(let m):
+        case .stored(let m), .merged(let m):
+            // Un registro del banco que se fusiona con su aviso no avisó antes: se trata como uno nuevo.
             let now = Date()
             let calendar = Calendar.current
             let ledger = Ledger(state: snap.state)

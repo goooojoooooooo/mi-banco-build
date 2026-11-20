@@ -14,6 +14,8 @@ private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: In
 
 private let nbsp = "\u{00A0}"
 
+private let summaryNow = at(2026, 11, 20, 9, 0)
+
 private let fund = "IE00B4L5Y983"
 private let apple = "US0378331005"
 
@@ -41,8 +43,8 @@ private let fixtureLines: [String] = [
     line(id: "tx-003", dt: "2026-05-10T12:00:00Z", type: "SELL", asset: "FUND", name: "iShares Core MSCI World", symbol: fund,
          shares: "4", price: "110", amount: "440.00", fee: "-1.00", tax: "-3.20"),
     line(id: "tx-004", dt: "2026-05-11T18:30:00Z", type: "CARD_TRANSACTION", amount: "-12.50"),
-    line(id: "tx-005", dt: "2026-06-01T10:00:00Z", type: "FREE_RECEIPT", asset: "CRYPTO", name: "Ethereum", symbol: "ETH",
-         shares: "0.01", price: "2500", amount: "0"),
+    line(id: "tx-005", dt: "2026-06-01T10:00:00Z", type: "BUY", asset: "CRYPTO", name: "Ethereum", symbol: "ETH",
+         shares: "0.01", price: "2500", amount: "-25.00"),
     line(id: "tx-006", dt: "2026-06-15T13:45:00Z", type: "BUY", asset: "STOCK", name: "Apple", symbol: apple,
          shares: "3", price: "180", amount: "-540.00", fee: "-1.00"),
     line(id: "tx-007", dt: "", type: "BUY", asset: "STOCK", name: "Apple", symbol: apple, shares: "1"),
@@ -86,10 +88,10 @@ private func portfolioWithFixture() throws -> Portfolio {
         #expect(investmentTransactions(from: signed).transactions.first?.shares == -4)
     }
 
-    @Test func entregaGratuita() throws {
+    @Test func compraDeCripto() throws {
         let t = try #require(investmentTransactions(from: try fixture()).transactions.first { $0.id == "tx-005" })
         #expect(t.shares == Decimal(string: "0.01"))
-        #expect(t.cashCents == 0)
+        #expect(t.cashCents == -2_500)
         #expect(t.assetClass == "CRYPTO")
     }
 
@@ -159,7 +161,7 @@ private func portfolioWithFixture() throws -> Portfolio {
     }
 
     @Test func valoracion() throws {
-        let s = try #require(portfolioSummary(try priced()))
+        let s = try #require(portfolioSummary(try priced(), now: summaryNow))
         let fundValue = try #require(s.positions.first { $0.id == fund })
         #expect(fundValue.valueCents == 88_000)
         #expect(fundValue.todayChangeCents == 1_200)
@@ -190,16 +192,18 @@ private func portfolioWithFixture() throws -> Portfolio {
                                                 assetClass: "CRYPTO", shares: 1, cashCents: -100_000, priceEUR: nil)]
         p.quotes["ETH"] = Quote(priceEUR: 2_000, previousCloseEUR: nil, fetchedAt: at(2026, 11, 19, 8, 0))
         p.manualPrices["ETH"] = ManualPrice(priceEUR: 3_000, setAt: at(2026, 11, 19, 9, 0))
-        #expect(portfolioSummary(p)?.positions.first?.priceEUR == 3_000)
+        #expect(portfolioSummary(p, now: summaryNow)?.positions.first?.priceEUR == 3_000)
         p.quotes["ETH"] = Quote(priceEUR: 2_000, previousCloseEUR: nil, fetchedAt: at(2026, 11, 19, 10, 0))
-        let s = try #require(portfolioSummary(p))
+        let s = try #require(portfolioSummary(p, now: summaryNow))
         #expect(s.positions.first?.priceEUR == 2_000)
         #expect(s.positions.first?.origin == .market(at(2026, 11, 19, 10, 0)))
     }
 
     @Test func sinPrecio() throws {
-        let s = try #require(portfolioSummary(try portfolioWithFixture()))
-        #expect(s.valueCents == 0)
+        let s = try #require(portfolioSummary(try portfolioWithFixture(), now: summaryNow))
+        #expect(s.valueCents == nil)
+        #expect(s.gainCents == nil)
+        #expect(s.todayChangeCents == nil)
         #expect(s.missingPrices == 3)
         #expect(s.todayChangeTenths == nil)
         #expect(s.pricedAt == nil)
@@ -207,14 +211,14 @@ private func portfolioWithFixture() throws -> Portfolio {
     }
 
     @Test func carteraVacia() {
-        #expect(portfolioSummary(Portfolio()) == nil)
+        #expect(portfolioSummary(Portfolio(), now: summaryNow) == nil)
     }
 
     @Test func preciosAbsurdosNoRompen() throws {
         var p = try portfolioWithFixture()
         p.quotes[fund] = Quote(priceEUR: Decimal(string: "9999999999999999999999999999")!, previousCloseEUR: nil, fetchedAt: at(2026, 11, 19, 10, 0))
         p.quotes[apple] = Quote(priceEUR: -5, previousCloseEUR: nil, fetchedAt: at(2026, 11, 19, 10, 0))
-        let s = try #require(portfolioSummary(p))
+        let s = try #require(portfolioSummary(p, now: summaryNow))
         #expect(s.missingPrices == 3)
     }
 

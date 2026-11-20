@@ -139,19 +139,52 @@ public struct InvestmentExtract: Equatable, Sendable {
     public let transactions: [InvestmentTransaction]
     public let ignoredRows: Int
     public let unreadableRows: Int
+    /// Filas con símbolo y acciones que NO son compra ni venta (dividendo, devolución de impuestos, split, traspaso...):
+    /// no cambian ninguna posición y se cuentan aparte para decírselo al dueño.
+    public let notTradeRows: Int
+
+    public init(transactions: [InvestmentTransaction], ignoredRows: Int, unreadableRows: Int, notTradeRows: Int = 0) {
+        self.transactions = transactions
+        self.ignoredRows = ignoredRows
+        self.unreadableRows = unreadableRows
+        self.notTradeRows = notTradeRows
+    }
+}
+
+/// Tipo de una fila. Solo BUY, SELL, SAVINGS_PLAN (y sus grafías: "SAVINGS PLAN", "SavingsPlan") y TRADE mueven
+/// posiciones; cualquier otro tipo no. Tipo vacío o ausente -> nil (se decide por el signo).
+private enum RowKind { case buy, sell, trade, other }
+
+private func rowKind(_ type: String?) -> RowKind? {
+    let folded = (type ?? "").uppercased().filter { $0.isLetter || $0.isNumber }
+    if folded.isEmpty { return nil }
+    switch folded {
+    case "BUY", "SAVINGSPLAN": return .buy
+    case "SELL": return .sell
+    case "TRADE": return .trade
+    default: return .other
+    }
 }
 
 /// Las operaciones de inversión de las filas ya leídas. Ignorada: sin símbolo o sin acciones (o a cero). Ilegible: sin
 /// identificador, sin fecha, acciones que no son un número o divisa que no es el euro (no se mezclan monedas).
-/// Signo: acciones negativas = venta; positivas con importe positivo = venta (se guarda en negativo); si no, compra.
+/// Solo mueve una posición una fila de tipo BUY, SELL o SAVINGS_PLAN (o TRADE con dirección clara); el resto de filas con
+/// símbolo y acciones (dividendos, devoluciones, splits, traspasos...) se cuentan en `notTradeRows` y no se aplican.
+/// Dirección: SELL o acciones negativas = venta; BUY y SAVINGS_PLAN = compra. Solo sin tipo se deduce del importe:
+/// acciones positivas con importe positivo = venta (se guarda en negativo); si no, compra.
 public func investmentTransactions(from rows: [TradeRepublicRow]) -> InvestmentExtract {
     var result: [InvestmentTransaction] = []
-    var ignored = 0, unreadable = 0
+    var ignored = 0, unreadable = 0, notTrade = 0
     for row in rows {
         let symbol = (row.symbol ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let sharesText = (row.shares ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if symbol.isEmpty || sharesText.isEmpty {
             ignored += 1
+            continue
+        }
+        let kind = rowKind(row.type)
+        if kind == .other {
+            notTrade += 1
             continue
         }
         guard let parsed = parseDecimal(sharesText) else {
@@ -169,13 +202,31 @@ public func investmentTransactions(from rows: [TradeRepublicRow]) -> InvestmentE
             continue
         }
         let amount = row.amountCents ?? 0
-        let shares: Decimal = parsed < 0 ? parsed : (amount > 0 ? -parsed : parsed)
+        let shares: Decimal
+        switch kind {
+        case .sell?:
+            shares = -parsed.magnitude
+        case .buy?:
+            shares = parsed
+        case .trade?:
+            // TRADE sin dirección en el tipo: solo con señal clara (acciones negativas o efectivo que sale).
+            if parsed < 0 || row.cashEffectCents < 0 {
+                shares = parsed
+            } else {
+                notTrade += 1
+                continue
+            }
+        case .other?:
+            continue
+        case nil:
+            shares = parsed < 0 ? parsed : (amount > 0 ? -parsed : parsed)
+        }
         let price = row.price.flatMap(parseDecimal).flatMap { $0 > 0 ? $0 : nil }
         let name = (row.name ?? "").isEmpty ? symbol : row.name!
         result.append(InvestmentTransaction(id: id, date: date, instrument: symbol, name: name, assetClass: row.assetClass,
                                             shares: shares, cashCents: row.cashEffectCents, priceEUR: price))
     }
-    return InvestmentExtract(transactions: result, ignoredRows: ignored, unreadableRows: unreadable)
+    return InvestmentExtract(transactions: result, ignoredRows: ignored, unreadableRows: unreadable, notTradeRows: notTrade)
 }
 
 // MARK: Precios y cartera
@@ -184,20 +235,24 @@ public struct Quote: Codable, Equatable, Sendable {
     public let priceEUR: Decimal
     public let previousCloseEUR: Decimal?
     public let fetchedAt: Date
+    /// La hora del propio precio en el mercado (`regularMarketTime`); la edad del precio se mide con ella, no con la consulta.
+    public let marketTime: Date?
 
-    public init(priceEUR: Decimal, previousCloseEUR: Decimal?, fetchedAt: Date) {
+    public init(priceEUR: Decimal, previousCloseEUR: Decimal?, fetchedAt: Date, marketTime: Date? = nil) {
         self.priceEUR = priceEUR
         self.previousCloseEUR = previousCloseEUR
         self.fetchedAt = fetchedAt
+        self.marketTime = marketTime
     }
 
-    private enum Keys: String, CodingKey { case priceEUR, previousCloseEUR, fetchedAt }
+    private enum Keys: String, CodingKey { case priceEUR, previousCloseEUR, fetchedAt, marketTime }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         priceEUR = try c.decimal(.priceEUR)
         previousCloseEUR = c.decimalIfPresent(.previousCloseEUR)
         fetchedAt = try c.decode(Date.self, forKey: .fetchedAt)
+        marketTime = try? c.decodeIfPresent(Date.self, forKey: .marketTime)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -205,6 +260,7 @@ public struct Quote: Codable, Equatable, Sendable {
         try c.encode(text(priceEUR), forKey: .priceEUR)
         try c.encodeIfPresent(previousCloseEUR.map(text), forKey: .previousCloseEUR)
         try c.encode(fetchedAt, forKey: .fetchedAt)
+        try c.encodeIfPresent(marketTime, forKey: .marketTime)
     }
 }
 
@@ -237,12 +293,15 @@ public struct ImportSummary: Equatable, Sendable {
     public let alreadyThere: Int
     public let ignoredRows: Int
     public let unreadableRows: Int
+    /// Filas que no son compras ni ventas (dividendos, devoluciones...): no cambian la cartera.
+    public let notTradeRows: Int
 
-    public init(added: Int, alreadyThere: Int, ignoredRows: Int, unreadableRows: Int) {
+    public init(added: Int, alreadyThere: Int, ignoredRows: Int, unreadableRows: Int, notTradeRows: Int = 0) {
         self.added = added
         self.alreadyThere = alreadyThere
         self.ignoredRows = ignoredRows
         self.unreadableRows = unreadableRows
+        self.notTradeRows = notTradeRows
     }
 }
 
@@ -254,6 +313,14 @@ public struct Portfolio: Codable, Equatable, Sendable {
     public var manualPrices: [String: ManualPrice]
     public var symbols: [String: String]
     public var lastImport: Date?
+    /// Entradas que la lectura tolerante descartó por no entenderse (una lista con el tipo equivocado cuenta como 1). No se
+    /// guarda: sirve para avisar «vuelve a importar tu extracto» tras cargar.
+    public internal(set) var droppedEntries: Int = 0
+
+    public static func == (a: Portfolio, b: Portfolio) -> Bool {
+        a.transactions == b.transactions && a.quotes == b.quotes && a.manualPrices == b.manualPrices
+            && a.symbols == b.symbols && a.lastImport == b.lastImport
+    }
 
     public init() {
         transactions = []
@@ -265,15 +332,39 @@ public struct Portfolio: Codable, Equatable, Sendable {
 
     private enum Keys: String, CodingKey { case transactions, quotes, manualPrices, symbols, lastImport }
 
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: Keys.self)
+        try c.encode(transactions, forKey: .transactions)
+        try c.encode(quotes, forKey: .quotes)
+        try c.encode(manualPrices, forKey: .manualPrices)
+        try c.encode(symbols, forKey: .symbols)
+        try c.encodeIfPresent(lastImport, forKey: .lastImport)
+    }
+
     /// Tolerante: un campo que falta o no se entiende queda vacío y una entrada rota se descarta; el resto se conserva.
     /// Lo descartado se recupera volviendo a importar la exportación.
     public init(from decoder: Decoder) throws {
         self.init()
         let c = try decoder.container(keyedBy: Keys.self)
-        transactions = ((try? c.decode([Lossy<InvestmentTransaction>].self, forKey: .transactions)) ?? []).compactMap(\.value)
-        quotes = ((try? c.decode([String: Lossy<Quote>].self, forKey: .quotes)) ?? [:]).compactMapValues(\.value)
-        manualPrices = ((try? c.decode([String: Lossy<ManualPrice>].self, forKey: .manualPrices)) ?? [:]).compactMapValues(\.value)
-        symbols = ((try? c.decode([String: Lossy<String>].self, forKey: .symbols)) ?? [:]).compactMapValues(\.value)
+        var dropped = 0
+        func present(_ key: Keys) -> Bool { c.contains(key) && ((try? c.decodeNil(forKey: key)) == false) }
+        if let raw = try? c.decode([Lossy<InvestmentTransaction>].self, forKey: .transactions) {
+            transactions = raw.compactMap(\.value)
+            dropped += raw.count - transactions.count
+        } else if present(.transactions) { dropped += 1 }
+        if let raw = try? c.decode([String: Lossy<Quote>].self, forKey: .quotes) {
+            quotes = raw.compactMapValues(\.value)
+            dropped += raw.count - quotes.count
+        } else if present(.quotes) { dropped += 1 }
+        if let raw = try? c.decode([String: Lossy<ManualPrice>].self, forKey: .manualPrices) {
+            manualPrices = raw.compactMapValues(\.value)
+            dropped += raw.count - manualPrices.count
+        } else if present(.manualPrices) { dropped += 1 }
+        if let raw = try? c.decode([String: Lossy<String>].self, forKey: .symbols) {
+            symbols = raw.compactMapValues(\.value)
+            dropped += raw.count - symbols.count
+        } else if present(.symbols) { dropped += 1 }
+        droppedEntries = dropped
         lastImport = try? c.decodeIfPresent(Date.self, forKey: .lastImport)
     }
 
@@ -289,14 +380,24 @@ public struct Portfolio: Codable, Equatable, Sendable {
                 already += 1
             }
         }
-        transactions.sort { $0.date != $1.date ? $0.date < $1.date : $0.id < $1.id }
+        transactions = orderedTransactions(transactions)
         lastImport = now
         return ImportSummary(added: added, alreadyThere: already, ignoredRows: extract.ignoredRows,
-                             unreadableRows: extract.unreadableRows)
+                             unreadableRows: extract.unreadableRows, notTradeRows: extract.notTradeRows)
     }
 }
 
 // MARK: Posiciones
+
+/// Por fecha; con la misma fecha (o filas de solo día) primero las compras y luego las ventas; si no, se conserva el
+/// orden en que llegaron (el de la exportación).
+func orderedTransactions(_ list: [InvestmentTransaction]) -> [InvestmentTransaction] {
+    list.enumerated().sorted { a, b in
+        if a.element.date != b.element.date { return a.element.date < b.element.date }
+        let aBuy = a.element.shares > 0, bBuy = b.element.shares > 0
+        return aBuy != bBuy ? aBuy : a.offset < b.offset
+    }.map(\.element)
+}
 
 public struct Position: Equatable, Sendable, Identifiable {
     public let instrument: String
@@ -312,9 +413,7 @@ public struct Position: Equatable, Sendable, Identifiable {
 public func positions(from transactions: [InvestmentTransaction]) -> [Position] {
     struct Acc { var name: String; var assetClass: String?; var shares: Decimal = 0; var cost: Int = 0 }
     var byInstrument: [String: Acc] = [:]
-    let ordered = transactions.enumerated().sorted {
-        $0.element.date != $1.element.date ? $0.element.date < $1.element.date : $0.offset < $1.offset
-    }.map(\.element)
+    let ordered = orderedTransactions(transactions)
     for t in ordered {
         var acc = byInstrument[t.instrument] ?? Acc(name: t.name, assetClass: t.assetClass)
         if !t.name.isEmpty { acc.name = t.name }
@@ -362,20 +461,30 @@ public struct PositionValue: Equatable, Sendable, Identifiable {
     public var id: String { position.id }
 }
 
+/// Un precio con más de 4 días se considera viejo.
+public let stalePriceAge: TimeInterval = 4 * 86_400
+
 public struct PortfolioSummary: Equatable, Sendable {
-    /// Valor de las posiciones con precio.
-    public let valueCents: Int
-    public let todayChangeCents: Int
+    /// Valor de las posiciones con precio; nil si ninguna tiene precio (no 0).
+    public let valueCents: Int?
+    /// nil si ninguna posición con precio trae cierre anterior: no hay cambio de hoy que contar.
+    public let todayChangeCents: Int?
     public let todayChangeTenths: Int?
-    /// Coste de todas las posiciones; la ganancia solo compara las que tienen precio.
+    /// Coste de todas las posiciones; la ganancia solo compara las que tienen precio y coste.
     public let costCents: Int
-    public let gainCents: Int
+    public let gainCents: Int?
     public let gainTenths: Int?
-    /// El precio más reciente de los usados.
+    /// El precio más reciente de los usados (su hora de mercado si la trae).
     public let pricedAt: Date?
+    /// El precio MÁS ANTIGUO de los usados.
+    public let oldestPriceAt: Date?
+    /// true = algún precio usado tiene más de 4 días.
+    public let hasStalePrice: Bool
     public let missingPrices: Int
     public let positions: [PositionValue]
 }
+
+private func priceDate(of quote: Quote) -> Date { quote.marketTime ?? quote.fetchedAt }
 
 private func value(of position: Position, in portfolio: Portfolio) -> PositionValue {
     var price: Decimal?
@@ -383,12 +492,12 @@ private func value(of position: Position, in portfolio: Portfolio) -> PositionVa
     var previous: Decimal?
     let quote = portfolio.quotes[position.instrument].flatMap { $0.priceEUR > 0 ? $0 : nil }
     let manual = portfolio.manualPrices[position.instrument].flatMap { $0.priceEUR > 0 ? $0 : nil }
-    if let manual, quote == nil || manual.setAt > quote!.fetchedAt {
+    if let manual, quote == nil || manual.setAt > priceDate(of: quote!) {
         price = manual.priceEUR
         origin = .manual(manual.setAt)
     } else if let quote {
         price = quote.priceEUR
-        origin = .market(quote.fetchedAt)
+        origin = .market(priceDate(of: quote))
         previous = quote.previousCloseEUR.flatMap { $0 > 0 ? $0 : nil }
     }
     guard let price, let valueCents = roundedInt(position.shares * price * 100) else {
@@ -396,22 +505,27 @@ private func value(of position: Position, in portfolio: Portfolio) -> PositionVa
                              gainCents: nil, gainTenths: nil)
     }
     let today = previous.flatMap { roundedInt(position.shares * (price - $0) * 100) }
+    // Sin coste conocido no hay ganancia que contar (no su valor entero).
+    let hasCost = position.costCents > 0
     let gain = valueCents - position.costCents
     return PositionValue(position: position, priceEUR: price, origin: origin, valueCents: valueCents, todayChangeCents: today,
-                         gainCents: gain, gainTenths: roundedQuotient(1000 * gain, position.costCents))
+                         gainCents: hasCost ? gain : nil,
+                         gainTenths: hasCost ? roundedQuotient(1000 * gain, position.costCents) : nil)
 }
 
-/// Resumen de la cartera; nil si no hay posiciones abiertas. Describe, no recomienda.
-public func portfolioSummary(_ portfolio: Portfolio) -> PortfolioSummary? {
+/// Resumen de la cartera; nil si no hay posiciones abiertas. Describe, no recomienda. `now` sirve solo para saber si algún
+/// precio es viejo.
+public func portfolioSummary(_ portfolio: Portfolio, now: Date) -> PortfolioSummary? {
     let values = positions(from: portfolio.transactions).map { value(of: $0, in: portfolio) }
     guard !values.isEmpty else { return nil }
     let priced = values.filter { $0.valueCents != nil }
     let totalValue = priced.reduce(0) { $0 + ($1.valueCents ?? 0) }
-    let pricedCost = priced.reduce(0) { $0 + $1.position.costCents }
     let withToday = priced.filter { $0.todayChangeCents != nil }
     let today = withToday.reduce(0) { $0 + ($1.todayChangeCents ?? 0) }
     let valueWithToday = withToday.reduce(0) { $0 + ($1.valueCents ?? 0) }
-    let gain = totalValue - pricedCost
+    let withCost = priced.filter { $0.position.costCents > 0 }
+    let gain = withCost.reduce(0) { $0 + ($1.valueCents ?? 0) - $1.position.costCents }
+    let gainBase = withCost.reduce(0) { $0 + $1.position.costCents }
     let dates: [Date] = priced.compactMap {
         switch $0.origin {
         case .market(let d), .manual(let d): return d
@@ -419,9 +533,12 @@ public func portfolioSummary(_ portfolio: Portfolio) -> PortfolioSummary? {
         }
     }
     return PortfolioSummary(
-        valueCents: totalValue, todayChangeCents: today,
+        valueCents: priced.isEmpty ? nil : totalValue,
+        todayChangeCents: withToday.isEmpty ? nil : today,
         todayChangeTenths: withToday.isEmpty ? nil : roundedQuotient(1000 * today, valueWithToday - today),
-        costCents: values.reduce(0) { $0 + $1.position.costCents }, gainCents: gain,
-        gainTenths: roundedQuotient(1000 * gain, pricedCost), pricedAt: dates.max(),
+        costCents: values.reduce(0) { $0 + $1.position.costCents },
+        gainCents: withCost.isEmpty ? nil : gain,
+        gainTenths: roundedQuotient(1000 * gain, gainBase), pricedAt: dates.max(), oldestPriceAt: dates.min(),
+        hasStalePrice: dates.contains { now.timeIntervalSince($0) > stalePriceAge },
         missingPrices: values.count - priced.count, positions: values)
 }

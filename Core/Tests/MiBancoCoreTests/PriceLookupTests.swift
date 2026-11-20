@@ -17,23 +17,24 @@ private func json(_ s: String) -> Data { Data(s.utf8) }
         #expect(!isISIN("IE00B4L5Y983 "))
     }
 
-    @Test func urlsSoloLlevanElCodigo() {
-        #expect(yahooSearchURL(isin: "IE00B4L5Y983").absoluteString
+    @Test func urlsSoloLlevanElCodigo() throws {
+        #expect(try #require(yahooSearchURL(isin: "IE00B4L5Y983")).absoluteString
             == "https://query2.finance.yahoo.com/v1/finance/search?q=IE00B4L5Y983&quotesCount=6&newsCount=0")
-        #expect(yahooChartURL(symbol: "EUNL.DE").absoluteString
+        #expect(try #require(yahooChartURL(symbol: "EUNL.DE")).absoluteString
             == "https://query1.finance.yahoo.com/v8/finance/chart/EUNL.DE?range=5d&interval=1d")
-        #expect(yahooChartURL(symbol: "A B").absoluteString.contains("A%20B"))
+        #expect(try #require(yahooChartURL(symbol: "ETH-EUR")).absoluteString.contains("/ETH-EUR?"))
+        #expect(try #require(yahooChartURL(symbol: "EURUSD=X")).absoluteString.contains("EURUSD%3DX"))
     }
 
-    @Test func urlsConEntradaRara() {
-        // Nada que cambie la forma de la dirección: ni barras, ni & ni ?.
-        let u = yahooChartURL(symbol: "X/../Y?z=1&w=2#f").absoluteString
-        #expect(u.hasPrefix("https://query1.finance.yahoo.com/v8/finance/chart/"))
-        #expect(u.hasSuffix("?range=5d&interval=1d"))
-        #expect(u.filter { $0 == "?" }.count == 1)
-        #expect(u.filter { $0 == "&" }.count == 1)
-        #expect(yahooSearchURL(isin: "A&b=1").absoluteString.filter { $0 == "&" }.count == 2)
-        #expect(yahooChartURL(symbol: "").host == "query1.finance.yahoo.com")
+    @Test func urlsConEntradaRaraDanNil() {
+        // Nada que cambie la forma de la dirección y nunca una dirección de relleno.
+        for raw in ["A B", "X/../Y?z=1&w=2#f", "", "eunl.de", "A&b", String(repeating: "A", count: 21), "Ñ", "A%2FB"] {
+            #expect(yahooChartURL(symbol: raw) == nil, "\(raw)")
+        }
+        #expect(yahooChartURL(symbol: String(repeating: "A", count: 20)) != nil)
+        for raw in ["A&b=1", "", "ETH", "IE00B4L5Y984", "ie00b4l5y983", "IE00B4L5Y983 "] {
+            #expect(yahooSearchURL(isin: raw) == nil, "\(raw)")
+        }
     }
 
     @Test func busqueda() {
@@ -64,17 +65,72 @@ private func json(_ s: String) -> Data { Data(s.utf8) }
         #expect(yahooSearchCandidates(json(#"{"quotes":[\#(many)]}"#)).count <= 20)
     }
 
+    private func quote(_ data: Data) -> Quote? {
+        if case .success(let q) = yahooChartQuote(data, fetchedAt: fetched) { return q }
+        return nil
+    }
+
     @Test func grafico() throws {
-        let a = json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.0,"chartPreviousClose":108.5}}],"error":null}}"#)
-        let got = try #require(yahooChartQuote(a, fetchedAt: fetched))
-        #expect(got.quote == Quote(priceEUR: 110, previousCloseEUR: Decimal(string: "108.5"), fetchedAt: fetched))
-        #expect(got.currency == "EUR")
-        let b = json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.0,"previousClose":107.25}}]}}"#)
-        #expect(yahooChartQuote(b, fetchedAt: fetched)?.quote.previousCloseEUR == Decimal(string: "107.25"))
-        let c = json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.0}}]}}"#)
-        #expect(yahooChartQuote(c, fetchedAt: fetched)?.quote.previousCloseEUR == nil)
-        #expect(yahooChartQuote(json(#"{"chart":{"result":null,"error":{"code":"Not Found"}}}"#), fetchedAt: fetched) == nil)
-        #expect(yahooChartQuote(json("{ esto no es json"), fetchedAt: fetched) == nil)
+        let a = json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.0,"previousClose":108.5}}],"error":null}}"#)
+        #expect(try #require(quote(a)) == Quote(priceEUR: 110, previousCloseEUR: Decimal(string: "108.5"), fetchedAt: fetched))
+        let c = json(#"{"chart":{"result":[{"meta":{"currency":"eur","regularMarketPrice":110.0}}]}}"#)
+        #expect(quote(c)?.previousCloseEUR == nil)
+        #expect(quote(c)?.priceEUR == 110)
+        #expect(yahooChartQuote(json(#"{"chart":{"result":null,"error":{"code":"Not Found"}}}"#), fetchedAt: fetched) == .failure(.unreadable))
+        #expect(yahooChartQuote(json("{ esto no es json"), fetchedAt: fetched) == .failure(.unreadable))
+    }
+
+    @Test func chartPreviousCloseNuncaEsAyer() {
+        // Con range=5d ese campo es el cierre de antes del rango: no se usa jamás.
+        let d = json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.0,"chartPreviousClose":90.0}}]}}"#)
+        #expect(quote(d)?.previousCloseEUR == nil)
+        let e = json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.0,"chartPreviousClose":90.0,"previousClose":107.0}}]}}"#)
+        #expect(quote(e)?.previousCloseEUR == 107)
+    }
+
+    /// Cinco barras de Fráncfort (UTC+1): vie 13, lun 16, mar 17, mié 18 (el jueves 19 no hubo barra) y vie 20 (hoy, en curso).
+    private func series(closes: String, marketTime: Int = 1_795_186_800, extra: String = "") -> Data {
+        json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.5,"gmtoffset":3600,"regularMarketTime":\#(marketTime)\#(extra)},"#
+            + #""timestamp":[1794556800,1794816000,1794902400,1794988800,1795161600],"#
+            + #""indicators":{"quote":[{"close":\#(closes)}]}}]}}"#)
+    }
+
+    @Test func cierreAnteriorDeLaSerie() throws {
+        let q = try #require(quote(series(closes: "[100.0,null,102.0,103.25,110.5]", extra: #","chartPreviousClose":50.0,"previousClose":1.0"#)))
+        #expect(q.previousCloseEUR == Decimal(string: "103.25"))
+        #expect(q.marketTime == Date(timeIntervalSince1970: 1_795_186_800))
+        #expect(q.priceEUR == Decimal(string: "110.5"))
+        // El último cierre previo es nulo: se salta hasta el anterior no nulo.
+        #expect(quote(series(closes: "[100.0,null,102.0,null,110.5]"))?.previousCloseEUR == 102)
+        // Solo hay un día previo con cierre, el primero.
+        #expect(quote(series(closes: "[100.0,null,null,null,110.5]"))?.previousCloseEUR == 100)
+    }
+
+    @Test func cierreAnteriorSinSerieUtil() {
+        // Serie sin cierres válidos: cae a previousClose; sin él, no hay cambio de hoy.
+        #expect(quote(series(closes: "[null,null,null,null,110.5]", extra: #","previousClose":104.0"#))?.previousCloseEUR == 104)
+        #expect(quote(series(closes: "[null,null,null,null,110.5]", extra: #","chartPreviousClose":50.0"#))?.previousCloseEUR == nil)
+        // Serie rota o de otro tipo: ignorada.
+        #expect(quote(series(closes: #""x""#, extra: #","previousClose":104.0"#))?.previousCloseEUR == 104)
+    }
+
+    @Test func barraDeHoyNoEsElCierreAnterior() {
+        // El día de negociación se mide en la zona del mercado: la barra del 20 es de hoy.
+        #expect(quote(series(closes: "[100.0,101.0,102.0,103.0,109.0]"))?.previousCloseEUR == 103)
+        // Si el mercado aún marca el jueves 19 (festivo, sin barra), el cierre anterior sigue siendo el del miércoles 18.
+        #expect(quote(series(closes: "[100.0,101.0,102.0,103.0,109.0]", marketTime: 1_795_075_200))?.previousCloseEUR == 103)
+    }
+
+    @Test func divisaQueNoEsEuroNoSeUsa() {
+        let usd = json(#"{"chart":{"result":[{"meta":{"currency":"USD","regularMarketPrice":110.0,"previousClose":108.0}}]}}"#)
+        #expect(yahooChartQuote(usd, fetchedAt: fetched) == .failure(.notEUR(currency: "USD")))
+        let pence = json(#"{"chart":{"result":[{"meta":{"currency":"GBp","regularMarketPrice":8250.0}}]}}"#)
+        #expect(yahooChartQuote(pence, fetchedAt: fetched) == .failure(.notEUR(currency: "GBp")))
+        let gbp = json(#"{"chart":{"result":[{"meta":{"currency":"GBP","regularMarketPrice":82.5}}]}}"#)
+        #expect(yahooChartQuote(gbp, fetchedAt: fetched) == .failure(.notEUR(currency: "GBP")))
+        #expect(PriceFailure.notEUR(currency: "USD").message == "precio no disponible en euros")
+        let eur = json(#"{"chart":{"result":[{"meta":{"currency":"Eur","regularMarketPrice":110.0}}]}}"#)
+        #expect(quote(eur)?.priceEUR == 110)
     }
 
     @Test func graficoHostil() {
@@ -87,15 +143,33 @@ private func json(_ s: String) -> Data { Data(s.utf8) }
             #"{"currency":"EUR","regularMarketPrice":1e999}"#, #"{"currency":"EUR","regularMarketPrice":[1]}"#,
             #"{"currency":5,"regularMarketPrice":5}"#, "[]", "null", "5",
         ]
-        for m in bad { #expect(yahooChartQuote(meta(m), fetchedAt: fetched) == nil, "\(m)") }
+        for m in bad { #expect(quote(meta(m)) == nil, "\(m)") }
         for raw in [#"{"chart":{"result":[]}}"#, #"{"chart":null}"#, #"{"chart":[]}"#, "[]", "", "null", #"{"chart":{"result":[null]}}"#,
                     #"{"chart":{"result":[{"meta":null}]}}"#, #"{"chart":{"result":"x"}}"#] {
-            #expect(yahooChartQuote(json(raw), fetchedAt: fetched) == nil, "\(raw)")
+            #expect(quote(json(raw)) == nil, "\(raw)")
         }
         // Un cierre anterior absurdo no tumba el precio: se descarta solo ese campo.
-        let q = yahooChartQuote(meta(#"{"currency":"EUR","regularMarketPrice":10,"chartPreviousClose":"x","previousClose":-1}"#), fetchedAt: fetched)
-        #expect(q?.quote.priceEUR == 10)
-        #expect(q?.quote.previousCloseEUR == nil)
+        let q = quote(meta(#"{"currency":"EUR","regularMarketPrice":10,"previousClose":-1,"regularMarketTime":"x"}"#))
+        #expect(q?.priceEUR == 10)
+        #expect(q?.previousCloseEUR == nil)
+        #expect(q?.marketTime == nil)
+        // Marca de tiempo y series hostiles: se ignoran sin tumbar el precio.
+        let h = json(#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":10,"regularMarketTime":1795186800},"timestamp":"x","indicators":[1]}]}}"#)
+        #expect(quote(h)?.priceEUR == 10)
+        #expect(quote(h)?.previousCloseEUR == nil)
+    }
+
+    @Test func horaDeMercadoDelPrecioViejo() throws {
+        // Consultado ahora, pero la hora del mercado es de hace seis días: la cartera lo marca como viejo.
+        let now = Date(timeIntervalSince1970: 1_795_186_800)
+        let old = Int(now.timeIntervalSince1970) - 6 * 86_400
+        let q = try #require(quote(series(closes: "[100.0,null,102.0,103.25,110.5]", marketTime: old)))
+        #expect(q.marketTime == Date(timeIntervalSince1970: TimeInterval(old)))
+        var p = Portfolio()
+        p.transactions = [InvestmentTransaction(id: "b", date: now.addingTimeInterval(-9_000_000), instrument: "AA", name: "A",
+                                                assetClass: nil, shares: 1, cashCents: -10_000, priceEUR: nil)]
+        p.quotes["AA"] = Quote(priceEUR: q.priceEUR, previousCloseEUR: q.previousCloseEUR, fetchedAt: now, marketTime: q.marketTime)
+        #expect(portfolioSummary(p, now: now)?.hasStalePrice == true)
     }
 
     @Test func cripto() {

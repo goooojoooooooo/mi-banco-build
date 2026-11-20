@@ -145,10 +145,14 @@ final class Plan3TapTests: XCTestCase {
         field.tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "100\n")
         XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].waitForExistence(timeout: 2))
+        // Guardado: al salir y volver, el campo enseña el límite (formateado) y no hay error.
         goBack()
         scrollTo(link)
-        let summary = NSPredicate(format: "label CONTAINS %@", "2 categorías")
-        XCTAssertTrue(waitFor(summary, link, timeout: 5))
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "100"), field, timeout: 10), "El límite no se guardó")
+        XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].exists)
     }
 
     func testSubscriptionsHideAndShowAgain() throws {

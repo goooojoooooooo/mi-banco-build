@@ -35,6 +35,21 @@ struct MiBancoApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-MiBancoSelfTest") {
+                BankingSelfTestView()
+                    .preferredColorScheme(.dark)
+            } else {
+                content
+            }
+            #else
+            content
+            #endif
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
             ZStack {
                 RootView(model: model, isLocked: showsLock, revealToken: revealToken)
                     .accessibilityHidden(showsLock)
@@ -102,7 +117,6 @@ struct MiBancoApp: App {
                 }
             }
         }
-    }
 
     /// El bloqueo escribe `locked = false` dentro de su animación de salida: en esa misma transacción se da por
     /// terminado el arranque, así el telón nunca asoma un instante entre el bloqueo y Inicio.

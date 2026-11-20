@@ -127,8 +127,6 @@ public struct EnableBankingClient: Sendable {
             response = try await transport.send(request)
         } catch is CancellationError {
             throw CancellationError()
-        } catch let error as URLError where error.code == .cancelled {
-            throw CancellationError()
         } catch {
             throw BankingClientError.offline
         }
@@ -157,9 +155,8 @@ public struct EnableBankingClient: Sendable {
 
     /// Escapa para ruta y consulta: solo quedan letras, cifras y `-._~`.
     private func escape(_ s: String) -> String {
-        // Conjunto ASCII explícito: `alphanumerics` deja pasar letras y cifras no ASCII.
-        let allowed = CharacterSet(charactersIn:
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
         return s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s
     }
 }

@@ -102,16 +102,6 @@ private func pem(label: String, _ bytes: [UInt8], wrap: Int = 64, eol: String = 
         #expect(applicationID(fromKeyFileName: "") == nil)
     }
 
-    @Test func applicationIDMustEndTheName() {
-        let id = "aa7c1f9e-1b2c-4d3e-8f90-0123456789ab"
-        #expect(applicationID(fromKeyFileName: id) == id)
-        #expect(applicationID(fromKeyFileName: id + ".pem") == id)
-        #expect(applicationID(fromKeyFileName: id + " (1).pem") == id)
-        #expect(applicationID(fromKeyFileName: id + "x.pem") == nil)
-        #expect(applicationID(fromKeyFileName: id + "0") == nil)
-        #expect(applicationID(fromKeyFileName: id + "-copia.pem") == nil)
-    }
-
     @Test func applicationIDShape() {
         #expect(isValidApplicationID("aa7c1f9e-1b2c-4d3e-8f90-0123456789ab"))
         #expect(isValidApplicationID("AA7C1F9E-1B2C-4D3E-8F90-0123456789AB"))

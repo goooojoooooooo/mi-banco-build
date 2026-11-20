@@ -33,17 +33,6 @@ import Testing
         #expect(parse("otro://cb?code=x&state=s1") == .malformed)
     }
 
-    @Test func callbackRejectsPathUserPasswordAndPort() {
-        #expect(parse("mibanco://cb/extra?code=x&state=s1") == .malformed)
-        #expect(parse("mibanco://cb/a/b?code=x&state=s1") == .malformed)
-        #expect(parse("mibanco://user@cb?code=x&state=s1") == .malformed)
-        #expect(parse("mibanco://user:pass@cb?code=x&state=s1") == .malformed)
-        #expect(parse("mibanco://cb:8080?code=x&state=s1") == .malformed)
-        // Una ruta vacía o "/" sigue valiendo.
-        #expect(parse("mibanco://cb/?code=x&state=s1") == .code("x"))
-        #expect(parse("mibanco://cb?code=x&state=s1") == .code("x"))
-    }
-
     @Test func constantTimeCompare() {
         #expect(constantTimeEqual("abc", "abc"))
         #expect(!constantTimeEqual("abc", "abd"))

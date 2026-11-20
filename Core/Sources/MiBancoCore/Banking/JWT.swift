@@ -17,9 +17,7 @@ public func base64URL(_ data: Data) -> String {
 /// La vida máxima de un JWT de Enable Banking es 86400 s.
 public func enableBankingJWTSigningInput(appID: String, now: Date, lifetime: TimeInterval) -> String {
     let iat = Int(now.timeIntervalSince1970.rounded(.down))
-    // NaN o infinito no deben tumbar la app: se usa la vida por defecto.
-    let safeLifetime = lifetime.isFinite ? lifetime : 3600
-    let life = Int(min(max(safeLifetime, 1), 86_400))
+    let life = Int(min(max(lifetime, 1), 86_400))
     let header: [String: Any] = ["typ": "JWT", "alg": "RS256", "kid": appID]
     let claims: [String: Any] = [
         "iss": "enablebanking.com", "aud": "api.enablebanking.com", "iat": iat, "exp": iat + life,

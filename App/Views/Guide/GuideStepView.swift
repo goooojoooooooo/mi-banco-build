@@ -76,6 +76,8 @@ struct GuideStepView: View {
             Text("\(track.title) · Paso \(index + 1) de \(steps.count)")
                 .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(Theme.label2)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, Theme.Space.gutter)
                 .accessibilityIdentifier("guide-step-counter")
             HStack(spacing: 6) {
                 ForEach(0..<steps.count, id: \.self) { i in

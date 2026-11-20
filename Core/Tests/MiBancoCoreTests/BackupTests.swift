@@ -154,8 +154,7 @@ private func tempDirectory() -> URL {
         let neg = pay(1250, "Mercadona", nov(19), isShop: true)
         let pos = income(2000, "Nómina", nov(18))
         let csv = movementsCSV(LedgerState(movements: [neg, pos]), now: nov(20), calendar: cal)
-        let rows = csv.components(separatedBy: "
-")
+        let rows = csv.components(separatedBy: "\r\n")
         #expect(rows[1].contains(";20,00;"))
         #expect(rows[2].contains(";-12,50;"))
         #expect(!csv.contains("'-12,50"))

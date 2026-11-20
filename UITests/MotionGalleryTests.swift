@@ -234,7 +234,7 @@ final class MotionGalleryTests: XCTestCase {
         revealWhole(options[0])
         revealWhole(options[2])
         let window = app.windows.firstMatch.frame
-        let frames = options.map(\.frame)
+        let frames = options.map { $0.frame }
         for (i, frame) in frames.enumerated() {
             XCTAssertTrue(window.contains(frame), "Opción \(i) fuera de la pantalla: \(frame)")
             XCTAssertGreaterThanOrEqual(frame.height, 44)

@@ -23,10 +23,12 @@ private let letterCategories: Set<Unicode.GeneralCategory> = [
     .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter,
 ]
 
-/// true si hay alguna letra fuera de la escritura latina (cualquier letra por encima de U+024F: cirílico, griego...). Una
-/// «е» cirílica dentro de «vеnde» engañaría a las listas de palabras: la línea entera se rechaza.
+/// true si, tras descomponer el texto (las tildes pasan a ser marcas aparte), alguna letra no es a-z: cirílico, griego, «đ», «ø»...
+/// Una «е» cirílica o una «đ» dentro de «vеnde» engañarían a las listas de palabras: la línea entera se rechaza.
 func hasNonLatinLetter(_ text: String) -> Bool {
-    withoutFormatCharacters(text).unicodeScalars.contains { $0.value > 0x24F && letterCategories.contains($0.properties.generalCategory) }
+    withoutFormatCharacters(text).decomposedStringWithCanonicalMapping.unicodeScalars.contains {
+        $0.value >= 128 && letterCategories.contains($0.properties.generalCategory)
+    }
 }
 
 /// Las palabras de un texto (solo letras), sin mayúsculas ni tildes.
@@ -43,8 +45,35 @@ func wordReadings(_ text: String) -> [[String]] {
     var joined = clean
     for hyphen in hyphens { joined = joined.replacingOccurrences(of: hyphen, with: "") }
     joined = joined.replacingOccurrences(of: "\r", with: "").replacingOccurrences(of: "\n", with: "")
-    let plain = splitWords(clean), merged = splitWords(joined)
-    return plain == merged ? [plain] : [plain, merged]
+    // Sin ninguna puntuación ni símbolo («v.e.n.d.e», «ve*nde»).
+    var stripped = String.UnicodeScalarView()
+    for scalar in clean.unicodeScalars
+    where !CharacterSet.punctuationCharacters.contains(scalar) && !CharacterSet.symbols.contains(scalar) { stripped.append(scalar) }
+    let plain = splitWords(clean), merged = splitWords(joined), bare = splitWords(String(stripped))
+    var readings: [[String]] = []
+    // Cada lectura, y esa misma con las rachas de letras sueltas pegadas («v e n d e» -> «vende»).
+    for list in [plain, merged, bare] {
+        for candidate in [list, collapseSingleLetters(list)] where !readings.contains(candidate) { readings.append(candidate) }
+    }
+    return readings
+}
+
+/// Pega las rachas de dos o más palabras de una sola letra («v e n d e» -> «vende»).
+private func collapseSingleLetters(_ list: [String]) -> [String] {
+    var out: [String] = []
+    var run: [String] = []
+    func flush() {
+        if run.count >= 2 { out.append(run.joined()) } else { out += run }
+        run = []
+    }
+    for word in list {
+        if word.count == 1 { run.append(word) } else {
+            flush()
+            out.append(word)
+        }
+    }
+    flush()
+    return out
 }
 
 // MARK: Capa (c): vocabulario de inversiones
@@ -53,11 +82,12 @@ func wordReadings(_ text: String) -> [[String]] {
 private let investmentPrefixes = [
     "invers", "invert", "inviert", "invirt", "accion", "cartera", "fondo", "bolsa", "posicion", "exposicion", "beneficio",
     "perdida", "cotiz", "dividend", "valor", "precio", "etf", "cripto", "bitcoin", "broker", "stock", "share", "market", "fund",
-    "portfolio", "profit", "crypto", "asset", "holding", "invest",
+    "portfolio", "profit", "crypto", "asset", "holding", "invest", "bono", "bond", "renta", "rentabil", "ganancia", "gain", "ibex",
+    "nasdaq", "deposito", "tesoro", "rebalanc", "purchase",
 ]
 
-/// «mercado» solo entero: «Mercadona» no es vocabulario de inversiones.
-private let investmentWords: Set<String> = ["mercado", "mercados"]
+/// «mercado», «oro» y «gold» solo enteros: «Mercadona» no es vocabulario de inversiones.
+private let investmentWords: Set<String> = ["mercado", "mercados", "oro", "gold"]
 
 func hasInvestmentVocabulary(_ text: String) -> Bool {
     wordReadings(text).contains { list in
@@ -114,7 +144,7 @@ private func hasAdviceMarker(_ list: [String]) -> Bool {
 private func hasTradeVerb(_ list: [String]) -> Bool {
     for (i, word) in list.enumerated() where tradeNouns.contains(word) {
         if i > 0, determiners.contains(list[i - 1]) { continue }
-        if i == 0, i + 1 < list.count, list[i + 1] == "de" { continue }
+        if i == 0, word == "venta" || word == "ventas", i + 1 < list.count, list[i + 1] == "de" { continue }
         return true
     }
     return false
@@ -169,47 +199,3 @@ public func containsNumber(_ text: String) -> Bool {
     }
 }
 
-/// Lo más largo que puede ser la frase de un modelo.
-let maxModelIntroLength = 300
-
-/// Un texto de un modelo solo se enseña si no está vacío, cabe, no lleva enlaces, NO lleva ningún número (las cifras viven en
-/// la frase de las reglas que se enseña debajo) y no aconseja ni habla de inversiones. Si no, se usa la frase de las reglas.
-/// `facts` no sirve para dar por buena nada: se conserva por compatibilidad con quien llama. Solo `openingLine` es pública.
-func acceptModelIntro(_ text: String, facts: [String]) -> Bool {
-    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, trimmed.count <= maxModelIntroLength else { return false }
-    let lower = trimmed.lowercased()
-    guard !lower.contains("http"), !lower.contains("://"), !lower.contains("www.") else { return false }
-    return !containsNumber(trimmed) && !containsAdvice(trimmed)
-}
-
-/// La frase que abre el resumen. Con el modo privado, siempre la de las reglas con los importes tapados (el texto de un modelo
-/// nunca sale en ese modo). Si no, el texto del modelo cuando existe y pasa las dos barreras (cifras y consejos); si no, la de
-/// las reglas.
-public func openingLine(briefing: Briefing, modelText: String?, facts: [String], privateMode: Bool) -> String {
-    if privateMode { return render(briefing.headline, .masked) }
-    if let modelText, acceptModelIntro(modelText, facts: facts) {
-        return modelText.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    return render(briefing.headline, .plain)
-}
-
-public let briefingModelInstructions =
-    "Eres el asistente de Mi Banco que saluda al dueño por la mañana. Escribe el saludo en una o dos frases, de tú, con un tono cálido y tranquilo. No escribas ninguna cifra ni ningún número, ni con dígitos ni con letras: las cifras se enseñan debajo. Nunca digas qué comprar, vender ni cuánto invertir. No añadas nada que no esté en los datos."
-
-/// Lo más largo que puede ser el mensaje al modelo y cuántos hechos lleva.
-private let maxPromptLength = 2500
-private let maxPromptFacts = 25
-
-/// El mensaje al modelo. Se arma con los hechos SIN las líneas de inversiones: el modelo nunca se entera de ellas.
-public func briefingModelPrompt(_ briefing: Briefing) -> String {
-    let head = "Datos:\n"
-    let tail = "\nEscribe el saludo."
-    var body = ""
-    for fact in briefingModelFacts(briefing).prefix(maxPromptFacts) {
-        let next = (body.isEmpty ? "" : "\n") + "- " + fact
-        if (head + body + next + tail).count > maxPromptLength { break }
-        body += next
-    }
-    return head + body + tail
-}

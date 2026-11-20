@@ -54,13 +54,17 @@ public struct Briefing: Equatable, Sendable {
     public let sections: [BriefingSection]
     public let tip: BriefingLine?
     public let isQuiet: Bool
+    /// La situación del día (por reglas) con la que se elige la frase de apertura del catálogo.
+    public let situation: OpeningSituation
 
-    public init(greeting: String, headline: [BriefingPart], sections: [BriefingSection], tip: BriefingLine?, isQuiet: Bool) {
+    public init(greeting: String, headline: [BriefingPart], sections: [BriefingSection], tip: BriefingLine?, isQuiet: Bool,
+                situation: OpeningSituation = .quietDay) {
         self.greeting = greeting
         self.headline = headline
         self.sections = sections
         self.tip = tip
         self.isQuiet = isQuiet
+        self.situation = situation
     }
 }
 
@@ -78,7 +82,12 @@ private let maskDots = "•••"
 /// Un importe escrito en un texto libre («13,99 € dos veces hoy», «20 EUR», «5 euros») o un decimal suelto con coma («13,99»):
 /// cifras con puntos o comas y un € / EUR / euros detrás, o `n,nn`.
 private let writtenAmountPattern =
-    "(?i)(?:€|euros?(?![a-z])|eur(?![a-z]))[ \u{00A0}]?[-+]?[0-9](?:[0-9.,]*[0-9])?|[-+]?[0-9][0-9.,]*[ \u{00A0}]?(?:€|euros?(?![a-z])|eur(?![a-z]))|[-+]?[0-9][0-9.]*,[0-9]{2}(?![0-9])"
+    "(?i)(?:€|(?<![a-z])(?:euros?|eur)(?![a-z]))[ \u{00A0}]?[-+]?[0-9](?:[0-9.,]*[0-9])?|[-+]?[0-9][0-9.,]*[ \u{00A0}]?(?:€|euros?(?![a-z])|eur(?![a-z]))|[-+]?[0-9][0-9.]*,[0-9]{2}(?![0-9])"
+
+/// Un solo signo menos en todo el resumen (U+2212): el que empieza un número negativo.
+private func uniformMinus(_ text: String) -> String {
+    text.hasPrefix("-") ? "\u{2212}" + text.dropFirst() : text
+}
 
 public func render(_ parts: [BriefingPart], _ style: RenderStyle) -> String {
     var out = ""
@@ -89,13 +98,13 @@ public func render(_ parts: [BriefingPart], _ style: RenderStyle) -> String {
         case (.text(let s), .masked):
             out += s.replacingOccurrences(of: writtenAmountPattern, with: maskDots, options: .regularExpression)
         case (.amount(let c), .plain):
-            out += formatEUR(c)
+            out += uniformMinus(formatEUR(c))
         case (.signed(let c), .plain):
-            out += formatSignedEUR(c)
+            out += uniformMinus(formatSignedEUR(c))
         case (.whole(let c), .plain):
-            out += formatEURWhole(c)
+            out += uniformMinus(formatEURWhole(c))
         case (.percentTenths(let t), .plain):
-            out += formatPercentTenths(t, signed: true)
+            out += uniformMinus(formatPercentTenths(t, signed: true))
         case (_, .masked):
             out += maskDots
         }
@@ -327,13 +336,6 @@ private func priceAge(_ date: Date, now: Date, _ calendar: Calendar) -> String {
     }
 }
 
-/// «+2,1 %» / «−1,3 %» (signo menos de verdad, espacio duro antes del %): el cambio de un décimo en décimas.
-private func signedPercent(_ tenths: Int) -> String {
-    let sign = tenths > 0 ? "+" : (tenths < 0 ? "\u{2212}" : "")
-    let n = tenths.magnitude
-    return "\(sign)\(n / 10),\(n % 10)\u{00A0}%"
-}
-
 /// La línea de lo que más subió y más bajó entre las posiciones con precio de mercado del último día de negociación y con
 /// cierre anterior (porcentaje contra ese cierre). Son hechos, sin ningún verbo de acción. Hacen falta al menos dos posiciones;
 /// si la mejor y la peor son la misma o todo está a cero, no hay línea.
@@ -353,19 +355,20 @@ func moversLine(_ s: PortfolioSummary, now: Date, calendar: Calendar) -> Briefin
         if movers[i].tenths < movers[worst].tenths { worst = i }
     }
     guard best != worst, movers[best].tenths != movers[worst].tenths else { return nil }
-    var sentences: [String] = []
     let up = movers[best].tenths > 0, down = movers[worst].tenths < 0
     guard up || down else { return nil }
     let today = dayDistance(from: day, to: now, calendar) <= 0
     var prefix = today ? "" : "En la última sesión (\(weekdayName(day, calendar))), "
-    func phrase(_ label: String, _ mover: (name: String, tenths: Int)) -> String {
-        defer { prefix = "" }
+    var parts: [BriefingPart] = []
+    // El porcentaje va como parte numérica: con el modo privado se tapa igual que en la línea del valor (el nombre se queda).
+    func phrase(_ label: String, _ mover: (name: String, tenths: Int)) {
         let head = prefix.isEmpty ? capitalized(label) : prefix + label
-        return "\(head): \(clippedName(mover.name)) (\(signedPercent(mover.tenths)))."
+        prefix = ""
+        parts += [.text((parts.isEmpty ? "" : " ") + "\(head): \(clippedName(mover.name)) ("), .percentTenths(mover.tenths), .text(").")]
     }
-    if up { sentences.append(phrase("lo que más subió", movers[best])) }
-    if down { sentences.append(phrase("lo que más bajó", movers[worst])) }
-    return BriefingLine(id: "inv-movers", parts: [.text(sentences.joined(separator: " "))], action: .openInvestments)
+    if up { phrase("lo que más subió", movers[best]) }
+    if down { phrase("lo que más bajó", movers[worst]) }
+    return BriefingLine(id: "inv-movers", parts: parts, action: .openInvestments)
 }
 
 /// `valueOnly`: solo la primera línea y los avisos de honestidad (día tranquilo).
@@ -516,22 +519,14 @@ public func makeBriefing(_ input: BriefingInput, calendar: Calendar) -> Briefing
         add(.investments, "Inversiones", investmentLines(investments, now: input.now, calendar: calendar, valueOnly: quiet))
     }
     return Briefing(greeting: greeting(at: input.now, calendar: calendar), headline: headline(input, calendar: calendar),
-                    sections: sections, tip: tipLine(input, calendar: calendar, shortfallOnly: quiet), isQuiet: quiet)
+                    sections: sections, tip: tipLine(input, calendar: calendar, shortfallOnly: quiet), isQuiet: quiet,
+                    situation: openingSituation(for: input, calendar: calendar))
 }
 
-/// Los hechos que se le dan a un modelo: los mismos, SIN la sección de inversiones (valor, cambio, ganancia, edad de precios,
-/// los que más subieron y bajaron): el modelo nunca se entera de ellas.
-func briefingModelFacts(_ briefing: Briefing) -> [String] {
-    var facts = [render(briefing.headline, .plain)]
-    for section in briefing.sections where section.kind != .investments {
-        for line in section.lines { facts.append(render(line.parts, .plain)) }
-    }
-    if let tip = briefing.tip { facts.append(render(tip.parts, .plain)) }
-    return facts
-}
 
-/// Los hechos que puede usar un modelo para redactar: la frase principal, cada línea y el consejo, ya escritos con importes.
-public func briefingFacts(_ briefing: Briefing) -> [String] {
+/// Los hechos de la pantalla (la frase principal, cada línea y el consejo, ya escritos con importes): son SOLO para enseñar o
+/// para pruebas; nunca se le pasan a un modelo.
+func displayFacts(_ briefing: Briefing) -> [String] {
     var facts = [render(briefing.headline, .plain)]
     for section in briefing.sections {
         for line in section.lines { facts.append(render(line.parts, .plain)) }

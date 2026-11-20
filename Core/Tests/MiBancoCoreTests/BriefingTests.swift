@@ -324,13 +324,12 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         let line = lines(b, .investments).first { $0.hasPrefix("Lo que más") } ?? ""
         #expect(!line.isEmpty)
         for action in ["compra", "vende", "mant", "espera", "aprovecha", "recomiend", "conviene", "debes"] {
-            #expect(!line.lowercased().contains(action), "(action)")
+            #expect(!line.lowercased().contains(action), "\(action)")
         }
         #expect(!briefingModelPrompt(b).contains("Lo que más"))
-        #expect(!briefingModelFacts(b).contains { $0.contains("Lo que más") })
-        // Los porcentajes no se tapan con el modo privado de pantalla (no son importes).
+        // Con el modo privado los porcentajes se tapan igual que en la línea del valor; los nombres se quedan.
         let masked = render(b.sections.first { $0.kind == .investments }!.lines[1].parts, .masked)
-        #expect(masked == nb("Lo que más subió: Alfa (+2,1 %). Lo que más bajó: Beta (\u{2212}1,3 %)."))
+        #expect(masked == "Lo que más subió: Alfa (•••). Lo que más bajó: Beta (•••).")
         // La voz normal la lee; la privada no.
         let spoken = spokenBriefing(b, input: input, privateMode: false, calendar: cal)
         #expect(spoken.contains("Lo que más subió: Alfa, más 2,1 por ciento."))
@@ -542,30 +541,14 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
 
     @Test func hechos() {
         let b = makeBriefing(busy(), calendar: cal)
-        let facts = briefingFacts(b)
+        let facts = displayFacts(b)
         #expect(facts.first == render(b.headline, .plain))
         #expect(facts.count == 1 + b.sections.reduce(0) { $0 + $1.lines.count } + 1)
         #expect(facts.last == render(b.tip!.parts, .plain))
     }
 
-    @Test func modeloInventaCifra() {
-        let facts = briefingFacts(makeBriefing(busy(), calendar: cal))
-        // J8: la frase del modelo no lleva ningún número, ni siquiera uno que esté en los hechos.
-        #expect(!acceptModelIntro(nb("Buenos días: ha entrado tu nómina de 1.850,00 € y ayer gastaste 62,45 €."), facts: facts))
-        #expect(acceptModelIntro("Buenos días: ha entrado tu nómina y ayer gastaste algo.", facts: facts))
-        #expect(!acceptModelIntro("Ayer gastaste 63 €.", facts: facts))
-        // Una cifra recortada tampoco es una cifra de los hechos.
-        #expect(!acceptModelIntro("Ayer gastaste 62 €.", facts: facts))
-        #expect(!acceptModelIntro("", facts: facts))
-        #expect(!acceptModelIntro("   \n", facts: facts))
-        #expect(!acceptModelIntro(String(repeating: "a", count: 301), facts: facts))
-        #expect(acceptModelIntro(String(repeating: "a", count: 300), facts: facts))
-        #expect(!acceptModelIntro("Mira http://ejemplo.invalid", facts: facts))
-        #expect(acceptModelIntro("Buenos días, hoy no hay sorpresas.", facts: facts))
-    }
 
     @Test func modeloConConsejo() {
-        let facts = briefingFacts(makeBriefing(busy(), calendar: cal))
         #expect(containsInvestmentAdvice("Te recomiendo comprar más acciones de Apple."))
         #expect(containsInvestmentAdvice("Deberías vender el ETF."))
         #expect(containsInvestmentAdvice("Invierte en oro."))
@@ -574,8 +557,6 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         // Hablar de inversiones con el modelo ya no se admite, digan lo que digan: la frase de las reglas las cuenta.
         #expect(containsInvestmentAdvice("Tus inversiones han subido un 0,4 % hoy."))
         #expect(!containsInvestmentAdvice("Buenos días, hoy no hay sorpresas."))
-        #expect(!acceptModelIntro("Deberías vender el ETF.", facts: facts))
-        #expect(!acceptModelIntro("Invierte en oro, que sube.", facts: facts))
         #expect(investmentAdviceRefusal == "No puedo decirte qué comprar, vender o cuánto invertir: eso solo puede hacerlo un asesor financiero autorizado. Sí puedo contarte cómo van tus inversiones.")
     }
 
@@ -596,7 +577,6 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
     ]) func rechazaConsejos(_ text: String) {
         #expect(containsAdvice(text), "\(text)")
         #expect(containsInvestmentAdvice(text))
-        #expect(!acceptModelIntro(text, facts: []), "\(text)")
     }
 
     @Test(arguments: [
@@ -615,7 +595,6 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         "buenos días 日本",
     ]) func capaNormalizacion(_ text: String) {
         #expect(containsAdvice(text), "\(text)")
-        #expect(!acceptModelIntro(text, facts: []), "\(text)")
     }
 
     @Test func capaNormalizacionPorPartes() {
@@ -657,7 +636,7 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
     /// Capa (e): compra y venta solo como sustantivo tras un determinante.
     @Test(arguments: [
         "compra", "Oye, compra ahora", "mejor compra ya", "si compras hoy", "compras", "venta", "ventas ya", "Hoy: venta", "Dos ventas",
-        "no compra nada", "Compra más",
+        "no compra nada", "Compra más", "compra de ayer",
     ]) func capaCompraVentaVerbo(_ text: String) {
         #expect(hasTradeVerb(text), "\(text)")
         #expect(containsAdvice(text), "\(text)")
@@ -665,7 +644,7 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
 
     @Test(arguments: [
         "tu compra", "tus compras", "la venta", "las ventas", "una compra", "esa venta", "mi compra", "su venta", "de compras",
-        "cada compra", "última compra", "primera venta", "venta de garaje", "compra de ayer",
+        "cada compra", "última compra", "primera venta", "venta de garaje",
     ]) func compraVentaComoSustantivo(_ text: String) {
         #expect(!hasTradeVerb(text), "\(text)")
     }
@@ -681,29 +660,12 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         "buy more", "hold",
     ]) func tablaGrandeRechaza(_ text: String) {
         #expect(containsAdvice(text), "\(text)")
-        #expect(!acceptModelIntro(text, facts: []), "\(text)")
     }
 
     @Test func tablaGrandeAcepta() {
         for text in ["has comprado en Mercadona", "tu compra más cara fue Zara", "venta de garaje"] {
             #expect(!containsAdvice(text), "\(text)")
-            #expect(acceptModelIntro(text, facts: []), "\(text)")
         }
-    }
-
-    @Test func elModeloNoSabeNadaDeInversiones() {
-        var input = busy()
-        input.investments = summary()
-        let b = makeBriefing(input, calendar: cal)
-        #expect(b.sections.contains { $0.kind == .investments })
-        let prompt = briefingModelPrompt(b)
-        for line in lines(b, .investments) { #expect(!prompt.contains(line), "\(line)") }
-        #expect(!prompt.contains("Valen"))
-        #expect(!prompt.contains("Desde la compra"))
-        #expect(!prompt.contains("precios de"))
-        #expect(!briefingModelFacts(b).contains { $0.hasPrefix("Valen") })
-        // Los hechos completos (para la pantalla) sí las llevan.
-        #expect(briefingFacts(b).contains { $0.hasPrefix("Valen") })
     }
 
     // MARK: J16 — más palabras de número
@@ -715,7 +677,6 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         "thirds", "percent", "II", "XIV", "MMXXVI", "Hoy es XII", "ven\u{200B}ti cinco", "do\u{00AD}s", "d\u{200B}os euros",
     ]) func masPalabrasDeNumero(_ text: String) {
         #expect(containsNumber(text), "\(text)")
-        #expect(!acceptModelIntro(text, facts: []), "\(text)")
     }
 
     @Test(arguments: [
@@ -734,7 +695,6 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         "Half of it", "Double", "Cero gastos", "Seven days", "Hoy ٣ pagos", "Ⅳ pagos",
     ]) func rechazaNumeros(_ text: String) {
         #expect(containsNumber(text), "\(text)")
-        #expect(!acceptModelIntro(text, facts: [text]), "\(text)")
     }
 
     @Test(arguments: [
@@ -742,48 +702,6 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         "Ayer fue un día de pocos gastos", "Qué buena mañana",
     ]) func aceptaTextoSinNumeros(_ text: String) {
         #expect(!containsNumber(text), "\(text)")
-        #expect(acceptModelIntro(text, facts: []), "\(text)")
-    }
-
-    // MARK: J9 — la frase de apertura
-
-    @Test func frasesDeApertura() {
-        let b = makeBriefing(busy(), calendar: cal)
-        let facts = briefingFacts(b)
-        let plain = render(b.headline, .plain)
-        let masked = render(b.headline, .masked)
-        #expect(masked != plain)
-        #expect(!masked.contains("€"))
-        let good = "Buenos días, ha entrado tu nómina."
-        // Modo privado: siempre la de las reglas tapada, aunque el modelo diga algo válido.
-        #expect(openingLine(briefing: b, modelText: good, facts: facts, privateMode: true) == masked)
-        #expect(openingLine(briefing: b, modelText: nil, facts: facts, privateMode: true) == masked)
-        // Sin modelo, vacío o rechazado por una barrera: la de las reglas.
-        #expect(openingLine(briefing: b, modelText: nil, facts: facts, privateMode: false) == plain)
-        #expect(openingLine(briefing: b, modelText: "  \n", facts: facts, privateMode: false) == plain)
-        #expect(openingLine(briefing: b, modelText: "Has gastado 62 euros", facts: facts, privateMode: false) == plain)
-        #expect(openingLine(briefing: b, modelText: "Te conviene vender", facts: facts, privateMode: false) == plain)
-        // Texto del modelo válido.
-        #expect(openingLine(briefing: b, modelText: good, facts: facts, privateMode: false) == good)
-    }
-
-    @Test func instrucciones() {
-        #expect(briefingModelInstructions.contains("No escribas ninguna cifra ni ningún número"))
-        #expect(!briefingModelInstructions.contains("Usa solo las cifras"))
-        #expect(briefingModelInstructions.contains("Nunca digas qué comprar, vender ni cuánto invertir"))
-        #expect(briefingModelInstructions.split(whereSeparator: \.isWhitespace).count <= 90)
-        let b = makeBriefing(busy(), calendar: cal)
-        let prompt = briefingModelPrompt(b)
-        #expect(prompt.hasPrefix("Datos:\n- "))
-        #expect(prompt.hasSuffix("\nEscribe el saludo."))
-        #expect(prompt.count <= 2_500)
-        for fact in briefingModelFacts(b) { #expect(prompt.contains("- " + fact)) }
-        // Con muchos hechos se recorta a 25.
-        let many = BriefingInput(now: nov(20, 8, 30), since: nov(19, 22, 10), isFirst: false,
-                                 attention: (0..<40).map { .warning(title: "Aviso \($0)", detail: String(repeating: "x", count: 80)) })
-        let long = briefingModelPrompt(makeBriefing(many, calendar: cal))
-        #expect(long.count <= 2_500)
-        #expect(long.components(separatedBy: "\n- ").count <= 26)
     }
 
     // MARK: Del libro al texto

@@ -177,8 +177,11 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     let ownTransfers = ownTransferIDs(in: state.movements)
     let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
     let twinPairs = probableTwinPairs(in: state.movements, skipping: ownTransfers.union(unconfirmed))
+    // Para saber si una fila del banco ya se contó, la pareja se busca saltando solo los traspasos: un capturado ya «sin
+    // confirmar» (llegó la fila 7-8 días tarde) sigue siendo la pareja de esa fila.
+    let countedPairs = probableTwinPairs(in: state.movements, skipping: ownTransfers)
     let capturesByID = Dictionary(state.movements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-    let rowsAlreadyCounted = Set(twinPairs.compactMap { pair in
+    let rowsAlreadyCounted = Set(countedPairs.compactMap { pair in
         capturesByID[pair.captureID].flatMap { knownAt($0) <= since ? pair.rowID : nil }
     })
     func inPeriod(_ m: Movement) -> Bool {

@@ -48,6 +48,12 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 8), "No se ve Gasto")
     }
 
+    /// Espera a que el predicado se cumpla sobre el objeto (XCTWaiter: sin `waitForExpectations`, que no es seguro en Swift 6).
+    private func waitFor(_ predicate: NSPredicate, _ object: Any, timeout: TimeInterval) -> Bool {
+        let exp = XCTNSPredicateExpectation(predicate: predicate, object: object)
+        return XCTWaiter().wait(for: [exp], timeout: timeout) == .completed
+    }
+
     private func goBack() {
         app.navigationBars.buttons.element(boundBy: 0).tap()
     }
@@ -66,14 +72,12 @@ final class Plan3TapTests: XCTestCase {
 
         previous.tap()
         let changed = NSPredicate(format: "label != %@", current)
-        expectation(for: changed, evaluatedWith: month)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(changed, month, timeout: 5))
         XCTAssertTrue(next.isEnabled, "Desde un mes pasado se puede volver")
         XCTAssertFalse(element("gasto.prevision").waitForExistence(timeout: 2), "Un mes pasado no tiene previsión")
 
         next.tap()
-        expectation(for: NSPredicate(format: "label == %@", current), evaluatedWith: month)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", current), month, timeout: 5))
         XCTAssertFalse(next.isEnabled)
     }
 
@@ -123,8 +127,7 @@ final class Plan3TapTests: XCTestCase {
         goBack()
         scrollTo(link)
         let summary = NSPredicate(format: "label CONTAINS %@", "2 categorías")
-        expectation(for: summary, evaluatedWith: link)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(summary, link, timeout: 5))
     }
 
     func testSubscriptionsHideAndShowAgain() throws {
@@ -144,16 +147,14 @@ final class Plan3TapTests: XCTestCase {
         hide.tap()
         let hidden = element("suscripciones.ocultas")
         XCTAssertTrue(hidden.waitForExistence(timeout: 5), "No aparece «Ocultas»")
-        expectation(for: NSPredicate(format: "count == 1"), evaluatedWith: rows)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(NSPredicate(format: "count == 1"), rows, timeout: 5))
 
         hidden.tap()
         let showAgain = app.buttons["suscripciones.volverAMostrar"]
         XCTAssertTrue(showAgain.waitForExistence(timeout: 5))
         showAgain.tap()
         XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 5), "No volvió a Suscripciones")
-        expectation(for: NSPredicate(format: "count == 2"), evaluatedWith: rows)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(NSPredicate(format: "count == 2"), rows, timeout: 5))
     }
 
     // MARK: - Categoría y traspaso en la hoja del movimiento
@@ -173,8 +174,7 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "No se desplegó la rejilla")
         XCTAssertTrue(element("category-apply-merchant").exists, "Falta «Aplicar a todo»")
         tile.tap()
-        expectation(for: NSPredicate(format: "label == %@", "Categoría: Comer fuera"), evaluatedWith: chip)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Comer fuera"), chip, timeout: 5))
         XCTAssertFalse(tile.waitForExistence(timeout: 1), "La rejilla no se plegó")
 
         // Volver a la categoría automática.
@@ -182,16 +182,14 @@ final class Plan3TapTests: XCTestCase {
         let automatic = app.buttons["category-automatic"]
         XCTAssertTrue(automatic.waitForExistence(timeout: 5), "Falta «Volver a la categoría automática»")
         automatic.tap()
-        expectation(for: NSPredicate(format: "label == %@", original), evaluatedWith: chip)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", original), chip, timeout: 5))
 
         // Traspaso entre tus cuentas: la fila de categoría se va y vuelve.
         let transfer = element("own-transfer-toggle")
         scrollTo(transfer, swipes: 2)
         XCTAssertTrue(transfer.waitForExistence(timeout: 5))
         transfer.tap()
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: chip)
-        waitForExpectations(timeout: 5)
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), chip, timeout: 5))
         transfer.tap()
         XCTAssertTrue(chip.waitForExistence(timeout: 5), "La categoría no volvió al apagar el traspaso")
     }
@@ -215,8 +213,7 @@ final class Plan3TapTests: XCTestCase {
             break
         }
         if share.exists { share.swipeDown(velocity: .fast) }
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: share)
-        waitForExpectations(timeout: 8)
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), share, timeout: 8))
     }
 
     func testRestoreSheetCancelAndSlide() throws {
@@ -235,7 +232,6 @@ final class Plan3TapTests: XCTestCase {
         let start = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 28, dy: frame.height / 2))
         let end = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
         start.press(forDuration: 0.1, thenDragTo: end)
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: slide)
-        waitForExpectations(timeout: 10)
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), slide, timeout: 10))
     }
 }

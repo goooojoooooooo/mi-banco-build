@@ -13,6 +13,15 @@ struct MovementDetailSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var entrance = Entrance()
 
+    /// Solo en la demo de capturas con la hoja abierta por argumento (la fase de escena parpadea en el simulador de CI).
+    private var demoKeepsVisible: Bool {
+        #if DEBUG
+        return DemoMode.isActive && DemoMode.opensDetail
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         Group {
             if let movement = model.movement(id) {
@@ -25,7 +34,7 @@ struct MovementDetailSheet: View {
         .environment(\.entrance, entrance)
         // Segunda línea de defensa (la primera: RootView cierra la hoja): fuera de primer plano, la hoja es negra.
         .overlay {
-            if scenePhase != .active {
+            if scenePhase != .active && !demoKeepsVisible {
                 Theme.canvas
                     .ignoresSafeArea()
                     .accessibilityHidden(true)

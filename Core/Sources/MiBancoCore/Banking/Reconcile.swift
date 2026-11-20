@@ -82,10 +82,8 @@ extension Ledger {
                let i = best(records: r, calendar: calendar, among: { m in
                    m.bankStatus == .pending && m.bankRef != nil && m.bankRef != r.ref && !batchRefs.contains(m.bankRef ?? "")
                }) {
-                if holdPendingFlips {
-                    report.unchanged += 1
-                    continue
-                }
+                // Sin lectura nueva el apunte no se aplica (ni se cuenta como nada): lo hará la siguiente consulta.
+                if holdPendingFlips { continue }
                 state.movements[i].bankRef = r.ref
                 state.movements[i].bankStatus = .booked
                 _ = applyName(r.merchant, to: i)

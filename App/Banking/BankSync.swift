@@ -90,10 +90,12 @@ actor BankSync {
     private func runBanks(_ banks: [BankID], trigger: SyncTrigger) async -> [BankID: SyncOutcome] {
         let store = SharedStore.make()
         var results: [BankID: SyncOutcome] = [:]
-        var links = (try? store.load().links) ?? [:]
+        let loaded = (try? store.load()) ?? LedgerState()
+        var links = loaded.links
         let calendar = bankingCalendar
         let plans = banksToFetch(
-            links: links.filter { banks.contains($0.key) }, trigger: trigger, now: Date(), calendar: calendar)
+            links: links.filter { banks.contains($0.key) }, trigger: trigger, now: Date(), calendar: calendar,
+            oldestPending: oldestPending(in: loaded))
         let planned = Dictionary(uniqueKeysWithValues: plans.map { ($0.bank, $0) })
 
         for bank in banks {
@@ -106,8 +108,11 @@ actor BankSync {
                 continue
             }
             // El libro puede haber cambiado mientras iban los bancos anteriores: se decide otra vez con lo vivo.
-            links = (try? store.load().links) ?? links
-            let decision = SyncPolicy.decide(links[bank], trigger: trigger, now: Date(), calendar: calendar)
+            let live = (try? store.load()) ?? loaded
+            links = live.links
+            let decision = SyncPolicy.decide(
+                links[bank], trigger: trigger, now: Date(), calendar: calendar,
+                oldestPending: Ledger(state: live).oldestPendingBankRow(bank))
             guard case let .fetch(dateFrom, strategy) = decision else {
                 if case let .skip(reason) = decision { results[bank] = .skipped(reason) }
                 continue
@@ -197,6 +202,13 @@ actor BankSync {
 
     /// Si mientras tanto hubo una reconexión o renovación, el fallo es de la sesión vieja: no se anota, no se borra la
     /// sesión nueva del Llavero y no hay resultado (decide Core: `syncFailureAction`).
+    private func oldestPending(in state: LedgerState) -> [BankID: Date] {
+        let ledger = Ledger(state: state)
+        var out: [BankID: Date] = [:]
+        for bank in BankID.allCases { if let date = ledger.oldestPendingBankRow(bank) { out[bank] = date } }
+        return out
+    }
+
     private static func sessionReadFailure(_ error: Error) -> SessionReadFailure {
         if let keychain = error as? KeychainError, case .status(let code) = keychain, code == errSecInteractionNotAllowed {
             return .deviceLocked

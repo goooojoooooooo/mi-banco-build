@@ -23,7 +23,7 @@ public enum SyncPolicy {
     public static let firstHistoryDays = 365
 
     public static func decide(
-        _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar
+        _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar, oldestPending: Date? = nil
     ) -> SyncDecision {
         guard let link else { return .skip(.notConnected) }
         if now >= link.consentValidUntil || link.problem == .consentExpired || link.problem == .keyRejected {
@@ -47,7 +47,14 @@ public enum SyncPolicy {
         }
         let base = link.lastSuccessAt.map { calendar.startOfDay(for: $0) }
             ?? dayStart(daysBefore: firstHistoryDays, of: now, calendar)
-        let from = calendar.date(byAdding: .day, value: -overlapDays, to: base) ?? base
+        var from = calendar.date(byAdding: .day, value: -overlapDays, to: base) ?? base
+        // La consulta llega siempre hasta el pendiente más antiguo (sin pasar del máximo): así su registro apuntado
+        // vuelve en el lote y un pendiente no se da por desaparecido solo porque la ventana avanzó.
+        if let oldestPending {
+            let floor = dayStart(daysBefore: firstHistoryDays, of: now, calendar)
+            let reach = max(calendar.startOfDay(for: oldestPending), floor)
+            if reach < from { from = reach }
+        }
         return .fetch(dateFrom: from, strategy: link.historyLoaded ? .standard : .longest)
     }
 
@@ -114,10 +121,12 @@ public struct BankFetchPlan: Equatable, Sendable {
 
 /// Bancos a consultar ahora, en orden estable (el de `BankID.allCases`). La app solo ejecuta esta lista.
 public func banksToFetch(
-    links: [BankID: BankLinkInfo], trigger: SyncTrigger, now: Date, calendar: Calendar
+    links: [BankID: BankLinkInfo], trigger: SyncTrigger, now: Date, calendar: Calendar,
+    oldestPending: [BankID: Date] = [:]
 ) -> [BankFetchPlan] {
     BankID.allCases.compactMap { bank in
-        guard case let .fetch(dateFrom, strategy) = SyncPolicy.decide(links[bank], trigger: trigger, now: now, calendar: calendar)
+        guard case let .fetch(dateFrom, strategy) = SyncPolicy.decide(
+            links[bank], trigger: trigger, now: now, calendar: calendar, oldestPending: oldestPending[bank])
         else { return nil }
         return BankFetchPlan(bank: bank, dateFrom: dateFrom, strategy: strategy)
     }

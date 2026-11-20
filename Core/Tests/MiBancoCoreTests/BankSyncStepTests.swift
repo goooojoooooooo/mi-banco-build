@@ -249,7 +249,7 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
 
     @Test func holdThatDisappearsFromCompleteFetchStopsCounting() {
         var l = Ledger(state: LedgerState(links: [.rev: link()]))
-        let from = iso("2026-11-13T00:00:00Z")
+        let from = iso("2026-11-01T00:00:00Z")
         let first = BalanceReading(cents: 10_000, at: iso("2026-11-20T08:59:00Z"), kind: .booked)
         _ = l.applyBankFetch(bank: .rev, records: [record("hold", cents: -5000, status: .pending, day: "2026-11-10T12:00:00Z")],
                              balance: first, dateFrom: from, complete: true, fetchedAt: iso("2026-11-20T09:00:00Z"), calendar: cal)
@@ -390,5 +390,182 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         struct LocalError: Error {}
         #expect(!isBankFailure(LocalError()))
         #expect(!isBankFailure(CancellationError()))
+    }
+
+    // MARK: R46 gemelo del pendiente
+
+    private func bankRow(_ cents: Int, _ status: BankStatus, date: String, imported: String, merchant: String? = "Cafe",
+                         ref: String) -> Movement {
+        Movement(bank: .rev, amountCents: cents, merchant: merchant, kind: .payment, source: .bank, date: iso(date),
+                 bankRef: ref, bankStatus: status, importedAt: iso(imported), dayOnly: true)
+    }
+
+    @Test func yesterdaysBookedRowIsNotTheTwinOfTodaysPending() {
+        let booked = bankRow(-240, .booked, date: "2026-11-19T12:00:00Z", imported: "2026-11-19T18:00:00Z", ref: "b")
+        let pending = bankRow(-240, .pending, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T08:00:00Z", ref: "p")
+        #expect(ledger(reading: bookedReading, [booked, pending]).balance(.rev)?.cents == 9_760)
+    }
+
+    @Test func yesterdaysBookedRowSeenInTheSameFetchIsNotATwinEither() {
+        let booked = bankRow(-240, .booked, date: "2026-11-19T12:00:00Z", imported: "2026-11-20T13:00:00Z", ref: "b")
+        let pending = bankRow(-240, .pending, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T13:00:00Z", ref: "p")
+        #expect(ledger(reading: bookedReading, [booked, pending]).balance(.rev)?.cents == 9_760)
+    }
+
+    @Test func bookedRowFirstSeenBeforeThePendingIsNotItsTwin() {
+        let booked = bankRow(-240, .booked, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T07:00:00Z", ref: "b")
+        let pending = bankRow(-240, .pending, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T08:00:00Z", ref: "p")
+        #expect(ledger(reading: bookedReading, [booked, pending]).balance(.rev)?.cents == 9_760)
+    }
+
+    @Test func differentMerchantIsNotATwinButAccentsAndCaseFold() {
+        let booked = bankRow(-240, .booked, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T13:00:00Z", merchant: "CAFÉ", ref: "b")
+        let other = bankRow(-240, .pending, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T08:00:00Z", merchant: "Taxi", ref: "p")
+        #expect(ledger(reading: bookedReading, [booked, other]).balance(.rev)?.cents == 9_760)
+        let same = bankRow(-240, .pending, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T08:00:00Z", merchant: "cafe", ref: "p2")
+        #expect(ledger(reading: bookedReading, [booked, same]).balance(.rev)?.cents == 10_000)
+    }
+
+    @Test func twoPendingRowsOneBookedTwinTwinsExactlyOne() {
+        let p1 = bankRow(-240, .pending, date: "2026-11-20T12:00:00Z", imported: "2026-11-20T08:00:00Z", ref: "p1")
+        let p2 = bankRow(-240, .pending, date: "2026-11-20T12:30:00Z", imported: "2026-11-20T08:00:00Z", ref: "p2")
+        let booked = bankRow(-240, .booked, date: "2026-11-20T12:10:00Z", imported: "2026-11-20T12:50:00Z", ref: "b")
+        let twinned = Ledger.twinnedPending([p1, p2, booked], bank: .rev, base: bookedReading)
+        #expect(twinned == [p1.id])
+        #expect(ledger(reading: bookedReading, [p1, p2, booked]).balance(.rev)?.cents == 9_760)
+    }
+
+    // MARK: R47 ventana de la consulta
+
+    private func day(_ d: Int, _ time: String = "13:00:00") -> Date {
+        iso("2026-11-" + (d < 10 ? "0\(d)" : "\(d)") + "T" + time + "Z")
+    }
+
+    @Test func fetchWindowReachesTheOldestPendingRow() {
+        var l = link()
+        l.lastSuccessAt = iso("2026-11-19T10:00:00Z")
+        let now = iso("2026-11-20T12:00:00Z")
+        func from(_ pending: Date?) -> Date? {
+            if case let .fetch(dateFrom, _) = SyncPolicy.decide(l, trigger: .appOpen, now: now, calendar: cal, oldestPending: pending) {
+                return dateFrom
+            }
+            return nil
+        }
+        let usual = from(nil)
+        #expect(from(iso("2026-11-03T12:00:00Z")) == iso("2026-11-02T23:00:00Z"))
+        // Un pendiente más reciente que la ventana habitual no la cambia.
+        #expect(from(iso("2026-11-18T12:00:00Z")) == usual)
+        // Nunca más atrás del máximo de la política.
+        let floor: Date? = {
+            if case let .fetch(dateFrom, _) = SyncPolicy.decide(l, trigger: .afterConnect, now: now, calendar: cal) { return dateFrom }
+            return nil
+        }()
+        #expect(from(iso("2024-01-01T12:00:00Z")) == floor)
+        #expect(banksToFetch(links: [.rev: l], trigger: .appOpen, now: now, calendar: cal,
+                             oldestPending: [.rev: iso("2026-11-03T12:00:00Z")]).first?.dateFrom == iso("2026-11-02T23:00:00Z"))
+    }
+
+    @Test func heldFlipSurvivesNineDaysWithoutAReading() {
+        let capture = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .notification,
+                               date: iso("2026-11-01T11:30:00Z"))
+        var l = Ledger(state: LedgerState(movements: [capture], links: [.rev: link()]))
+        func pendingRecord(_ status: BankStatus) -> BankRecord {
+            record("p", cents: -1250, status: status, day: "2026-11-01T12:00:00Z")
+        }
+        // Día 1: el pago está pendiente y la lectura es de solo contabilizado.
+        _ = l.applyBankFetch(
+            bank: .rev, records: [pendingRecord(.pending)],
+            balance: BalanceReading(cents: 10_000, at: day(1, "12:59:00"), kind: .booked),
+            dateFrom: iso("2026-10-01T00:00:00Z"), complete: true, fetchedAt: day(1), calendar: cal)
+        #expect(l.balance(.rev)?.cents == 8_750)
+        // Días 2 a 9: el banco ya lo da apuntado pero no hay lectura adoptable: se sostiene.
+        for d in 2...9 {
+            _ = l.applyBankFetch(bank: .rev, records: [pendingRecord(.booked)], balance: nil,
+                                 dateFrom: iso("2026-10-01T00:00:00Z"), complete: true, fetchedAt: day(d), calendar: cal)
+        }
+        #expect(l.state.movements.first?.bankStatus == .pending)
+        #expect(l.balance(.rev)?.cents == 8_750)
+        // Día 10: la ventana llega hasta el pendiente más antiguo, así que su registro apuntado vuelve en el lote.
+        let now = day(10)
+        guard case let .fetch(dateFrom, _) = SyncPolicy.decide(
+            l.state.links[.rev], trigger: .appOpen, now: now, calendar: cal, oldestPending: l.oldestPendingBankRow(.rev))
+        else { Issue.record("debía consultar"); return }
+        let batch = [pendingRecord(.booked)].filter { $0.timing.date >= dateFrom }
+        _ = l.applyBankFetch(bank: .rev, records: batch,
+                             balance: BalanceReading(cents: 8_750, at: day(10, "12:59:00"), kind: .booked),
+                             dateFrom: dateFrom, complete: true, fetchedAt: now, calendar: cal)
+        #expect(l.state.movements.count == 1)
+        let row = l.state.movements.first
+        #expect(row?.source == .notification)
+        #expect(row?.bankRef == "p")
+        #expect(row?.bankStatus == .booked)
+        #expect(l.balance(.rev)?.cents == 8_750)
+    }
+
+    @Test func pendingRowOlderThanTheWindowIsKeptButDoesNotCount() {
+        let old = Movement(bank: .rev, amountCents: -5000, merchant: "Hotel", kind: .payment, source: .bank,
+                           date: iso("2025-01-01T12:00:00Z"), bankRef: "old", bankStatus: .pending,
+                           importedAt: iso("2025-01-01T12:00:00Z"))
+        var l = Ledger(state: LedgerState(movements: [old], links: [.rev: link()]))
+        let from = iso("2025-11-20T00:00:00Z")
+        _ = l.applyBankFetch(bank: .rev, records: [], balance: BalanceReading(cents: 10_000, at: iso("2026-11-20T12:59:00Z"), kind: .booked),
+                             dateFrom: from, complete: true, fetchedAt: fetched, calendar: cal)
+        #expect(l.state.movements.count == 1)
+        #expect(l.balance(.rev)?.cents == 10_000)
+    }
+
+    // MARK: R48 saldo de cierre
+
+    private func closing(_ reference: String?, change: String? = nil) -> [EBBalance] {
+        [EBBalance(balanceAmount: EBAmount(currency: "EUR", amount: "100.00"), balanceType: "CLBD",
+                   lastChangeDateTime: change, referenceDate: reference)]
+    }
+
+    @Test func closingBalanceOfYesterdayIsStampedAtTheEndOfThatDay() {
+        let fetchedAt = iso("2026-11-20T10:00:00Z")
+        let reading = chooseBalanceReading(closing("2026-11-19"), fetchedAt: fetchedAt)
+        #expect(reading?.at == iso("2026-11-19T23:00:00Z"))
+        let payment = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .notification,
+                               date: iso("2026-11-20T08:00:00Z"))
+        var l = Ledger(state: LedgerState(movements: [payment], links: [.rev: link()]))
+        _ = l.applyBankFetch(bank: .rev, records: [], balance: reading, dateFrom: iso("2026-11-13T00:00:00Z"), complete: true,
+                             fetchedAt: fetchedAt, calendar: cal)
+        #expect(l.balance(.rev)?.cents == 8_750)
+    }
+
+    @Test func sameClosingBalanceFetchedTwiceIsAdoptedOnce() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        let from = iso("2026-11-13T00:00:00Z")
+        let t1 = iso("2026-11-20T10:00:00Z"), t2 = iso("2026-11-20T10:30:00Z")
+        let first = l.applyBankFetch(bank: .rev, records: [], balance: chooseBalanceReading(closing("2026-11-19"), fetchedAt: t1),
+                                     dateFrom: from, complete: true, fetchedAt: t1, calendar: cal)
+        let second = l.applyBankFetch(bank: .rev, records: [], balance: chooseBalanceReading(closing("2026-11-19"), fetchedAt: t2),
+                                      dateFrom: from, complete: true, fetchedAt: t2, calendar: cal)
+        #expect(first?.balanceAdopted == true)
+        #expect(second?.balanceAdopted == false)
+        #expect(l.state.balances[.rev]?.fetchedAt == t1)
+    }
+
+    @Test func closingBalanceOfTodayIsStampedAtTheFetchTime() {
+        let fetchedAt = iso("2026-11-20T10:00:00Z")
+        #expect(chooseBalanceReading(closing("2026-11-20"), fetchedAt: fetchedAt)?.at == fetchedAt)
+        #expect(chooseBalanceReading(closing(nil), fetchedAt: fetchedAt)?.at == fetchedAt)
+        // La hora de cambio, si la hay, manda sobre el día de referencia.
+        #expect(chooseBalanceReading(closing("2026-11-19", change: "2026-11-20T09:00:00Z"), fetchedAt: fetchedAt)?.at
+            == iso("2026-11-20T09:00:00Z"))
+    }
+
+    // MARK: disco
+
+    @Test func failingStoreThrowsAndLeavesTheFileUntouched() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("mb-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let blocker = dir.appendingPathComponent("blocker")
+        try Data("x".utf8).write(to: blocker)
+        // Un archivo donde debería ir la carpeta del libro: guardar falla.
+        let store = FileStore(directory: blocker)
+        #expect(throws: (any Error).self) { _ = try store.update { _ in 1 } }
+        #expect(try Data(contentsOf: blocker) == Data("x".utf8))
     }
 }

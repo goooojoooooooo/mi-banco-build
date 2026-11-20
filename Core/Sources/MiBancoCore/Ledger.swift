@@ -308,10 +308,24 @@ public struct Ledger: Sendable {
     public mutating func adoptBalance(_ bank: BankID, cents: Int, at: Date, origin: BalanceOrigin,
                                       fetchedAt: Date? = nil, countsPending: Bool = false,
                                       forcedEstimate: Bool = false) -> Bool {
-        if let current = state.balances[bank], current.origin != .manual, at < current.setAt { return false }
+        guard Self.isAdoptable(cents: cents, at: at, origin: origin, over: state.balances[bank]) else { return false }
         state.balances[bank] = ManualBalance(cents: cents, setAt: at, origin: origin, fetchedAt: fetchedAt,
                                           countsPending: countsPending, forcedEstimate: forcedEstimate)
         return true
+    }
+
+    /// El ÚNICO criterio de si una lectura sustituye a la actual: la a mano siempre cede; una del banco/aviso/extracto no
+    /// sustituye a otra más nueva ni a la misma lectura del banco repetida (mismo instante e importe).
+    public static func isAdoptable(cents: Int, at: Date, origin: BalanceOrigin, over current: ManualBalance?) -> Bool {
+        guard let current, current.origin != .manual else { return true }
+        if at < current.setAt { return false }
+        if at == current.setAt, origin == .bank, current.origin == .bank, cents == current.cents { return false }
+        return true
+    }
+
+    /// El pendiente del banco más antiguo (la consulta debe llegar hasta él para volver a verlo).
+    public func oldestPendingBankRow(_ bank: BankID) -> Date? {
+        state.movements.filter { $0.bank == bank && $0.bankStatus == .pending && $0.bankRef != nil }.map(\.date).min()
     }
 
     public mutating func setLink(_ bank: BankID, _ info: BankLinkInfo?) {
@@ -561,34 +575,37 @@ public struct Ledger: Sendable {
 
     static let pendingLookback: TimeInterval = 30 * 86_400
 
-    /// Pendientes del banco que ya tienen su pago apuntado (fila propia del banco, mismo importe, el día del apunte entre
-    /// 1 día antes y 5 después, ya conocida cuando se tomó la lectura): una lectura de solo contabilizado ya lo incluye,
-    /// así que el pendiente no debe sumar encima. Uno a uno, el más cercano primero.
+    /// Pendientes del banco que ya tienen su pago apuntado: una lectura de solo contabilizado ya lo incluye, así que el
+    /// pendiente no debe sumar encima. Gemelo = fila propia del banco, mismo banco e importe con signo, que (1) se vio por
+    /// primera vez a la vez o después que el pendiente y no después de la consulta de la lectura, (2) tiene fecha de 0 a 5
+    /// días DESPUÉS del pendiente (nunca antes), (3) tiene el mismo comercio (sin mayúsculas ni tildes) si los dos lo
+    /// traen y (4) no es ya el gemelo de otro pendiente: uno a uno, el más cercano primero.
     static func twinnedPending(_ movements: [Movement], bank: BankID, base: ManualBalance) -> Set<UUID> {
         let known = base.fetchedAt ?? base.setAt
-        var booked = movements.filter {
-            $0.bank == bank && $0.source == .bank && $0.bankStatus == .booked && ($0.importedAt.map { $0 <= known } ?? true)
+        let booked = movements.filter {
+            $0.bank == bank && $0.source == .bank && $0.bankStatus == .booked && ($0.importedAt.map { $0 <= known } ?? false)
         }
-        var out = Set<UUID>()
         let pending = movements.filter { $0.bank == bank && $0.bankStatus == .pending && $0.bankRef != nil }
-            .sorted { $0.date < $1.date }
-        for p in pending {
+        func name(_ m: Movement) -> String { normalizeMerchant(m.merchant ?? "") }
+        var pairs: [(p: Int, b: Int, days: Int, seconds: TimeInterval)] = []
+        for (i, p) in pending.enumerated() {
             let pDay = madridCalendar.startOfDay(for: p.date)
-            var winner: (index: Int, days: Int, seconds: TimeInterval)?
             for (j, b) in booked.enumerated() where b.amountCents == p.amountCents {
-                let days = madridCalendar.dateComponents([.day], from: pDay, to: madridCalendar.startOfDay(for: b.date)).day ?? Int.max
-                guard days >= -1, days <= 5 else { continue }
-                let seconds = abs(b.date.timeIntervalSince(p.date))
-                if let w = winner {
-                    if (abs(days), seconds) < (abs(w.days), w.seconds) { winner = (j, days, seconds) }
-                } else {
-                    winner = (j, days, seconds)
-                }
+                guard let bImported = b.importedAt, bImported >= (p.importedAt ?? .distantPast) else { continue }
+                let days = madridCalendar.dateComponents([.day], from: pDay, to: madridCalendar.startOfDay(for: b.date)).day ?? -1
+                guard days >= 0, days <= 5 else { continue }
+                let pn = name(p), bn = name(b)
+                if !pn.isEmpty, !bn.isEmpty, pn != bn { continue }
+                pairs.append((i, j, days, abs(b.date.timeIntervalSince(p.date))))
             }
-            if let winner {
-                out.insert(p.id)
-                booked.remove(at: winner.index)
-            }
+        }
+        pairs.sort { ($0.days, $0.seconds) < ($1.days, $1.seconds) }
+        var usedPending = Set<Int>(), usedBooked = Set<Int>()
+        var out = Set<UUID>()
+        for pair in pairs where !usedPending.contains(pair.p) && !usedBooked.contains(pair.b) {
+            usedPending.insert(pair.p)
+            usedBooked.insert(pair.b)
+            out.insert(pending[pair.p].id)
         }
         return out
     }

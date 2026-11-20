@@ -165,6 +165,25 @@ private func briefing(_ s: OpeningSituation) -> Briefing {
                         #expect(w != "calma" && !w.hasPrefix("tranquil") && !w.hasPrefix("sobresalto") && !w.hasPrefix("sorpresa"), "\(line)")
                     }
                 }
+                // J26: frases por palabras enteras, con el mismo plegado de mayúsculas y acentos.
+                let phrase = " " + list.joined(separator: " ") + " "
+                // Nada de «a su ritmo»: da por hecho que todo va normal.
+                #expect(!phrase.contains(" a su ritmo "), "\(line)")
+                // Pueden fallar varios bancos, o todos.
+                if s == .bankUnreadable {
+                    #expect(!phrase.hasPrefix(" un banco "), "\(line)")
+                    for forbidden in ["uno de tus bancos", "el resto", "del resto"] { #expect(!phrase.contains(" \(forbidden) "), "\(line)") }
+                }
+                // El periodo no es un día.
+                if s == .busyDay || s == .incomeArrived { #expect(!list.contains("dia") && !list.contains("dias"), "\(line)") }
+                if s == .monthEnd { #expect(!phrase.contains(" ha ido el dia "), "\(line)") }
+                // Con un solo ingreso ya basta.
+                if s == .incomeArrived { #expect(!list.contains("ingresos"), "\(line)") }
+                // Ningún adjetivo de persona: «bienvenid…» solo como «la bienvenida»; «encantad…», nunca.
+                for (i, w) in list.enumerated() where w.hasPrefix("bienvenid") {
+                    #expect(w == "bienvenida" && i > 0 && list[i - 1] == "la", "\(line)")
+                }
+                for w in list { #expect(!w.hasPrefix("encantad"), "\(line)") }
             }
         }
     }

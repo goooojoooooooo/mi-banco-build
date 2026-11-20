@@ -63,7 +63,6 @@ private func quiet() -> BriefingInput {
         investments: summary(pricedAt: nov(20, 17, 35)), freeMoney: FreeMoney(cents: 154_977, daysLeft: 10))
 }
 
-
 /// Las líneas de un resumen ya escritas con importes (solo para las pruebas; el Core ya no las usa para nada).
 private func displayFacts(_ briefing: Briefing) -> [String] {
     var facts = [render(briefing.headline, .plain)]
@@ -73,6 +72,7 @@ private func displayFacts(_ briefing: Briefing) -> [String] {
     if let tip = briefing.tip { facts.append(render(tip.parts, .plain)) }
     return facts
 }
+
 private func lines(_ b: Briefing, _ kind: BriefingSectionKind) -> [String] {
     b.sections.first { $0.kind == kind }?.lines.map { render($0.parts, .plain) } ?? []
 }

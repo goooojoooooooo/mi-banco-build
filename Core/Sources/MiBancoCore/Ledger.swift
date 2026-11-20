@@ -401,18 +401,27 @@ public struct Ledger: Sendable {
 
     /// El ÚNICO criterio de qué movimientos se suman sobre una lectura de saldo (lo usan `balance` y "Te quedaban"):
     /// posteriores a la lectura y capturados (no los del banco: su saldo ya los incluye). Un capturado enlazado a un
-    /// registro del banco cuenta solo si su hora precisa es posterior a la lectura; los de extracto solo cuentan sobre
-    /// un saldo puesto a mano.
+    /// registro del banco o de un extracto cuenta solo si su hora precisa es posterior a la lectura Y su registro no
+    /// se conocía ya cuando se tomó la lectura (`importedAt` nil o posterior): un aviso tardío fusionado en una fila
+    /// que el banco ya había dado está dentro de ese saldo. Los de extracto solo cuentan sobre un saldo puesto a mano.
     public static func countsTowardBalance(_ m: Movement, base: ManualBalance) -> Bool {
-        m.date > base.setAt && isBalanceEligible(m, origin: base.origin)
+        guard m.date > base.setAt, isBalanceEligible(m, origin: base.origin) else { return false }
+        if isLinked(m), let imported = m.importedAt, imported <= base.setAt { return false }
+        return true
     }
 
-    /// La parte del criterio que no mira la fecha. Un capturado enlazado a un registro del banco (`bankRef`) con hora
-    /// precisa es elegible: solo cuenta si es posterior a la lectura (lo exige `countsTowardBalance`), porque entonces
-    /// el saldo del banco todavía no lo incluía. Una fila de solo día nunca tiene hora real.
+    /// Capturado (o fusionado) enlazado a un registro del banco o a una fila de extracto.
+    private static func isLinked(_ m: Movement) -> Bool { m.bankRef != nil || m.statementRef != nil }
+
+    /// La parte del criterio que no mira la fecha. Un enlazado con hora precisa es elegible: solo cuenta si es
+    /// posterior a la lectura (lo exige `countsTowardBalance`). Una fila de solo día nunca tiene hora real, y sobre un
+    /// saldo de extracto (con hora de solo día) un capturado enlazado a una fila del extracto ya está en ese saldo.
     public static func isBalanceEligible(_ m: Movement, origin: BalanceOrigin) -> Bool {
         guard m.source != .bank, m.source != .statement || origin == .manual else { return false }
-        return m.bankRef == nil || !m.dayOnly
+        guard isLinked(m) else { return true }
+        if m.dayOnly { return false }
+        if m.statementRef != nil && origin == .statement { return false }
+        return true
     }
 
     public func total() -> Int? {

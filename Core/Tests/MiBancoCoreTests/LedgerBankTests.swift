@@ -139,9 +139,46 @@ import Testing
         #expect(Ledger.countsTowardBalance(m(.statement, at: t + 1), base: manualBase))
         #expect(!Ledger.countsTowardBalance(m(.statement, at: t + 1), base: bankBase))
         #expect(!Ledger.countsTowardBalance(m(.statement, at: t + 1), base: ManualBalance(cents: 1, setAt: t, origin: .statement)))
+        // R27: enlazado cuyo registro ya se conocía al tomar la lectura (importedAt <= lectura) no cuenta; posterior, sí.
+        func late(importedAt: Date?) -> Movement {
+            Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: .notification, date: t + 300,
+                     bankRef: "k", importedAt: importedAt)
+        }
+        #expect(!Ledger.countsTowardBalance(late(importedAt: t), base: bankBase))
+        #expect(!Ledger.countsTowardBalance(late(importedAt: t - 60), base: bankBase))
+        #expect(Ledger.countsTowardBalance(late(importedAt: t + 60), base: bankBase))
+        #expect(Ledger.countsTowardBalance(late(importedAt: nil), base: bankBase))
+        // R24: enlazado a una fila de extracto, sobre un saldo de extracto, nunca; sobre un saldo del banco, como R21.
+        let stmtLinked = Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: .wallet, date: t + 300,
+                                  statementRef: "s")
+        #expect(!Ledger.countsTowardBalance(stmtLinked, base: ManualBalance(cents: 1, setAt: t, origin: .statement)))
+        #expect(Ledger.countsTowardBalance(stmtLinked, base: bankBase))
+        #expect(Ledger.countsTowardBalance(stmtLinked, base: manualBase))
         // La parte sin fecha (la que usa "Te quedaban" para el movimiento que cae justo en la lectura).
         #expect(Ledger.isBalanceEligible(m(.wallet, at: t), origin: .bank))
         #expect(!Ledger.isBalanceEligible(m(.bank, at: t), origin: .manual))
+    }
+
+    /// R27: el banco dio el pago antes que el aviso; el aviso tardío se fusiona y no se resta otra vez.
+    @Test func lateNoticeMergedIntoKnownRowIsNotCountedAgain() {
+        let reading = iso("2026-11-20T12:00:00Z")  // 13:00 en Madrid
+        var l = Ledger(state: LedgerState(balances: [.rev: ManualBalance(cents: 10_000, setAt: reading, origin: .bank)],
+                                          movements: [bankRecord(amount: -1250, at: iso("2026-11-20T11:00:00Z"), importedAt: reading)]))
+        let outcome = l.ingest(.wallet(bank: .rev, amount: "12,50", merchant: "Mercadona"), now: iso("2026-11-20T12:05:00Z"))
+        guard case .merged = outcome else { Issue.record("esperaba .merged: \(outcome)"); return }
+        #expect(l.balance(.rev)?.cents == 10_000)
+        #expect(l.balance(.rev)?.estimated == false)
+    }
+
+    /// R24: un capturado enlazado a una fila de extracto no se cuenta dos veces sobre un saldo de extracto.
+    @Test func captureLinkedToStatementRowIsNotCountedOnStatementBalance() {
+        let reading = iso("2026-11-19T11:00:00Z")
+        let capture = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .wallet,
+                               date: iso("2026-11-19T15:00:00Z"), statementRef: "r|abc|1")
+        let l = Ledger(state: LedgerState(balances: [.rev: ManualBalance(cents: 10_000, setAt: reading, origin: .statement)],
+                                          movements: [capture]))
+        #expect(l.balance(.rev)?.cents == 10_000)
+        #expect(l.balance(.rev)?.estimated == false)
     }
 
     @Test func olderReadingIsRejected() {

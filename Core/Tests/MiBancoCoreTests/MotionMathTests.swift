@@ -2,6 +2,24 @@ import Testing
 @testable import MiBancoCore
 
 @Suite struct MotionMathTests {
+    @Test func percentNeverTraps() {
+        #expect(MotionMath.percent(.nan) == 0)
+        #expect(MotionMath.percent(.infinity) == 0)
+        #expect(MotionMath.percent(-.infinity) == 0)
+        #expect(MotionMath.percent(-0.2) == 0)
+        #expect(MotionMath.percent(0.954) == 95)
+        #expect(MotionMath.percent(1.2) == 120)
+        #expect(MotionMath.percent(1e12) == 999)
+    }
+
+    @Test func unitClampsTheFill() {
+        #expect(MotionMath.unit(.nan) == 0)
+        #expect(MotionMath.unit(.infinity) == 0)
+        #expect(MotionMath.unit(-3) == 0)
+        #expect(MotionMath.unit(0.4) == 0.4)
+        #expect(MotionMath.unit(1.7) == 1)
+    }
+
     private func near(_ a: Double, _ b: Double, _ tol: Double = 0.0005) -> Bool { abs(a - b) <= tol }
 
     @Test func balancedIsIdentity() {

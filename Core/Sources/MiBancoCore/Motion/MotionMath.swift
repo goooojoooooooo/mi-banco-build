@@ -82,6 +82,19 @@ public enum MotionMath {
         return overshoot < 0 ? -value : value
     }
 
+    /// Porcentaje entero de una fracción (0,954 → 95), sin trampas: lo que no es un número (gasto / presupuesto 0) es 0 y
+    /// lo finito se acota a 0…999 antes de redondear.
+    public static func percent(_ fraction: Double) -> Int {
+        guard fraction.isFinite else { return 0 }
+        return Int(min(999, max(0, fraction * 100)).rounded())
+    }
+
+    /// Una fracción para dibujar un relleno: 0…1, y 0 si no es un número.
+    public static func unit(_ fraction: Double) -> Double {
+        guard fraction.isFinite else { return 0 }
+        return min(1, max(0, fraction))
+    }
+
     /// Lo que usa un cambio de color u opacidad con Reducir movimiento: mismo tiempo, nunca rebota.
     public static func calm(_ spec: SpringSpec) -> SpringSpec {
         SpringSpec(response: spec.response, dampingFraction: 1)

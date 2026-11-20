@@ -56,6 +56,27 @@ import Testing
         #expect(DigitRoll.position(c, at: 10, overshoot: 0.17) == digit)
     }
 
+    /// Alrededor del 9/0: 9,6 -> 0 sube 0,4 (acaba en 10, la segunda «0» de la tira) y 0,4 -> 9 baja 1,4 (acaba en -1).
+    @Test func zeroDeltaColumnWrapsAroundTheStrip() {
+        func place(_ x: Double) -> Double { let r = x.truncatingRemainder(dividingBy: 10); return r < 0 ? r + 10 : r }
+        let up = DigitRoll.columns(from: 0, to: 500, digitCount: 4, startingAt: [9.6, 0, 0, 0])[0]
+        #expect(place(up.to) == 0)
+        #expect(up.to > up.from)
+        let down = DigitRoll.columns(from: 9000, to: 9500, digitCount: 4, startingAt: [0.4, 0, 0, 0])[0]
+        #expect(place(down.to) == 9)
+        #expect(down.to < down.from)
+    }
+
+    /// Un asentamiento de menos de un dígito se pasa de su sitio en proporción (9,08 -> 9 no baja hasta 8,83).
+    @Test func shortSettleOvershootIsScaledDown() {
+        let c = DigitColumn(place: 0, from: 9.08, to: 9, delay: 0, duration: 1)
+        let swing = DigitRoll.position(c, at: 0.78, overshoot: 0.17)
+        #expect(abs(swing - 9) < 0.02)
+        // Una rodada de un dígito o más conserva el rebote entero.
+        let full = DigitColumn(place: 0, from: 3, to: 5, delay: 0, duration: 1)
+        #expect(abs(DigitRoll.position(full, at: 0.78, overshoot: 0.17) - 5.17) < 0.001)
+    }
+
     @Test func widerNumberKeepsRightAlignment() {
         let c = DigitRoll.columns(from: 99900, to: 144900, digitCount: 6)[0]
         #expect(c.from == 0)

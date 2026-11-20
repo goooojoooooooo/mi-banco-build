@@ -23,7 +23,8 @@ public enum DigitRoll {
     /// Columnas de izquierda a derecha (`place` = potencia de 10). Cada una rueda hacia el dígito nuevo en el sentido
     /// del cambio de su parte alta, más una vuelta (10) si ese cambio es de 10 o más, con tope `maxExtraTurns`.
     /// `positions` (una por columna) es donde está ahora cada tira, con decimales si se interrumpe una rodada.
-    /// Una columna cuyo cambio es 0 no se mueve. La duración de cada columna crece `perColumn` y su salida se retrasa `stagger`.
+    /// Una columna cuyo cambio es 0 se asienta en su dígito por el camino más corto (si ya está en él, no se mueve; si
+    /// una rodada interrumpida la dejó entre dos dígitos, recorre la fracción que le falta). La duración de cada columna crece `perColumn` y su salida se retrasa `stagger`.
     public static func columns(
         from old: Int, to new: Int, digitCount: Int, startingAt positions: [Double]? = nil,
         maxExtraTurns: Int = 1, base: Double = 0.56, perColumn: Double = 0.038, stagger: Double = 0.022
@@ -69,7 +70,8 @@ public enum DigitRoll {
         if k <= 0 { return column.from }
         if k >= 1 { return column.to }
         let distance = column.to - column.from
-        let over = distance == 0 ? 0 : overshoot * (distance > 0 ? 1 : -1)
+        // Un asentamiento más corto que un dígito se pasa proporcionalmente menos (9,08 → 9 no baja hasta 8,83).
+        let over = distance == 0 ? 0 : overshoot * (distance > 0 ? 1 : -1) * min(1, abs(distance))
         if k < 0.78 {
             let u = k / 0.78
             return column.from + (distance + over) * (1 - pow(1 - u, 3))

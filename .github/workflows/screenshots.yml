@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       pequeno:
-        description: "Ademas, tres capturas de la guia en el iPhone mas pequeno que no es Max ni Plus"
+        description: "Todo en el iPhone mas pequeno que no es Max ni Plus (iPhone 15/16), y ademas tres capturas pequeno de la guia"
         type: boolean
         default: false
 permissions:
@@ -40,6 +40,9 @@ jobs:
           RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
           RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
+          fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
           UDID=$(xcrun simctl create "MiBancoShots" "$DEVICETYPE" "$RUNTIME")
@@ -102,33 +105,11 @@ jobs:
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.
           shot bloqueo 3.5 -MiBancoDemoLock
-          ls -l out
-      - name: Capturas de la guia en un iPhone pequeno (opcional)
-        if: ${{ inputs.pequeno }}
-        timeout-minutes: 20
-        run: |
-          APP=build/dd/Build/Products/Debug-iphonesimulator/MiBanco.app
-          RUNTIME=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1 | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
-          SMALL=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
-          echo "Dispositivo pequeno: $SMALL"
-          test -n "$SMALL"
-          UDID2=$(xcrun simctl create "MiBancoSmall" "$SMALL" "$RUNTIME")
-          xcrun simctl boot "$UDID2"
-          perl -e 'alarm 480; exec @ARGV' xcrun simctl bootstatus "$UDID2" -b
-          xcrun simctl ui "$UDID2" appearance dark
-          xcrun simctl status_bar "$UDID2" override --time "9:41" --batteryState charged --batteryLevel 100 --cellularBars 4 --wifiBars 3
-          xcrun simctl install "$UDID2" "$APP"
-          small() {
-            name="$1"; shift
-            xcrun simctl launch "$UDID2" com.mibanco.app -MiBancoDemo "$@" -AppleLanguages "(es)" -AppleLocale es_ES
-            sleep 10
-            xcrun simctl io "$UDID2" screenshot "out/$name.png"
-            xcrun simctl terminate "$UDID2" com.mibanco.app || true
-            sleep 3
-          }
-          small guia-pequeno-lista -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
-          small guia-pequeno-campo -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
-          small guia-pequeno-apagar -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 10
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            shot guia-pequeno-lista 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
+            shot guia-pequeno-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            shot guia-pequeno-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 10
+          fi
           ls -l out
       - uses: actions/upload-artifact@v4
         if: always()

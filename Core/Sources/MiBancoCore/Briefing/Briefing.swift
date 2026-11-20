@@ -522,15 +522,3 @@ public func makeBriefing(_ input: BriefingInput, calendar: Calendar) -> Briefing
                     sections: sections, tip: tipLine(input, calendar: calendar, shortfallOnly: quiet), isQuiet: quiet,
                     situation: openingSituation(for: input, calendar: calendar))
 }
-
-
-/// Los hechos de la pantalla (la frase principal, cada línea y el consejo, ya escritos con importes): son SOLO para enseñar o
-/// para pruebas; nunca se le pasan a un modelo.
-func displayFacts(_ briefing: Briefing) -> [String] {
-    var facts = [render(briefing.headline, .plain)]
-    for section in briefing.sections {
-        for line in section.lines { facts.append(render(line.parts, .plain)) }
-    }
-    if let tip = briefing.tip { facts.append(render(tip.parts, .plain)) }
-    return facts
-}

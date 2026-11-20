@@ -122,6 +122,64 @@ private func briefing(_ s: OpeningSituation) -> Briefing {
         }
     }
 
+    @Test func laRotacionAguantaCambiosDeHoraYDeAnio() {
+        // 25 de octubre de 2026: el día de 25 horas; 31 de diciembre -> 1 de enero; 28 de febrero -> 1 de marzo (2027 no es bisiesto).
+        let starts = [DateComponents(year: 2026, month: 10, day: 24, hour: 10), DateComponents(year: 2026, month: 12, day: 30, hour: 10),
+                      DateComponents(year: 2027, month: 2, day: 27, hour: 10), DateComponents(year: 2027, month: 3, day: 27, hour: 10)]
+        for s in OpeningSituation.allCases {
+            let b = briefing(s)
+            for start in starts {
+                var day = cal.date(from: start)!
+                for _ in 0..<4 {
+                    let next = cal.date(byAdding: .day, value: 1, to: day)!
+                    let morning = cal.date(bySettingHour: 0, minute: 30, second: 0, of: day)!
+                    let night = cal.date(bySettingHour: 23, minute: 30, second: 0, of: day)!
+                    let today = openingLine(briefing: b, choice: nil, day: day, privateMode: false)
+                    #expect(openingLine(briefing: b, choice: nil, day: morning, privateMode: false) == today, "\(s) \(day)")
+                    #expect(openingLine(briefing: b, choice: nil, day: night, privateMode: false) == today, "\(s) \(day)")
+                    #expect(openingLine(briefing: b, choice: nil, day: next, privateMode: false) != today, "\(s) \(day)")
+                    day = next
+                }
+            }
+        }
+    }
+
+    @Test func laCopiaNoUsaPalabrasProhibidas() {
+        func words(_ line: String) -> [String] {
+            line.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+                .components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+        }
+        let calendarDays: [OpeningSituation] = [.quietDay, .weekend, .monthStart, .monthEnd]
+        for s in OpeningSituation.allCases {
+            for line in openingCandidates(for: s) {
+                let list = words(line)
+                for forbidden in ["bienvenido", "encantado", "encantada"] { #expect(!list.contains(forbidden), "\(line)") }
+                // «la bienvenida» sí; «bienvenida» para el dueño, no.
+                for (i, w) in list.enumerated() where w == "bienvenida" { #expect(i > 0 && list[i - 1] == "la", "\(line)") }
+                // «listo» y «lista» como adjetivos de una persona, no; «un repaso rápido y listo» es una muletilla.
+                for (i, w) in list.enumerated() where w == "listo" || w == "lista" { #expect(i > 0 && list[i - 1] == "y", "\(line)") }
+                #expect(!line.lowercased().contains("buenas noticias"), "\(line)")
+                if s == .incomeArrived || s == .busyDay { #expect(!list.contains("hoy"), "\(line)") }
+                if calendarDays.contains(s) {
+                    for w in list {
+                        #expect(w != "calma" && !w.hasPrefix("tranquil") && !w.hasPrefix("sobresalto") && !w.hasPrefix("sorpresa"), "\(line)")
+                    }
+                }
+            }
+        }
+    }
+
+    @Test func ningunaFraseChocaConOtraDeSuSituacionSalvoPorPuntuacion() {
+        func key(_ line: String) -> String {
+            line.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+                .components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        for s in OpeningSituation.allCases {
+            let keys = openingCandidates(for: s).map(key)
+            #expect(Set(keys).count == keys.count, "\(s)")
+        }
+    }
+
     @Test func laMismaFraseDuranteTodoElDia() {
         let b = briefing(.quietDay)
         let morning = openingLine(briefing: b, choice: nil, day: at(11, 25, 6), privateMode: false)
@@ -156,7 +214,7 @@ private func briefing(_ s: OpeningSituation) -> Briefing {
         #expect(openingChoice(from: "3.", count: 9) == 3)
         #expect(openingChoice(from: "9", count: 9) == 9)
         #expect(openingChoice(from: "1", count: 9) == 1)
-        for bad in ["0", "10", "-1", "", "  ", "tres", "3 y 4", "1.5", "3,5", "Elijo la 3", "٣", "３", "99999999999999999999", "+3"] {
+        for bad in ["0", "10", "-1", "", "  ", "tres", "3 y 4", "1.5", "3,5", "Elijo la 3", "٣", "３", "99999999999999999999", "+3", "03", "01", "00", "003"] {
             #expect(openingChoice(from: bad, count: 9) == nil, "\(bad)")
         }
         #expect(openingChoice(from: "1", count: 0) == nil)
@@ -270,8 +328,8 @@ private func briefing(_ s: OpeningSituation) -> Briefing {
         let section = makeBriefing(input, calendar: cal).sections.first { $0.kind == .investments }!
         for line in section.lines.prefix(2) {
             let masked = render(line.parts, .masked)
-            #expect(!masked.contains("%"), "(masked)")
-            #expect(masked.range(of: "[0-9]", options: .regularExpression) == nil, "(masked)")
+            #expect(!masked.contains("%"), "\(masked)")
+            #expect(masked.range(of: "[0-9]", options: .regularExpression) == nil, "\(masked)")
         }
         #expect(render(section.lines[1].parts, .masked) == "Lo que más subió: Alfa (•••). Lo que más bajó: Beta (•••).")
         #expect(render(section.lines[1].parts, .plain).contains("\u{2212}1,3"))

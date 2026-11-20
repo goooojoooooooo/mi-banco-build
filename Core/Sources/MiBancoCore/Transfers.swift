@@ -123,6 +123,12 @@ public func unconfirmedCaptureIDs(in state: LedgerState, now: Date) -> Set<UUID>
 /// (`unconfirmedCaptureIDs`). Los ids de `skip` (traspasos, capturados ya sin confirmar) ni se emparejan ni sirven de
 /// pareja; una operación de valores nunca es pareja.
 public func probableTwinCaptureIDs(in movements: [Movement], skipping skip: Set<UUID> = []) -> Set<UUID> {
+    Set(probableTwinPairs(in: movements, skipping: skip).map(\.captureID))
+}
+
+/// Las parejas (capturado, fila del banco) de `probableTwinCaptureIDs`: quien necesita saber CUÁL es la fila del banco (el
+/// resumen deja fuera la fila cuyo capturado ya se conocía).
+public func probableTwinPairs(in movements: [Movement], skipping skip: Set<UUID> = []) -> [(captureID: UUID, rowID: UUID)] {
     let captures = movements.filter {
         $0.kind == .payment && !$0.source.isBankSourced && $0.bankRef == nil && $0.statementRef == nil
             && !$0.flaggedNotMine && !$0.excludedFromSpending && !skip.contains($0.id)
@@ -158,12 +164,14 @@ public func probableTwinCaptureIDs(in movements: [Movement], skipping skip: Set<
         return a.row.id.uuidString < b.row.id.uuidString
     }
     var usedCaptures = Set<UUID>()
+    var pairs: [(captureID: UUID, rowID: UUID)] = []
     var usedRows = Set<UUID>()
     for c in candidates where !usedCaptures.contains(c.capture.id) && !usedRows.contains(c.row.id) {
         usedCaptures.insert(c.capture.id)
+        pairs.append((c.capture.id, c.row.id))
         usedRows.insert(c.row.id)
     }
-    return usedCaptures
+    return pairs
 }
 
 /// Ids que nunca suman como gasto aunque sean pagos: los traspasos entre tus cuentas, los capturados sin confirmar

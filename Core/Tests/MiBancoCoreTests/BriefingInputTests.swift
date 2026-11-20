@@ -86,7 +86,7 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
 
     @Test func manual() {
         let today = BriefingRecord(shownAt: nov(20, 6), since: nov(19, 8))
-        #expect(BriefingSchedule.manual(previous: today, now: nov(20, 15), calendar: cal) == today)
+        #expect(BriefingSchedule.manual(previous: today, now: nov(20, 15), calendar: cal) == BriefingRecord(shownAt: nov(20, 15), since: today.since))
         let yesterday = BriefingRecord(shownAt: nov(19, 8), since: nov(18, 8))
         #expect(BriefingSchedule.manual(previous: yesterday, now: nov(20, 15), calendar: cal)
             == BriefingSchedule.due(previous: yesterday, now: nov(20, 15), calendar: cal))
@@ -315,6 +315,75 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         // Sin problema, sigue avisando de que caduca.
         state.links[.rev] = link(validUntil: nov(25, 10))
         #expect(input(state).attention == [.consentExpiring(.rev, nov(25, 10))])
+    }
+
+    // MARK: J17 — un pago no sale en dos resúmenes
+
+    private func capture(_ cents: Int, _ name: String, at when: Date) -> Movement {
+        Movement(bank: .rev, amountCents: cents, merchant: name, kind: cents < 0 ? .payment : .income, source: .notification,
+                 date: when, isShop: true)
+    }
+
+    @Test func unCapturadoYSuFilaDelBancoNoSalenEnDosResumenes() {
+        var state = LedgerState()
+        let zara = capture(-4_995, "Zara", at: nov(19, 19))
+        state.movements = [zara]
+        // Resumen A: el día 19 por la noche.
+        let a = input(state, since: nov(18, 22), now: nov(19, 20))
+        #expect(a.payments.map(\.name) == ["Zara"])
+        // El día 20 llega la fila del banco (sin enlazar): pareja probable del capturado que ya se contó.
+        let row = Movement(bank: .rev, amountCents: -5_000, merchant: "ZARA ONLINE", kind: .payment, source: .bank,
+                           date: nov(19, 19, 30), isShop: true, bankRef: "r1", bankStatus: .booked, importedAt: nov(20, 7))
+        state.movements.append(row)
+        let b = input(state, since: nov(19, 20), now: nov(20, 8))
+        #expect(b.payments.isEmpty)
+        #expect(b.income.isEmpty)
+        #expect(b.banks.isEmpty)
+        #expect(render(makeBriefing(b, calendar: cal).headline, .plain).hasPrefix("Nada nuevo"))
+        // Lo mismo si la fila se enlazó al capturado (el banco ya no tiene fila propia).
+        var linked = zara
+        linked.bankRef = "r1"
+        linked.bankStatus = .booked
+        linked.linkedAt = nov(20, 7)
+        var folded = LedgerState()
+        folded.movements = [linked]
+        let c = input(folded, since: nov(19, 20), now: nov(20, 8))
+        #expect(c.payments.isEmpty && c.income.isEmpty && c.banks.isEmpty)
+        // Una fila del banco sin capturado sí es nueva.
+        var alone = LedgerState()
+        alone.movements = [row]
+        #expect(input(alone, since: nov(19, 20), now: nov(20, 8)).payments.map(\.cents) == [5_000])
+    }
+
+    // MARK: J18 — reabrir a mano
+
+    @Test func reabrirAManoNoRepiteAlDiaSiguiente() {
+        let first = BriefingRecord(shownAt: nov(20, 9), since: nov(19, 9))
+        let reopened = BriefingSchedule.manual(previous: first, now: nov(20, 15), calendar: cal)
+        #expect(reopened == BriefingRecord(shownAt: nov(20, 15), since: nov(19, 9)))
+        var state = LedgerState()
+        state.movements = [capture(-1_200, "Comida", at: nov(20, 12))]
+        // El pago de las 12:00 sale al reabrir...
+        #expect(input(state, since: reopened.since, now: nov(20, 15)).payments.map(\.name) == ["Comida"])
+        // ...y no al día siguiente.
+        let next = BriefingSchedule.due(previous: reopened, now: nov(21, 8), calendar: cal)
+        #expect(next?.since == nov(20, 15))
+        #expect(input(state, since: nov(20, 15), now: nov(21, 8)).payments.isEmpty)
+    }
+
+    // MARK: J19 — menores
+
+    @Test func elTotalNombraAlBancoConectadoSinSaldoAunqueNoTengaMovimientos() {
+        var state = LedgerState()
+        state.links[.rev] = link(validUntil: date(12, 31))
+        state.links[.ima] = link(validUntil: date(12, 31))
+        state.balances[.rev] = ManualBalance(cents: 10_000, setAt: nov(20, 8), origin: .bank)
+        let i = input(state)
+        #expect(i.totalLeftOut == [.ima])
+        #expect(lines(makeBriefing(i, calendar: cal), .money).first?.contains("sin contar imagin") == true)
+        // Sin conexión no se nombra.
+        state.links[.ima] = nil
+        #expect(input(state).totalLeftOut.isEmpty)
     }
 
     // MARK: J6 — un registro del futuro no vale

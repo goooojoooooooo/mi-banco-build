@@ -47,11 +47,12 @@ public enum BriefingSchedule {
         return BriefingRecord(shownAt: now, since: since)
     }
 
-    /// Abrir el resumen a mano: si ya hay uno de hoy se devuelve tal cual (mismo "desde"); si no, el que tocaría.
+    /// Abrir el resumen a mano: si ya hay uno de hoy se devuelve con el mismo "desde" y `shownAt` ahora (quien llama lo
+    /// guarda: así lo que se supo entre la primera apertura y esta no se repite mañana); si no, el que tocaría.
     public static func manual(previous stored: BriefingRecord?, now: Date, calendar: Calendar) -> BriefingRecord {
         let previous = valid(stored, now: now)
         if let previous, briefingDay(of: now, calendar: calendar) <= briefingDay(of: previous.shownAt, calendar: calendar) {
-            return previous
+            return BriefingRecord(shownAt: now, since: previous.since)
         }
         return due(previous: previous, now: now, calendar: calendar) ?? previous
             ?? BriefingRecord(shownAt: now, since: now.addingTimeInterval(-86_400))

@@ -78,7 +78,7 @@ private let maskDots = "•••"
 /// Un importe escrito en un texto libre («13,99 € dos veces hoy», «20 EUR», «5 euros») o un decimal suelto con coma («13,99»):
 /// cifras con puntos o comas y un € / EUR / euros detrás, o `n,nn`.
 private let writtenAmountPattern =
-    "(?i)[-+]?[0-9][0-9.,]*[ \u{00A0}]?(?:€|euros?(?![a-z])|eur(?![a-z]))|[-+]?[0-9][0-9.]*,[0-9]{2}(?![0-9])"
+    "(?i)(?:€|euros?(?![a-z])|eur(?![a-z]))[ \u{00A0}]?[-+]?[0-9](?:[0-9.,]*[0-9])?|[-+]?[0-9][0-9.,]*[ \u{00A0}]?(?:€|euros?(?![a-z])|eur(?![a-z]))|[-+]?[0-9][0-9.]*,[0-9]{2}(?![0-9])"
 
 public func render(_ parts: [BriefingPart], _ style: RenderStyle) -> String {
     var out = ""
@@ -475,6 +475,17 @@ public func makeBriefing(_ input: BriefingInput, calendar: Calendar) -> Briefing
     }
     return Briefing(greeting: greeting(at: input.now, calendar: calendar), headline: headline(input, calendar: calendar),
                     sections: sections, tip: tipLine(input, calendar: calendar, shortfallOnly: quiet), isQuiet: quiet)
+}
+
+/// Los hechos que se le dan a un modelo: los mismos, SIN la sección de inversiones (valor, cambio, ganancia, edad de precios,
+/// los que más subieron y bajaron): el modelo nunca se entera de ellas.
+func briefingModelFacts(_ briefing: Briefing) -> [String] {
+    var facts = [render(briefing.headline, .plain)]
+    for section in briefing.sections where section.kind != .investments {
+        for line in section.lines { facts.append(render(line.parts, .plain)) }
+    }
+    if let tip = briefing.tip { facts.append(render(tip.parts, .plain)) }
+    return facts
 }
 
 /// Los hechos que puede usar un modelo para redactar: la frase principal, cada línea y el consejo, ya escritos con importes.

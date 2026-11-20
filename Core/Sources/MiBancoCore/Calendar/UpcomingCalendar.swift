@@ -72,8 +72,8 @@ public func upcomingCalendar(state: LedgerState, book: AccountBook, now: Date, c
     var seen = Set<String>()
     for charge in subscriptionCharges(in: state, now: now, calendar: calendar, notSpending: exclusions) {
         guard let i = index(of: charge.date) else { continue }
-        // La misma suscripción no se cuenta dos veces el mismo día.
-        guard seen.insert("\(charge.bank.rawValue)|\(normalizeMerchant(charge.name))|\(i)").inserted else { continue }
+        // La misma suscripción (mismo importe) no se cuenta dos veces el mismo día; dos cobros distintos del mismo comercio, sí.
+        guard seen.insert("\(charge.bank.rawValue)|\(normalizeMerchant(charge.name))|\(i)|\(charge.cents)").inserted else { continue }
         chargesByDay[i].append(charge)
     }
     var incomeByDay = [[ExpectedIncome]](repeating: [], count: upcomingCalendarDays)

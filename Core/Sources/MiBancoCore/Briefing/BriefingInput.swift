@@ -166,23 +166,31 @@ private let staleBankSeconds: TimeInterval = 172_800
 public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: AccountBook, record: BriefingRecord, isFirst: Bool,
                           now: Date, calendar: Calendar) -> BriefingInput {
     let since = record.since
-    // Un movimiento pertenece al periodo por cuándo SE ENTERÓ la app (la fecha del banco puede ser anterior al resumen
-    // pasado y haber llegado después): así ninguno se pierde ni sale en dos resúmenes.
+    // Un movimiento pertenece al periodo por el PRIMER momento en que la app lo supo: un aviso o pago de Cartera, el día de su
+    // fecha (enlazarlo después a una fila del banco no lo mueve a otro periodo); una fila del banco o de un extracto, cuando se
+    // importó si fue después de su fecha. Así ninguno se pierde ni sale en dos resúmenes.
     // Límite: solo entra si su propia fecha no es anterior a 7 días antes del «desde» (una importación de meses de historial
     // no inunda el resumen).
     let lateLimit = since.addingTimeInterval(-7 * 86_400)
+    func knownAt(_ m: Movement) -> Date { m.source.isBankSourced ? max(m.date, m.importedAt ?? m.date) : m.date }
+    // Una fila del banco cuya pareja probable (capturado) ya se conocía en el resumen anterior no es nueva: ya se contó.
+    let ownTransfers = ownTransferIDs(in: state.movements)
+    let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
+    let twinPairs = probableTwinPairs(in: state.movements, skipping: ownTransfers.union(unconfirmed))
+    let capturesByID = Dictionary(state.movements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    let rowsAlreadyCounted = Set(twinPairs.compactMap { pair in
+        capturesByID[pair.captureID].flatMap { knownAt($0) <= since ? pair.rowID : nil }
+    })
     func inPeriod(_ m: Movement) -> Bool {
-        let knownAt = max(m.date, m.importedAt ?? m.date)
-        return knownAt > since && knownAt <= now && m.date > lateLimit && !m.flaggedNotMine
+        let known = knownAt(m)
+        return known > since && known <= now && m.date > lateLimit && !m.flaggedNotMine && !rowsAlreadyCounted.contains(m.id)
     }
     let ledger = Ledger(state: state)
     // Se calcula una vez y se pasa a todas las sumas de gasto (traspasos, capturados sin confirmar y gemelos).
     let exclusions = spendingExclusions(in: state, now: now)
     // Los capturados que ya cuentan en la fila de su banco (sin confirmar o con gemelo): fuera de ingresos y del cambio de
     // cada banco. Los traspasos propios se quedan en el cambio del banco.
-    let ownTransfers = ownTransferIDs(in: state.movements)
-    let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
-    let twins = probableTwinCaptureIDs(in: state.movements, skipping: ownTransfers.union(unconfirmed))
+    let twins = Set(twinPairs.map(\.captureID))
     let doubleCounted = unconfirmed.union(twins).subtracting(ownTransfers)
     let period = state.movements.filter(inPeriod)
     func name(_ m: Movement) -> String { m.displayMerchant ?? m.merchant ?? m.bank.displayName }
@@ -220,7 +228,10 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     }
     // El cambio total solo suma bancos con saldo conocido; los que quedan fuera se dicen junto al total.
     let totalChange = banks.filter { $0.cents != nil }.reduce(0) { $0 + $1.changeCents }
-    let leftOut = banks.filter { $0.cents == nil }.map(\.bank)
+    // También los bancos conectados sin saldo conocido que no tuvieron ningún movimiento en el periodo.
+    let listedWithoutBalance = Set(banks.filter { $0.cents == nil }.map(\.bank))
+    let linkedWithoutBalance = Set(state.links.keys.filter { ledger.balance($0) == nil })
+    let leftOut = BankID.allCases.filter { listedWithoutBalance.contains($0) || linkedWithoutBalance.contains($0) }
 
     // Lo que viene
     let startOfToday = calendar.startOfDay(for: now)

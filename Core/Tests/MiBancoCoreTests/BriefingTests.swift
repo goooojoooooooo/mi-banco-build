@@ -241,6 +241,15 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         #expect(render(plain.sections[0].lines[0].parts, .masked).contains("Euros de ayer"))
     }
 
+    @Test func enmascaraLaMonedaEscritaAntesDelNumero() {
+        let cases = [("Cobro de €13", "Cobro de •••"), ("Cobro de EUR 20", "Cobro de •••"), ("Cobro de € 13,50", "Cobro de •••"),
+                     ("Cobro €13.", "Cobro •••."), ("Cobro de euros 5", "Cobro de •••"), ("Cobro de eur20", "Cobro de •••")]
+        for (text, expected) in cases {
+            let b = attentionBriefing([.warning(title: text, detail: nil)])
+            #expect(render(b.sections[0].lines[0].parts, .masked) == expected, "\(text)")
+        }
+    }
+
     @Test func elTotalDiceUnosSiAlgunSaldoEsEstimado() {
         var input = BriefingInput(now: nov(20, 8, 30), since: nov(19, 22, 10), isFirst: false,
                                   banks: [BankLine(bank: .rev, cents: 10_000, estimated: false, changeCents: 0),
@@ -465,7 +474,9 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         #expect(containsInvestmentAdvice("Invierte en oro."))
         #expect(containsInvestmentAdvice("TE RECOMIENDO VENDER"))
         #expect(containsInvestmentAdvice("Es un buen momento para comprar."))
-        #expect(!containsInvestmentAdvice("Tus inversiones han subido un 0,4 % hoy."))
+        // Hablar de inversiones con el modelo ya no se admite, digan lo que digan: la frase de las reglas las cuenta.
+        #expect(containsInvestmentAdvice("Tus inversiones han subido un 0,4 % hoy."))
+        #expect(!containsInvestmentAdvice("Buenos días, hoy no hay sorpresas."))
         #expect(!acceptModelIntro("Deberías vender el ETF.", facts: facts))
         #expect(!acceptModelIntro("Invierte en oro, que sube.", facts: facts))
         #expect(investmentAdviceRefusal == "No puedo decirte qué comprar, vender o cuánto invertir: eso solo puede hacerlo un asesor financiero autorizado. Sí puedo contarte cómo van tus inversiones.")
@@ -492,12 +503,128 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
     }
 
     @Test(arguments: [
-        "has comprado en Mercadona", "tu compra más cara fue Zara", "venta de garaje", "inversiones: +1,2 % hoy",
-        "Compraste algo ayer", "Vendiste un fondo", "Has vendido acciones", "Lo invertido sube", "Invertiste en un fondo",
-        "Tus compras de hoy", "Dos ventas", "Tus inversiones han subido hoy", "Buenos días, hoy no hay sorpresas",
-        "Ha entrado tu nómina", "Los precios son de ayer",
+        "has comprado en Mercadona", "tu compra más cara fue Zara", "venta de garaje", "Compraste algo ayer", "Vendiste algo ayer",
+        "Has vendido tu bici", "Tus compras de hoy", "La compra de ayer fue grande", "Cada compra cuenta", "Buenos días, hoy no hay sorpresas",
+        "Ha entrado tu nómina", "Ayer fue un día de pocos gastos", "Qué buena mañana",
     ]) func aceptaDescripciones(_ text: String) {
         #expect(!containsAdvice(text), "\(text)")
+    }
+
+    // MARK: J15 — consejos en capas
+
+    /// Capa (b): formato, guiones y otras escrituras.
+    @Test(arguments: [
+        "ve\u{00AD}nde", "ven\u{200B}de", "ven\u{200D}de", "ven-de", "ven-\nde", "ven\nde", "ven\u{2010}de", "vеnde", "comprаr", "ΒΙΒΛΙΟ",
+        "buenos días 日本",
+    ]) func capaNormalizacion(_ text: String) {
+        #expect(containsAdvice(text), "\(text)")
+        #expect(!acceptModelIntro(text, facts: []), "\(text)")
+    }
+
+    @Test func capaNormalizacionPorPartes() {
+        #expect(withoutFormatCharacters("a\u{00AD}b\u{200B}c\u{200D}d") == "abcd")
+        #expect(hasNonLatinLetter("vеnde"))
+        #expect(!hasNonLatinLetter("Mañana, señor Ñandú, ¡sí! café"))
+        // Una tilde descompuesta (e + U+0301) no es otra escritura.
+        #expect(!hasNonLatinLetter("cafe\u{0301}"))
+        #expect(wordReadings("ven-\nde").contains(["vende"]))
+    }
+
+    /// Capa (c): vocabulario de inversiones.
+    @Test(arguments: [
+        "Tus inversiones", "Tu cartera sube", "Las acciones", "Un fondo indexado", "La bolsa hoy", "El mercado", "Tu posición", "Exposición alta",
+        "Beneficios del día", "Una pérdida", "La cotización", "Dividendos", "El valor total", "El precio", "Un ETF", "Cripto", "Bitcoin",
+        "Tu broker", "Your stocks", "Your shares", "The market", "A fund", "The portfolio", "Profit today", "Crypto", "Your assets", "Holdings",
+        "Invertiste", "Lo invertido", "Inversión",
+    ]) func capaVocabulario(_ text: String) {
+        #expect(hasInvestmentVocabulary(text), "\(text)")
+        #expect(containsAdvice(text), "\(text)")
+    }
+
+    @Test func vocabularioNoRechazaMercadona() {
+        #expect(!hasInvestmentVocabulary("has comprado en Mercadona"))
+        #expect(!hasInvestmentVocabulary("Buenos días, hoy no hay sorpresas"))
+    }
+
+    /// Capa (d): marcadores.
+    @Test(arguments: [
+        "mejor esperar", "espera a que baje", "aguarda un poco", "convendría esperar", "tendrías que", "habría que", "debemos", "debería",
+        "podrías", "considera esperar", "plantéate", "quédate como estás", "deshazte de", "acumula", "promedia a la baja", "reduce",
+        "refuerza", "refuerzo", "sal de esa", "entra en el", "toma nota", "evita eso", "procura", "intenta", "wait a bit", "stay put",
+        "get out", "take profits", "consider it", "avoid it", "better", "Mejor así",
+    ]) func capaMarcadores(_ text: String) {
+        #expect(hasAdviceMarker(text), "\(text)")
+        #expect(containsAdvice(text), "\(text)")
+    }
+
+    /// Capa (e): compra y venta solo como sustantivo tras un determinante.
+    @Test(arguments: [
+        "compra", "Oye, compra ahora", "mejor compra ya", "si compras hoy", "compras", "venta", "ventas ya", "Hoy: venta", "Dos ventas",
+        "no compra nada", "Compra más",
+    ]) func capaCompraVentaVerbo(_ text: String) {
+        #expect(hasTradeVerb(text), "\(text)")
+        #expect(containsAdvice(text), "\(text)")
+    }
+
+    @Test(arguments: [
+        "tu compra", "tus compras", "la venta", "las ventas", "una compra", "esa venta", "mi compra", "su venta", "de compras",
+        "cada compra", "última compra", "primera venta", "venta de garaje", "compra de ayer",
+    ]) func compraVentaComoSustantivo(_ text: String) {
+        #expect(!hasTradeVerb(text), "\(text)")
+    }
+
+    /// La tabla grande del re-examen: todo lo que se coló.
+    @Test(arguments: [
+        "mejor esperar", "espera a que baje", "no toques tu cartera", "quédate como estás", "sal de esa posición", "entra en el fondo",
+        "refuerza tu posición", "reduce exposición", "toma beneficios", "deshazte de", "acumula", "promedia a la baja",
+        "time to take profits", "stay put", "get out", "Oye, compra ahora", "mejor compra ya", "si compras hoy", "convendría esperar",
+        "tendrías que", "habría que", "ve\u{00AD}nde", "ven\u{200B}de", "vеnde", "ven\nde", "ven-de", "ven-\nde",
+        "te conviene vender", "mantén tus acciones", "aprovecha la caída", "yo que tú compraría", "te recomiendo que vendas",
+        "no vendas", "invierte un poco cada mes", "buen momento de comprar", "es hora de vender", "vende.", "you should sell",
+        "buy more", "hold",
+    ]) func tablaGrandeRechaza(_ text: String) {
+        #expect(containsAdvice(text), "\(text)")
+        #expect(!acceptModelIntro(text, facts: []), "\(text)")
+    }
+
+    @Test func tablaGrandeAcepta() {
+        for text in ["has comprado en Mercadona", "tu compra más cara fue Zara", "venta de garaje"] {
+            #expect(!containsAdvice(text), "\(text)")
+            #expect(acceptModelIntro(text, facts: []), "\(text)")
+        }
+    }
+
+    @Test func elModeloNoSabeNadaDeInversiones() {
+        var input = busy()
+        input.investments = summary()
+        let b = makeBriefing(input, calendar: cal)
+        #expect(b.sections.contains { $0.kind == .investments })
+        let prompt = briefingModelPrompt(b)
+        for line in lines(b, .investments) { #expect(!prompt.contains(line), "\(line)") }
+        #expect(!prompt.contains("Valen"))
+        #expect(!prompt.contains("Desde la compra"))
+        #expect(!prompt.contains("precios de"))
+        #expect(!briefingModelFacts(b).contains { $0.hasPrefix("Valen") })
+        // Los hechos completos (para la pantalla) sí las llevan.
+        #expect(briefingFacts(b).contains { $0.hasPrefix("Valen") })
+    }
+
+    // MARK: J16 — más palabras de número
+
+    @Test(arguments: [
+        "un par de cosas", "dos pares", "una docena", "unas docenas", "una decena", "decenas de", "un centenar", "centenares",
+        "un millar", "millares", "un billón", "billones", "un cuarto", "tres cuartos", "un tercio", "tercios", "un quinto", "quintos",
+        "a dozen", "dozens", "a couple", "couples", "a pair", "pairs", "a billion", "billions", "a quarter", "quarters", "a third",
+        "thirds", "percent", "II", "XIV", "MMXXVI", "Hoy es XII", "ven\u{200B}ti cinco", "do\u{00AD}s", "d\u{200B}os euros",
+    ]) func masPalabrasDeNumero(_ text: String) {
+        #expect(containsNumber(text), "\(text)")
+        #expect(!acceptModelIntro(text, facts: []), "\(text)")
+    }
+
+    @Test(arguments: [
+        "Un día", "Uno de ellos", "Una nómina", "mi casa", "di la verdad", "La mayoría de gastos", "Mix de pagos", "Buenos días",
+    ]) func siguenSiendoValidasSinNumero(_ text: String) {
+        #expect(!containsNumber(text), "\(text)")
     }
 
     // MARK: J8 — la frase del modelo no lleva números
@@ -553,7 +680,7 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         #expect(prompt.hasPrefix("Datos:\n- "))
         #expect(prompt.hasSuffix("\nEscribe el saludo."))
         #expect(prompt.count <= 2_500)
-        for fact in briefingFacts(b) { #expect(prompt.contains("- " + fact)) }
+        for fact in briefingModelFacts(b) { #expect(prompt.contains("- " + fact)) }
         // Con muchos hechos se recorta a 25.
         let many = BriefingInput(now: nov(20, 8, 30), since: nov(19, 22, 10), isFirst: false,
                                  attention: (0..<40).map { .warning(title: "Aviso \($0)", detail: String(repeating: "x", count: 80)) })

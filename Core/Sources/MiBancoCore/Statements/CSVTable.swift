@@ -29,9 +29,21 @@ public struct CSVTable: Equatable, Sendable {
         let records = try splitRecords(scalars, delimiter: delimiter)
         guard let header = records.first else { throw StatementError.empty }
         let body = records.dropFirst()
-        let aligned = body.filter { $0.count == header.count }
-        return CSVTable(headers: header.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }, rows: Array(aligned),
-                        malformedRows: body.count - aligned.count)
+        let names = header.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        var aligned: [[String]] = []
+        for row in body {
+            if row.count == names.count {
+                aligned.append(row)
+            } else if row.count > names.count, row[names.count...].allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                // Algunos bancos terminan cada línea de datos con un `;` que la cabecera no lleva: celdas sobrantes vacías.
+                aligned.append(Array(row[..<names.count]))
+            } else if row.count < names.count, names[row.count...].allSatisfy({ $0.isEmpty }) {
+                // La cabecera termina con un separador de más (columnas sin nombre) y la fila no.
+                aligned.append(row + Array(repeating: "", count: names.count - row.count))
+            }
+            // Cualquier otra diferencia: se descarta y se cuenta (nunca se lee por posición desplazada).
+        }
+        return CSVTable(headers: names, rows: aligned, malformedRows: body.count - aligned.count)
     }
 
     /// Índice de la primera columna cuyo nombre normalizado coincide con algún alias (se prueban en orden).

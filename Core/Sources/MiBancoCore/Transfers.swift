@@ -128,21 +128,26 @@ public func probableTwinCaptureIDs(in movements: [Movement], skipping skip: Set<
             && !$0.flaggedNotMine && !$0.excludedFromSpending && !skip.contains($0.id)
     }
     guard !captures.isEmpty else { return [] }
-    let rows = Dictionary(grouping: movements.filter {
-        $0.kind == .payment && $0.source.isBankSourced && !$0.excludedFromSpending && !skip.contains($0.id)
-    }, by: \.bank)
+    // Filas candidatas por (banco, día de Madrid): cada capturado mira solo los tres días que le valen. Una fila cuyo texto
+    // marca una operación que no es de tarjeta (recibo, transferencia...) o que el dueño dice que no es suya no es pareja.
+    struct DayKey: Hashable { let bank: BankID; let day: Date }
+    var rows: [DayKey: [Movement]] = [:]
+    for row in movements where row.kind == .payment && row.source.isBankSourced && !row.excludedFromSpending
+        && !row.flaggedNotMine && !skip.contains(row.id) && !marksNonCardOperation(row.merchant) {
+        rows[DayKey(bank: row.bank, day: madridCalendar.startOfDay(for: row.date)), default: []].append(row)
+    }
     var candidates: [(capture: Movement, row: Movement, diff: Int, days: Int, seconds: TimeInterval)] = []
     for capture in captures {
         let cents = abs(capture.amountCents)
         guard cents > 0 else { continue }
-        for row in rows[capture.bank] ?? [] {
-            let other = abs(row.amountCents)
-            guard other * 100 >= cents * 95, other * 100 <= cents * 130 else { continue }
-            let days = abs(madridCalendar.dateComponents(
-                [.day], from: madridCalendar.startOfDay(for: capture.date),
-                to: madridCalendar.startOfDay(for: row.date)).day ?? Int.max / 2)
-            guard days <= 1 else { continue }
-            candidates.append((capture, row, abs(other - cents), days, abs(row.date.timeIntervalSince(capture.date))))
+        let day = madridCalendar.startOfDay(for: capture.date)
+        for offset in -1...1 {
+            guard let neighbour = madridCalendar.date(byAdding: .day, value: offset, to: day) else { continue }
+            for row in rows[DayKey(bank: capture.bank, day: madridCalendar.startOfDay(for: neighbour))] ?? [] {
+                let other = abs(row.amountCents)
+                guard other * 100 >= cents * 95, other * 100 <= cents * 130 else { continue }
+                candidates.append((capture, row, abs(other - cents), abs(offset), abs(row.date.timeIntervalSince(capture.date))))
+            }
         }
     }
     candidates.sort { a, b in
@@ -164,9 +169,23 @@ public func probableTwinCaptureIDs(in movements: [Movement], skipping skip: Set<
 /// Ids que nunca suman como gasto aunque sean pagos: los traspasos entre tus cuentas, los capturados sin confirmar
 /// (definición de 7 días de Plan 2) y los capturados con pareja probable en una fila del banco (R35, ya el mismo día).
 /// Se calcula una vez por reconstrucción y se pasa a todas las sumas (parámetros `notSpending:`).
-public func spendingExclusions(in state: LedgerState, now: Date) -> Set<UUID> {
-    let transfers = ownTransferIDs(in: state.movements)
+/// `ownTransfers`: el resultado de `ownTransferIDs(in:)` si quien llama ya lo tiene (la instantánea lo necesita aparte
+/// para la lista de traspasos): así el emparejado no se repite.
+public func spendingExclusions(in state: LedgerState, now: Date, ownTransfers: Set<UUID>? = nil) -> Set<UUID> {
+    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
     let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
     return transfers.union(unconfirmed)
         .union(probableTwinCaptureIDs(in: state.movements, skipping: transfers.union(unconfirmed)))
+}
+
+/// Palabras que marcan una operación que no es un pago con tarjeta (R40): una fila así no puede ser la pareja de un
+/// capturado. Coincidencia por palabra entera, sin mayúsculas ni tildes.
+private let nonCardWords: Set<String> = [
+    "recibo", "domiciliacion", "adeudo", "transferencia", "traspaso", "bizum", "cajero", "comision",
+]
+
+private func marksNonCardOperation(_ text: String?) -> Bool {
+    guard let text else { return false }
+    let folded = text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+    return folded.components(separatedBy: CharacterSet.alphanumerics.inverted).contains { nonCardWords.contains($0) }
 }

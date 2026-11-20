@@ -141,6 +141,24 @@ public func isBankFailure(_ error: Error) -> Bool {
     error is BankingClientError || error is URLError
 }
 
+/// Qué hacer con el fallo de una consulta una vez terminada, según si la conexión sigue siendo la misma.
+public enum SyncFailureAction: Equatable, Sendable {
+    /// Anotar el fallo en la conexión y, si el problema es de consentimiento, borrar la sesión del Llavero.
+    case record(deleteSession: Bool)
+    /// Una reconexión o renovación ocurrió mientras tanto (otra sesión o conexión más nueva que el intento): el fallo
+    /// es de la sesión vieja. No se anota nada ni se toca el Llavero.
+    case drop
+}
+
+/// `startedSessionID`: la sesión con la que arrancó la consulta (nil si no había). `currentSessionID`: la que hay ahora
+/// en el Llavero. `link`: la conexión ahora en el libro. `attemptAt`: cuándo se anotó el intento.
+public func syncFailureAction(
+    problem: SyncProblem, startedSessionID: String?, currentSessionID: String?, link: BankLinkInfo?, attemptAt: Date
+) -> SyncFailureAction {
+    guard let link, link.connectedAt <= attemptAt, startedSessionID == currentSessionID else { return .drop }
+    return .record(deleteSession: problem == .consentExpired)
+}
+
 extension BankLinkInfo {
     /// Aplica el resultado de una consulta: éxito o el fallo clasificado.
     public func applying(_ outcome: Result<Void, Error>, at: Date) -> BankLinkInfo {

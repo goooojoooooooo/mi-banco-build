@@ -94,6 +94,7 @@ extension Ledger {
                 setRef(r.ref, on: i)
                 if channel == .bank {
                     state.movements[i].bankStatus = r.status
+                    state.movements[i].linkedAt = now
                 } else if state.movements[i].bankStatus == nil {
                     state.movements[i].bankStatus = .booked
                 }
@@ -138,6 +139,7 @@ extension Ledger {
                         let row = state.movements[j]
                         state.movements[i].bankRef = row.bankRef
                         state.movements[i].bankStatus = row.bankStatus
+                        state.movements[i].linkedAt = now
                         if state.movements[i].statementRef == nil { state.movements[i].statementRef = row.statementRef }
                         if let name = row.merchant, !name.isEmpty { state.movements[i].bankMerchant = name }
                         state.movements[i].isShop = state.movements[i].isShop || row.isShop
@@ -158,8 +160,9 @@ extension Ledger {
     /// Capturados (aviso o Cartera) que el banco debería haber confirmado ya y no lo han hecho. Dos fuentes de cobertura:
     /// - Banco conectado: más de 7 días antes de la última consulta con éxito, y no antes del primer movimiento con clave
     ///   del banco (ahí empieza lo que se ve).
-    /// - Extractos importados (también de un banco sin conexión): el periodo entre la primera y la última fila de sus
-    ///   extractos; dentro de él, más de 7 días antes de `now`.
+    /// - Extractos importados (también de un banco sin conexión): los periodos guardados en `statementCoverage`, uno por
+    ///   importación (R38); un día cuenta solo dentro de uno de ellos, así que el hueco entre dos extractos no está
+    ///   cubierto, y el día en que se importó tampoco. Dentro de un periodo, más de 7 días antes de `now`.
     /// Comparación por día de Madrid (las filas de solo día se guardan a mediodía).
     public func unconfirmedCaptures(bank: BankID, now: Date) -> Set<UUID> {
         func unlinkedCapture(_ m: Movement) -> Bool {
@@ -176,14 +179,10 @@ extension Ledger {
                 }.map(\.id))
             }
         }
-        let statementDates = state.movements.filter { $0.bank == bank && $0.statementRef != nil }.map(\.date)
-        if let first = statementDates.min(), let last = statementDates.max() {
-            let firstDay = madridCalendar.startOfDay(for: first)
-            let lastDay = madridCalendar.startOfDay(for: last)
+        if let intervals = state.statementCoverage[bank], !intervals.isEmpty {
             let cutoff = now.addingTimeInterval(-7 * 86_400)
             ids.formUnion(state.movements.filter { m in
-                let day = madridCalendar.startOfDay(for: m.date)
-                return unlinkedCapture(m) && m.date <= cutoff && day >= firstDay && day <= lastDay
+                unlinkedCapture(m) && m.date <= cutoff && intervals.contains { m.date >= $0.start && m.date < $0.end }
             }.map(\.id))
         }
         return ids

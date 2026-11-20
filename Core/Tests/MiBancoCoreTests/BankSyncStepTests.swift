@@ -261,6 +261,37 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
 
     // MARK: fallos locales
 
+    @Test func sameSessionRecordsAndDeletesOnlyOnExpiry() {
+        let l = link()
+        let at = iso("2026-11-20T13:00:00Z")
+        #expect(syncFailureAction(problem: .consentExpired, startedSessionID: "s1", currentSessionID: "s1", link: l, attemptAt: at)
+            == .record(deleteSession: true))
+        #expect(syncFailureAction(problem: .offline, startedSessionID: "s1", currentSessionID: "s1", link: l, attemptAt: at)
+            == .record(deleteSession: false))
+    }
+
+    @Test func reconnectedDuringSyncDropsTheOutcome() {
+        let at = iso("2026-11-20T13:00:00Z")
+        // Otra sesión en el Llavero: se conserva y no se anota nada.
+        #expect(syncFailureAction(problem: .consentExpired, startedSessionID: "old", currentSessionID: "new", link: link(), attemptAt: at)
+            == .drop)
+        // La conexión se renovó después del intento.
+        let renewed = link().renewed(consentValidUntil: iso("2027-06-01T10:00:00Z"), at: iso("2026-11-20T13:00:05Z"))
+        #expect(syncFailureAction(problem: .consentExpired, startedSessionID: "s1", currentSessionID: "s1", link: renewed, attemptAt: at)
+            == .drop)
+        // Desconectada o sin sesión nueva ni vieja.
+        #expect(syncFailureAction(problem: .offline, startedSessionID: "s1", currentSessionID: "s1", link: nil, attemptAt: at) == .drop)
+        #expect(syncFailureAction(problem: .offline, startedSessionID: "s1", currentSessionID: nil, link: link(), attemptAt: at) == .drop)
+    }
+
+    @Test func noSessionAtStartRecordsUnlessOneAppearedMeanwhile() {
+        let at = iso("2026-11-20T13:00:00Z")
+        #expect(syncFailureAction(problem: .consentExpired, startedSessionID: nil, currentSessionID: nil, link: link(), attemptAt: at)
+            == .record(deleteSession: true))
+        #expect(syncFailureAction(problem: .consentExpired, startedSessionID: nil, currentSessionID: "new", link: link(), attemptAt: at)
+            == .drop)
+    }
+
     @Test func onlyBankFailuresAreRecorded() {
         #expect(isBankFailure(BankingClientError.offline))
         #expect(isBankFailure(BankingClientError.api(.rateLimited, code: nil)))

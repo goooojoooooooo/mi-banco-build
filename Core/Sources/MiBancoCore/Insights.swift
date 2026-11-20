@@ -109,7 +109,8 @@ private func movementInsights(_ m: Movement, in state: LedgerState, index: Merch
         if key.contains("nomina"), cents >= 50_000 {
             out.append(make(.salary, .positive, subject: m.id.uuidString, title: "Has recibido tu nómina: \(amount)",
                             date: m.date, bank: m.bank, merchant: m.merchant, movementID: m.id, calendar: calendar))
-        } else if cents >= 80_000 {
+        } else if cents >= 80_000, !m.excludedFromSpending {
+            // Una venta de valores mueve el saldo pero no es un ingreso que avisar (R40).
             let from = m.merchant.map { " de \($0)" } ?? ""
             out.append(make(.largeIncome, .positive, subject: m.id.uuidString, title: "Ingreso grande: \(amount)\(from)",
                             date: m.date, bank: m.bank, merchant: m.merchant, movementID: m.id, calendar: calendar))

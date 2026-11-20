@@ -135,7 +135,8 @@ actor BankSync {
         }
         guard let session else {
             // Hay conexión en el libro pero no sesión en el Llavero (otro dispositivo, copia restaurada): hay que renovar.
-            return await recordFailure(bank, BankingClientError.api(.consentExpired, code: nil), store: store)
+            return await recordFailure(bank, BankingClientError.api(.consentExpired, code: nil), startedSession: nil,
+                                       attemptAt: Date(), store: store)
         }
 
         // 1. El intento queda anotado antes de llamar (cuenta para el límite diario aunque la app muera a mitad).
@@ -180,19 +181,28 @@ actor BankSync {
             // Una cancelación (caducó la tarea de fondo, la app se va) o un fallo local (disco) no son un fallo del
             // banco: no se anotan.
             if error is CancellationError || Task.isCancelled || !isBankFailure(error) { return nil }
-            return await recordFailure(bank, error, store: store)
+            return await recordFailure(bank, error, startedSession: session.sessionID, attemptAt: attemptAt, store: store)
         }
     }
 
-    private func recordFailure(_ bank: BankID, _ error: Error, store: FileStore) async -> SyncOutcome {
+    /// Si mientras tanto hubo una reconexión o renovación, el fallo es de la sesión vieja: no se anota, no se borra la
+    /// sesión nueva del Llavero y no hay resultado (decide Core: `syncFailureAction`).
+    private func recordFailure(
+        _ bank: BankID, _ error: Error, startedSession: String?, attemptAt: Date, store: FileStore
+    ) async -> SyncOutcome? {
         let problem = syncProblem(for: error)
-        _ = try? store.update { ledger in
-            guard let link = ledger.state.links[bank] else { return }
-            ledger.setLink(bank, link.applying(.failure(error), at: Date()))
-        }
-        if problem == .consentExpired {
-            try? KeychainVault.delete(KeychainVault.session(for: bank))
-        }
+        let current = (try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank))) ?? nil
+        let action = (try? store.update { ledger -> SyncFailureAction in
+            let action = syncFailureAction(
+                problem: problem, startedSessionID: startedSession, currentSessionID: current?.sessionID,
+                link: ledger.state.links[bank], attemptAt: attemptAt)
+            if case .record = action, let link = ledger.state.links[bank] {
+                ledger.setLink(bank, link.applying(.failure(error), at: Date()))
+            }
+            return action
+        }) ?? .drop
+        guard case let .record(deleteSession) = action else { return nil }
+        if deleteSession { try? KeychainVault.delete(KeychainVault.session(for: bank)) }
         NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
         return .failed(problem)
     }

@@ -31,6 +31,11 @@ final class BankConnector {
     /// Cambia con cada intento: un intento viejo que despierta tras un `await` se retira.
     @ObservationIgnored private var attempt = UUID()
 
+    /// Un intento a medias que ya caducó no sirve para nada: se borra al arrancar.
+    private init() {
+        if let pending = loadPending(), pending.isExpired(now: Date()) { deletePending() }
+    }
+
     var phase: ConnectPhase { flow.phase }
 
     /// Abriendo, esperando al banco o terminando.
@@ -51,6 +56,8 @@ final class BankConnector {
 
     func connect(_ bank: BankID, aspsp: EBASPSP? = nil) async {
         guard !isActive else { return }
+        // Un intento anterior (de este banco u otro) ya no puede contestar a este: se borra ANTES del primer `await`.
+        deletePending()
         flow.handle(.start(bank))
         let mine = UUID()
         attempt = mine
@@ -59,7 +66,7 @@ final class BankConnector {
 
         let client: EnableBankingClient
         do { client = try BankingCredentials.client() } catch {
-            fail(bank, ConnectMessage.tooSlow)
+            fail(bank, ConnectMessage.missingCredentials)
             return
         }
 
@@ -90,14 +97,14 @@ final class BankConnector {
 
         // `state` aleatorio del sistema; el intento queda en el Llavero ANTES de abrir la hoja web.
         guard let state = Self.randomState() else {
-            fail(bank, ConnectMessage.tooSlow)
+            fail(bank, ConnectMessage.storeFailed)
             return
         }
         let until = consentValidUntil(for: chosen, now: Date())
         let pending = PendingAuth(
             state: state, bank: bank, aspspName: chosen.name, aspspCountry: chosen.country, startedAt: Date())
         do { try KeychainVault.setCodable(pending, for: .pendingAuth) } catch {
-            fail(bank, ConnectMessage.tooSlow)
+            fail(bank, ConnectMessage.storeFailed)
             return
         }
         requestedUntil = until
@@ -155,6 +162,8 @@ final class BankConnector {
 
         // Todo lo siguiente, hasta el primer `await`, es síncrono: la primera llamada consume el intento
         // (lo borra del Llavero) y una segunda no encuentra nada.
+        // La vuelta se VERIFICA primero contra el `state` guardado: cualquier app puede abrir `mibanco://cb?...`, y una
+        // vuelta falsa no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora).
         let pending = loadPending()
         let check: PendingCheck
         if let pending {
@@ -162,7 +171,8 @@ final class BankConnector {
         } else {
             check = .none
         }
-        let actions = flow.handle(.callback(check))
+        let result: AuthCallbackResult = pending.map { parseAuthCallback(url, expectedState: $0.state) } ?? .malformed
+        let actions = flow.handle(.callbackReceived(check, result))
 
         var bankToProcess: BankID?
         for action in actions {
@@ -170,10 +180,9 @@ final class BankConnector {
         }
         guard let bank = bankToProcess, let pending else { return }
 
-        let result = parseAuthCallback(url, expectedState: pending.state)
         // Consumir: pase lo que pase, este intento no vuelve a servir.
         do { try KeychainVault.delete(.pendingAuth) } catch {
-            fail(bank, ConnectMessage.tooSlow)
+            fail(bank, ConnectMessage.storeFailed)
             return
         }
         guard case .code(let code) = result else {
@@ -184,14 +193,22 @@ final class BankConnector {
     }
 
     private func finish(bank: BankID, code: String, pending: PendingAuth) async {
+        // Si la persona desconecta mientras tanto, `attempt` cambia y este intento se retira.
+        let mine = attempt
         let client: EnableBankingClient
         do { client = try BankingCredentials.client() } catch {
-            fail(bank, ConnectMessage.tooSlow)
+            fail(bank, ConnectMessage.missingCredentials)
             return
         }
         let session: EBSession
         do { session = try await client.createSession(code: code) } catch {
+            guard attempt == mine else { return }
             fail(bank, connectMessage(for: error))
+            return
+        }
+        // Desde aquí hasta escribir no hay más `await`: lo que se comprueba ahora sigue valiendo al escribir.
+        guard attempt == mine, flow.phase == .finishing(bank) else {
+            try? await client.deleteSession(id: session.sessionID)
             return
         }
         let accounts = selectAccounts(session.accounts)
@@ -206,16 +223,23 @@ final class BankConnector {
         let stored = StoredSession(
             sessionID: session.sessionID, accountUIDs: accounts.map(\.uid), validUntil: until,
             aspspName: pending.aspspName, aspspCountry: pending.aspspCountry)
+        // La sesión que funcionaba hasta ahora (si la hay) se guarda: si algo falla se deja todo como estaba.
+        let item = KeychainVault.session(for: bank)
+        let previous = (try? KeychainVault.codable(StoredSession.self, for: item)) ?? nil
         do {
-            try KeychainVault.setCodable(stored, for: KeychainVault.session(for: bank))
+            try KeychainVault.setCodable(stored, for: item)
             _ = try SharedStore.make().update { ledger in
                 let info = ledger.state.links[bank]?.renewed(consentValidUntil: until, at: now)
                     ?? BankLinkInfo(connectedAt: now, consentValidUntil: until)
                 ledger.setLink(bank, info)
             }
         } catch {
+            switch rollbackAfterLedgerFailure(previous: previous) {
+            case .restore(let old): try? KeychainVault.setCodable(old, for: item)
+            case .deleteNew: try? KeychainVault.delete(item)
+            }
             try? await client.deleteSession(id: session.sessionID)
-            fail(bank, ConnectMessage.tooSlow)
+            fail(bank, ConnectMessage.storeFailed)
             return
         }
         authURL = nil
@@ -223,13 +247,18 @@ final class BankConnector {
         flow.handle(.succeeded(bank))
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
+        // Reconexión: la sesión remota vieja ya no hace falta (mejor esfuerzo).
+        if let old = staleRemoteSessionID(previous: previous, new: stored) {
+            try? await client.deleteSession(id: old)
+        }
     }
 
     // MARK: - Desconectar
 
     func disconnect(_ bank: BankID) async {
-        if flow.phase.isActive, phaseBank == bank { run(flow.handle(.cancel)) }
-        if phaseBank == bank { run(flow.handle(.reset)) }
+        // Un trámite de este banco (también uno que está terminando) se abandona: `attempt` cambia y `finish` se retira.
+        attempt = UUID()
+        run(flow.handle(.disconnected(bank)))
         if let session = try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)),
            let client = try? BankingCredentials.client() {
             try? await client.deleteSession(id: session.sessionID)

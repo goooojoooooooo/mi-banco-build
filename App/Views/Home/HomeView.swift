@@ -277,8 +277,13 @@ struct HomeView: View {
         }
         if DemoMode.opensDetail, let first = model.snapshot.searchIndex.first {
             Task {
+                // Se reintenta unos segundos: `openDetail` no abre con la app aún fuera de primer plano (arranque en el simulador de CI);
+                // repetir la misma ruta no hace nada una vez abierta.
                 try? await Task.sleep(for: .seconds(1.5))
-                openDetail(first.id)
+                for _ in 0..<10 {
+                    openDetail(first.id)
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
             }
         }
     }

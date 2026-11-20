@@ -34,6 +34,12 @@ public enum ConnectEvent: Equatable, Sendable {
     /// La persona cerró la hoja web del banco (no la cerró la app).
     case webDismissedByUser
     case callback(PendingCheck)
+    /// La vuelta ya comprobada contra el `state` guardado. Una vuelta que no se puede verificar (`state` falso o ausente,
+    /// forma rara) o sin intento en el Llavero se ignora sin tocar nada: la puede mandar cualquier app. Solo `.code` y
+    /// `.denied` llegan a la máquina como `callback`.
+    case callbackReceived(PendingCheck, AuthCallbackResult)
+    /// La persona desconecta ese banco: el trámite de ese banco, esté donde esté (también terminando), se abandona.
+    case disconnected(BankID)
     case succeeded(BankID)
     case failed(BankID, String)
     case sceneBackground(Date)
@@ -91,6 +97,25 @@ public struct ConnectFlow: Equatable, Sendable {
             default:
                 return []
             }
+
+        case .callbackReceived(let check, let result):
+            switch result {
+            case .code, .denied: return handle(.callback(check))
+            case .stateMismatch, .malformed: return []
+            }
+
+        case .disconnected(let bank):
+            let mine: Bool
+            switch phase {
+            case .idle: mine = false
+            case .opening(let b), .waitingForBank(let b), .finishing(let b), .connected(let b), .needsResume(let b),
+                 .failed(let b, _), .chooseASPSP(let b, _):
+                mine = b == bank
+            }
+            guard mine else { return [] }
+            let wasActive = phase.isActive
+            phase = .idle
+            return wasActive ? [.cancelWebSession, .deletePending] : [.deletePending]
 
         case .callback(let check):
             // Ya se está terminando: la segunda vuelta no hace nada.
@@ -173,6 +198,8 @@ public enum ConnectMessage {
     public static let redirectNotAllowed =
         "Enable Banking no reconoce la dirección de vuelta. Revisa el paso 2 de la guía."
     public static let offline = "Sin conexión a internet."
+    public static let missingCredentials = "Falta la clave de tu banco. Añádela en Ajustes › Bancos."
+    public static let storeFailed = "No se pudo guardar la conexión en este iPhone. Vuelve a intentarlo."
 
     public static func noEuroAccount(_ bank: BankID) -> String {
         "No hemos encontrado una cuenta en euros en \(bank.displayName)."
@@ -208,4 +235,23 @@ public func canConnectBank(_ bank: BankID, cachedList: [EBASPSP]?) -> Bool {
     case .rev, .ima: true
     case .tr: cachedList.flatMap { matchASPSP(for: .tr, in: $0) } != nil
     }
+}
+
+/// Qué hacer con la sesión del Llavero cuando falla la escritura del libro tras guardar la nueva (R: éxito atómico).
+public enum SessionRollback: Equatable, Sendable {
+    /// Había una sesión que funcionaba: se vuelve a poner.
+    case restore(StoredSession)
+    /// No había ninguna: se borra la nueva.
+    case deleteNew
+}
+
+public func rollbackAfterLedgerFailure(previous: StoredSession?) -> SessionRollback {
+    previous.map(SessionRollback.restore) ?? .deleteNew
+}
+
+/// Id de la sesión REMOTA vieja que sobra tras reconectar con éxito (la nueva ya está guardada): `nil` si no había o si
+/// es la misma.
+public func staleRemoteSessionID(previous: StoredSession?, new: StoredSession) -> String? {
+    guard let previous, previous.sessionID != new.sessionID else { return nil }
+    return previous.sessionID
 }

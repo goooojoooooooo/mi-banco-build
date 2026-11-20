@@ -16,7 +16,7 @@ struct GuideStepView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(.dynamicTypeSize) private var typeSize
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     /// `start` es el paso de partida, contando desde 0.
     init(track: GuideTrack, model: LedgerModel, start: Int = 0) {

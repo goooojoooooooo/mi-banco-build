@@ -9,6 +9,7 @@ struct GuideStepView: View {
 
     @State private var index: Int
     @State private var forward = true
+    @State private var pendingStep: Int?
     @State private var helpOpen = false
     @State private var firstNoticeSeen = false
     @Environment(\.openURL) private var openURL
@@ -57,6 +58,9 @@ struct GuideStepView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Avisos al instante")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: pendingStep) { _, target in
+            if let target { applyPending(target) }
+        }
         .onChange(of: status) { old, new in
             if case .notYet = old, case .working = new {
                 withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) { firstNoticeSeen = true }
@@ -228,15 +232,18 @@ struct GuideStepView: View {
         if index > 0 { move(to: index - 1) }
     }
 
-    /// Primero se fija el sentido (para que el paso que sale y el que entra usen el mismo) y un instante después se cambia.
+    /// Primero se fija el sentido y el paso al que ir; el cambio de paso se hace en `onChange`, ya con el sentido
+    /// pintado, para que el paso que sale y el que entra se deslicen hacia el mismo lado (sin temporizadores).
     private func move(to target: Int) {
         forward = target > index
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(16))
-            withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.45, bounce: 0.18)) {
-                index = target
-                helpOpen = false
-            }
+        pendingStep = target
+    }
+
+    private func applyPending(_ target: Int) {
+        pendingStep = nil
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.45, bounce: 0.18)) {
+            index = target
+            helpOpen = false
         }
     }
 

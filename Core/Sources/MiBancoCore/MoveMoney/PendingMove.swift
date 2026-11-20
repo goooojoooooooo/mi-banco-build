@@ -34,13 +34,15 @@ private let moveLifetime: TimeInterval = 3 * 86_400
 
 /// El traspaso está hecho cuando llega el pago del mismo importe desde ese banco
 /// (hasta 5 min antes de crearlo y 3 días después); pasados los 3 días sin él, caduca.
-public func moveState(_ move: PendingMove, movements: [Movement], now: Date) -> MoveState {
+/// No cuentan las compras en tienda, los movimientos marcados «no es mío», los fechados después de `now` ni los que
+/// ya reclama otro traspaso (`claimed`). `.done` trae el id del movimiento: quien llama lo anota como reclamado.
+public func moveState(_ move: PendingMove, movements: [Movement], now: Date, claimed: Set<UUID> = []) -> MoveState {
     let from = move.createdAt.addingTimeInterval(-moveLookBack)
     let to = move.createdAt.addingTimeInterval(moveLifetime)
-    let hit = movements.first {
+    let hit = movements.filter {
         $0.bank == move.from && $0.kind == .payment && $0.amountCents == -move.amountCents && !$0.flaggedNotMine
-            && $0.date >= from && $0.date <= to
-    }
+            && !$0.isShop && $0.date <= now && $0.date >= from && $0.date <= to && !claimed.contains($0.id)
+    }.min { $0.date < $1.date }
     if let hit { return .done(movementID: hit.id) }
     return now > to ? .expired : .waiting
 }
@@ -59,6 +61,6 @@ public func bankTransferHint(from bank: BankID, kind: PasteKind, amountCents: In
     case (.rev, .iban): return "En Revolut: Pagos → Transferir → Cuenta bancaria → pega el IBAN y pon \(amount)."
     case (.rev, .phone): return "En Revolut: Pagos → Enviar → pega el número y pon \(amount)."
     case (.tr, .iban): return "En Trade Republic: Efectivo → Transferir → Retirar. Solo puedes enviarlo a tu cuenta de referencia."
-    case (.tr, .phone): return "En Trade Republic no se puede enviar dinero a un número de teléfono."
+    case (.tr, .phone): return "No encuentro cómo enviar dinero a un teléfono desde Trade Republic. Usa su IBAN."
     }
 }

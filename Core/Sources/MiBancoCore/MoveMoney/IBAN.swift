@@ -4,7 +4,9 @@ import Foundation
 
 /// Mayúsculas y solo letras y cifras ("es91-2100 0418" -> "ES912100…").
 public func normalizeIBAN(_ raw: String) -> String {
-    String(raw.uppercased().unicodeScalars.filter { $0.isASCII && (CharacterSet.alphanumerics.contains($0)) }.map(Character.init))
+    // Primero se quita lo que no es ASCII y después se pasa a mayúsculas: así «ß» no se convierte en "SS".
+    let ascii = String(raw.unicodeScalars.filter { $0.isASCII && CharacterSet.alphanumerics.contains($0) }.map(Character.init))
+    return ascii.uppercased()
 }
 
 /// Longitud 15–34 (España exactamente 24) y dígito de control módulo 97 igual a 1.
@@ -41,10 +43,11 @@ public func formatIBAN(_ iban: String) -> String {
     return out
 }
 
-/// "ES91 •••• 1332": solo los cuatro primeros y los cuatro últimos caracteres.
+/// "ES91 •••• 1332": cuatro primeros y cuatro últimos, solo si el IBAN tiene al menos 12 caracteres;
+/// si es más corto, solo los dos últimos ("•••• 32").
 public func maskedIBAN(_ iban: String) -> String {
     let clean = normalizeIBAN(iban)
-    guard clean.count >= 8 else { return "••••" }
+    guard clean.count >= 12 else { return clean.count >= 2 ? "•••• \(clean.suffix(2))" : "••••" }
     return "\(clean.prefix(4)) •••• \(clean.suffix(4))"
 }
 

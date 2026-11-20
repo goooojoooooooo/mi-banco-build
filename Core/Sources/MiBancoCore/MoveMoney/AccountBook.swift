@@ -1,11 +1,15 @@
 import Foundation
 
 /// Un destinatario guardado. Sensible: vive solo en el llavero (nunca en el libro, copias ni registros).
-public struct Payee: Codable, Equatable, Sendable, Identifiable {
+public struct Payee: Codable, Equatable, Sendable, Identifiable, CustomStringConvertible, CustomDebugStringConvertible {
     public var id: UUID
     public var name: String
     public var iban: String?
     public var phone: String?
+
+    /// Nunca el nombre, el IBAN ni el teléfono: si alguien lo imprime por error, no sale nada.
+    public var description: String { "Payee(•••)" }
+    public var debugDescription: String { "Payee(•••)" }
 
     public init(id: UUID = UUID(), name: String, iban: String? = nil, phone: String? = nil) {
         self.id = id
@@ -17,11 +21,15 @@ public struct Payee: Codable, Equatable, Sendable, Identifiable {
 
 /// IBAN propios, saldo mínimo a respetar por banco y destinatarios. Solo para el llavero:
 /// no forma parte de `LedgerState` ni de ninguna copia de seguridad.
-public struct AccountBook: Codable, Equatable, Sendable {
+public struct AccountBook: Codable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
     public var ibans: [BankID: String]
     /// Céntimos que no se quieren tocar en cada banco.
     public var floors: [BankID: Int]
     public var payees: [Payee]
+
+    /// Sin IBAN, mínimos ni destinatarios en la salida.
+    public var description: String { "AccountBook(•••)" }
+    public var debugDescription: String { "AccountBook(•••)" }
 
     public init() {
         ibans = [:]

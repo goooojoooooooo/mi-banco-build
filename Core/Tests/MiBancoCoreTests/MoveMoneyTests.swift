@@ -61,22 +61,36 @@ private func move(_ cents: Int = 20000) -> PendingMove {
         #expect(moveState(m, movements: [], now: nov(23, 7, 45).addingTimeInterval(1)) == .expired)
     }
 
+    /// Todas las claves de un JSON, a cualquier profundidad.
+    private func allKeys(_ value: Any) -> Set<String> {
+        if let dict = value as? [String: Any] {
+            return dict.reduce(into: Set(dict.keys)) { $0.formUnion(allKeys($1.value)) }
+        }
+        if let list = value as? [Any] {
+            return list.reduce(into: Set<String>()) { $0.formUnion(allKeys($1)) }
+        }
+        return []
+    }
+
     @Test func movimientoPendienteSinIBAN() throws {
         let m = move()
         let data = try JSONEncoder().encode(m)
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(Set(object.keys) == ["amountCents", "createdAt", "from", "id", "target"])
 
+        // El libro nunca lleva claves de IBAN, destinatarios, teléfono ni libro de cuentas.
         var hit = payment(20000, at: nov(20, 7, 49))
         hit.merchant = "Traspaso"
-        guard case .done = moveState(m, movements: [hit], now: nov(20, 8)) else {
-            Issue.record("el traspaso debería estar hecho")
-            return
+        let state = LedgerState(
+            balances: [.ima: ManualBalance(cents: 128455, setAt: nov(20), fromBank: false)],
+            movements: [hit], unread: [UnreadNotice(bank: .rev, text: "texto", date: nov(20))])
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(state))
+        let keys = Set(allKeys(json).map { $0.lowercased() })
+        #expect(keys.contains("movements"))
+        #expect(keys.contains("amountcents"))
+        for forbidden in ["iban", "ibans", "payee", "payees", "accountbook", "phone"] {
+            #expect(!keys.contains(forbidden), "\(forbidden)")
         }
-        let state = LedgerState(movements: [hit])
-        let json = String(decoding: try JSONEncoder().encode(state), as: UTF8.self)
-        #expect(!json.contains("ES91"))
-        #expect(!String(decoding: data, as: UTF8.self).contains("ES91"))
     }
 
     @Test func libroDeCuentasTolerante() throws {
@@ -155,5 +169,131 @@ private func move(_ cents: Int = 20000) -> PendingMove {
         #expect(free?.perDayCents == 14088)
         #expect(freeMoney(balances: [:], floors: floors, banks: [.rev, .ima], pending: pending, now: now, calendar: cal) == nil)
         #expect(freeMoney(balances: [.rev: 3000], floors: [.rev: 5000], banks: [.rev], pending: [], now: now, calendar: cal) == nil)
+    }
+
+    // MARK: Ronda de arreglos tras la revisión
+
+    @Test func traspasoNoLoCierraOtroPago() {
+        let m = move()
+        var shop = payment(20000, at: nov(20, 7, 46))
+        shop.isShop = true
+        #expect(moveState(m, movements: [shop], now: nov(20, 8)) == .waiting)
+
+        // Dos traspasos iguales necesitan dos movimientos distintos.
+        let m2 = move()
+        let first = payment(20000, at: nov(20, 7, 49))
+        let second = payment(20000, at: nov(20, 7, 55))
+        let all = [first, second]
+        guard case .done(let firstID) = moveState(m, movements: all, now: nov(20, 8)) else {
+            Issue.record("el primero debería cerrarse")
+            return
+        }
+        #expect(firstID == first.id)
+        #expect(moveState(m2, movements: [first], now: nov(20, 8), claimed: [firstID]) == .waiting)
+        #expect(moveState(m2, movements: all, now: nov(20, 8), claimed: [firstID]) == .done(movementID: second.id))
+
+        // Fechado después de ahora: no vale.
+        #expect(moveState(m, movements: [payment(20000, at: nov(20, 9))], now: nov(20, 8)) == .waiting)
+        // Otro banco y «no es mío»: no valen.
+        #expect(moveState(m, movements: [payment(20000, bank: .rev, at: nov(20, 7, 49))], now: nov(20, 8)) == .waiting)
+        var flagged = payment(20000, at: nov(20, 7, 49))
+        flagged.flaggedNotMine = true
+        #expect(moveState(m, movements: [flagged], now: nov(20, 8)) == .waiting)
+    }
+
+    @Test func traspasoLimitesExactos() {
+        let m = move()
+        let start = m.createdAt.addingTimeInterval(-300)
+        let end = m.createdAt.addingTimeInterval(3 * 86_400)
+        let now = end.addingTimeInterval(10)
+        func at(_ when: Date) -> MoveState { moveState(m, movements: [payment(20000, at: when)], now: now) }
+        #expect(at(start) != .waiting && at(start) != .expired)
+        #expect(at(start.addingTimeInterval(-1)) == .expired)
+        #expect(at(end) != .waiting && at(end) != .expired)
+        #expect(at(end.addingTimeInterval(1)) == .expired)
+    }
+
+    @Test func dineroLibreAvisaDeLosQueFaltan() {
+        let now = nov(20, 8, 30)
+        let free = freeMoney(balances: [.rev: 34020], floors: floors, banks: [.rev, .ima], pending: [], now: now, calendar: cal)
+        #expect(free?.cents == 29020)
+        #expect(free?.missingBanks == [BankID.ima])
+        let full = freeMoney(balances: balances, floors: floors, banks: [.rev, .ima, .tr], pending: [], now: now, calendar: cal)
+        #expect(full?.missingBanks.isEmpty == true)
+        #expect(freeMoney(balances: [.tr: 100], floors: [:], banks: [.rev, .ima], pending: [], now: now, calendar: cal) == nil)
+    }
+
+    @Test func dondeLoPagoSoloLosIncluidos() {
+        let options = whereToPay(amountCents: 4500, balances: balances, floors: floors, upcoming: [spotify, netflix],
+                                 included: [.rev, .ima], estimated: [.ima])
+        #expect(options == [
+            PayOption(bank: .ima, leftAfterCents: 123955, fits: true, isEstimated: true),
+            PayOption(bank: .rev, leftAfterCents: 22022, fits: true),
+        ])
+    }
+
+    @Test func faltaSoloConIncluidosYMarcaEstimados() {
+        let now = nov(19, 10)
+        let netflixSoon = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1399, date: nov(20, 12))
+        let all: [BankID: Int] = [.rev: 920, .ima: 128455, .tr: 215000]
+        // imagin excluido: se sugiere Trade Republic; con las dos excluidas, nadie.
+        let noIma = shortfalls(balances: all, floors: [:], upcoming: [netflixSoon], now: now, calendar: cal, included: [.rev, .tr])
+        #expect(noIma.first?.suggestedFrom == .tr)
+        let onlyRev = shortfalls(balances: all, floors: [:], upcoming: [netflixSoon], now: now, calendar: cal, included: [.rev])
+        #expect(onlyRev.count == 1)
+        #expect(onlyRev[0].suggestedFrom == nil)
+        // Rev excluido: no se le avisa de que le falta.
+        #expect(shortfalls(balances: all, floors: [:], upcoming: [netflixSoon], now: now, calendar: cal, included: [.ima, .tr]).isEmpty)
+        // Estimados.
+        let est = shortfalls(balances: all, floors: [:], upcoming: [netflixSoon], now: now, calendar: cal, estimated: [.rev, .ima])
+        #expect(est.first?.isEstimated == true)
+        #expect(est.first?.suggestedIsEstimated == true)
+        let exact = shortfalls(balances: all, floors: [:], upcoming: [netflixSoon], now: now, calendar: cal)
+        #expect(exact.first?.isEstimated == false)
+        #expect(exact.first?.suggestedIsEstimated == false)
+        // Un cobro anterior a ahora ya está en el saldo.
+        let past = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1399, date: nov(19, 9))
+        #expect(shortfalls(balances: all, floors: [:], upcoming: [past], now: now, calendar: cal).isEmpty)
+    }
+
+    @Test func pistaDeTradeRepublicConTelefono() {
+        #expect(bankTransferHint(from: .tr, kind: .phone, amountCents: 1500)
+            == "No encuentro cómo enviar dinero a un teléfono desde Trade Republic. Usa su IBAN.")
+    }
+
+    @Test func salidaSinDatosPersonales() {
+        let payee = Payee(id: UUID(), name: "Ana Pérez", iban: esIBAN, phone: "+34 612 345 678")
+        var book = AccountBook()
+        book.ibans[.rev] = esIBAN
+        book.payees = [payee]
+        for text in ["\(payee)", String(reflecting: payee), "\(book)", String(reflecting: book), String(describing: book)] {
+            #expect(!text.contains("Ana"))
+            #expect(!text.contains("ES91"))
+            #expect(!text.contains("612"))
+            #expect(!text.contains("2100"))
+        }
+    }
+
+    @Test func ibanCasosLimite() {
+        // 34 caracteres con dígito de control correcto.
+        let long = "XX61ABCD1234567890ABCD1234567890AB"
+        #expect(long.count == 34)
+        #expect(isValidIBAN(long))
+        #expect(maskedIBAN(long) == "XX61 •••• 90AB")
+        // España con el módulo 97 correcto pero de 23 y 25 caracteres: no vale.
+        #expect(!isValidIBAN("ES982100041845020005133"))
+        #expect(!isValidIBAN("ES48210004184502000513321"))
+        // Lo que no es ASCII se descarta antes de pasar a mayúsculas.
+        #expect(normalizeIBAN("ß") == "")
+        #expect(normalizeIBAN("esß91 2100 0418 4502 0005 1332") == esIBAN)
+        // Máscara de IBAN cortos: solo los dos últimos.
+        #expect(maskedIBAN("ES91ABCDEFGH") == "ES91 •••• EFGH")
+        #expect(maskedIBAN("ES91ABCDEFG") == "•••• FG")
+        #expect(maskedIBAN("") == "••••")
+    }
+
+    @Test func telefonoConGuiones() {
+        #expect(normalizeSpanishMobile("612-345-678") == "+34 612 345 678")
+        #expect(normalizeSpanishMobile("+34-612-34-56-78") == "+34 612 345 678")
     }
 }

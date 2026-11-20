@@ -1,11 +1,10 @@
 import SwiftUI
 
 /// Cristal de la capa de navegación (ojo, lupa, campo de búsqueda, indicador del segmentado).
-/// iOS 26+: Liquid Glass. iOS 18–25: material fino con un trazo blanco del 12 %.
+/// iOS 26+: Liquid Glass (no interactivo: el toque lo recibe el botón, no el cristal). iOS 18–25: material fino con un trazo blanco del 12 %.
 /// Reducir transparencia: superficie opaca #1C1C1E con trazo del 15 %. Nunca sobre contenido.
 struct GlassSurface<S: Shape>: ViewModifier {
     let shape: S
-    var interactive = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
@@ -14,7 +13,7 @@ struct GlassSurface<S: Shape>: ViewModifier {
                 .background(Color(white: 0.11), in: shape)
                 .overlay(shape.stroke(.white.opacity(0.15), lineWidth: 0.5))
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            content.glassEffect(.regular, in: shape)
         } else {
             content
                 .background(.ultraThinMaterial, in: shape)
@@ -24,8 +23,8 @@ struct GlassSurface<S: Shape>: ViewModifier {
 }
 
 extension View {
-    func glassSurface<S: Shape>(_ shape: S, interactive: Bool = true) -> some View {
-        modifier(GlassSurface(shape: shape, interactive: interactive))
+    func glassSurface<S: Shape>(_ shape: S) -> some View {
+        modifier(GlassSurface(shape: shape))
     }
 
     /// iOS 26+: identidad para que el cristal se transforme (morph) dentro de un `GlassGroup`.

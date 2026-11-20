@@ -52,7 +52,7 @@ private struct SegmentIndicator: View {
         let position = min(max(motion.carouselPosition, 0), last)
         Color.clear
             .frame(width: max(segmentWidth - 6, 0), height: 36)
-            .glassSurface(Capsule(), interactive: false)
+            .glassSurface(Capsule())
             .offset(x: position * segmentWidth + 3, y: 4)
             .accessibilityHidden(true)
     }

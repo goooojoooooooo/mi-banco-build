@@ -7,6 +7,8 @@ struct CategoryRow: View {
     let row: CategoryRowModel
     /// Orden de la fila: escalona el crecimiento de la barra.
     let index: Int
+    /// Lo que marca la rayita ("el mes pasado a estas alturas"), para VoiceOver.
+    var markName = "el mes anterior"
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -66,8 +68,12 @@ struct CategoryRow: View {
     }
 
     private var spoken: String {
-        let amount = spokenAmount(row.cents, hidden: preferences.privateMode)
-        return [row.category.displayName, amount, row.spokenChange].compactMap { $0 }.joined(separator: ", ")
+        let hidden = preferences.privateMode
+        let amount = spokenAmount(row.cents, hidden: hidden)
+        // Con el modo privado el porcentaje está difuminado: tampoco se lee.
+        let change = row.spokenChange == nil ? nil : (hidden ? "cambio oculto" : row.spokenChange)
+        let mark = row.previousCents.map { "la marca indica \(markName): \(spokenAmount($0, hidden: hidden))" }
+        return [row.category.displayName, amount, change, mark].compactMap { $0 }.joined(separator: ", ")
     }
 }
 

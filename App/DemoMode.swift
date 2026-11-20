@@ -94,6 +94,12 @@ enum DemoMode {
             .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
         ]
 
+        // Gasto: lo de este mes se fecha siempre dentro del mes en curso y nunca en el futuro, sea el día que sea.
+        let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? startOfToday
+        func thisMonth(_ fraction: Double) -> Date {
+            monthStart.addingTimeInterval(max(1, now.timeIntervalSince(monthStart) * fraction))
+        }
+
         // Lo reciente (lo que se ve en Inicio).
         let spotifyDate = day(1, hour: 9, minute: 2)
         var movements = [
@@ -105,7 +111,7 @@ enum DemoMode {
             movement(.tr, 612, "Intereses", day(4, hour: 6)),
             movement(.tr, -4_995, "Zara", day(5, hour: 18, minute: 20)),
             movement(.ima, -2_340, "Lidl", day(5, hour: 11, minute: 5)),
-            movement(.rev, -1_830, "Glovo", day(6, hour: 21, minute: 40)),
+            movement(.rev, -1_830, "Glovo", max(day(6, hour: 21, minute: 40), thisMonth(0.2))),
             // Dos cargos iguales en Amazon con tres minutos de diferencia: "Posible cobro duplicado" (ámbar) en Avisos.
             movement(.ima, -2_499, "Amazon", day(1, hour: 16, minute: 2)),
             movement(.ima, -2_499, "Amazon", day(1, hour: 16, minute: 5)),
@@ -128,8 +134,6 @@ enum DemoMode {
         }
 
         // El mes pasado, repartido: la frase del ritmo compara con él.
-        let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? startOfToday
-        let lastMonth = monthsAgo(1, from: monthStart)
         let spread: [(Int, BankID, Int, String)] = [
             (2, .rev, -3_480, "Mercadona"), (4, .ima, -2_215, "Lidl"), (5, .rev, -1_260, "Glovo"),
             (8, .tr, -8_990, "Zara"), (9, .rev, -1_480, "Renfe"), (11, .ima, -4_620, "Carrefour"),
@@ -137,21 +141,26 @@ enum DemoMode {
             (18, .ima, -3_310, "Lidl"), (20, .rev, -2_145, "Glovo"), (23, .tr, -5_499, "Decathlon"),
             (25, .rev, -3_760, "Mercadona"), (27, .ima, -1_985, "Carrefour"),
         ]
-        for (dayOfMonth, bank, cents, merchant) in spread {
-            guard let date = calendar.date(byAdding: .day, value: dayOfMonth - 1, to: lastMonth)?.addingTimeInterval(13 * 3600),
-                  date < monthStart else { continue }
-            movements.append(movement(bank, cents, merchant, date))
+        // Los dos meses anteriores (el segundo, algo más barato): las comparaciones salen con cifras creíbles.
+        for (back, percent) in [(1, 100), (2, 90)] {
+            let first = monthsAgo(back, from: monthStart)
+            let next = monthsAgo(back - 1, from: monthStart)
+            for (dayOfMonth, bank, cents, merchant) in spread {
+                guard let date = calendar.date(byAdding: .day, value: dayOfMonth - 1, to: first)?.addingTimeInterval(13 * 3600),
+                      date < next else { continue }
+                movements.append(movement(bank, cents * percent / 100, merchant, date))
+            }
         }
 
         // Gasto: un traspaso entre tus bancos (no cuenta como gasto) y dos comidas fuera este mes.
         func transfer(_ bank: BankID, _ cents: Int, _ merchant: String) -> Movement {
             Movement(bank: bank, amountCents: cents, merchant: merchant, kind: cents < 0 ? .payment : .income,
-                     source: .notification, date: day(8, hour: 10, minute: 15), isShop: false)
+                     source: .notification, date: thisMonth(0.35), isShop: false)
         }
         movements.append(transfer(.rev, -20_000, "Transferencia a imagin"))
         movements.append(transfer(.ima, 20_000, "Transferencia de Revolut"))
-        movements.append(movement(.rev, -4_650, "Restaurante Lateral", day(9, hour: 21, minute: 5)))
-        movements.append(movement(.rev, -1_240, "Bar Pepe", day(10, hour: 13, minute: 30)))
+        movements.append(movement(.rev, -4_650, "Restaurante Lateral", thisMonth(0.5)))
+        movements.append(movement(.rev, -1_240, "Bar Pepe", thisMonth(0.65)))
 
         if includesUnknownShop {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.

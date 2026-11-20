@@ -9,6 +9,8 @@ struct CategoryRowModel: Equatable, Sendable, Identifiable {
     let fraction: Double
     /// Dónde quedó el mes anterior (mismo punto del mes si se mira el actual), en la misma escala. nil sin gasto previo.
     let previousFraction: Double?
+    /// Lo gastado en la categoría el mes anterior (mismo punto del mes si es el actual): lo que lee VoiceOver de la marca.
+    let previousCents: Int?
     /// "+12 %" / "-30 %"; nil si el mes anterior no tuvo gasto en la categoría.
     let change: String?
     /// "12 % más que el mes pasado": lo que lee VoiceOver; nil sin comparación.
@@ -23,6 +25,10 @@ struct SpendingPage: Equatable, Sendable {
     let title: String
     let comparison: String?
     let forecast: String?
+    /// Línea bajo «Por categoría» que explica la marca de cada barra.
+    let markCaption: String
+    /// Cómo se llama lo que marca, para VoiceOver ("el mes pasado a estas alturas").
+    let markName: String
     let rows: [CategoryRowModel]
 }
 
@@ -33,7 +39,7 @@ extension LedgerSnapshot {
     /// Las páginas de Gasto, de una sola vez. El emparejado de traspasos y las claves de suscripción llegan ya
     /// calculados: ninguna suma de Core los recalcula por mes ni por categoría.
     static func spendingPages(state: LedgerState, now: Date, calendar: Calendar, transfers: Set<UUID>,
-                              pace: SpendingPace?) -> (months: [Date], pages: [Date: SpendingPage]) {
+                              subscriptions: [Subscription], pace: SpendingPace?) -> (months: [Date], pages: [Date: SpendingPage]) {
         let currentStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
         var months = [currentStart]
         if let first = state.movements.map(\.date).min(),
@@ -46,7 +52,6 @@ extension LedgerSnapshot {
             }
         }
 
-        let subscriptions = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
         let keys = Set(subscriptions.map(\.id))
         let forecast = monthForecast(in: state, now: now, calendar: calendar, ownTransferIDs: transfers, subscriptions: subscriptions)
         let spanish = Locale(identifier: "es_ES")
@@ -86,10 +91,14 @@ extension LedgerSnapshot {
                     category: spend.category, cents: spend.cents,
                     fraction: min(1, Double(spend.cents) / max(biggest, 1)),
                     previousFraction: spend.previousCents > 0 ? min(1, Double(spend.previousCents) / max(biggest, 1)) : nil,
+                    previousCents: spend.previousCents > 0 ? spend.previousCents : nil,
                     change: percent.map(formatSignedPercent),
                     spokenChange: percent.map { spoken(percent: $0, current: isCurrent) })
             }
-            pages[start] = SpendingPage(month: month, title: title, comparison: comparison, forecast: forecastText, rows: rows)
+            pages[start] = SpendingPage(
+                month: month, title: title, comparison: comparison, forecast: forecastText,
+                markCaption: isCurrent ? "La marca indica cuánto llevabas el mes pasado a estas alturas." : "La marca indica el mes anterior.",
+                markName: isCurrent ? "el mes pasado a estas alturas" : "el mes anterior", rows: rows)
         }
         return (months, pages)
     }

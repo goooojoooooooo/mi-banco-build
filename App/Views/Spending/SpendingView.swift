@@ -8,17 +8,16 @@ struct SpendingView: View {
     var isVisible = false
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Posición en `spendingMonths`; nil = el mes actual (el último).
-    @State private var chosen: Int?
-    /// +1 = hacia un mes posterior (el contenido sale hacia la izquierda). Se fija un instante antes de cambiar de mes.
-    @State private var direction = 1
+    /// El mes elegido (su inicio) y hacia dónde se fue, en un solo valor: cambian en la misma transacción.
+    /// nil = el mes actual. Si ese mes deja de existir (otra lista de meses), se vuelve al actual.
+    @State private var selection = Selection()
     @State private var entrance = Entrance()
     @State private var tick = 0
 
     var body: some View {
         let snapshot = model.snapshot
         let months = snapshot.spendingMonths
-        let index = min(chosen ?? (months.count - 1), months.count - 1)
+        let index = selection.month.flatMap { months.firstIndex(of: $0) } ?? (months.count - 1)
         let page = index >= 0 ? months[index] : nil
         let content = page.flatMap { snapshot.spendingPages[$0] }
         NavigationStack {
@@ -26,9 +25,9 @@ struct SpendingView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if let content, let page {
                         MonthSelector(title: content.title, canGoBack: index > 0, canGoForward: index < months.count - 1) { step in
-                            move(by: step, count: months.count, from: index)
+                            move(by: step, months: months, from: index)
                         }
-                        .padding(.horizontal, 8)
+                        .padding(.horizontal, 6)
                         .staggeredEntrance(0, rise: 8)
 
                         SpendingTotal(cents: content.month.totalCents, monthName: content.title)
@@ -52,6 +51,18 @@ struct SpendingView: View {
                                 .accessibilityAddTraits(.isHeader)
                                 .staggeredEntrance(3, listIndex: 0)
 
+                            if !content.rows.isEmpty {
+                                Text(content.markCaption)
+                                    .titan(.caption)
+                                    .foregroundStyle(Theme.label3)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.horizontal, Theme.Space.gutter)
+                                    .padding(.bottom, 4)
+                                    .staggeredEntrance(3, listIndex: 0)
+                                    .accessibilityHidden(true)
+                                    .accessibilityIdentifier("gasto.marca")
+                            }
+
                             if content.rows.isEmpty {
                                 Text("Este mes aún no has gastado nada.")
                                     .titan(.callout)
@@ -62,7 +73,7 @@ struct SpendingView: View {
                                     .accessibilityIdentifier("gasto.vacio")
                             } else {
                                 ForEach(Array(content.rows.enumerated()), id: \.element.id) { i, row in
-                                    CategoryRow(row: row, index: i)
+                                    CategoryRow(row: row, index: i, markName: content.markName)
                                         .staggeredEntrance(4 + i, listIndex: 1 + i)
                                 }
                             }
@@ -82,7 +93,7 @@ struct SpendingView: View {
                     .onEnded { value in
                         let dx = value.translation.width, dy = value.translation.height
                         guard abs(dx) >= 60, abs(dx) > abs(dy) * 1.5 else { return }
-                        move(by: dx < 0 ? 1 : -1, count: months.count, from: index)
+                        move(by: dx < 0 ? 1 : -1, months: months, from: index)
                     }
             )
             .sensoryFeedback(.selection, trigger: tick)
@@ -91,8 +102,9 @@ struct SpendingView: View {
         #if DEBUG
         .onAppear {
             guard DemoMode.isActive, DemoMode.monthOffset != 0 else { return }
-            let count = model.snapshot.spendingMonths.count
-            chosen = max(0, min(count - 1, count - 1 + DemoMode.monthOffset))
+            let months = model.snapshot.spendingMonths
+            guard !months.isEmpty else { return }
+            selection.month = months[max(0, min(months.count - 1, months.count - 1 + DemoMode.monthOffset))]
         }
         #endif
         .onChange(of: isVisible) { _, visible in
@@ -103,20 +115,20 @@ struct SpendingView: View {
 
     private var blockTransition: AnyTransition {
         guard !reduceMotion else { return .opacity }
-        let x = CGFloat(direction) * 28
-        return .asymmetric(insertion: .opacity.combined(with: .offset(x: x)),
-                           removal: .opacity.combined(with: .offset(x: -x)))
+        // El mes que entra se construye en el mismo render que cambia la dirección, así que siempre lleva la buena;
+        // el que sale solo se funde (su transición se fijó antes del cambio y no puede conocer hacia dónde vas).
+        let x = CGFloat(selection.direction) * 28
+        return .asymmetric(insertion: .opacity.combined(with: .offset(x: x)), removal: .opacity)
     }
 
-    /// Primero se fija la dirección (el contenido que sale ya la lleva) y en el ciclo siguiente se cambia de mes.
-    private func move(by step: Int, count: Int, from index: Int) {
+    /// Mes y dirección cambian juntos, dentro de la misma animación: sin temporizador ni tarea.
+    private func move(by step: Int, months: [Date], from index: Int) {
         let target = index + step
-        guard target >= 0, target < count else { return }
-        direction = step
+        guard target >= 0, target < months.count else { return }
         tick += 1
-        Task { @MainActor in
-            if !reduceMotion { begin(.list) }
-            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) { chosen = target }
+        if !reduceMotion { begin(.list) }
+        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
+            selection = Selection(month: months[target], direction: step)
         }
     }
 
@@ -128,4 +140,10 @@ struct SpendingView: View {
             if entrance.token == token { entrance.active = false }
         }
     }
+}
+
+/// El mes elegido y la dirección del último cambio (+1 = hacia un mes posterior).
+private struct Selection: Equatable {
+    var month: Date?
+    var direction = 1
 }

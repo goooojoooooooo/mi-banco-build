@@ -10,19 +10,22 @@ struct MonthSelector: View {
     let step: (Int) -> Void
 
     var body: some View {
+        // Flechas en los extremos (la izquierda alineada con el título grande) y el mes centrado entre ambas.
         HStack(spacing: 0) {
             arrow("chevron.left", label: "Mes anterior", id: "gasto.mesAnterior", enabled: canGoBack) { step(-1) }
-            ZStack(alignment: .leading) {
+            Spacer(minLength: 0)
+            ZStack {
                 Text(title)
                     .titan(.cardTitle)
                     .foregroundStyle(Theme.label)
                     .id(title)
                     .transition(.opacity)
             }
-            .frame(minWidth: 120, minHeight: 44)
+            .frame(minHeight: 44)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Mes: \(title)")
             .accessibilityIdentifier("gasto.mes")
+            Spacer(minLength: 0)
             arrow("chevron.right", label: "Mes siguiente", id: "gasto.mesSiguiente", enabled: canGoForward) { step(1) }
         }
     }

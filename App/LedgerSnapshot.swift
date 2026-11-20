@@ -231,7 +231,10 @@ struct LedgerSnapshot: Sendable {
         warningInsightIDs = insights.filter { $0.severity == .warning }.map(\.id)
 
         // Pestaña Gasto: todas las páginas aquí, nunca en un `body`.
-        let built = Self.spendingPages(state: state, now: now, calendar: calendar, transfers: transfers, pace: corePace)
+        // Las suscripciones activas se detectan una sola vez y sirven a todas las pantallas de Gasto.
+        let subscriptions = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
+        let built = Self.spendingPages(state: state, now: now, calendar: calendar, transfers: transfers,
+                                       subscriptions: subscriptions, pace: corePace)
         spendingMonths = built.months
         spendingPages = built.pages
     }

@@ -8,12 +8,17 @@ public struct BackupFile: Codable, Equatable, Sendable {
     public var version: Int
     public var exportedAt: Date
     public var ledger: LedgerState
+    /// Cartera de inversiones (Plan 4b). Una copia anterior no trae la clave: queda en nil y quien restaura debe dejar
+    /// la cartera actual como está (no borrarla).
+    public var portfolio: Portfolio?
 
-    public init(app: String = "MiBanco", version: Int = BackupFile.currentVersion, exportedAt: Date, ledger: LedgerState) {
+    public init(app: String = "MiBanco", version: Int = BackupFile.currentVersion, exportedAt: Date, ledger: LedgerState,
+                portfolio: Portfolio? = nil) {
         self.app = app
         self.version = version
         self.exportedAt = exportedAt
         self.ledger = ledger
+        self.portfolio = portfolio
     }
 }
 
@@ -26,9 +31,14 @@ public enum BackupError: Error, Equatable, Sendable {
 
 /// JSON con claves ordenadas; fechas con la estrategia por defecto para que la ida y vuelta sea exacta.
 public func encodeBackup(_ state: LedgerState, exportedAt: Date) throws -> Data {
+    try encodeBackup(state, portfolio: nil, exportedAt: exportedAt)
+}
+
+/// Igual, con la cartera de inversiones dentro (si no hay, la clave no se escribe).
+public func encodeBackup(_ state: LedgerState, portfolio: Portfolio?, exportedAt: Date) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-    return try encoder.encode(BackupFile(exportedAt: exportedAt, ledger: state))
+    return try encoder.encode(BackupFile(exportedAt: exportedAt, ledger: state, portfolio: portfolio))
 }
 
 private struct BackupHeader: Decodable {

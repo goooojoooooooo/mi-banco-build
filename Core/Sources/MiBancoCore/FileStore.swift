@@ -1,7 +1,7 @@
 import Foundation
 
 public final class FileStore: Sendable {
-    private let directory: URL
+    public let directory: URL
 
     public init(directory: URL) {
         self.directory = directory
@@ -21,6 +21,14 @@ public final class FileStore: Sendable {
         options.insert(.completeFileProtectionUntilFirstUserAuthentication)
         #endif
         try JSONEncoder().encode(s).write(to: fileURL, options: options)
+    }
+
+    /// Copia `ledger.json`, si existe, a `fileName` en la misma carpeta, sustituyendo la copia anterior.
+    public func copyCurrent(to fileName: String) throws {
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        let target = directory.appendingPathComponent(fileName)
+        try? FileManager.default.removeItem(at: target)
+        try FileManager.default.copyItem(at: fileURL, to: target)
     }
 
     /// Lee, aplica y guarda; en Darwin dentro de un NSFileCoordinator (app y extensiones comparten el fichero).

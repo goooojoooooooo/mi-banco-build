@@ -225,6 +225,14 @@ public struct Ledger: Sendable {
         if let cents, cents > 0 { state.budgets.byCategory[category] = cents } else { state.budgets.byCategory[category] = nil }
     }
 
+    /// Sustituye todo el libro por el de una copia. Los campos que dependen de este dispositivo (p. ej. las conexiones
+    /// con bancos, ligadas al Llavero) NO se restauran: para excluir uno, añade una línea `restored.x = state.x` aquí.
+    public mutating func restore(_ backup: LedgerState) {
+        let restored = backup
+        // (sin campos excluidos todavía)
+        state = restored
+    }
+
     public mutating func setSubscriptionDismissed(_ dismissed: Bool, id: String) {
         if dismissed { state.dismissedSubscriptions.insert(id) } else { state.dismissedSubscriptions.remove(id) }
     }

@@ -24,10 +24,13 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public var note: String?
     /// true = el usuario dice que este movimiento no es suyo: se excluye de sumas, detecciones y avisos.
     public var flaggedNotMine: Bool
+    /// La categoría que el dueño puso a este movimiento (nil = la decide la app).
+    public var category: SpendingCategory?
 
     public init(id: UUID = UUID(), bank: BankID, amountCents: Int, merchant: String?, kind: MovementKind, source: Source, date: Date,
                 pairedAcrossSources: Bool = false, fingerprint: String? = nil, pairedFingerprint: String? = nil,
-                isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false) {
+                isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false,
+                category: SpendingCategory? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -41,11 +44,12 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.isShop = isShop
         self.note = note
         self.flaggedNotMine = flaggedNotMine
+        self.category = category
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
-        case note, flaggedNotMine
+        case note, flaggedNotMine, category
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -64,6 +68,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         isShop = try c.decodeIfPresent(Bool.self, forKey: .isShop) ?? false
         note = try c.decodeIfPresent(String.self, forKey: .note)
         flaggedNotMine = try c.decodeIfPresent(Bool.self, forKey: .flaggedNotMine) ?? false
+        category = try c.decodeIfPresent(SpendingCategory.self, forKey: .category)
     }
 }
 
@@ -101,17 +106,21 @@ public struct LedgerState: Codable, Equatable, Sendable {
     public var alertSettings: AlertSettings
     /// Comercios silenciados, con la clave de `normalizeMerchant`.
     public var mutedMerchants: Set<String>
+    /// Categoría recordada por comercio (clave de `normalizeMerchant`).
+    public var categoryOverrides: [String: SpendingCategory]
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
-                alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = []) {
+                alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
+                categoryOverrides: [String: SpendingCategory] = [:]) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
         self.alertSettings = alertSettings
         self.mutedMerchants = mutedMerchants
+        self.categoryOverrides = categoryOverrides
     }
 
-    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants }
+    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides }
 
     /// Los libros guardados antes de los avisos no traen ajustes ni silenciados: valores por defecto.
     public init(from decoder: any Decoder) throws {
@@ -121,6 +130,7 @@ public struct LedgerState: Codable, Equatable, Sendable {
         unread = try c.decode([UnreadNotice].self, forKey: .unread)
         alertSettings = try c.decodeIfPresent(AlertSettings.self, forKey: .alertSettings) ?? AlertSettings()
         mutedMerchants = try c.decodeIfPresent(Set<String>.self, forKey: .mutedMerchants) ?? []
+        categoryOverrides = try c.decodeIfPresent([String: SpendingCategory].self, forKey: .categoryOverrides) ?? [:]
     }
 }
 
@@ -171,6 +181,21 @@ public struct Ledger: Sendable {
     public mutating func setFlaggedNotMine(_ flagged: Bool, for id: UUID) {
         guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
         state.movements[i].flaggedNotMine = flagged
+    }
+
+    /// Pone (o quita, con nil) la categoría de un movimiento. Con `applyToMerchant` se recuerda para todo el
+    /// comercio y se limpian las categorías sueltas de sus movimientos.
+    public mutating func setCategory(_ category: SpendingCategory?, for id: UUID, applyToMerchant: Bool) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        let key = normalizeMerchant(state.movements[i].merchant ?? "")
+        if applyToMerchant, !key.isEmpty {
+            state.categoryOverrides[key] = category
+            for j in state.movements.indices where normalizeMerchant(state.movements[j].merchant ?? "") == key {
+                state.movements[j].category = nil
+            }
+        } else {
+            state.movements[i].category = category
+        }
     }
 
     public mutating func setMuted(_ muted: Bool, merchant: String) {

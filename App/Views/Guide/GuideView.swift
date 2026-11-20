@@ -17,14 +17,14 @@ struct GuideView: View {
                 NavigationLink {
                     GuideStepView(track: track, model: model)
                 } label: {
-                    GuideTrackRow(track: track, status: guideStatus(track, in: model.state))
+                    GuideTrackRow(track: track, status: guideStatus(track, in: model.state, now: Date()))
                 }
                 .accessibilityIdentifier("guide-track-\(track.rawValue)")
                 .listRowBackground(Theme.grouped)
             }
 
             Label {
-                Text("imagin no avisa de los pagos: para imagin usa «\(GuideNames.transactionTrigger)».")
+                Text("imagin no avisa de sus pagos: para imagin usa la guía de Apple Pay. Hay una guía de Apple Pay por banco: si pagas con Apple Pay desde otro banco, haz también la suya.")
                     .font(Theme.font(.footnote))
                     .foregroundStyle(Theme.label2)
             } icon: {
@@ -44,14 +44,22 @@ private struct GuideTrackRow: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(track.title).titan(.option).foregroundStyle(Theme.label)
-                Text(subtitle).titan(.meta).foregroundStyle(Theme.label3)
+                Text(subtitle).titan(.meta).foregroundStyle(Theme.label3).fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 0)
-            if case .working = status {
+            switch status {
+            case .working:
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 20))
                     .foregroundStyle(Theme.label)
                     .accessibilityHidden(true)
+            case .silent:
+                Image(systemName: "exclamationmark.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Theme.label2)
+                    .accessibilityHidden(true)
+            case .notYet:
+                EmptyView()
             }
         }
         .padding(.vertical, 4)
@@ -60,18 +68,6 @@ private struct GuideTrackRow: View {
         .accessibilityElement(children: .combine)
     }
 
-    private var subtitle: String {
-        switch status {
-        case .notYet: "Sin configurar"
-        case .working(let since): "Funciona desde el \(Self.day(since))"
-        }
-    }
-
-    /// "20 nov"
-    private static func day(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "es_ES")
-        formatter.dateFormat = "d MMM"
-        return formatter.string(from: date).replacingOccurrences(of: ".", with: "")
-    }
+    /// «Funciona · Último aviso: 20 nov», «Hace 15 días que no llega ningún aviso» o «Aún no ha llegado ningún aviso».
+    private var subtitle: String { guideStatusLine(status) }
 }

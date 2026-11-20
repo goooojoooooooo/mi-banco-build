@@ -101,17 +101,21 @@ public struct LedgerState: Codable, Equatable, Sendable {
     public var alertSettings: AlertSettings
     /// Comercios silenciados, con la clave de `normalizeMerchant`.
     public var mutedMerchants: Set<String>
+    /// Primer y último aviso visto por cada guía de Atajos (clave: `GuideTrack.rawValue`).
+    public var guideSightings: [String: GuideSighting]
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
-                alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = []) {
+                alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
+                guideSightings: [String: GuideSighting] = [:]) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
         self.alertSettings = alertSettings
         self.mutedMerchants = mutedMerchants
+        self.guideSightings = guideSightings
     }
 
-    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants }
+    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, guideSightings }
 
     /// Los libros guardados antes de los avisos no traen ajustes ni silenciados: valores por defecto.
     public init(from decoder: any Decoder) throws {
@@ -121,6 +125,8 @@ public struct LedgerState: Codable, Equatable, Sendable {
         unread = try c.decode([UnreadNotice].self, forKey: .unread)
         alertSettings = try c.decodeIfPresent(AlertSettings.self, forKey: .alertSettings) ?? AlertSettings()
         mutedMerchants = try c.decodeIfPresent(Set<String>.self, forKey: .mutedMerchants) ?? []
+        // Tolerante: un registro ausente o estropeado no impide abrir el libro.
+        guideSightings = (try? c.decodeIfPresent([String: GuideSighting].self, forKey: .guideSightings)) ?? [:]
     }
 }
 
@@ -190,6 +196,7 @@ public struct Ledger: Sendable {
     }
 
     public mutating func ingest(_ input: IngestInput, now: Date) -> IngestOutcome {
+        state.recordGuideSighting(for: input, now: now)
         let bank: BankID
         let parsed: ParsedMovement
         let source: Movement.Source

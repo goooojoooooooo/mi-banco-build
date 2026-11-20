@@ -143,22 +143,36 @@ private struct MockTabBar: View {
 }
 
 /// La tarjeta de la acción dentro de la automatización, con sus campos.
+/// Los campos hasta el resaltado ya llevan su dato; el resaltado enseña de dónde sale («Notificación › Título»).
 private struct MockActionCard: View {
     let track: GuideTrack
     let highlight: String
-    var filled = false
+    /// Todos los campos con su dato (el paso final).
+    var allFilled = false
 
     private var fields: [String] {
-        track == .wallet
+        track.isApplePay
             ? [GuideNames.bankField, GuideNames.amountField, GuideNames.merchantField]
             : [GuideNames.bankField, GuideNames.titleField, GuideNames.subtitleField, GuideNames.bodyField]
+    }
+
+    private var variable: String {
+        track.isApplePay ? GuideNames.transactionVariable : GuideNames.notificationVariable
+    }
+
+    /// Lo que lleva un campo: el banco (salvo en el paso de elegirlo) o «variable › propiedad».
+    private func value(_ field: String) -> String? {
+        if field == GuideNames.bankField { return highlight == field ? nil : track.bankName }
+        let index = fields.firstIndex(of: field) ?? 0
+        let reached = fields.firstIndex(of: highlight) ?? -1
+        return allFilled || index <= reached ? "\(variable) › \(field)" : nil
     }
 
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
                 AppMark(size: 18)
-                Text(track == .wallet ? GuideNames.walletAction : GuideNames.noticeAction)
+                Text(track.isApplePay ? GuideNames.walletAction : GuideNames.noticeAction)
                     .font(Mock.text).foregroundStyle(Theme.label).lineLimit(1).minimumScaleFactor(0.6)
                 Spacer(minLength: 0)
             }
@@ -166,8 +180,8 @@ private struct MockActionCard: View {
                 HStack(spacing: 6) {
                     Text(field).font(Mock.text).foregroundStyle(Theme.label2)
                     Spacer(minLength: 0)
-                    if field == highlight || filled {
-                        Text(field == GuideNames.bankField ? (track.bankName ?? "—") : GuideNames.shortcutInput)
+                    if let text = value(field) {
+                        Text(text)
                             .font(Mock.small).foregroundStyle(Theme.label)
                             .padding(.horizontal, 6).frame(height: 18)
                             .background(Mock.bar, in: Capsule())
@@ -203,6 +217,27 @@ private struct MockButton: View {
     }
 }
 
+/// Fila con un interruptor: encendido (blanco, bolita a la derecha) o apagado (gris, bolita a la izquierda).
+private struct MockToggleRow: View {
+    let text: String
+    let isOn: Bool
+    var highlighted = false
+
+    var body: some View {
+        HStack {
+            Text(text).font(Mock.text).foregroundStyle(Theme.label).lineLimit(1).minimumScaleFactor(0.6)
+            Spacer(minLength: 0)
+            Capsule().fill(isOn ? Theme.label : Mock.bar).frame(width: 34, height: 20)
+                .overlay(alignment: isOn ? .trailing : .leading) {
+                    Circle().fill(isOn ? Color.black : Theme.label).frame(width: 16, height: 16).padding(.horizontal, 2)
+                }
+        }
+        .padding(.horizontal, 10).frame(height: 32)
+        .background(Mock.row, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .pulse(highlighted, radius: 11)
+    }
+}
+
 /// La maqueta de un paso: se elige por `step.illustration`; lo que se resalta es `step.tapTarget`.
 struct GuideIllustrationView: View {
     let step: GuideStep
@@ -211,7 +246,7 @@ struct GuideIllustrationView: View {
     var body: some View {
         PhoneFrame { mock }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Dibujo de la pantalla con «\(step.tapTarget)» resaltado")
+            .accessibilityLabel("Dibujo de la pantalla. Toca «\(step.tapTarget)», \(step.place).")
     }
 
     @ViewBuilder private var mock: some View {
@@ -262,44 +297,72 @@ struct GuideIllustrationView: View {
                 MockNavBar(title: GuideNames.newAutomation)
                 MockRow(text: target, symbol: "magnifyingglass")
                 MockRow()
-                MockRow(text: target, symbol: track == .wallet ? "wallet.pass" : "bell.badge", highlighted: true)
+                MockRow(text: target, symbol: track.isApplePay ? "wallet.pass" : "bell.badge", highlighted: true)
+                MockRow()
+                Spacer(minLength: 0)
+            }
+        case .appField:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.notificationTrigger)
+                MockRow()
+                MockRow(text: target, symbol: "app.fill", highlighted: true)
                 MockRow()
                 Spacer(minLength: 0)
             }
         case .appPicker:
             VStack(spacing: 8) {
-                if track == .wallet {
-                    MockNavBar(title: GuideNames.walletApp)
-                    MockRow(symbol: "creditcard", checked: true)
-                    MockRow(symbol: "creditcard", checked: true)
-                    MockRow(symbol: "creditcard", checked: true)
-                    Spacer(minLength: 0)
-                    MockButton(text: target, highlighted: true)
-                } else {
-                    MockNavBar(title: GuideNames.appField, trailing: GuideNames.ok)
-                    MockRow()
-                    MockRow(text: target, symbol: "app.fill", checked: true, highlighted: true)
-                    MockRow()
-                    MockRow()
-                    Spacer(minLength: 0)
-                }
+                MockNavBar(title: GuideNames.appField, trailing: GuideNames.ok)
+                MockRow()
+                MockRow(text: target, symbol: "app.fill", highlighted: true)
+                MockRow()
+                MockRow()
+                Spacer(minLength: 0)
+            }
+        case .appOK:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.appField, trailing: GuideNames.ok, trailingHighlighted: true)
+                MockRow()
+                MockRow(text: track.bankName, symbol: "app.fill", checked: true)
+                MockRow()
+                MockRow()
+                Spacer(minLength: 0)
+            }
+        case .walletCards, .walletNext:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.walletApp)
+                MockRow(text: track.bankName, symbol: "creditcard", checked: true,
+                        highlighted: step.illustration == .walletCards)
+                MockRow(symbol: "creditcard")
+                MockRow(symbol: "creditcard")
+                Spacer(minLength: 0)
+                MockButton(text: GuideNames.next, highlighted: step.illustration == .walletNext)
             }
         case .runImmediately:
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.newAutomation)
-                MockRow(text: target, checked: true, highlighted: true)
+                MockRow(text: target, highlighted: true)
                 MockRow()
-                HStack {
-                    Text(GuideNames.notifyWhenRun).font(Mock.text).foregroundStyle(Theme.label)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    Spacer(minLength: 0)
-                    Capsule().fill(Mock.bar).frame(width: 34, height: 20)
-                        .overlay(alignment: .leading) { Circle().fill(Theme.label).frame(width: 16, height: 16).padding(.leading, 2) }
-                }
-                .padding(.horizontal, 10).frame(height: 32)
-                .background(Mock.row, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                 Spacer(minLength: 0)
                 MockButton(text: GuideNames.next)
+            }
+        case .notifyOff:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation)
+                MockRow(text: GuideNames.runImmediately, checked: true)
+                MockRow()
+                // Así llega el interruptor (encendido): hay que apagarlo.
+                MockToggleRow(text: target, isOn: true, highlighted: true)
+                Spacer(minLength: 0)
+                MockButton(text: GuideNames.next)
+            }
+        case .runNext:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation)
+                MockRow(text: GuideNames.runImmediately, checked: true)
+                MockRow()
+                MockToggleRow(text: GuideNames.notifyWhenRun, isOn: false)
+                Spacer(minLength: 0)
+                MockButton(text: target, highlighted: true)
             }
         case .blankAutomation:
             VStack(spacing: 8) {
@@ -308,6 +371,21 @@ struct GuideIllustrationView: View {
                 MockRow(symbol: "sparkles")
                 Spacer(minLength: 0)
                 MockButton(text: target, highlighted: true)
+                Spacer(minLength: 0)
+            }
+        case .addActionButton:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation, trailing: GuideNames.ok)
+                Spacer(minLength: 0)
+                MockRow(text: target, symbol: "plus.circle", highlighted: true)
+                Spacer(minLength: 0)
+            }
+        case .addActionSearch:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.addAction)
+                MockRow(text: target, symbol: "magnifyingglass", highlighted: true)
+                MockRow()
+                MockRow()
                 Spacer(minLength: 0)
             }
         case .addAction:
@@ -330,16 +408,24 @@ struct GuideIllustrationView: View {
                 MockActionCard(track: track, highlight: target)
                 Spacer(minLength: 0)
             }
+        case .bankChoice:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.bankField)
+                ForEach(BankID.allCases, id: \.self) { bank in
+                    MockRow(text: bank.displayName, symbol: "building.columns", highlighted: bank == track.bank)
+                }
+                Spacer(minLength: 0)
+            }
         case .variablePicker:
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.newAutomation)
-                MockActionCard(track: track, highlight: target, filled: true)
+                MockActionCard(track: track, highlight: target)
                 Spacer(minLength: 0)
             }
         case .done:
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.newAutomation, trailing: GuideNames.ok, trailingHighlighted: true)
-                MockActionCard(track: track, highlight: "", filled: true)
+                MockActionCard(track: track, highlight: "", allFilled: true)
                 Spacer(minLength: 0)
             }
         }

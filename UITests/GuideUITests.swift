@@ -2,6 +2,8 @@ import XCTest
 
 /// Toques reales sobre la guía de avisos: abrirla desde Ajustes, avanzar, retroceder, ayuda y «Abrir Atajos».
 final class GuideUITests: XCTestCase {
+    /// Pasos de la guía de Revolut (una sola acción por pantalla).
+    static let revolutSteps = 20
     var app: XCUIApplication!
 
     override func setUpWithError() throws {
@@ -18,7 +20,7 @@ final class GuideUITests: XCTestCase {
         app.launch()
     }
 
-    /// El contador lleva identificador, así que se lee su etiqueta («Revolut · Paso 3 de 11»), no se busca por texto.
+    /// El contador lleva identificador, así que se lee su etiqueta («Revolut · Paso 3 de 20»), no se busca por texto.
     private func waitForStep(_ n: Int, _ message: String) {
         let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
         if !counter.waitForExistence(timeout: 10) {
@@ -27,7 +29,7 @@ final class GuideUITests: XCTestCase {
             XCTFail("\(message). Árbol: \(tree.prefix(6000))")
             return
         }
-        let expected = "Revolut · Paso \(n) de 11"
+        let expected = "Revolut · Paso \(n) de \(Self.revolutSteps)"
         let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", expected), object: counter)
         XCTAssertEqual(XCTWaiter().wait(for: [reached], timeout: 6), .completed, "\(message) (se esperaba «\(expected)»)")
     }
@@ -66,10 +68,19 @@ final class GuideUITests: XCTestCase {
         XCTAssertTrue(app.buttons["guide-open-shortcuts"].exists, "Falta el botón «Abrir Atajos»")
     }
 
+    func testListHasOneApplePayGuidePerBank() throws {
+        let link = app.buttons["settings-alerts-guide"]
+        XCTAssertTrue(link.waitForExistence(timeout: 15), "Ajustes no muestra «Avisos al instante»")
+        link.tap()
+        for id in ["guide-track-walletImagin", "guide-track-walletRevolut", "guide-track-walletTradeRepublic"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5), "Falta la guía de Apple Pay: \(id)")
+        }
+    }
+
     func testLastStepIsDone() throws {
         openRevolutGuide()
         let next = app.buttons["guide-next"]
-        for step in 2...11 {
+        for step in 2...Self.revolutSteps {
             next.tap()
             waitForStep(step, "No llegó al paso \(step)")
         }

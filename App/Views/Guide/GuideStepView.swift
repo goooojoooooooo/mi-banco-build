@@ -12,6 +12,7 @@ struct GuideStepView: View {
     @State private var pendingStep: Int?
     @State private var helpOpen = false
     @State private var firstNoticeSeen = false
+    @State private var shortcutsUnavailable = false
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -27,7 +28,8 @@ struct GuideStepView: View {
     private var steps: [GuideStep] { guideSteps(for: track) }
     private var step: GuideStep { steps[index] }
     private var isLast: Bool { index == steps.count - 1 }
-    private var status: GuideStatus { guideStatus(track, in: model.state) }
+    private var bigText: Bool { typeSize.isAccessibilitySize }
+    private var status: GuideStatus { guideStatus(track, in: model.state, now: Date()) }
 
     private var slide: AnyTransition {
         if reduceMotion { return .opacity }
@@ -53,7 +55,8 @@ struct GuideStepView: View {
                     guard abs(dx) > 70, abs(dx) > abs(value.translation.height) * 1.5 else { return }
                     if dx < 0 { advance() } else { goBack() }
                 })
-            controls
+            // Con letra grande los botones fijos se comerían la pantalla: pasan al final del contenido y se desplazan.
+            if !bigText { controls }
         }
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Avisos al instante")
@@ -112,6 +115,7 @@ struct GuideStepView: View {
                     helpDisclosure
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
+                if bigText { controls }
             }
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, Theme.Space.gutter)
@@ -124,8 +128,8 @@ struct GuideStepView: View {
         HStack(spacing: Theme.Space.row) {
             DrawnCheck(lineWidth: 3, color: Theme.label)
                 .frame(width: 26, height: 26)
-            Text(track == .wallet ? "¡Funciona! Ha llegado el primer pago con Apple Pay."
-                                  : "¡Funciona! Ha llegado el primer aviso de \(track.bankName ?? track.title).")
+            Text(track.isApplePay ? "¡Funciona! Ha llegado el primer pago con Apple Pay de \(track.bankName)."
+                                  : "¡Funciona! Ha llegado el primer aviso de \(track.bankName).")
                 .font(.system(.body, weight: .semibold))
                 .foregroundStyle(Theme.label)
                 .fixedSize(horizontal: false, vertical: true)
@@ -174,8 +178,23 @@ struct GuideStepView: View {
 
     private var controls: some View {
         VStack(spacing: Theme.Space.row) {
+            if shortcutsUnavailable {
+                Text("No se pudo abrir \(GuideNames.shortcutsApp). Búscala en tu iPhone o descárgala del App Store.")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.label2)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("guide-open-failed")
+                    .transition(.opacity)
+            }
             Button {
-                if let url = URL(string: "shortcuts://") { openURL(url) }
+                shortcutsUnavailable = false
+                guard let url = URL(string: "shortcuts://") else { return }
+                // El sistema avisa si no ha podido abrirla (por ejemplo, si no está instalada).
+                openURL(url) { accepted in
+                    if !accepted { withAnimation(reduceMotion ? nil : Theme.Motion.quick) { shortcutsUnavailable = true } }
+                }
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "arrow.up.forward.app")

@@ -38,6 +38,7 @@ struct AlertsGuideRows: View {
                                 .transition(.opacity)
                         } else {
                             Label("Probar aviso", systemImage: "paperplane")
+                                .labelStyle(.titleAndIcon)
                                 .font(Theme.font(.body, weight: .semibold))
                                 .foregroundStyle(.black)
                                 .fixedSize()

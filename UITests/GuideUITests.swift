@@ -20,8 +20,13 @@ final class GuideUITests: XCTestCase {
 
     /// El contador lleva identificador, así que se lee su etiqueta («Revolut · Paso 3 de 11»), no se busca por texto.
     private func waitForStep(_ n: Int, _ message: String) {
-        let counter = app.staticTexts["guide-step-counter"]
-        XCTAssertTrue(counter.waitForExistence(timeout: 10), message)
+        let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
+        if !counter.waitForExistence(timeout: 10) {
+            // Si falla, el árbol de accesibilidad (en una línea) queda en el registro para ver qué había en pantalla.
+            let tree = app.debugDescription.replacingOccurrences(of: "\n", with: " | ")
+            XCTFail("\(message). Árbol: \(tree.prefix(6000))")
+            return
+        }
         let expected = "Revolut · Paso \(n) de 11"
         let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", expected), object: counter)
         XCTAssertEqual(XCTWaiter().wait(for: [reached], timeout: 6), .completed, "\(message) (se esperaba «\(expected)»)")

@@ -287,3 +287,81 @@ private func flow(in phase: ConnectPhase) -> ConnectFlow {
         #expect(canConnectBank(.tr, cachedList: [EBASPSP(name: "Trade Republic", country: "DE")]))
     }
 }
+
+@Suite struct ConnectFlowReviewTests {
+    @Test func forgedCallbackWhileWaitingIsIgnoredAndTheGenuineOneStillSucceeds() {
+        var f = flow(in: .waitingForBank(.rev))
+        // Una vuelta falsa (state distinto, ausente o forma rara) no cambia nada ni pide ninguna acción.
+        for forged in [AuthCallbackResult.stateMismatch, .malformed] {
+            #expect(f.handle(.callbackReceived(.valid(.rev), forged)) == [])
+            #expect(f.phase == .waitingForBank(.rev))
+        }
+        // Tampoco si el intento ya caducó: una vuelta falsa no lo "cancela".
+        #expect(f.handle(.callbackReceived(.expired(.rev), .stateMismatch)) == [])
+        #expect(f.phase == .waitingForBank(.rev))
+        // La de verdad sigue funcionando.
+        #expect(f.handle(.callbackReceived(.valid(.rev), .code("c"))) == [.cancelWebSession, .processCallback(.rev)])
+        #expect(f.phase == .finishing(.rev))
+        #expect(f.handle(.succeeded(.rev)) == [])
+        #expect(f.phase == .connected(.rev))
+    }
+
+    @Test func verifiedDeniedGoesThroughAndNoPendingIsAlwaysIgnored() {
+        var f = flow(in: .waitingForBank(.ima))
+        #expect(f.handle(.callbackReceived(.none, .code("c"))) == [])
+        #expect(f.handle(.callbackReceived(.none, .denied)) == [])
+        #expect(f.phase == .waitingForBank(.ima))
+        #expect(f.handle(.callbackReceived(.valid(.ima), .denied)) == [.cancelWebSession, .processCallback(.ima)])
+        #expect(f.phase == .finishing(.ima))
+        var g = flow(in: .waitingForBank(.ima))
+        #expect(g.handle(.callbackReceived(.expired(.ima), .code("c"))) == [.deletePending, .cancelWebSession])
+        #expect(g.phase == .failed(.ima, ConnectMessage.tooSlow))
+    }
+
+    @Test func forgedCallbackInAnyPhaseChangesNothing() {
+        let phases: [ConnectPhase] = [.idle, .opening(.rev), .waitingForBank(.rev), .finishing(.rev), .connected(.rev),
+                                      .needsResume(.rev), .failed(.rev, "x")]
+        for phase in phases {
+            var f = flow(in: phase)
+            let before = f
+            #expect(f.handle(.callbackReceived(.valid(.rev), .stateMismatch)) == [])
+            #expect(f.handle(.callbackReceived(.valid(.rev), .malformed)) == [])
+            #expect(f == before)
+        }
+    }
+
+    @Test func disconnectDuringFinishingWinsAndOtherBanksAreUntouched() {
+        var f = flow(in: .finishing(.rev))
+        #expect(f.handle(.disconnected(.ima)) == [])
+        #expect(f.phase == .finishing(.rev))
+        #expect(f.handle(.disconnected(.rev)) == [.cancelWebSession, .deletePending])
+        #expect(f.phase == .idle)
+        // Un `succeeded` tardío ya no vale.
+        #expect(f.handle(.succeeded(.rev)) == [])
+        #expect(f.phase == .idle)
+        var done = flow(in: .connected(.rev))
+        #expect(done.handle(.disconnected(.rev)) == [.deletePending])
+        #expect(done.phase == .idle)
+        var idle = ConnectFlow()
+        #expect(idle.handle(.disconnected(.rev)) == [])
+    }
+
+    @Test func newMessagesAreExact() {
+        #expect(ConnectMessage.missingCredentials == "Falta la clave de tu banco. Añádela en Ajustes › Bancos.")
+        #expect(ConnectMessage.storeFailed == "No se pudo guardar la conexión en este iPhone. Vuelve a intentarlo.")
+    }
+
+    @Test func ledgerFailureRestoresThePreviousSessionOrDeletesTheNewOne() {
+        let old = StoredSession(sessionID: "old", accountUIDs: ["a"], validUntil: t0, aspspName: "Banco", aspspCountry: "ES")
+        #expect(rollbackAfterLedgerFailure(previous: old) == .restore(old))
+        #expect(rollbackAfterLedgerFailure(previous: nil) == .deleteNew)
+    }
+
+    @Test func onlyADifferentOldRemoteSessionIsDeletedAfterReconnecting() {
+        let old = StoredSession(sessionID: "old", accountUIDs: ["a"], validUntil: t0, aspspName: "Banco", aspspCountry: "ES")
+        let new = StoredSession(sessionID: "new", accountUIDs: ["a"], validUntil: t0, aspspName: "Banco", aspspCountry: "ES")
+        #expect(staleRemoteSessionID(previous: old, new: new) == "old")
+        #expect(staleRemoteSessionID(previous: old, new: old) == nil)
+        #expect(staleRemoteSessionID(previous: nil, new: new) == nil)
+    }
+}

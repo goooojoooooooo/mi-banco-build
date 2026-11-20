@@ -228,7 +228,8 @@ public func weeklyDigestText(for state: LedgerState, weekContaining date: Date, 
 /// `state` es el libro DESPUÉS de guardarlo.
 /// El saldo bajo se avisa aunque el comercio esté silenciado: el saldo ha bajado de verdad.
 public func immediateAlerts(afterStoring movement: Movement, in state: LedgerState, now: Date, calendar: Calendar) -> [Insight] {
-    if movement.flaggedNotMine { return [] }
+    // Lo que ya existía antes de importarse (historial del banco) no avisa de nada, tampoco de presupuestos ni de saldo.
+    if movement.flaggedNotMine || movement.isHistorical { return [] }
     var out: [Insight] = []
     let settings = state.alertSettings
     if movement.kind == .payment, settings.lowBalance,
@@ -243,7 +244,8 @@ public func immediateAlerts(afterStoring movement: Movement, in state: LedgerSta
     if isMuted(movement.merchant, in: state) { return out }
     // El primer tramo de un traspaso real puede avisar antes de que exista su pareja (el segundo aún no ha llegado):
     // ese aviso ya salió y no se puede retirar. Se acepta; una vez emparejados, ningún tramo cuenta.
-    let transfers = ownTransferIDs(in: state.movements)
+    // Traspasos y capturados sin confirmar (que ya están en la fila del banco): ni gasto ni avisos.
+    let transfers = spendingExclusions(in: state, now: now)
     let subs = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     out += movementInsights(movement, in: state, index: MerchantIndex(state.movements, ownTransferIDs: transfers),
                             subscriptions: subs, ownTransfers: transfers, calendar: calendar)
@@ -259,10 +261,12 @@ public func immediateAlerts(afterStoring movement: Movement, in state: LedgerSta
 }
 
 /// El feed de "Avisos": lo que merece saberse ahora, lo más reciente primero, con un máximo de 12.
-public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [Insight] {
+/// `spendingExclusions`: el conjunto de `spendingExclusions(in:now:)` si quien llama ya lo calculó (la instantánea).
+public func insights(for state: LedgerState, now: Date, calendar: Calendar,
+                     spendingExclusions precomputed: Set<UUID>? = nil) -> [Insight] {
     let settings = state.alertSettings
     let ledger = Ledger(state: state)
-    let transfers = ownTransferIDs(in: state.movements)
+    let transfers = precomputed ?? spendingExclusions(in: state, now: now)
     let subs = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     var out: [Insight] = []
 

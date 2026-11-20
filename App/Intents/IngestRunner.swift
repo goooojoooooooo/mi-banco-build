@@ -39,7 +39,8 @@ enum IngestRunner {
             let now = Date()
             let calendar = Calendar.current
             let ledger = Ledger(state: snap.state)
-            let transfers = ownTransferIDs(in: snap.state.movements)
+            // Traspasos y capturados sin confirmar: no son gasto de hoy ni del comercio (calculado una vez).
+            let transfers = spendingExclusions(in: snap.state, now: now)
             // "Cada movimiento" apagado o comercio silenciado: el movimiento queda guardado (e Inicio se actualiza),
             // pero ni aviso básico ni Live Activity.
             if snap.state.alertSettings.everyMovement && !ledger.isMuted(merchant: m.merchant) {

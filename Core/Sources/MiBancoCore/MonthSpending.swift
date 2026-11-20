@@ -96,7 +96,7 @@ public func monthSpending(in state: LedgerState, month: Date, now: Date, calenda
     guard let windows = monthWindows(month: month, now: now, calendar: calendar) else {
         return MonthSpending(monthStart: month, totalCents: 0, previousTotalCents: 0, byCategory: [])
     }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: now)
     let subKeys = keys ?? subscriptionKeys(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     var cents: [SpendingCategory: Int] = [:]
     var counts: [SpendingCategory: Int] = [:]
@@ -130,7 +130,7 @@ public func spendingMovements(in state: LedgerState, category: SpendingCategory,
                               ownTransferIDs ownTransfers: Set<UUID>? = nil,
                               subscriptionKeys keys: Set<String>? = nil) -> [Movement] {
     guard let windows = monthWindows(month: month, now: now, calendar: calendar) else { return [] }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: now)
     let subKeys = keys ?? subscriptionKeys(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     return spendingMovements(in: state.movements, excluding: transfers)
         .filter { windows.current.contains($0.date) && categoryOf($0, in: state, subscriptionKeys: subKeys) == category }
@@ -145,7 +145,7 @@ public func monthForecast(in state: LedgerState, now: Date, calendar: Calendar,
     let day = calendar.component(.day, from: now)
     guard day >= 5, let interval = calendar.dateInterval(of: .month, for: now),
           let days = calendar.range(of: .day, in: .month, for: now)?.count else { return nil }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: now)
     let subscriptions = subs ?? activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     let keys = Set(subscriptions.map(\.id))
     var spent = 0
@@ -175,7 +175,7 @@ public func averageMonthlySpending(in state: LedgerState, category: SpendingCate
     let from = max(earliest, firstMonth)
     guard from < monthStart,
           let count = calendar.dateComponents([.month], from: from, to: monthStart).month, count > 0 else { return nil }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: monthStart)
     var subKeys = keys ?? []
     if category != nil, keys == nil {
         subKeys = subscriptionKeys(in: state, now: monthStart, calendar: calendar, ownTransferIDs: transfers)

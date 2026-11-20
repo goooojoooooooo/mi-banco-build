@@ -337,8 +337,9 @@ public struct Ledger: Sendable {
     /// Sustituye todo el libro por el de una copia. Los campos que dependen de este dispositivo (p. ej. las conexiones
     /// con bancos, ligadas al Llavero) NO se restauran: para excluir uno, añade una línea `restored.x = state.x` aquí.
     public mutating func restore(_ backup: LedgerState) {
-        let restored = backup
-        // (sin campos excluidos todavía)
+        var restored = backup
+        // La conexión con cada banco es de este aparato (su sesión vive en el Llavero): nunca sale de una copia.
+        restored.links = state.links
         state = restored
     }
 

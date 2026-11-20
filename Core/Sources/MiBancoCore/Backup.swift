@@ -60,8 +60,9 @@ public func movementsCSVFileName(exportedAt: Date, calendar: Calendar) -> String
     "MiBanco-movimientos-\(datePart(exportedAt, calendar: calendar)).csv"
 }
 
-/// Hora del movimiento para el CSV. Vacía cuando el movimiento no tiene hora real (R13); hoy todos la tienen.
+/// Hora del movimiento para el CSV. Vacía cuando el movimiento no tiene hora real (R13): filas del banco de solo día.
 private func csvTime(of movement: Movement, calendar: Calendar) -> String {
+    if movement.dayOnly { return "" }
     let c = calendar.dateComponents([.hour, .minute], from: movement.date)
     return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
 }

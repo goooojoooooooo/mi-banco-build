@@ -70,7 +70,8 @@ public func detectSubscriptions(in movements: [Movement], now: Date, calendar: C
 /// Las suscripciones detectadas sin las que el dueño ocultó (id `"<banco>|<clave>"` en `dismissedSubscriptions`).
 public func activeSubscriptions(in state: LedgerState, now: Date, calendar: Calendar,
                                 ownTransferIDs: Set<UUID>? = nil) -> [Subscription] {
-    detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: ownTransferIDs)
+    detectSubscriptions(in: state.movements, now: now, calendar: calendar,
+                        ownTransferIDs: ownTransferIDs ?? spendingExclusions(in: state, now: now))
         .filter { !state.dismissedSubscriptions.contains("\($0.bank.rawValue)|\($0.id)") }
 }
 

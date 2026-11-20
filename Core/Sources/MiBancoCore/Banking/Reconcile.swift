@@ -72,6 +72,11 @@ extension Ledger {
                     state.movements[i].bankStatus = r.status
                     changed = true
                 }
+                // El día en que se apuntó (R54), en cuanto el registro llega apuntado.
+                if channel == .bank, !holdsFlip, let day = r.bookedDay, state.movements[i].bookedDay != day {
+                    state.movements[i].bookedDay = day
+                    changed = true
+                }
                 if applyName(r.merchant, to: i) { changed = true }
                 if changed { report.updated += 1 } else { report.unchanged += 1 }
                 continue
@@ -86,6 +91,7 @@ extension Ledger {
                 if holdPendingFlips { continue }
                 state.movements[i].bankRef = r.ref
                 state.movements[i].bankStatus = .booked
+                state.movements[i].bookedDay = r.bookedDay
                 _ = applyName(r.merchant, to: i)
                 report.updated += 1
                 continue
@@ -99,6 +105,7 @@ extension Ledger {
                 if channel == .bank {
                     state.movements[i].bankStatus = r.status
                     state.movements[i].linkedAt = now
+                    state.movements[i].bookedDay = r.bookedDay
                 } else if state.movements[i].bankStatus == nil {
                     state.movements[i].bankStatus = .booked
                 }
@@ -118,7 +125,8 @@ extension Ledger {
                 source: channelSource, date: r.timing.date, isShop: r.isShop,
                 bankRef: channel == .bank ? r.ref : nil, statementRef: channel == .statement ? r.ref : nil,
                 bankStatus: channel == .bank ? r.status : .booked, importedAt: now, dayOnly: !r.timing.isExact,
-                excludedFromSpending: r.excludedFromSpending, firstSeenStatus: channel == .bank ? r.status : nil)
+                excludedFromSpending: r.excludedFromSpending, firstSeenStatus: channel == .bank ? r.status : nil,
+                bookedDay: channel == .bank ? r.bookedDay : nil)
             state.movements.append(movement)
             report.added += 1
             report.addedIDs.append(movement.id)
@@ -140,12 +148,14 @@ extension Ledger {
                 } else {
                     state.movements[i].bankRef = nil
                     state.movements[i].bankStatus = nil
+                    state.movements[i].bookedDay = nil
                     // Si el mismo pago ya llegó apuntado como fila propia del banco, se funden en UN movimiento.
                     if let j = foldCandidate(for: state.movements[i], excluding: toDelete, batchRefs: batchRefs, calendar: calendar) {
                         let row = state.movements[j]
                         state.movements[i].bankRef = row.bankRef
                         state.movements[i].bankStatus = row.bankStatus
                         state.movements[i].linkedAt = now
+                        state.movements[i].bookedDay = row.bookedDay
                         if state.movements[i].statementRef == nil { state.movements[i].statementRef = row.statementRef }
                         if let name = row.merchant, !name.isEmpty { state.movements[i].bankMerchant = name }
                         state.movements[i].isShop = state.movements[i].isShop || row.isShop

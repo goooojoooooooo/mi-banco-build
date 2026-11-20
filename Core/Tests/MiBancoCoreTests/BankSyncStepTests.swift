@@ -207,7 +207,7 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
     }
 
     @Test func rowIsNeverCountedTwiceOnBookedOnlyReading() {
-        // Posterior a la lectura y desconocida al consultar: ya la suma `countsTowardBalance`; el pendiente no la repite.
+        // Posterior a la lectura y desconocida al consultar: la suma `addsToReading` una sola vez.
         let m = capture(-1250, at: "2026-11-20T13:30:00Z", importedAt: "2026-11-20T13:30:00Z")
         #expect(ledger(reading: bookedReading, [m]).balance(.rev)?.cents == 8_750)
     }
@@ -732,6 +732,108 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         _ = l.applyBankFetch(bank: .rev, records: [], balance: nil, dateFrom: iso("2026-11-13T00:00:00Z"), complete: true,
                              fetchedAt: iso("2026-11-20T14:00:00Z"), calendar: cal)
         #expect(l.state.movements.count == 1)
+    }
+
+    // MARK: R54 el cierre contabilizado mira el día en que se apuntó
+
+    private func closingOf19(_ type: String, _ amount: String) -> EBBalance {
+        EBBalance(balanceAmount: EBAmount(currency: "EUR", amount: amount), balanceType: type, lastChangeDateTime: nil,
+                  referenceDate: "2026-11-19")
+    }
+
+    @Test func bookedClosingComparesTheDayThePaymentWasBooked() {
+        // Pagado el 19, apuntado el 20.
+        let tx = EBTransaction(transactionAmount: EBAmount(currency: "EUR", amount: "12.50"), creditDebitIndicator: "DBIT",
+                               status: .book, entryReference: "late", bookingDate: "2026-11-20", transactionDate: "2026-11-19",
+                               remittanceInformation: ["Mercadona"])
+        let records = bankRecords(from: [tx], bank: .rev, calendar: cal)
+        #expect(records.first?.timing == .transactionDay(iso("2026-11-19T11:00:00Z")))
+        #expect(records.first?.bookedDay == iso("2026-11-20T11:00:00Z"))
+        var booked = Ledger(state: LedgerState(links: [.rev: link()]))
+        applyClosing19(&booked, records)
+        #expect(booked.state.movements.first?.bookedDay == iso("2026-11-20T11:00:00Z"))
+        #expect(booked.balance(.rev)?.cents == 8_750)
+        // Un cierre DISPONIBLE del 19 ya incluía lo retenido el 19: sigue mirando el día del pago.
+        var available = Ledger(state: LedgerState(links: [.rev: link()]))
+        _ = available.applyBankFetch(bank: .rev, records: records,
+                                     balance: chooseBalanceReading([closingOf19("CLAV", "100.00")], fetchedAt: closingFetchAt),
+                                     dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: closingFetchAt, calendar: cal)
+        #expect(available.balance(.rev)?.cents == 10_000)
+    }
+
+    @Test func pendingRowThatBooksTakesTheBookingDay() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        let from = iso("2026-11-13T00:00:00Z")
+        _ = l.applyBankFetch(bank: .rev, records: [record("p", cents: -1250, status: .pending, day: "2026-11-19T11:00:00Z")],
+                             balance: BalanceReading(cents: 10_000, at: iso("2026-11-19T18:59:00Z"), kind: .booked),
+                             dateFrom: from, complete: true, fetchedAt: iso("2026-11-19T19:00:00Z"), calendar: cal)
+        var bookedRecord = record("p", cents: -1250, status: .booked, day: "2026-11-19T11:00:00Z")
+        bookedRecord.bookedDay = iso("2026-11-20T11:00:00Z")
+        applyClosing19(&l, [bookedRecord])
+        #expect(l.state.movements.first?.bankStatus == .booked)
+        #expect(l.state.movements.first?.bookedDay == iso("2026-11-20T11:00:00Z"))
+        #expect(l.balance(.rev)?.cents == 8_750)
+    }
+
+    @Test func bookedDayIsOptionalAndRoundTrips() throws {
+        let m = Movement(bank: .rev, amountCents: -240, merchant: "Cafe", kind: .payment, source: .bank, date: fetched,
+                         bankRef: "c", bankStatus: .booked, importedAt: fetched, bookedDay: day19)
+        #expect(try JSONDecoder().decode(Movement.self, from: JSONEncoder().encode(m)) == m)
+        let oldMovement = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","bank":"rev","amountCents":-500,"kind":"payment","source":"bank","date":2000}"#
+        #expect(try JSONDecoder().decode(Movement.self, from: Data(oldMovement.utf8)).bookedDay == nil)
+    }
+
+    // MARK: R55 gemelos en un cierre
+
+    @Test func bookedRowSeenAfterTheClosingFetchIsNotTheTwinOfAnOlderPending() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        applyClosing19(&l, [record("p", cents: -1000, status: .pending, day: "2026-11-17T11:00:00Z")])
+        #expect(l.balance(.rev)?.cents == 9_000)
+        // El mismo cierre vuelve a las 16:00 (no se adopta: se sostiene) junto con un apuntado del 17 con otra clave.
+        let later = iso("2026-11-20T16:00:00Z")
+        let applied = l.applyBankFetch(
+            bank: .rev,
+            records: [record("p", cents: -1000, status: .pending, day: "2026-11-17T11:00:00Z"),
+                      record("b", cents: -1000, status: .booked, day: "2026-11-17T11:00:00Z")],
+            balance: chooseBalanceReading(closing("2026-11-19"), fetchedAt: later),
+            dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: later, calendar: cal)
+        #expect(applied?.balanceAdopted == false)
+        #expect(l.balance(.rev)?.cents == 9_000)
+    }
+
+    @Test func availableClosingAbsorbsTheBookingOfAHoldItAlreadyHad() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        _ = l.applyBankFetch(
+            bank: .rev,
+            records: [record("p", cents: -1000, status: .pending, day: "2026-11-19T11:00:00Z"),
+                      record("b", cents: -1000, status: .booked, day: "2026-11-20T11:00:00Z")],
+            balance: chooseBalanceReading([closingOf19("CLAV", "100.00")], fetchedAt: closingFetchAt),
+            dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: closingFetchAt, calendar: cal)
+        #expect(l.state.balances[.rev]?.closingDay == day19)
+        #expect(l.state.balances[.rev]?.countsPending == false)
+        #expect(l.balance(.rev)?.cents == 10_000)
+        #expect(teQuedaban(l).isEmpty)
+    }
+
+    // MARK: R56 cierre de cuentas de clases distintas
+
+    @Test func mixedKindClosingOfTheSameDayKeepsItsDay() {
+        let reading = combineBalanceReadings([
+            chooseBalanceReading([closingOf19("CLBD", "60.00")], fetchedAt: closingFetchAt),
+            chooseBalanceReading([closingOf19("CLAV", "40.00")], fetchedAt: closingFetchAt)])
+        #expect(reading?.kind == .mixed)
+        #expect(reading?.closingDay == day19)
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        _ = l.applyBankFetch(bank: .rev, records: [record("b", cents: -1250, day: "2026-11-20T11:00:00Z")], balance: reading,
+                             dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: closingFetchAt, calendar: cal)
+        #expect(l.balance(.rev)?.cents == 8_750)
+        #expect(l.balance(.rev)?.estimated == true)
+        // Cierres de días distintos: sin día de cierre.
+        let otherDay = EBBalance(balanceAmount: EBAmount(currency: "EUR", amount: "40.00"), balanceType: "CLAV",
+                                 lastChangeDateTime: nil, referenceDate: "2026-11-18")
+        #expect(combineBalanceReadings([
+            chooseBalanceReading([closingOf19("CLBD", "60.00")], fetchedAt: closingFetchAt),
+            chooseBalanceReading([otherDay], fetchedAt: closingFetchAt)])?.closingDay == nil)
     }
 
     // MARK: disco

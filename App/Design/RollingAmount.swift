@@ -23,14 +23,15 @@ struct RollingAmount: View {
     var revealed = true
     var style: AmountStyle = .plain(sign: false)
 
-    /// Opcional: sin preferencias (extensión, vista previa) el importe se ve y no se cierra la app.
+    /// Opcional: sin preferencias (extensión, vista previa) no se cierra la app, y el ojo se lee de lo guardado: nunca
+    /// se enseña un importe que el dueño tiene oculto.
     @Environment(AppPreferences.self) private var preferences: AppPreferences?
     @Environment(\.motion) private var motion
     @Environment(\.entrance) private var entrance
 
     var body: some View {
         RollingDigits(
-            cents: cents, style: style, hidden: preferences?.privateMode ?? false, countsUp: countsUp,
+            cents: cents, style: style, hidden: preferences?.privateMode ?? AppPreferences.storedPrivateMode, countsUp: countsUp,
             revealed: revealed, motion: motion,
             restartToken: entrance.token, restartsOnToken: entrance.active && entrance.scope == .assembly)
     }
@@ -44,6 +45,8 @@ struct RollingAmount: View {
 ///   ojo cambia (6 × 40 ms), y los puntos aparecen con 16 ms entre ellos. Al mostrar, se baraja y rueda a la cifra real en
 ///   0,38 s. VoiceOver lee `spokenAmount`.
 /// - Con Reducir movimiento no hay giro ni barajado: la cifra se funde.
+/// - Toda decisión sobre qué se dibuja (cifra real, barajado o puntos, y a qué importe rodar) la toma `AmountReveal`
+///   (Core, con pruebas); esta vista solo guarda los temporizadores y dibuja.
 struct RollingDigits: View {
     let cents: Int
     let style: AmountStyle
@@ -68,14 +71,8 @@ struct RollingDigits: View {
         self.restartToken = restartToken
         self.restartsOnToken = restartsOnToken
         // Con el modo privado puesto desde el principio, el primer fotograma ya son puntos (nunca cifras).
-        _mode = State(initialValue: hidden ? .dots(Self.dotCount) : .real)
-        _latestCents = State(initialValue: cents)
-    }
-
-    private enum Mode: Equatable {
-        case real
-        case scramble(Int)
-        case dots(Int)
+        _reveal = State(initialValue: AmountReveal(cents: cents, hidden: hidden))
+        _popped = State(initialValue: hidden ? Self.dotCount : 0)
     }
 
     /// Los 5 puntos de «•••,••».
@@ -86,43 +83,45 @@ struct RollingDigits: View {
     @State private var planStart = Date.distantPast
     @State private var planID = 0
     @State private var rolling = false
-    @State private var mode: Mode
+    /// Qué se dibuja (cifra real, barajado o puntos) y a qué importe: lo decide `AmountReveal`.
+    @State private var reveal: AmountReveal
+    /// Paso del barajado (1…6) y cuántos puntos han salido ya (el pequeño salto de cada punto).
+    @State private var scrambleStep = 0
+    @State private var popped: Int
     @State private var transition: Task<Void, Never>?
     @State private var seed = Int.random(in: 1...1_000_000)
     @State private var idealWidth: CGFloat = 0
     @State private var availableWidth: CGFloat = 0
-    /// El importe más reciente, también el que llega mientras el ojo está cambiando (la rodada final lo lee de aquí).
-    @State private var latestCents: Int
     @ScaledMetric(relativeTo: .largeTitle) private var heroScale = 1.0
-    @ScaledMetric(relativeTo: .body) private var plainSize = 17.0
 
     // MARK: Cuerpo
 
     var body: some View {
         fitted(content)
+            // Con Reducir movimiento, cerrar el ojo se funde solo, lo anime o no quien llama.
+            .modifier(ReduceFade(reduce: motion.reduce, fade: motion.fade, value: drawnNow))
             // Antes de empezar a contar (tarjeta vecina aún sin ver) no se enseña un 0 falso.
-            .opacity(value == nil && mode == .real && !hidden && countsUp && !motion.reduce ? 0 : 1)
+            .opacity(value == nil && drawnNow == .real && !hidden && countsUp && !motion.reduce ? 0 : 1)
             .privacySensitive()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(spokenAmount(cents, hidden: hidden))
             .onAppear(perform: start)
             .task(id: planID) { await finishRoll() }
-            .onChange(of: hidden) { _, nowHidden in toggle(hidden: nowHidden) }
+            .onChange(of: hidden) { _, nowHidden in
+                transition?.cancel()
+                perform(reveal.apply(.eyeChanged(hidden: nowHidden), reduceMotion: motion.reduce))
+            }
             .onChange(of: revealed) { _, _ in if value == nil { start() } }
             .onChange(of: restartToken) { _, _ in recount() }
-            .onChange(of: cents) { _, new in changed(to: new) }
+            .onChange(of: cents) { _, new in perform(reveal.apply(.valueChanged(new), reduceMotion: motion.reduce)) }
     }
 
-    /// Lo que se dibuja ahora. Si `hidden` ya es true pero el estado aún enseña cifras (el primer fotograma tras tocar
-    /// el ojo), se dibujan dígitos al azar: una cifra real no se dibuja nunca con el modo privado puesto.
-    private var effectiveMode: Mode {
-        // Con Reducir movimiento nunca hay un fotograma de barajado: directo a los puntos.
-        if hidden, mode == .real { return motion.reduce ? .dots(Self.dotCount) : .scramble(0) }
-        return mode
-    }
+    /// Lo que se dibuja ahora. Si `hidden` ya es true pero `reveal` aún enseña cifras (el primer fotograma tras tocar
+    /// el ojo), `AmountReveal` lo cubre: una cifra real no se dibuja nunca con el modo privado puesto.
+    private var drawnNow: AmountReveal.Drawn { reveal.displayed(hiddenInput: hidden, reduceMotion: motion.reduce) }
 
     @ViewBuilder private var content: some View {
-        switch effectiveMode {
+        switch drawnNow {
         case .real:
             // Los glifos se calculan una vez, fuera del cierre que se ejecuta en cada fotograma.
             let figures = glyphs(of: shownValue)
@@ -134,8 +133,8 @@ struct RollingDigits: View {
                 .id(motion.reduce ? shownValue : 0)
                 .transition(.opacity)
             }
-        case .scramble(let step):
-            row(maskGlyphs(scrambleStep: step), at: .infinity, blurAll: motion.richEffects ? 0.5 : 0)
+        case .scramble:
+            row(maskGlyphs(scrambleStep: scrambleStep), at: .infinity, blurAll: motion.richEffects ? 0.5 : 0)
         case .dots:
             row(maskGlyphs(), at: .infinity)
         }
@@ -218,6 +217,7 @@ struct RollingDigits: View {
 
     // MARK: Fila
 
+    /// La tipografía propia del estilo; `.plain` no tiene (nil): dibuja con la del sitio donde se coloca.
     private func font(_ small: Bool) -> Font? {
         switch style {
         case .plain: nil
@@ -225,12 +225,10 @@ struct RollingDigits: View {
         }
     }
 
-    /// Cuerpo del texto de una parte; el protagonista crece con el tamaño de texto (hasta 1,35 y luego se encoge para caber).
+    /// Cuerpo del texto de una parte del protagonista; crece con el tamaño de texto (hasta 1,35 y luego se encoge para caber).
     private func baseSize(_ small: Bool) -> CGFloat {
-        switch style {
-        case .plain: plainSize
-        case let .hero(euros, cents, _): (small ? cents : euros) * min(heroScale, 1.35)
-        }
+        guard case let .hero(euros, cents, _) = style else { return 0 }
+        return (small ? cents : euros) * min(heroScale, 1.35)
     }
 
     /// Solo la cifra protagonista cambia el color; en una línea simple se hereda del entorno (verde de un ingreso, etc.).
@@ -257,7 +255,7 @@ struct RollingDigits: View {
     /// (el barajado del ojo).
     private func row(_ glyphs: [Glyph], at t: Double, blurAll: Double = 0) -> some View {
         let digitTotal = glyphs.compactMap(\.digit).count
-        let usesPlan = !plan.isEmpty && plan.count == digitTotal && effectiveMode == .real
+        let usesPlan = !plan.isEmpty && plan.count == digitTotal && drawnNow == .real
         return HStack(alignment: .lastTextBaseline, spacing: 0) {
             ForEach(glyphs) { g in
                 if let d = g.digit {
@@ -265,14 +263,17 @@ struct RollingDigits: View {
                     let pos = usesPlan ? DigitRoll.position(plan[d], at: t, overshoot: overshoot) : still
                     let speed = usesPlan && motion.richEffects ? DigitRoll.speed(plan[d], at: t, overshoot: overshoot) : 0
                     DigitCell(position: pos, blur: max(blurAll, min(1, speed / 16) * 0.85), blurRadius: blurRadius(g.small))
-                        .font(font(g.small))
+                        .cellFont(font(g.small))
                         .foregroundStyle(glyphStyle(g.small))
                 } else if let dot = g.dot {
-                    DotCell(font: font(g.small), size: baseSize(g.small), visible: dotVisible(dot))
+                    // La máscara es el «•» de la propia tipografía, en la fuente de su celda (grande en euros, pequeña
+                    // en céntimos), con el avance del propio glifo.
+                    BulletCell(visible: dotVisible(dot))
+                        .cellFont(font(g.small))
                         .foregroundStyle(glyphStyle(g.small))
                 } else {
                     Text(String(g.char))
-                        .font(font(g.small))
+                        .cellFont(font(g.small))
                         .foregroundStyle(glyphStyle(g.small))
                 }
             }
@@ -283,8 +284,7 @@ struct RollingDigits: View {
     }
 
     private func dotVisible(_ index: Int) -> Bool {
-        if case .dots(let popped) = effectiveMode { return index < popped }
-        return true
+        reveal.drawn == .dots ? index < popped : true
     }
 
     /// Los importes protagonistas se encogen hasta un 60 % si no caben (como `minimumScaleFactor(0.6)`).
@@ -329,21 +329,6 @@ struct RollingDigits: View {
         roll(to: cents, from: 0, positions: nil, delay: 0.15)
     }
 
-    private func changed(to new: Int) {
-        latestCents = new
-        // Con el modo privado puesto no se toca nada visible: al mostrar, se rueda hasta la cifra de entonces.
-        guard !hidden, mode == .real else { return }
-        guard let old = value else { return start() }
-        if motion.reduce {
-            withAnimation(motion.fade) {
-                value = new
-                plan = []
-            }
-        } else {
-            roll(to: new, from: old, positions: currentPositions())
-        }
-    }
-
     /// Dónde está ahora cada tira (con decimales si va rodando), para seguir desde ahí.
     private func currentPositions() -> [Double]? {
         guard !plan.isEmpty else { return nil }
@@ -379,41 +364,53 @@ struct RollingDigits: View {
         rolling = false
     }
 
-    /// El ojo: se baraja 240 ms con dígitos propios y los puntos aparecen (o, al mostrar, rueda hasta la cifra real).
-    private func toggle(hidden nowHidden: Bool) {
-        transition?.cancel()
-        if motion.reduce {
+    /// Hace lo que `AmountReveal` ha decidido. Aquí no se decide nada: solo se mueven los dígitos y los temporizadores.
+    private func perform(_ action: AmountReveal.Action) {
+        switch action {
+        case .none:
+            break
+        case .rollTo(let target):
+            // Un importe que llega antes de estrenarse (aún sin cuenta) empieza su cuenta.
+            if let old = value { roll(to: target, from: old, positions: currentPositions()) } else { start() }
+        case .crossFadeTo(let target):
             withAnimation(motion.fade) {
-                if nowHidden {
-                    mode = .dots(Self.dotCount)
-                } else {
-                    mode = .real
-                    value = latestCents
-                    plan = []
-                    rolling = false
-                }
+                value = target
+                plan = []
+                rolling = false
             }
-            return
+        case .startScramble(let generation):
+            startScramble(generation)
+        case .showDots:
+            rolling = false
+            withAnimation(motion.fade) { popped = Self.dotCount }
         }
+    }
+
+    /// El ojo: se baraja 240 ms con dígitos propios y los puntos aparecen (o, al mostrar, rueda hasta la cifra real).
+    /// Al acabar, `AmountReveal` dice qué toca; un aviso de un barajado ya cancelado no hace nada (generación vieja).
+    private func startScramble(_ generation: Int) {
+        scrambleStep = 0
+        popped = 0
         transition = Task { @MainActor in
             for step in 1...6 {
-                mode = .scramble(step)
+                scrambleStep = step
                 try? await Task.sleep(for: .milliseconds(40))
                 if Task.isCancelled { return }
             }
-            if nowHidden {
+            switch reveal.apply(.scrambleEnded(generation: generation), reduceMotion: motion.reduce) {
+            case .showDots:
                 rolling = false
-                for popped in 1...Self.dotCount {
-                    withAnimation(motion.animation(.snap)) { mode = .dots(popped) }
+                for count in 1...Self.dotCount {
+                    withAnimation(motion.animation(.snap)) { popped = count }
                     try? await Task.sleep(for: .milliseconds(16))
                     if Task.isCancelled { return }
                 }
-            } else {
+            case .rollTo(let target):
                 let random = AmountMask.scrambledDigits(count: Self.dotCount, step: 6, seed: seed)
                 let from = random.reduce(0) { $0 * 10 + $1 }
-                // El importe de AHORA, no el del toque: un cambio durante el barajado no se pierde.
-                roll(to: latestCents, from: from, positions: random.map(Double.init), base: 0.38, perColumn: 0.03, stagger: 0.014)
-                mode = .real
+                roll(to: target, from: from, positions: random.map(Double.init), base: 0.38, perColumn: 0.03, stagger: 0.014)
+            default:
+                break
             }
         }
     }
@@ -467,24 +464,32 @@ private struct DigitCell: View {
     }
 }
 
-/// Un punto de la máscara: ocupa el ancho de un dígito, descansa sobre la línea base (centrado a media altura de las
-/// cifras) y pesa como un trazo de cifra (17 % del cuerpo). Aparece con un pequeño salto.
-private struct DotCell: View {
-    let font: Font?
-    let size: CGFloat
+/// Un punto de la máscara: el «•» de la propia tipografía, con su avance, en la fuente que le ponga la celda. Aparece
+/// con un pequeño salto; ocupa su sitio desde el principio para que la cifra no se mueva mientras salen.
+private struct BulletCell: View {
     let visible: Bool
 
     var body: some View {
-        Text("0")
-            .font(font)
-            .monospacedDigit()
-            .hidden()
-            .overlay(alignment: .bottom) {
-                Circle()
-                    .frame(width: size * 0.17, height: size * 0.17)
-                    .padding(.bottom, size * 0.5)
-                    .scaleEffect(visible ? 1 : 0.3)
-                    .opacity(visible ? 0.9 : 0)
-            }
+        Text("•")
+            .scaleEffect(visible ? 1 : 0.3)
+            .opacity(visible ? 1 : 0)
+    }
+}
+
+/// `.font(nil)` no significa «hereda»: la tipografía solo se aplica si el estilo trae una propia.
+private extension View {
+    @ViewBuilder func cellFont(_ font: Font?) -> some View {
+        if let font { self.font(font) } else { self }
+    }
+}
+
+/// Con Reducir movimiento, el cambio de lo que se dibuja (cifra ↔ puntos) se funde por sí solo.
+private struct ReduceFade: ViewModifier {
+    let reduce: Bool
+    let fade: Animation
+    let value: AmountReveal.Drawn
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduce { content.animation(fade, value: value) } else { content }
     }
 }

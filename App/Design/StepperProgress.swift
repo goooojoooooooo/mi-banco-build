@@ -53,7 +53,9 @@ struct StepperProgress: View {
             .overlay(alignment: .leading) {
                 Rectangle()
                     .fill(.white)
-                    .scaleEffect(x: filled ? 1 : 0, anchor: .leading)
+                    // Con Reducir movimiento la línea no crece: se funde.
+                    .scaleEffect(x: motion.reduce || filled ? 1 : 0, anchor: .leading)
+                    .opacity(motion.reduce ? (filled ? 1 : 0) : 1)
             }
             .clipShape(Capsule())
             .padding(.horizontal, 6)

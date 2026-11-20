@@ -87,12 +87,16 @@ jobs:
           shot bloqueo 3.5 -MiBancoDemoLock
           # Galeria de movimiento (solo DEBUG): marca, cifras, controles, modo privado y movimiento reducido.
           shot motion-galeria 10 -MiBancoMotionGallery
+          shot motion-galeria-cifras 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage cifras
           shot motion-galeria-controles 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage controles
-          shot motion-galeria-privado 10 -MiBancoMotionGallery -MiBancoDemoPrivate
+          shot motion-galeria-privado 10 -MiBancoMotionGallery -MiBancoDemoPrivate -MiBancoMotionGalleryPage cifras
+          # Fuera del entorno de preferencias y con el ojo cerrado guardado: el importe sigue oculto y no hay chip «Ojo».
+          shot motion-galeria-sin-preferencias 10 -MiBancoMotionGallery -MiBancoMotionGalleryNoPrefs -MiBancoDemoPrivate -MiBancoMotionGalleryPage cifras
           shot motion-galeria-reducido 10 -MiBancoMotionGallery -MiBancoMotionReduce
           # Tamaño de texto más grande de accesibilidad: nada se recorta ni se pisa.
           shot motion-galeria-texto-grande 10 -MiBancoMotionGallery -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
-          shot motion-galeria-controles-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage controles -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          shot motion-galeria-controles-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage botones -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          shot motion-galeria-segmentado-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage segmentado -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           shot motion-galeria-pasos-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage pasos -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           ls -l out
       - uses: actions/upload-artifact@v4

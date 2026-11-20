@@ -1,4 +1,5 @@
 import SwiftUI
+import MiBancoCore
 
 /// Barra de progreso de gasto: se llena con un muelle que se pasa un poco y, al cruzar `warnAt` mientras se ve, pasa a
 /// ámbar con un fundido, un pulso de luz (solo con efectos ricos) y una háptica de aviso, una sola vez por cruce.
@@ -27,10 +28,10 @@ struct FillBar: View {
             Rectangle().fill(Color(hex: "#2E2E32"))
             Rectangle()
                 .fill(Theme.label)
-                .scaleEffect(x: max(0, shown), anchor: .leading)
+                .scaleEffect(x: MotionMath.unit(shown), anchor: .leading)
             Rectangle()
                 .fill(Theme.warning)
-                .scaleEffect(x: max(0, shown), anchor: .leading)
+                .scaleEffect(x: MotionMath.unit(shown), anchor: .leading)
                 .opacity(warned ? 1 : 0)
             Rectangle()
                 .fill(Theme.warning)
@@ -48,7 +49,7 @@ struct FillBar: View {
         .sensoryFeedback(Haptics.warning, trigger: warnCount)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
-        .accessibilityValue("\(Int((fraction * 100).rounded())) %")
+        .accessibilityValue("\(MotionMath.percent(fraction)) %")
         .onAppear {
             // Reaparecer al desplazarse una lista no repite nada.
             guard !appeared else { return }

@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Botón que se transforma: cápsula blanca con su título → círculo de 52 pt con rueda de carga → ✓ que se dibuja con
+/// Botón que se transforma: cápsula blanca con su título → círculo (del alto de la cápsula) con rueda de carga → ✓ que se dibuja con
 /// rebote → vuelve a la cápsula tras 1,1 s. Si `action` devuelve false, se sacude 6 pt dos veces y enseña el error.
 /// Con Reducir movimiento la cápsula no cambia de forma: el título, la rueda y el ✓ se funden. Hápticas: éxito y aviso.
 /// Todo el botón es un único elemento de accesibilidad: su etiqueta es el título y, al acabar, `doneTitle`.
+/// Tamaño: nunca mayor que su sitio. El ancho es como mucho el escalado con el texto (220 pt a tamaño normal) y nunca más
+/// que el contenedor; el alto sale del título más el relleno vertical (mínimo 52 pt) y no se estira con el hueco libre.
 struct MorphingButton: View {
     let title: String
     let doneTitle: String
@@ -17,9 +19,12 @@ struct MorphingButton: View {
     @State private var doneCount = 0
     @State private var failCount = 0
     @Environment(\.motion) private var motion
-    /// Alto y ancho de la cápsula crecen con el tamaño de texto.
-    @ScaledMetric(relativeTo: .body) private var height = 52.0
+    /// Ancho máximo de la cápsula: crece con el tamaño de texto, pero el contenedor manda.
     @ScaledMetric(relativeTo: .body) private var width = 220.0
+    /// Alto de la cápsula en reposo (lo mide `onGeometryChange`): el círculo de carga tiene ese mismo alto.
+    @State private var idleHeight = Self.minHeight
+
+    private static let minHeight: CGFloat = 52
 
     private var isCircle: Bool { phase != .idle && !motion.reduce }
 
@@ -53,32 +58,38 @@ struct MorphingButton: View {
     }
 
     private var face: some View {
-        // La cápsula marca el tamaño; el contenido va encima y no lo cambia (el título no estira el círculo).
-        Capsule()
-            .fill(.white)
-            .frame(minWidth: isCircle ? height : width, maxWidth: isCircle ? height : width, minHeight: height)
-            .overlay {
-                ZStack {
-                    Text(title)
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.black)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.8)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 16)
-                        .opacity(phase == .idle ? 1 : 0)
-                    ProgressView()
-                        .tint(.black)
-                        .opacity(phase == .loading ? 1 : 0)
-                    if phase == .done {
-                        DrawnCheck(lineWidth: 2.8, color: .black)
-                            .frame(width: 24, height: 24)
-                            .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
-                    }
-                }
+        // El título (invisible en la carga) manda en el alto; el fondo es un fondo, no pide tamaño. El círculo es un
+        // marco del alto de reposo, sin mínimos rígidos en el ancho: el contenedor lo acota.
+        ZStack {
+            Text(title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.black)
+                .lineLimit(2)
+                .minimumScaleFactor(0.8)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+                .padding(.vertical, 14)
+                .frame(maxWidth: .infinity)
+                .opacity(phase == .idle ? 1 : 0)
+            ProgressView()
+                .tint(.black)
+                .opacity(phase == .loading ? 1 : 0)
+            if phase == .done {
+                DrawnCheck(lineWidth: 2.8, color: .black)
+                    .frame(width: 24, height: 24)
+                    .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
             }
-            .contentShape(Capsule())
-            .frame(minWidth: 44, minHeight: 44)
+        }
+        .frame(
+            minWidth: isCircle ? idleHeight : nil, maxWidth: isCircle ? idleHeight : width,
+            minHeight: isCircle ? idleHeight : Self.minHeight, maxHeight: isCircle ? idleHeight : nil)
+        .background(Capsule().fill(.white))
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            // Solo en reposo: durante la carga el marco ya es el círculo.
+            if phase == .idle { idleHeight = height }
+        }
+        .contentShape(Capsule())
+        .frame(minWidth: 44, minHeight: 44)
     }
 
     private func run() async {

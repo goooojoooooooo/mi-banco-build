@@ -4,12 +4,15 @@ import MiBancoCore
 
 /// Galería de movimiento solo para compilaciones DEBUG: enseña, sobre negro, cada pieza del kit sin enlazarla a ninguna
 /// pantalla. Se abre con `-MiBancoMotionGallery` (junto a `-MiBancoDemo`, para que nada toque datos ni UserDefaults).
-/// `-MiBancoMotionGalleryPage controles|pasos` baja hasta las piezas de abajo; `-MiBancoMotionReduce` la abre con Reducir
-/// movimiento simulado. Datos inventados.
+/// `-MiBancoMotionGalleryPage cifras|controles|botones|segmentado|pasos` baja hasta esa parte; `-MiBancoMotionReduce` la abre con
+/// Reducir movimiento simulado; `-MiBancoMotionGalleryNoPrefs` la monta FUERA del entorno de preferencias (como lo haría
+/// una hoja o una ventana nueva que se olvidase de ellas). Datos inventados.
 enum MotionGalleryLaunch {
     private static var arguments: [String] { ProcessInfo.processInfo.arguments }
     static var isActive: Bool { arguments.contains("-MiBancoMotionGallery") }
     static var startsReduced: Bool { arguments.contains("-MiBancoMotionReduce") }
+    /// Sin `AppPreferences` en el entorno de la galería.
+    static var withoutPreferences: Bool { arguments.contains("-MiBancoMotionGalleryNoPrefs") }
     /// Hasta dónde baja al abrir: «controles», «pasos» (o nada).
     static var page: String? {
         guard let i = arguments.firstIndex(of: "-MiBancoMotionGalleryPage"), i + 1 < arguments.count else { return nil }
@@ -25,11 +28,15 @@ extension View {
 }
 
 private struct MotionGalleryOverlay: ViewModifier {
+    @Environment(AppPreferences.self) private var preferences: AppPreferences?
+
     func body(content: Content) -> some View {
         // Con la galería, la app de debajo ni se monta (así no deja elementos de accesibilidad ni tareas).
         if MotionGalleryLaunch.isActive {
             MotionGallery()
                 .motionEnvironment()
+                // `-MiBancoMotionGalleryNoPrefs`: el entorno sin preferencias (el ojo guardado sigue mandando).
+                .environment(MotionGalleryLaunch.withoutPreferences ? nil : preferences)
                 .background(Color.black.ignoresSafeArea())
         } else {
             content
@@ -53,7 +60,6 @@ struct MotionGallery: View {
     @State private var stepsDone = false
     @State private var period = 1
     @State private var localLevel = AppPreferences.defaultMotionLevel
-    @State private var localPrivate = false
 
     private var motion: MotionContext {
         var m = baseMotion
@@ -78,12 +84,16 @@ struct MotionGallery: View {
                         .padding(.top, 24)
                     levelSection
                     markSection
+                    Color.clear.frame(height: 1).id("cifras")
                     amountSection
+                    rowsSection
                     Color.clear.frame(height: 1).id("controles")
                     glassSection
                     liftSection
                     burstSection
+                    Color.clear.frame(height: 1).id("botones")
                     morphSection
+                    Color.clear.frame(height: 1).id("segmentado")
                     segmentedSection
                     fillSection
                     Color.clear.frame(height: 1).id("pasos")
@@ -157,13 +167,39 @@ struct MotionGallery: View {
             HStack(spacing: 10) {
                 chip("Pago", id: "gallery.pay") { cents -= 480 }
                 chip("Ingreso", id: "gallery.income") { cents += 124_500 }
-                chip("Ojo", id: "gallery.eye") {
-                    withAnimation(motion.fade) {
-                        if let preferences { preferences.privateMode.toggle() } else { localPrivate.toggle() }
+                // Sin preferencias el ojo no puede funcionar: no se enseña.
+                if let preferences {
+                    chip("Ojo", id: "gallery.eye") {
+                        withAnimation(motion.fade) { preferences.privateMode.toggle() }
                     }
                 }
             }
         }
+    }
+
+    /// Importes de una línea con la tipografía de una fila puesta por quien los coloca (`.plain` no trae la suya).
+    private var rowsSection: some View {
+        section("Filas") {
+            VStack(spacing: 4) {
+                rowAmount("Café", cents: -480, sign: false, color: Theme.label, id: "gallery.row.expense")
+                rowAmount("Nómina", cents: 125_000, sign: true, color: Theme.income, id: "gallery.row.income")
+                rowAmount("Saldo", cents: 6_120, sign: false, color: Theme.label, id: "gallery.row.plain")
+            }
+        }
+    }
+
+    private func rowAmount(_ name: String, cents: Int, sign: Bool, color: Color, id: String) -> some View {
+        HStack {
+            Text(name)
+                .titan(.subtitle)
+                .foregroundStyle(Theme.label2)
+            Spacer(minLength: 12)
+            RollingAmount(cents: cents, countsUp: false, style: .plain(sign: sign))
+                .titan(.row)
+                .foregroundStyle(color)
+                .accessibilityIdentifier(id)
+        }
+        .frame(minHeight: 44)
     }
 
     private var glassSection: some View {

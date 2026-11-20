@@ -152,7 +152,10 @@ enum DemoMode {
             let first = monthsAgo(back, from: monthStart)
             let next = monthsAgo(back - 1, from: monthStart)
             for (dayOfMonth, bank, cents, merchant) in spread {
-                guard let date = calendar.date(byAdding: .day, value: dayOfMonth - 1, to: first)?.addingTimeInterval(13 * 3600),
+                // Repsol, Starbucks y Decathlon solo salen una vez por mes: en el mes más antiguo se adelantan 8 días para que no
+                // se lean como suscripciones (cobros a 26-35 días); Suscripciones solo debe enseñar Spotify y Netflix.
+                let oneOff = back == 2 && ["Repsol", "Starbucks", "Decathlon"].contains(merchant)
+                guard let date = calendar.date(byAdding: .day, value: max(0, dayOfMonth - 1 - (oneOff ? 8 : 0)), to: first)?.addingTimeInterval(13 * 3600),
                       date < next else { continue }
                 movements.append(movement(bank, cents * percent / 100, merchant, date))
             }

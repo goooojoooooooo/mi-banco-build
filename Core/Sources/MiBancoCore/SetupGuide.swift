@@ -188,7 +188,7 @@ public func guideSteps(for track: GuideTrack) -> [GuideStep] {
 
     add("Que vaya sola", "Marca «\(N.runImmediately)».", N.runImmediately, "en el centro de la pantalla",
         .runImmediately, "Si no lo marcas, el iPhone te preguntará cada vez.")
-    add("Sin avisos de \(N.shortcutsApp)", "Apaga «\(N.notifyWhenRun)».", N.notifyWhenRun, "en el centro de la pantalla",
+    add("Sin avisos de \(N.shortcutsApp)", "Apaga «\(N.notifyWhenRun)»: el interruptor debe quedar gris.", N.notifyWhenRun, "en el centro de la pantalla",
         .notifyOff, "Así \(N.shortcutsApp) no te enseña un aviso cada vez que funciona. El interruptor debe quedar apagado.")
     add("Sigue", "Toca «\(N.next)».", N.next, "abajo", .runNext, retry)
     add("Empieza en blanco", "Toca «\(N.blankAutomation)».", N.blankAutomation, "en el centro de la pantalla",

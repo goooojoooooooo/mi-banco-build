@@ -23,7 +23,7 @@ private let shared3 = Row(title: "Crea una nueva", instruction: "Toca «+» arri
 private let runRows: [Row] = [
     Row(title: "Que vaya sola", instruction: "Marca «Ejecutar inmediatamente».", tap: "Ejecutar inmediatamente",
         help: "Si no lo marcas, el iPhone te preguntará cada vez."),
-    Row(title: "Sin avisos de Atajos", instruction: "Apaga «Notificar al ejecutar».", tap: "Notificar al ejecutar",
+    Row(title: "Sin avisos de Atajos", instruction: "Apaga «Notificar al ejecutar»: el interruptor debe quedar gris.", tap: "Notificar al ejecutar",
         help: "Así Atajos no te enseña un aviso cada vez que funciona. El interruptor debe quedar apagado."),
     Row(title: "Sigue", instruction: "Toca «Siguiente».", tap: "Siguiente", help: retry),
     Row(title: "Empieza en blanco", instruction: "Toca «Nueva automatización en blanco».", tap: "Nueva automatización en blanco",

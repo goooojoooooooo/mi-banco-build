@@ -83,6 +83,8 @@ struct GuideStepView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, Theme.Space.gutter)
                 .accessibilityIdentifier("guide-step-counter")
+                // El contador es una guía de orientación: con letra enorme se queda en un tamaño que no come la pantalla.
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
             HStack(spacing: 6) {
                 ForEach(0..<steps.count, id: \.self) { i in
                     Capsule()

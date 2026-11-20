@@ -71,13 +71,13 @@ private func precedes(_ a: Movement, _ b: Movement) -> Bool {
     a.date != b.date ? a.date < b.date : a.id.uuidString < b.id.uuidString
 }
 
-/// Pagos válidos (no marcados como "no es mío") agrupados por comercio normalizado. Se construye una vez por llamada.
+/// Pagos válidos (ni "no es mío" ni traspasos entre tus cuentas) agrupados por comercio normalizado. Se construye una vez por llamada.
 struct MerchantIndex {
     private let groups: [String: [Movement]]
 
     init(_ movements: [Movement]) {
         var groups: [String: [Movement]] = [:]
-        for m in movements where m.kind == .payment && !m.flaggedNotMine {
+        for m in spendingMovements(in: movements) {
             let key = normalizeMerchant(m.merchant ?? "")
             if key.isEmpty { continue }
             groups[key, default: []].append(m)
@@ -90,8 +90,9 @@ struct MerchantIndex {
 
 /// Alertas que dependen solo del movimiento y de los anteriores (todas menos el saldo bajo).
 private func movementInsights(_ m: Movement, in state: LedgerState, index: MerchantIndex, subscriptions: [Subscription],
+                              ownTransfers: Set<UUID>,
                               calendar: Calendar) -> [Insight] {
-    if m.flaggedNotMine || isMuted(m.merchant, in: state) { return [] }
+    if m.flaggedNotMine || ownTransfers.contains(m.id) || isMuted(m.merchant, in: state) { return [] }
     let settings = state.alertSettings
     let cents = abs(m.amountCents)
     let amount = formatEUR(cents)
@@ -187,6 +188,7 @@ public func immediateAlerts(afterStoring movement: Movement, in state: LedgerSta
     if isMuted(movement.merchant, in: state) { return out }
     let subs = detectSubscriptions(in: state.movements, now: now, calendar: calendar)
     out += movementInsights(movement, in: state, index: MerchantIndex(state.movements), subscriptions: subs,
+                            ownTransfers: ownTransferIDs(in: state.movements),
                             calendar: calendar)
     return out
 }
@@ -207,8 +209,9 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar) -> [
     }
 
     let index = MerchantIndex(state.movements)
+    let transfers = ownTransferIDs(in: state.movements)
     for m in state.movements where m.date <= now && now.timeIntervalSince(m.date) < recentWindow {
-        out += movementInsights(m, in: state, index: index, subscriptions: subs, calendar: calendar)
+        out += movementInsights(m, in: state, index: index, subscriptions: subs, ownTransfers: transfers, calendar: calendar)
     }
 
     if settings.subscriptions {

@@ -26,7 +26,7 @@ public struct Subscription: Equatable, Sendable, Identifiable {
 /// con 26–35 días entre sí e importes dentro de ±25 %. Si el último cargo tiene 45 días o más, se da por cancelada.
 public func detectSubscriptions(in movements: [Movement], now: Date, calendar: Calendar) -> [Subscription] {
     var groups: [String: [Movement]] = [:]
-    for m in movements where m.kind == .payment && !m.flaggedNotMine {
+    for m in spendingMovements(in: movements) {
         guard let merchant = m.merchant else { continue }
         let key = normalizeMerchant(merchant)
         if key.isEmpty { continue }

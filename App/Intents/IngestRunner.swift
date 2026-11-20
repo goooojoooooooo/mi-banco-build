@@ -64,11 +64,11 @@ enum IngestRunner {
         }
     }
 
-    /// Pagos tuyos de hoy (los marcados "no es mío" no cuentan).
+    /// Pagos tuyos de hoy (ni los "no es mío" ni los traspasos entre tus cuentas cuentan).
     private static func spentToday(_ movements: [Movement], now: Date, calendar: Calendar) -> Int {
         let start = calendar.startOfDay(for: now)
-        return movements.reduce(0) { sum, m in
-            m.kind == .payment && !m.flaggedNotMine && m.date >= start && m.date <= now ? sum + abs(m.amountCents) : sum
+        return spendingMovements(in: movements).reduce(0) { sum, m in
+            m.date >= start && m.date <= now ? sum + abs(m.amountCents) : sum
         }
     }
 }

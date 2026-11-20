@@ -27,7 +27,7 @@ struct WeekSpend: Sendable, Equatable {
         guard let start = calendar.date(byAdding: .day, value: -6, to: today) else { return }
 
         var spent = Array(repeating: 0, count: 7)
-        for m in movements where m.date >= start && m.kind == .payment && m.amountCents < 0 && !m.flaggedNotMine {
+        for m in spendingMovements(in: movements) where m.date >= start && m.amountCents < 0 {
             if let bank, m.bank != bank { continue }
             let index = calendar.dateComponents([.day], from: start, to: calendar.startOfDay(for: m.date)).day ?? -1
             guard (0..<7).contains(index) else { continue }

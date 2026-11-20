@@ -26,11 +26,13 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public var flaggedNotMine: Bool
     /// La categoría que el dueño puso a este movimiento (nil = la decide la app).
     public var category: SpendingCategory?
+    /// nil = lo decide la app (ver `ownTransferPairs`); true = el dueño dice que es un traspaso entre sus cuentas; false = dice que no.
+    public var ownTransfer: Bool?
 
     public init(id: UUID = UUID(), bank: BankID, amountCents: Int, merchant: String?, kind: MovementKind, source: Source, date: Date,
                 pairedAcrossSources: Bool = false, fingerprint: String? = nil, pairedFingerprint: String? = nil,
                 isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false,
-                category: SpendingCategory? = nil) {
+                category: SpendingCategory? = nil, ownTransfer: Bool? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -45,11 +47,12 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.note = note
         self.flaggedNotMine = flaggedNotMine
         self.category = category
+        self.ownTransfer = ownTransfer
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
-        case note, flaggedNotMine, category
+        case note, flaggedNotMine, category, ownTransfer
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -69,6 +72,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         note = try c.decodeIfPresent(String.self, forKey: .note)
         flaggedNotMine = try c.decodeIfPresent(Bool.self, forKey: .flaggedNotMine) ?? false
         category = try c.decodeIfPresent(SpendingCategory.self, forKey: .category)
+        ownTransfer = try c.decodeIfPresent(Bool.self, forKey: .ownTransfer)
     }
 }
 
@@ -196,6 +200,11 @@ public struct Ledger: Sendable {
         } else {
             state.movements[i].category = category
         }
+    }
+
+    public mutating func setOwnTransfer(_ value: Bool?, for id: UUID) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        state.movements[i].ownTransfer = value
     }
 
     public mutating func setMuted(_ muted: Bool, merchant: String) {

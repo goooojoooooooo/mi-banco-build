@@ -57,15 +57,15 @@ enum BankingSelfTest {
             try KeychainVault.set(secret, for: .appID, service: testService)
             guard try KeychainVault.data(for: .appID, service: testService) == secret else {
                 try? KeychainVault.deleteAll(service: testService)
-                return failure("llavero")
+                return failure("llavero (lectura distinta)")
             }
             try KeychainVault.set(Data("otro".utf8), for: .appID, service: testService)
             guard try KeychainVault.data(for: .appID, service: testService) == Data("otro".utf8) else {
                 try? KeychainVault.deleteAll(service: testService)
-                return failure("llavero")
+                return failure("llavero (actualizacion distinta)")
             }
             try KeychainVault.delete(.appID, service: testService)
-            guard try KeychainVault.data(for: .appID, service: testService) == nil else { return failure("llavero") }
+            guard try KeychainVault.data(for: .appID, service: testService) == nil else { return failure("llavero (borrado sin efecto)") }
         } catch {
             try? KeychainVault.deleteAll(service: testService)
             // El código del sistema (OSStatus) no es secreto y dice por qué falla el Llavero.

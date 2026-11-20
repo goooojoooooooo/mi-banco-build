@@ -228,5 +228,71 @@ private func tempDirectory() -> URL {
         }
         #expect(try store.load() == a)
     }
+
+    @Test func copiaQueFallaALaMitadDejaIntactaLaAnteriorTambienComoRoot() throws {
+        struct Boom: Error {}
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        try store.save(a)
+        try store.copyCurrent(to: "copia.json")
+        let before = try Data(contentsOf: dir.appendingPathComponent("copia.json"))
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(b)
+        // La copia escribe algo y falla a mitad: la anterior no se toca y no queda ningún temporal.
+        #expect(throws: Boom.self) {
+            try store.copyCurrent(to: "copia.json", copy: { _, temp in
+                try Data("a medias".utf8).write(to: temp)
+                throw Boom()
+            })
+        }
+        #expect(try Data(contentsOf: dir.appendingPathComponent("copia.json")) == before)
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        #expect(names == ["copia.json", "ledger.json"])
+    }
+
+    @Test func restaurarFuncionaConElLibroActualCorrupto() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let corrupt = Data("esto no es json {{{".utf8)
+        try corrupt.write(to: dir.appendingPathComponent("ledger.json"))
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        #expect(try store.load() == b)
+        #expect(try Data(contentsOf: dir.appendingPathComponent("antes.json")) == corrupt)
+        // Una copia corrupta no se ofrece como "lo de antes".
+        #expect(store.copyInfo(named: "antes.json") == nil)
+    }
+
+    @Test func restaurarSinLibroPreviosTambienFunciona() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        #expect(try store.load() == b)
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("antes.json").path))
+    }
+
+    @Test func copyInfoDevuelveLoGuardadoYSuFecha() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        #expect(store.copyInfo(named: "antes.json") == nil)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        try store.save(a)
+        try store.copyCurrent(to: "antes.json")
+        let info = try #require(store.copyInfo(named: "antes.json"))
+        #expect(info.state == a)
+        #expect(abs(info.date.timeIntervalSinceNow) < 120)
+    }
 }
 

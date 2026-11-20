@@ -6,20 +6,19 @@ public enum RestoreError: Error, Equatable, Sendable {
 }
 
 public extension FileStore {
-    /// Restaura `state` guardando antes una copia de lo actual, todo dentro de UNA sola actualización coordinada:
+    /// Restaura `state` guardando antes una copia de lo actual, todo dentro de UNA sola escritura coordinada:
     /// nada puede escribir entre la copia y la restauración. Si la copia falla, se aborta (el libro queda como estaba)
     /// y se lanza `RestoreError.safetyCopyFailed`. `makeCopy` existe para poder probar ese fallo.
+    /// Si el `ledger.json` actual no se puede decodificar, la copia previa es igualmente una copia del fichero tal cual
+    /// y la restauración no necesita leerlo: restaurar funciona justo cuando más falta hace.
     func restoreKeepingCopy(_ state: LedgerState, copyName: String,
                             makeCopy: (FileStore, String) throws -> Void = { try $0.copyCurrent(to: $1) }) throws {
-        var copyFailed = false
-        _ = try update { (ledger: inout Ledger) -> Bool in
-            do { try makeCopy(self, copyName) } catch {
-                copyFailed = true
-                return false
-            }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try coordinatedWrite {
+            do { try makeCopy(self, copyName) } catch { throw RestoreError.safetyCopyFailed }
+            var ledger = Ledger(state: loadOrEmpty())
             ledger.restore(state)
-            return true
+            try save(ledger.state)
         }
-        if copyFailed { throw RestoreError.safetyCopyFailed }
     }
 }

@@ -88,14 +88,19 @@ final class MotionGalleryTests: XCTestCase {
     /// Con el ojo cerrado, ninguna cifra real está en pantalla ni en el árbol de accesibilidad.
     func testHiddenAmountNeverExposesDigits() throws {
         tap("gallery.eye")
-        let money = NSPredicate(format: "label MATCHES %@", #".*[0-9]{1,3}(\.[0-9]{3})*,[0-9]{2}.*"#)
         for _ in 0..<8 {
             XCTAssertTrue(labelled("importe oculto").waitForExistence(timeout: 3))
-            XCTAssertEqual(app.descendants(matching: .any).matching(money).count, 0, "Hay una cifra real con el ojo cerrado")
+            XCTAssertEqual(moneyLabelCount(), 0, "Hay una cifra real con el ojo cerrado")
             Thread.sleep(forTimeInterval: 0.3)
         }
         tap("gallery.pay")
         Thread.sleep(forTimeInterval: 1.0)
-        XCTAssertEqual(app.descendants(matching: .any).matching(money).count, 0, "Un pago con el ojo cerrado enseñó la cifra")
+        XCTAssertEqual(moneyLabelCount(), 0, "Un pago con el ojo cerrado enseñó la cifra")
+    }
+
+    /// Cuántos elementos tienen una etiqueta con forma de importe («3.774,75»).
+    private func moneyLabelCount() -> Int {
+        let money = NSPredicate(format: "label MATCHES %@", #".*[0-9]{1,3}(\.[0-9]{3})*,[0-9]{2}.*"#)
+        return app.descendants(matching: .any).matching(money).count
     }
 }

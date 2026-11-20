@@ -41,6 +41,28 @@ import Testing
         #expect(until(31_536_000) == now.addingTimeInterval(180 * day - 3600))
     }
 
+    @Test func consentIsNeverInThePast() {
+        let day: TimeInterval = 86_400
+        func until(_ validity: Int?) -> Date {
+            consentValidUntil(for: EBASPSP(name: "X", country: "ES", maximumConsentValidity: validity), now: now)
+        }
+        // Un banco que permite menos de un día manda; aun así queda después de `now`.
+        #expect(until(3600) == now.addingTimeInterval(3600))
+        #expect(until(0) > now)
+        #expect(until(-5) > now)
+        // Un banco que permite justo algo más de un día: 1 día (el mínimo cabe).
+        #expect(until(Int(day) + 1800) == now.addingTimeInterval(day))
+        // El mínimo es 1 día cuando el banco permite más.
+        #expect(until(Int(day) + 3600) == now.addingTimeInterval(day))
+        #expect(until(2 * Int(day)) == now.addingTimeInterval(2 * day - 3600))
+    }
+
+    @Test func nonEuroBalancesAreNeverPicked() {
+        #expect(pickBalanceCents([balance("ITAV", "5.00", "USD")]) == nil)
+        #expect(pickBalanceCents([balance("ITAV", "5.00", "usd"), balance("CLBD", "7.00", "GBP")]) == nil)
+        #expect(pickBalanceCents([balance("ITAV", "5.00", "eur")]) == 500)
+    }
+
     @Test func selectsEuroCurrentAccounts() {
         let accounts = [
             EBAccount(uid: "u1", currency: "EUR", cashAccountType: "CACC"),

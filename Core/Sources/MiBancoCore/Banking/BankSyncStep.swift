@@ -53,8 +53,17 @@ extension Ledger {
         fetchedAt: Date, calendar: Calendar
     ) -> BankFetchApplied? {
         guard let link = state.links[bank] else { return nil }
-        let coverage = complete ? DateInterval(start: min(dateFrom, fetchedAt), end: fetchedAt) : nil
-        let report = reconcile(records, bank: bank, channel: .bank, coverage: coverage, now: fetchedAt, calendar: calendar)
+        // Sin lectura adoptable (no hay, o es más vieja que la actual) y con una base que suma pendientes, los pendientes
+        // no pasan a apuntados en esta escritura (dejarían de sumar sin que el saldo los incluya) ni se dan por
+        // desaparecidos: lo aplica la siguiente consulta que sí adopte lectura.
+        let current = state.balances[bank]
+        let adoptable = balance.map { b in !(current.map { $0.origin != .manual && b.at < $0.setAt } ?? false) } ?? false
+        let hold = !adoptable && (current?.countsPending ?? false)
+        // Consulta completa: el banco devuelve TODOS sus pendientes actuales; uno que falta ha desaparecido, sea de la
+        // fecha que sea. `dateFrom` solo acota lo apuntado que se pidió.
+        let coverage = (complete && !hold) ? DateInterval(start: .distantPast, end: .distantFuture) : nil
+        let report = reconcile(records, bank: bank, channel: .bank, coverage: coverage, now: fetchedAt, calendar: calendar,
+                               holdPendingFlips: hold)
         var adopted = false
         if let balance {
             adopted = adoptBalance(bank, cents: balance.cents, at: balance.at, origin: .bank, fetchedAt: fetchedAt,

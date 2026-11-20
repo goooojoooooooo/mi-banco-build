@@ -1,6 +1,7 @@
 import Foundation
 import MiBancoCore
 import Observation
+import Security
 import UIKit
 
 extension Notification.Name {
@@ -125,15 +126,18 @@ actor BankSync {
     ) async -> SyncOutcome? {
         // 0. Sesión y cliente ANTES de anotar nada: un fallo local (Llavero sin desbloquear tras reiniciar, credenciales
         // ilegibles) no gasta uno de los intentos del día, no pone espera ni aparece como fallo del banco.
-        let session: StoredSession?
-        let client: EnableBankingClient
+        var stored: StoredSession?
         do {
-            session = try KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank))
-            client = try BankingCredentials.client()
+            stored = try KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank))
         } catch {
-            return nil
+            // Solo el Llavero aún bloqueado tras reiniciar es pasajero; un dato ilegible o cualquier otro error se trata
+            // como sesión que falta (se anota y se avisa de que hay que renovar), no se calla para siempre.
+            if !recordsSessionReadFailure(Self.sessionReadFailure(error)) { return nil }
+            stored = nil
         }
-        guard let session else {
+        let client: EnableBankingClient
+        do { client = try BankingCredentials.client() } catch { return nil }
+        guard let session = stored else {
             // Hay conexión en el libro pero no sesión en el Llavero (otro dispositivo, copia restaurada): hay que renovar.
             return await recordFailure(bank, BankingClientError.api(.consentExpired, code: nil), startedSession: nil,
                                        attemptAt: Date(), store: store)
@@ -141,11 +145,17 @@ actor BankSync {
 
         // 1. El intento queda anotado antes de llamar (cuenta para el límite diario aunque la app muera a mitad).
         let attemptAt = Date()
-        let connected = (try? store.update { ledger -> Bool in
-            guard let link = ledger.state.links[bank] else { return false }
-            ledger.setLink(bank, link.recordingAttempt(at: attemptAt))
-            return true
-        }) ?? false
+        let connected: Bool
+        do {
+            connected = try store.update { ledger -> Bool in
+                guard let link = ledger.state.links[bank] else { return false }
+                ledger.setLink(bank, link.recordingAttempt(at: attemptAt))
+                return true
+            }
+        } catch {
+            // Un fallo de disco no es del banco: sin resultado.
+            return nil
+        }
         guard connected else { return .skipped(.notConnected) }
 
         let from = bankDateParameter(dateFrom, calendar: calendar)
@@ -187,6 +197,13 @@ actor BankSync {
 
     /// Si mientras tanto hubo una reconexión o renovación, el fallo es de la sesión vieja: no se anota, no se borra la
     /// sesión nueva del Llavero y no hay resultado (decide Core: `syncFailureAction`).
+    private static func sessionReadFailure(_ error: Error) -> SessionReadFailure {
+        if let keychain = error as? KeychainError, case .status(let code) = keychain, code == errSecInteractionNotAllowed {
+            return .deviceLocked
+        }
+        return .unreadable
+    }
+
     private func recordFailure(
         _ bank: BankID, _ error: Error, startedSession: String?, attemptAt: Date, store: FileStore
     ) async -> SyncOutcome? {
@@ -202,7 +219,12 @@ actor BankSync {
             return action
         }) ?? .drop
         guard case let .record(deleteSession) = action else { return nil }
-        if deleteSession { try? KeychainVault.delete(KeychainVault.session(for: bank)) }
+        if deleteSession {
+            // Se vuelve a leer justo antes de borrar: solo se borra la sesión con la que arrancó esta consulta (o una
+            // ilegible si no había ninguna); una reconexión en medio dejó otra y esa no se toca.
+            let nowID = ((try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank))) ?? nil)?.sessionID
+            if nowID == startedSession { try? KeychainVault.delete(KeychainVault.session(for: bank)) }
+        }
         NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
         return .failed(problem)
     }

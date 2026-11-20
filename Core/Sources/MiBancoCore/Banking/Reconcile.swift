@@ -31,7 +31,7 @@ extension Ledger {
     /// banco va a `bankMerchant`.
     public mutating func reconcile(
         _ records: [BankRecord], bank: BankID, channel: RecordChannel, coverage: DateInterval?, now: Date,
-        calendar: Calendar
+        calendar: Calendar, holdPendingFlips: Bool = false
     ) -> ReconcileReport {
         var report = ReconcileReport()
         let channelSource: Movement.Source = channel == .bank ? .bank : .statement
@@ -66,7 +66,9 @@ extension Ledger {
             if let i = sameKey ?? oldKey {
                 if sameKey == nil { setRef(r.ref, on: i) }
                 var changed = false
-                if channel == .bank, state.movements[i].bankStatus != r.status {
+                // `holdPendingFlips`: sin una lectura de saldo nueva, un pendiente no pasa a apuntado (dejaría de sumar).
+                let holdsFlip = holdPendingFlips && state.movements[i].bankStatus == .pending && r.status == .booked
+                if channel == .bank, !holdsFlip, state.movements[i].bankStatus != r.status {
                     state.movements[i].bankStatus = r.status
                     changed = true
                 }
@@ -80,6 +82,10 @@ extension Ledger {
                let i = best(records: r, calendar: calendar, among: { m in
                    m.bankStatus == .pending && m.bankRef != nil && m.bankRef != r.ref && !batchRefs.contains(m.bankRef ?? "")
                }) {
+                if holdPendingFlips {
+                    report.unchanged += 1
+                    continue
+                }
                 state.movements[i].bankRef = r.ref
                 state.movements[i].bankStatus = .booked
                 _ = applyName(r.merchant, to: i)

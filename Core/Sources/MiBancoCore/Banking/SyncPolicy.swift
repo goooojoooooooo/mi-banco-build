@@ -141,6 +141,19 @@ public func isBankFailure(_ error: Error) -> Bool {
     error is BankingClientError || error is URLError
 }
 
+/// Por qué no se pudo leer la sesión guardada del Llavero.
+public enum SessionReadFailure: Equatable, Sendable {
+    /// El móvil aún no se ha desbloqueado tras reiniciar (`errSecInteractionNotAllowed`): pasa solo, no se anota nada.
+    case deviceLocked
+    /// Dato ilegible o cualquier otro error del Llavero: no se arregla solo; se trata como sesión que falta.
+    case unreadable
+}
+
+/// `true` = se anota como fallo de consentimiento (hay que renovar); `false` = sin resultado, se reintenta más tarde.
+public func recordsSessionReadFailure(_ failure: SessionReadFailure) -> Bool {
+    failure == .unreadable
+}
+
 /// Qué hacer con el fallo de una consulta una vez terminada, según si la conexión sigue siendo la misma.
 public enum SyncFailureAction: Equatable, Sendable {
     /// Anotar el fallo en la conexión y, si el problema es de consentimiento, borrar la sesión del Llavero.

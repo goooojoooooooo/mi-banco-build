@@ -228,8 +228,99 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         let after = Ledger.balancesAfter(bank: .rev, current: balance?.cents ?? 0, reading: bookedReading,
                                          movements: [c, p2, p1])
         #expect(after[c.id] == balance?.cents)
-        #expect(after[p2.id] == 6_750)
-        #expect(after[p1.id] == 8_000)
+        // Lo anterior a la lectura no tiene cifra, sea la lectura de la clase que sea.
+        #expect(after[p2.id] == nil)
+        #expect(after[p1.id] == nil)
+    }
+
+    @Test func olderPendingRowGetsNoTeQuedabanButCountsInBalance() {
+        let booked = Movement(bank: .rev, amountCents: -3000, merchant: "Bar", kind: .payment, source: .bank,
+                              date: iso("2026-11-20T12:45:00Z"), bankRef: "b", bankStatus: .booked,
+                              importedAt: iso("2026-11-20T13:00:00Z"))
+        let pending = capture(-2000, at: "2026-11-20T12:00:00Z", importedAt: "2026-11-20T12:10:00Z")
+        let l = ledger(reading: bookedReading, [pending, booked])
+        #expect(l.balance(.rev)?.cents == 8_000)
+        let after = Ledger.balancesAfter(bank: .rev, current: 8_000, reading: bookedReading, movements: [booked, pending])
+        #expect(after[pending.id] == nil)
+        #expect(after[booked.id] == nil)
+    }
+
+    // MARK: autorizaciones viejas
+
+    @Test func holdThatDisappearsFromCompleteFetchStopsCounting() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        let from = iso("2026-11-13T00:00:00Z")
+        let first = BalanceReading(cents: 10_000, at: iso("2026-11-20T08:59:00Z"), kind: .booked)
+        _ = l.applyBankFetch(bank: .rev, records: [record("hold", cents: -5000, status: .pending, day: "2026-11-10T12:00:00Z")],
+                             balance: first, dateFrom: from, complete: true, fetchedAt: iso("2026-11-20T09:00:00Z"), calendar: cal)
+        #expect(l.balance(.rev)?.cents == 5_000)
+        let second = BalanceReading(cents: 10_000, at: iso("2026-11-20T12:59:00Z"), kind: .booked)
+        _ = l.applyBankFetch(bank: .rev, records: [], balance: second, dateFrom: from, complete: true,
+                             fetchedAt: fetched, calendar: cal)
+        #expect(l.balance(.rev)?.cents == 10_000)
+        #expect(l.state.movements.isEmpty)
+    }
+
+    @Test func pendingRowOlderThanThirtyDaysNeverCounts() {
+        let old = Movement(bank: .rev, amountCents: -5000, merchant: "Hotel", kind: .payment, source: .bank,
+                           date: iso("2026-10-05T12:00:00Z"), bankRef: "old", bankStatus: .pending,
+                           importedAt: iso("2026-10-05T12:00:00Z"))
+        #expect(ledger(reading: bookedReading, [old]).balance(.rev)?.cents == 10_000)
+    }
+
+    // MARK: pendiente que se apunta sin lectura nueva
+
+    @Test func flipWithoutAdoptedReadingKeepsThePendingRowCounting() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        let from = iso("2026-11-13T00:00:00Z")
+        let first = BalanceReading(cents: 10_000, at: iso("2026-11-20T11:59:00Z"), kind: .booked)
+        _ = l.applyBankFetch(bank: .rev, records: [record("p", cents: -1250, status: .pending)], balance: first, dateFrom: from,
+                             complete: true, fetchedAt: iso("2026-11-20T12:00:00Z"), calendar: cal)
+        #expect(l.balance(.rev)?.cents == 8_750)
+        // La consulta apunta el pago pero no trae lectura de saldo.
+        _ = l.applyBankFetch(bank: .rev, records: [record("p", cents: -1250, status: .booked)], balance: nil, dateFrom: from,
+                             complete: true, fetchedAt: iso("2026-11-20T12:30:00Z"), calendar: cal)
+        #expect(l.state.movements.first?.bankStatus == .pending)
+        #expect(l.balance(.rev)?.cents == 8_750)
+        #expect(l.balance(.rev)?.estimated == true)
+        // La siguiente trae lectura contabilizada que ya lo incluye.
+        let next = BalanceReading(cents: 8_750, at: iso("2026-11-20T12:59:00Z"), kind: .booked)
+        _ = l.applyBankFetch(bank: .rev, records: [record("p", cents: -1250, status: .booked)], balance: next, dateFrom: from,
+                             complete: true, fetchedAt: fetched, calendar: cal)
+        #expect(l.state.movements.first?.bankStatus == .booked)
+        #expect(l.balance(.rev)?.cents == 8_750)
+        #expect(l.balance(.rev)?.estimated == true)
+    }
+
+    @Test func flipUnderNewKeyWithoutReadingIsHeldToo() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        let from = iso("2026-11-13T00:00:00Z")
+        let first = BalanceReading(cents: 10_000, at: iso("2026-11-20T11:59:00Z"), kind: .booked)
+        _ = l.applyBankFetch(bank: .rev, records: [record("p", cents: -1250, status: .pending)], balance: first, dateFrom: from,
+                             complete: true, fetchedAt: iso("2026-11-20T12:00:00Z"), calendar: cal)
+        _ = l.applyBankFetch(bank: .rev, records: [record("b", cents: -1250, status: .booked)], balance: nil, dateFrom: from,
+                             complete: true, fetchedAt: iso("2026-11-20T12:30:00Z"), calendar: cal)
+        #expect(l.state.movements.count == 1)
+        #expect(l.state.movements.first?.bankStatus == .pending)
+        #expect(l.balance(.rev)?.cents == 8_750)
+    }
+
+    @Test func bookedTwinInSameBatchCountsThePaymentOnce() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        let reading = BalanceReading(cents: 10_000, at: iso("2026-11-20T12:59:00Z"), kind: .booked)
+        _ = l.applyBankFetch(
+            bank: .rev, records: [record("p", cents: -1250, status: .pending), record("b", cents: -1250, status: .booked)],
+            balance: reading, dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: fetched, calendar: cal)
+        // El pago apuntado ya está en la lectura; su gemelo pendiente no suma otra vez.
+        #expect(l.balance(.rev)?.cents == 10_000)
+        #expect(l.balance(.rev)?.estimated == true)
+    }
+
+    // MARK: sesión ilegible
+
+    @Test func onlyALockedKeychainIsSilent() {
+        #expect(recordsSessionReadFailure(.deviceLocked) == false)
+        #expect(recordsSessionReadFailure(.unreadable) == true)
     }
 
     @Test func teQuedabanStopsBeforeAPlainReadingAsBefore() {

@@ -521,7 +521,8 @@ public struct Ledger: Sendable {
 
     public func balance(_ bank: BankID) -> (cents: Int, estimated: Bool)? {
         guard let base = state.balances[bank] else { return nil }
-        let later = state.movements.filter { $0.bank == bank && Self.addsToReading($0, base: base) }
+        let twinned = base.countsPending ? Self.twinnedPending(state.movements, bank: bank, base: base) : []
+        let later = state.movements.filter { $0.bank == bank && Self.addsToReading($0, base: base, twinned: twinned) }
         let exact = base.origin != .manual && later.isEmpty && !base.countsPending && !base.forcedEstimate
         return (base.cents + later.reduce(0) { $0 + $1.amountCents }, !exact)
     }
@@ -550,21 +551,61 @@ public struct Ledger: Sendable {
     /// lo que ya exige `countsTowardBalance` O, si la lectura es solo de lo contabilizado, cualquier fila con un registro
     /// pendiente del banco (sea del banco o un aviso enlazado a él) en cualquier fecha: el banco aún no la incluye.
     /// Es un solo O: una fila nunca se cuenta dos veces.
-    public static func addsToReading(_ m: Movement, base: ManualBalance) -> Bool {
+    /// Un pendiente solo cuenta si es de los últimos 30 días antes de la lectura (una retención olvidada no resta para
+    /// siempre) y si no tiene un gemelo apuntado en la misma consulta (`twinned`): ese pago ya está en la lectura.
+    public static func addsToReading(_ m: Movement, base: ManualBalance, twinned: Set<UUID> = []) -> Bool {
         if countsTowardBalance(m, base: base) { return true }
-        return base.countsPending && m.bankStatus == .pending && m.bankRef != nil
+        guard base.countsPending, m.bankStatus == .pending, m.bankRef != nil, !twinned.contains(m.id) else { return false }
+        return m.date >= base.setAt.addingTimeInterval(-pendingLookback)
+    }
+
+    static let pendingLookback: TimeInterval = 30 * 86_400
+
+    /// Pendientes del banco que ya tienen su pago apuntado (fila propia del banco, mismo importe, el día del apunte entre
+    /// 1 día antes y 5 después, ya conocida cuando se tomó la lectura): una lectura de solo contabilizado ya lo incluye,
+    /// así que el pendiente no debe sumar encima. Uno a uno, el más cercano primero.
+    static func twinnedPending(_ movements: [Movement], bank: BankID, base: ManualBalance) -> Set<UUID> {
+        let known = base.fetchedAt ?? base.setAt
+        var booked = movements.filter {
+            $0.bank == bank && $0.source == .bank && $0.bankStatus == .booked && ($0.importedAt.map { $0 <= known } ?? true)
+        }
+        var out = Set<UUID>()
+        let pending = movements.filter { $0.bank == bank && $0.bankStatus == .pending && $0.bankRef != nil }
+            .sorted { $0.date < $1.date }
+        for p in pending {
+            let pDay = madridCalendar.startOfDay(for: p.date)
+            var winner: (index: Int, days: Int, seconds: TimeInterval)?
+            for (j, b) in booked.enumerated() where b.amountCents == p.amountCents {
+                let days = madridCalendar.dateComponents([.day], from: pDay, to: madridCalendar.startOfDay(for: b.date)).day ?? Int.max
+                guard days >= -1, days <= 5 else { continue }
+                let seconds = abs(b.date.timeIntervalSince(p.date))
+                if let w = winner {
+                    if (abs(days), seconds) < (abs(w.days), w.seconds) { winner = (j, days, seconds) }
+                } else {
+                    winner = (j, days, seconds)
+                }
+            }
+            if let winner {
+                out.insert(p.id)
+                booked.remove(at: winner.index)
+            }
+        }
+        return out
     }
 
     /// Saldo justo después de cada movimiento de `bank` ("Te quedaban"). `movements` va de más nuevo a más antiguo.
     /// Parte de `current` (lo que da `balance`) y resta lo que se suma después de cada fila; una fila que la lectura ya
     /// incluía y cae justo en su hora también tiene saldo. Con una lectura normal, lo anterior a su hora se desconoce
-    /// (se para); con una lectura de solo contabilizado los pendientes cuentan a cualquier fecha, así que no se para.
+    /// (se para), sea cual sea la clase de lectura: `current` ya incluye los pendientes viejos, y a las filas con cifra
+    /// les resta exactamente lo que `balance` sumó después de ellas.
     public static func balancesAfter(bank: BankID, current: Int, reading: ManualBalance, movements: [Movement]) -> [UUID: Int] {
         var out: [UUID: Int] = [:]
         var later = 0
+        let twinned = reading.countsPending ? twinnedPending(movements, bank: bank, base: reading) : []
         for m in movements where m.bank == bank {
-            if m.date < reading.setAt && !reading.countsPending && !addsToReading(m, base: reading) { break }
-            let adds = addsToReading(m, base: reading)
+            // Lo anterior a la lectura no tiene cifra (aunque un pendiente viejo cuente en el saldo actual).
+            if m.date < reading.setAt { break }
+            let adds = addsToReading(m, base: reading, twinned: twinned)
             guard adds || (m.date == reading.setAt && isBalanceEligible(m, origin: reading.origin)) else { continue }
             out[m.id] = current - later
             later += m.amountCents

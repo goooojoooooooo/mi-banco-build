@@ -241,6 +241,103 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         #expect(render(plain.sections[0].lines[0].parts, .masked).contains("Euros de ayer"))
     }
 
+    // MARK: J20 — lo que más subió y bajó
+
+    private func mover(_ name: String, change: Int, value: Int = 10_000, at when: Date? = nov(20, 9)) -> PositionValue {
+        let position = Position(instrument: name, name: name, assetClass: nil, shares: 1, costCents: 0, costIncomplete: false)
+        guard let when else {
+            return PositionValue(position: position, priceEUR: nil, origin: .none, valueCents: nil, todayChangeCents: nil,
+                                 gainCents: nil, gainTenths: nil)
+        }
+        return PositionValue(position: position, priceEUR: 1, origin: .market(when), valueCents: value + change, todayChangeCents: change,
+                             gainCents: nil, gainTenths: nil)
+    }
+
+    private func moversSummary(_ positions: [PositionValue], day: Date? = cal.startOfDay(for: nov(20))) -> PortfolioSummary {
+        PortfolioSummary(valueCents: 151_000, todayChangeCents: 600, todayChangeTenths: 4, changeDay: day, costCents: 133_667,
+                         gainCents: 17_333, gainTenths: 130, pricedAt: nov(20, 9), oldestPriceAt: nov(20, 9), hasStalePrice: false,
+                         missingPrices: 0, positions: positions)
+    }
+
+    private func moversText(_ positions: [PositionValue], now: Date = nov(20, 10), day: Date? = cal.startOfDay(for: nov(20))) -> String? {
+        let input = BriefingInput(now: now, since: nov(19, 22, 10), isFirst: false, investments: moversSummary(positions, day: day))
+        let b = makeBriefing(input, calendar: cal)
+        return b.sections.first { $0.kind == .investments }?.lines.first { $0.id == "inv-movers" }.map { render($0.parts, .plain) }
+    }
+
+    @Test func masSubioYMasBajo() {
+        let text = moversText([mover("Alfa", change: 210), mover("Beta", change: -130), mover("Gamma", change: 10)])
+        #expect(text == nb("Lo que más subió: Alfa (+2,1 %). Lo que más bajó: Beta (\u{2212}1,3 %)."))
+        // Va justo después de la línea del valor.
+        let input = BriefingInput(now: nov(20, 10), since: nov(19, 22, 10), isFirst: false,
+                                  investments: moversSummary([mover("Alfa", change: 210), mover("Beta", change: -130)]))
+        let ids = makeBriefing(input, calendar: cal).sections.first { $0.kind == .investments }!.lines.map(\.id)
+        #expect(ids.prefix(2) == ["inv-value", "inv-movers"])
+    }
+
+    @Test func todoSubioSoloDiceLoQueMasSubio() {
+        #expect(moversText([mover("Alfa", change: 210), mover("Beta", change: 50)]) == nb("Lo que más subió: Alfa (+2,1 %)."))
+    }
+
+    @Test func todoBajoSoloDiceLoQueMasBajo() {
+        #expect(moversText([mover("Alfa", change: -130), mover("Beta", change: -400)]) == nb("Lo que más bajó: Beta (\u{2212}4,0 %)."))
+    }
+
+    @Test func sinLineaCuandoNoHayDosDistintas() {
+        #expect(moversText([mover("Alfa", change: 210)]) == nil)
+        #expect(moversText([]) == nil)
+        // Todo a cero, o la misma subida en las dos.
+        #expect(moversText([mover("Alfa", change: 0), mover("Beta", change: 0)]) == nil)
+        #expect(moversText([mover("Alfa", change: 100), mover("Beta", change: 100)]) == nil)
+        // Sin día del cambio.
+        #expect(moversText([mover("Alfa", change: 210), mover("Beta", change: -130)], day: nil) == nil)
+    }
+
+    @Test func unPrecioDelViernesVistoElSabado() {
+        let text = moversText([mover("Alfa", change: 210), mover("Beta", change: -130)], now: nov(21, 10))
+        #expect(text == nb("En la última sesión (viernes), lo que más subió: Alfa (+2,1 %). Lo que más bajó: Beta (\u{2212}1,3 %)."))
+        let onlyUp = moversText([mover("Alfa", change: 210), mover("Beta", change: 50)], now: nov(21, 10))
+        #expect(onlyUp == nb("En la última sesión (viernes), lo que más subió: Alfa (+2,1 %)."))
+    }
+
+    @Test func lasPosicionesSinPrecioONoDelDiaSeIgnoran() {
+        // Una sin precio no cuenta: con solo una válida no hay línea.
+        #expect(moversText([mover("Alfa", change: 210), mover("Beta", change: 0, at: nil)]) == nil)
+        // Con otra válida, sí, y la sin precio no aparece.
+        let text = moversText([mover("Alfa", change: 210), mover("Beta", change: 0, at: nil), mover("Gamma", change: -130)])
+        #expect(text == nb("Lo que más subió: Alfa (+2,1 %). Lo que más bajó: Gamma (\u{2212}1,3 %)."))
+        // Un precio de otro día no es del mismo cambio.
+        let old = moversText([mover("Alfa", change: 210), mover("Beta", change: -130, at: nov(18, 9))])
+        #expect(old == nil)
+    }
+
+    @Test func losNombresLargosDeLasPosicionesSeRecortan() {
+        let long = String(repeating: "N", count: 60)
+        let text = moversText([mover(long, change: 210), mover("Beta", change: -130)])
+        #expect(text?.contains(String(repeating: "N", count: 39) + "…") == true)
+    }
+
+    @Test func laLineaNoLlevaPalabrasDeAccionNiLlegaAlModelo() {
+        var input = busy()
+        input.investments = moversSummary([mover("Alfa", change: 210), mover("Beta", change: -130)])
+        let b = makeBriefing(input, calendar: cal)
+        let line = lines(b, .investments).first { $0.hasPrefix("Lo que más") } ?? ""
+        #expect(!line.isEmpty)
+        for action in ["compra", "vende", "mant", "espera", "aprovecha", "recomiend", "conviene", "debes"] {
+            #expect(!line.lowercased().contains(action), "(action)")
+        }
+        #expect(!briefingModelPrompt(b).contains("Lo que más"))
+        #expect(!briefingModelFacts(b).contains { $0.contains("Lo que más") })
+        // Los porcentajes no se tapan con el modo privado de pantalla (no son importes).
+        let masked = render(b.sections.first { $0.kind == .investments }!.lines[1].parts, .masked)
+        #expect(masked == nb("Lo que más subió: Alfa (+2,1 %). Lo que más bajó: Beta (\u{2212}1,3 %)."))
+        // La voz normal la lee; la privada no.
+        let spoken = spokenBriefing(b, input: input, privateMode: false, calendar: cal)
+        #expect(spoken.contains("Lo que más subió: Alfa, más 2,1 por ciento."))
+        #expect(spoken.contains("Lo que más bajó: Beta, menos 1,3 por ciento."))
+        #expect(!spokenBriefing(b, input: input, privateMode: true, calendar: cal).contains("Lo que más"))
+    }
+
     @Test func enmascaraLaMonedaEscritaAntesDelNumero() {
         let cases = [("Cobro de €13", "Cobro de •••"), ("Cobro de EUR 20", "Cobro de •••"), ("Cobro de € 13,50", "Cobro de •••"),
                      ("Cobro €13.", "Cobro •••."), ("Cobro de euros 5", "Cobro de •••"), ("Cobro de eur20", "Cobro de •••")]

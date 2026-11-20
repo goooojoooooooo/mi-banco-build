@@ -327,6 +327,47 @@ private func priceAge(_ date: Date, now: Date, _ calendar: Calendar) -> String {
     }
 }
 
+/// «+2,1 %» / «−1,3 %» (signo menos de verdad, espacio duro antes del %): el cambio de un décimo en décimas.
+private func signedPercent(_ tenths: Int) -> String {
+    let sign = tenths > 0 ? "+" : (tenths < 0 ? "\u{2212}" : "")
+    let n = tenths.magnitude
+    return "\(sign)\(n / 10),\(n % 10)\u{00A0}%"
+}
+
+/// La línea de lo que más subió y más bajó entre las posiciones con precio de mercado del último día de negociación y con
+/// cierre anterior (porcentaje contra ese cierre). Son hechos, sin ningún verbo de acción. Hacen falta al menos dos posiciones;
+/// si la mejor y la peor son la misma o todo está a cero, no hay línea.
+func moversLine(_ s: PortfolioSummary, now: Date, calendar: Calendar) -> BriefingLine? {
+    guard let day = s.changeDay else { return nil }
+    var movers: [(name: String, tenths: Int)] = []
+    for p in s.positions {
+        guard case .market(let at) = p.origin, calendar.startOfDay(for: at) == day,
+              let value = p.valueCents, let change = p.todayChangeCents,
+              let tenths = roundedQuotient(1000 * change, value - change), value - change > 0 else { continue }
+        movers.append((p.position.name, tenths))
+    }
+    guard movers.count >= 2 else { return nil }
+    var best = 0, worst = 0
+    for i in movers.indices {
+        if movers[i].tenths > movers[best].tenths { best = i }
+        if movers[i].tenths < movers[worst].tenths { worst = i }
+    }
+    guard best != worst, movers[best].tenths != movers[worst].tenths else { return nil }
+    var sentences: [String] = []
+    let up = movers[best].tenths > 0, down = movers[worst].tenths < 0
+    guard up || down else { return nil }
+    let today = dayDistance(from: day, to: now, calendar) <= 0
+    var prefix = today ? "" : "En la última sesión (\(weekdayName(day, calendar))), "
+    func phrase(_ label: String, _ mover: (name: String, tenths: Int)) -> String {
+        defer { prefix = "" }
+        let head = prefix.isEmpty ? capitalized(label) : prefix + label
+        return "\(head): \(clippedName(mover.name)) (\(signedPercent(mover.tenths)))."
+    }
+    if up { sentences.append(phrase("lo que más subió", movers[best])) }
+    if down { sentences.append(phrase("lo que más bajó", movers[worst])) }
+    return BriefingLine(id: "inv-movers", parts: [.text(sentences.joined(separator: " "))], action: .openInvestments)
+}
+
 /// `valueOnly`: solo la primera línea y los avisos de honestidad (día tranquilo).
 private func investmentLines(_ s: PortfolioSummary, now: Date, calendar: Calendar, valueOnly: Bool) -> [BriefingLine] {
     var lines: [BriefingLine] = []
@@ -347,6 +388,7 @@ private func investmentLines(_ s: PortfolioSummary, now: Date, calendar: Calenda
         first.append(.text("."))
     }
     lines.append(BriefingLine(id: "inv-value", parts: first, action: .openInvestments))
+    if let movers = moversLine(s, now: now, calendar: calendar) { lines.append(movers) }
     if !valueOnly {
         var second: [BriefingPart] = []
         if let gain = s.gainCents {

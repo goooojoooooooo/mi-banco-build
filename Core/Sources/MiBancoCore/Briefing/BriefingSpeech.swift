@@ -5,6 +5,7 @@ private func spoken(_ text: String) -> String {
     s = s.replacingOccurrences(of: "\\+(?=[0-9])", with: "más ", options: .regularExpression)
     s = s.replacingOccurrences(of: "-(?=[0-9])", with: "menos ", options: .regularExpression)
     s = s.replacingOccurrences(of: " (", with: ", ").replacingOccurrences(of: ")", with: "")
+    s = s.replacingOccurrences(of: "\u{2212}(?=[0-9])", with: "menos ", options: .regularExpression)
     s = s.replacingOccurrences(of: " · ", with: ". ")
     s = s.replacingOccurrences(of: "%", with: "por ciento").replacingOccurrences(of: "€", with: "euros")
     return s
@@ -74,6 +75,7 @@ public func spokenBriefing(_ briefing: Briefing, input: BriefingInput, privateMo
     }
     var names = (input.income + input.payments).map(\.name) + input.upcoming.map(\.name) + input.shortfalls.map(\.charge.name)
     if let expected = input.expected { names.append(expected.name) }
+    names += (input.investments?.positions ?? []).map(\.position.name)
     sentences.append(render(briefing.headline, .plain))
     for section in briefing.sections {
         for line in section.lines { sentences.append(sentence(spoken(render(line.parts, .plain), keeping: names))) }

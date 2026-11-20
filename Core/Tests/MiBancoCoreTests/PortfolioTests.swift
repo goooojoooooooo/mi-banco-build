@@ -43,8 +43,8 @@ private let fixtureLines: [String] = [
     line(id: "tx-003", dt: "2026-05-10T12:00:00Z", type: "SELL", asset: "FUND", name: "iShares Core MSCI World", symbol: fund,
          shares: "4", price: "110", amount: "440.00", fee: "-1.00", tax: "-3.20"),
     line(id: "tx-004", dt: "2026-05-11T18:30:00Z", type: "CARD_TRANSACTION", amount: "-12.50"),
-    line(id: "tx-005", dt: "2026-06-01T10:00:00Z", type: "BUY", asset: "CRYPTO", name: "Ethereum", symbol: "ETH",
-         shares: "0.01", price: "2500", amount: "-25.00"),
+    line(id: "tx-005", dt: "2026-06-01T10:00:00Z", type: "FREE_RECEIPT", asset: "CRYPTO", name: "Ethereum", symbol: "ETH",
+         shares: "0.01", price: "2500", amount: "0"),
     line(id: "tx-006", dt: "2026-06-15T13:45:00Z", type: "BUY", asset: "STOCK", name: "Apple", symbol: apple,
          shares: "3", price: "180", amount: "-540.00", fee: "-1.00"),
     line(id: "tx-007", dt: "", type: "BUY", asset: "STOCK", name: "Apple", symbol: apple, shares: "1"),
@@ -88,11 +88,14 @@ private func portfolioWithFixture() throws -> Portfolio {
         #expect(investmentTransactions(from: signed).transactions.first?.shares == -4)
     }
 
-    @Test func compraDeCripto() throws {
-        let t = try #require(investmentTransactions(from: try fixture()).transactions.first { $0.id == "tx-005" })
+    @Test func entregaGratuita() throws {
+        let e = investmentTransactions(from: try fixture())
+        let t = try #require(e.transactions.first { $0.id == "tx-005" })
         #expect(t.shares == Decimal(string: "0.01"))
-        #expect(t.cashCents == -2_500)
+        #expect(t.cashCents == 0)
         #expect(t.assetClass == "CRYPTO")
+        #expect(t.acquired)
+        #expect(e.notTradeRows == 0)
     }
 
     @Test func decimales() {
@@ -130,7 +133,10 @@ private func portfolioWithFixture() throws -> Portfolio {
         #expect(p[0].shares == 3)
         #expect(p[0].costCents == 54_100)
         #expect(p[1].shares == Decimal(string: "0.01"))
-        #expect(p[1].costCents == 2_500)
+        // Entrega gratuita: sin importe no hay coste y la posición queda marcada como incompleta.
+        #expect(p[1].costCents == 0)
+        #expect(p[1].costIncomplete)
+        #expect(!p[0].costIncomplete)
         #expect(p[2].shares == 8)
         #expect(p[2].costCents == 77_067)
     }
@@ -174,14 +180,17 @@ private func portfolioWithFixture() throws -> Portfolio {
         let eth = try #require(s.positions.first { $0.id == "ETH" })
         #expect(eth.valueCents == 3_000)
         #expect(eth.todayChangeCents == nil)
-        #expect(eth.gainCents == 500)
+        #expect(eth.gainCents == nil)
+        #expect(eth.gainTenths == nil)
         #expect(eth.origin == .manual(at(2026, 11, 19, 9, 0)))
         #expect(s.valueCents == 151_000)
         #expect(s.todayChangeCents == 600)
         #expect(s.todayChangeTenths == 4)
-        #expect(s.costCents == 133_667)
-        #expect(s.gainCents == 17_333)
-        #expect(s.gainTenths == 130)
+        #expect(s.costCents == 131_167)
+        // La ganancia solo compara las posiciones con coste completo (sin la cripto recibida gratis).
+        #expect(s.gainCents == 16_833)
+        #expect(s.gainTenths == 128)
+        #expect(s.changeDay == at(2026, 11, 19, 0, 0))
         #expect(s.missingPrices == 0)
         #expect(s.pricedAt == at(2026, 11, 19, 17, 35))
     }

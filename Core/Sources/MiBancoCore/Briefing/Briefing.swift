@@ -75,8 +75,10 @@ public enum RenderStyle: Sendable {
 
 private let maskDots = "•••"
 
-/// Un importe escrito en un texto libre («13,99 € dos veces hoy»): cifras con puntos o comas y un € detrás.
-private let writtenAmountPattern = "[-+]?[0-9][0-9.,]*[ \u{00A0}]?€"
+/// Un importe escrito en un texto libre («13,99 € dos veces hoy», «20 EUR», «5 euros») o un decimal suelto con coma («13,99»):
+/// cifras con puntos o comas y un € / EUR / euros detrás, o `n,nn`.
+private let writtenAmountPattern =
+    "(?i)[-+]?[0-9][0-9.,]*[ \u{00A0}]?(?:€|euros?(?![a-z])|eur(?![a-z]))|[-+]?[0-9][0-9.]*,[0-9]{2}(?![0-9])"
 
 public func render(_ parts: [BriefingPart], _ style: RenderStyle) -> String {
     var out = ""
@@ -167,17 +169,27 @@ private func dayLabel(_ date: Date, now: Date, _ calendar: Calendar) -> String {
 
 private func plural(_ n: Int, _ one: String, _ many: String) -> String { n == 1 ? one : many }
 
+/// Lo más largo que sale el nombre de un comercio en una línea del resumen.
+let maxMerchantNameLength = 40
+
+/// El nombre de un comercio recortado a 40 caracteres (con «…» al final si se recorta).
+func clippedName(_ name: String) -> String {
+    name.count <= maxMerchantNameLength ? name : String(name.prefix(maxMerchantNameLength - 1)) + "…"
+}
+
 // MARK: Secciones
 
 private func moneyLines(_ input: BriefingInput, quiet: Bool) -> [BriefingLine] {
     var lines: [BriefingLine] = []
     let known = input.banks.filter { $0.cents != nil }
-    // «unos» en el total solo cuando TODOS los saldos conocidos son estimaciones; cada banco estimado lo dice en su línea.
-    let approximate = !known.isEmpty && known.allSatisfy(\.estimated)
+    // «unos» en el total en cuanto UN saldo conocido es una estimación (la suma lo es); cada banco estimado lo dice en su línea.
+    let approximate = known.contains(where: \.estimated)
     if let total = input.totalCents {
+        // «sin contar imagin»: los bancos sin saldo conocido no están en el total ni en su cambio.
+        let leftOut = input.totalLeftOut.isEmpty ? "" : ", sin contar " + input.totalLeftOut.map(\.displayName).joined(separator: ", ")
         if quiet {
             lines.append(BriefingLine(id: "money-total", parts: [.text(approximate ? "Sigues con unos " : "Sigues con "),
-                                                                 .amount(total), .text(" en total.")]))
+                                                                 .amount(total), .text(" en total\(leftOut).")]))
             return lines
         }
         var parts: [BriefingPart] = [.text(approximate ? "En total, unos " : "En total, "), .amount(total)]
@@ -186,6 +198,7 @@ private func moneyLines(_ input: BriefingInput, quiet: Bool) -> [BriefingLine] {
         } else {
             parts += [.text(" ("), .signed(input.totalChangeCents), .text(")")]
         }
+        if !leftOut.isEmpty { parts.append(.text(leftOut)) }
         lines.append(BriefingLine(id: "money-total", parts: parts))
     }
     if quiet { return lines }
@@ -212,7 +225,8 @@ private func happenedLines(_ input: BriefingInput) -> [BriefingLine] {
     var lines: [BriefingLine] = []
     for item in input.income.prefix(maxListedPerKind) {
         lines.append(BriefingLine(id: "in-\(item.id.uuidString)",
-                                  parts: [.text("Entró \(item.name): "), .amount(item.cents), .text(" en \(item.bank.displayName)")],
+                                  parts: [.text("Entró \(clippedName(item.name)): "), .amount(item.cents),
+                                          .text(" en \(item.bank.displayName)")],
                                   action: .openMovement(item.id)))
     }
     if input.income.count > maxListedPerKind {
@@ -222,7 +236,8 @@ private func happenedLines(_ input: BriefingInput) -> [BriefingLine] {
     }
     for item in input.payments.prefix(maxListedPerKind) {
         lines.append(BriefingLine(id: "out-\(item.id.uuidString)",
-                                  parts: [.text("\(item.name): "), .amount(item.cents), .text(" con \(item.bank.displayName)")],
+                                  parts: [.text("\(clippedName(item.name)): "), .amount(item.cents),
+                                          .text(" con \(item.bank.displayName)")],
                                   action: .openMovement(item.id)))
     }
     if input.payments.count > maxListedPerKind {
@@ -241,14 +256,15 @@ private func upcomingLines(_ input: BriefingInput, calendar: Calendar, quiet: Bo
     var lines: [BriefingLine] = []
     if !quiet, let expected = input.expected {
         let day = "\(weekdayName(expected.date, calendar)) \(calendar.component(.day, from: expected.date))"
-        lines.append(BriefingLine(id: "expected", parts: [.text("Hacia el \(day): \(expected.name), unos "), .amount(expected.cents),
+        lines.append(BriefingLine(id: "expected", parts: [.text("Hacia el \(day): \(clippedName(expected.name)), unos "), .amount(expected.cents),
                                                           .text(" en \(expected.bank.displayName)")]))
     }
     for (i, charge) in input.upcoming.enumerated() {
         if quiet, dayDistance(from: input.now, to: charge.date, calendar) > 1 { continue }
         lines.append(BriefingLine(id: "upcoming-\(i)",
-                                  parts: [.text("\(dayLabel(charge.date, now: input.now, calendar)): \(charge.name), "),
-                                          .amount(charge.cents), .text(" en \(charge.bank.displayName)")]))
+                                  parts: [.text("\(dayLabel(charge.date, now: input.now, calendar)): \(clippedName(charge.name)), "),
+                                          .amount(charge.cents),
+                                          .text(" en \(charge.bank.displayName)" + (overdueNote(charge, calendar: calendar).map { " (\($0))" } ?? ""))]))
     }
     return lines
 }
@@ -318,19 +334,23 @@ private func investmentLines(_ s: PortfolioSummary, now: Date, calendar: Calenda
         return [BriefingLine(id: "inv-value", parts: [.text("Aún no tengo precios de tus inversiones.")], action: .openInvestments)]
     }
     // Con precios que faltan, la cifra es parcial y se dice.
-    var first: [BriefingPart] = [.text(s.missingPrices > 0 ? "Valen al menos " : "Valen "), .amount(value)]
-    if let today = s.todayChangeCents {
-        first += [.text(": "), .signed(today), .text(" hoy")]
+    let partial = s.missingPrices > 0
+    var first: [BriefingPart] = [.text(partial ? "Valen al menos " : "Valen "), .amount(value)]
+    if partial { first.append(.text(" de las que tienen precio")) }
+    // El cambio solo es «de hoy» si el precio es de hoy; si no, se dice de qué sesión es. Sin día no se escribe.
+    if let today = s.todayChangeCents, let day = s.changeDay {
+        let when = dayDistance(from: day, to: now, calendar) <= 0 ? "hoy" : "en la última sesión (\(weekdayName(day, calendar)))"
+        first += [.text(": "), .signed(today), .text(" \(when)")]
         if let tenths = s.todayChangeTenths { first += [.text(" ("), .percentTenths(tenths), .text(")")] }
     } else {
-        // Sin cierre anterior no hay cambio de hoy que contar: no se escribe.
+        // Sin cierre anterior no hay cambio que contar: no se escribe.
         first.append(.text("."))
     }
     lines.append(BriefingLine(id: "inv-value", parts: first, action: .openInvestments))
     if !valueOnly {
         var second: [BriefingPart] = []
         if let gain = s.gainCents {
-            second += [.text("Desde la compra: "), .signed(gain)]
+            second += [.text(partial ? "Desde la compra, de las que tienen precio: " : "Desde la compra: "), .signed(gain)]
             if let tenths = s.gainTenths { second += [.text(" ("), .percentTenths(tenths), .text(")")] }
         }
         if let at = s.pricedAt {
@@ -362,7 +382,7 @@ private func tipLine(_ input: BriefingInput, calendar: Calendar, shortfallOnly: 
         case 1: when = "Mañana te cobran"
         default: when = "El \(weekdayName(s.charge.date, calendar)) \(calendar.component(.day, from: s.charge.date)) te cobran"
         }
-        var parts: [BriefingPart] = [.text("\(when) \(s.charge.name) ("), .amount(s.charge.cents),
+        var parts: [BriefingPart] = [.text("\(when) \(clippedName(s.charge.name)) ("), .amount(s.charge.cents),
                                      .text(") en \(s.bank.displayName) y tienes \(s.isEstimated ? "unos " : "")"), .amount(s.balanceCents)]
         if let from = s.suggestedFrom {
             parts += [.text(". Pasa "), .amount(s.suggestedCents), .text(" desde \(from.displayName).")]
@@ -374,20 +394,26 @@ private func tipLine(_ input: BriefingInput, calendar: Calendar, shortfallOnly: 
                             action: .moveMoney(from: s.suggestedFrom, to: s.bank, cents: s.suggestedCents))
     }
     if shortfallOnly { return nil }
+    // Nunca «unos 0 € al día»: si lo que sale por día no llega a medio euro, esa línea no se escribe.
     if let tip = input.budgetTip {
         let days = calendar.range(of: .day, in: .month, for: input.now)?.count ?? 30
         let daysLeft = max(1, days - calendar.component(.day, from: input.now) + 1)
-        return BriefingLine(id: "tip-budget",
-                            parts: [.text("Te quedan "), .amount(tip.remainingCents), .text(" para \(tip.name) hasta fin de mes: unos "),
-                                    .whole(tip.remainingCents / daysLeft), .text(" al día.")],
-                            action: .openBudgets)
+        let perDay = tip.remainingCents / daysLeft
+        if perDay.magnitude >= 50 {
+            return BriefingLine(id: "tip-budget",
+                                parts: [.text("Te quedan "), .amount(tip.remainingCents), .text(" para \(tip.name) hasta fin de mes: unos "),
+                                        .whole(perDay), .text(" al día.")],
+                                action: .openBudgets)
+        }
     }
-    if let free = input.freeMoney {
+    if let free = input.freeMoney, free.perDayCents.magnitude >= 50 {
         var parts: [BriefingPart] = [.text("Hasta fin de mes te quedan unos "), .whole(free.cents), .text(" libres: unos "),
-                                     .whole(free.perDayCents), .text(" al día.")]
-        if !free.missingBanks.isEmpty {
+                                     .whole(free.perDayCents)]
+        if free.missingBanks.isEmpty {
+            parts.append(.text(" al día, sin contar el gasto del día a día."))
+        } else {
             let names = free.missingBanks.map(\.displayName).joined(separator: ", ")
-            parts.append(.text(" Sin contar \(names): no tengo su saldo."))
+            parts.append(.text(" al día. Sin contar \(names): no tengo su saldo, y sin contar el gasto del día a día."))
         }
         return BriefingLine(id: "tip-free", parts: parts)
     }
@@ -395,6 +421,15 @@ private func tipLine(_ input: BriefingInput, calendar: Calendar, shortfallOnly: 
 }
 
 // MARK: El resumen
+
+let nothingNewUnreadable = "Nada nuevo en lo que he podido ver."
+
+/// Los bancos con un problema de conexión en la lista de atención (en su orden, sin repetir).
+func bankProblemBanks(_ input: BriefingInput) -> [BankID] {
+    var banks: [BankID] = []
+    for case .bankProblem(let bank, _) in input.attention where !banks.contains(bank) { banks.append(bank) }
+    return banks
+}
 
 private func headline(_ input: BriefingInput, calendar: Calendar) -> [BriefingPart] {
     let period = periodPhrase(since: input.since, now: input.now, isFirst: input.isFirst, calendar: calendar)
@@ -411,6 +446,8 @@ private func headline(_ input: BriefingInput, calendar: Calendar) -> [BriefingPa
         return [.text("\(period) entraron "), .amount(incomeTotal), .text(".")]
     case (true, true):
         if !input.transfers.isEmpty { return [.text("\(period) solo has movido dinero entre tus cuentas.")] }
+        // Con un banco que no se ha podido leer, «nada nuevo» no es seguro: se dice solo lo que se ha podido ver.
+        if !bankProblemBanks(input).isEmpty { return [.text(nothingNewUnreadable)] }
         let quiet = quietPeriodPhrase(since: input.since, now: input.now, isFirst: input.isFirst, calendar: calendar)
         return [.text("Nada nuevo \(quiet).")]
     }

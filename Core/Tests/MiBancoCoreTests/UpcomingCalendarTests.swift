@@ -126,6 +126,57 @@ private func calendarOf(_ state: LedgerState, book: AccountBook = AccountBook(),
         #expect(days[6].balanceAfter[.ima] == 17_000)
     }
 
+    // MARK: J12 — cobros retrasados y mínimos
+
+    private func overdueState(first: Date = date(9, 18), second: Date = date(10, 18)) -> LedgerState {
+        var state = LedgerState()
+        state.movements = subscription(.rev, "Spotify", 1099, first, second)
+        state.balances[.rev] = ManualBalance(cents: 10_000, setAt: date(11, 20, 8), origin: .bank)
+        return state
+    }
+
+    @Test func unCobroRetrasadoSeColocaHoyYSeResta() throws {
+        // Su fecha era el 18 y no llegó: hoy (20) cuenta con su fecha debida.
+        let days = calendarOf(overdueState())
+        let charge = try #require(days[0].charges.first)
+        #expect(days[0].charges.count == 1)
+        #expect(charge.name == "Spotify")
+        #expect(charge.overdue)
+        #expect(charge.dueDate == date(11, 18, 12))
+        #expect(charge.date == date(11, 20, 0))
+        #expect(overdueNote(charge, calendar: cal) == "con retraso, debía cobrarse el 18")
+        #expect(days[0].balanceAfter[.rev] == 10_000 - 1099)
+        #expect(days[13].balanceAfter[.rev] == 10_000 - 1099)
+        #expect(days.flatMap(\.charges).count == 1)
+        // Un cobro normal no lleva nota.
+        let normal = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1399, date: date(11, 25))
+        #expect(!normal.overdue && overdueNote(normal, calendar: cal) == nil)
+    }
+
+    @Test func elLimiteDeCatorceDiasDeRetraso() {
+        // Debía cobrarse el 6 (14 días antes de hoy): todavía se coloca.
+        let edge = calendarOf(overdueState(first: date(9, 6), second: date(10, 6)))
+        #expect(edge[0].charges.first?.overdue == true)
+        #expect(edge[0].charges.first?.dueDate == date(11, 6, 12))
+        // Ya cobrado hoy: no se cuenta ni como retrasado.
+        var booked = overdueState()
+        booked.movements.append(mv(.rev, -1099, "Spotify", at: date(11, 20, 8)))
+        #expect(calendarOf(booked, now: date(11, 20, 9)).flatMap(\.charges).filter(\.overdue).isEmpty)
+    }
+
+    @Test func elPrimerDiaPorDebajoDelMinimo() {
+        var state = twoSubscriptions()
+        state.balances[.rev] = ManualBalance(cents: 5_500, setAt: date(11, 20, 8), origin: .bank)
+        var book = AccountBook()
+        book.floors[.rev] = 5_000
+        let days = calendarOf(state, book: book)
+        #expect(firstBelowFloorDays(days) == [.rev: date(11, 22, 0)])
+        #expect(firstBelowFloorDays(calendarOf(state)).isEmpty)
+        // Un banco que ya está por debajo hoy: el día de hoy.
+        state.balances[.rev] = ManualBalance(cents: 4_000, setAt: date(11, 20, 8), origin: .bank)
+        #expect(firstBelowFloorDays(calendarOf(state, book: book)) == [.rev: date(11, 20, 0)])
+    }
+
     @Test func sinNadaSigueHabiendoCatorceDias() {
         let days = calendarOf(LedgerState())
         #expect(days.count == 14)

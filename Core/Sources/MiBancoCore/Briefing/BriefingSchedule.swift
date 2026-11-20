@@ -27,9 +27,17 @@ public enum BriefingSchedule {
         return calendar.startOfDay(for: previous)
     }
 
+    /// Un registro guardado con `shownAt` posterior a `now` (reloj atrasado o cambiado) no vale: se actúa como si no hubiera
+    /// ninguno, así que un resumen nunca queda bloqueado hasta una fecha futura.
+    private static func valid(_ record: BriefingRecord?, now: Date) -> BriefingRecord? {
+        guard let record, record.shownAt <= now else { return nil }
+        return record
+    }
+
     /// El registro del resumen que toca enseñar ahora, o nil si ya se enseñó uno hoy. La primera vez mira 24 horas atrás;
     /// después, desde el resumen anterior (como mucho una semana).
-    public static func due(previous: BriefingRecord?, now: Date, calendar: Calendar) -> BriefingRecord? {
+    public static func due(previous stored: BriefingRecord?, now: Date, calendar: Calendar) -> BriefingRecord? {
+        let previous = valid(stored, now: now)
         guard let previous else {
             return BriefingRecord(shownAt: now, since: now.addingTimeInterval(-86_400))
         }
@@ -40,7 +48,8 @@ public enum BriefingSchedule {
     }
 
     /// Abrir el resumen a mano: si ya hay uno de hoy se devuelve tal cual (mismo "desde"); si no, el que tocaría.
-    public static func manual(previous: BriefingRecord?, now: Date, calendar: Calendar) -> BriefingRecord {
+    public static func manual(previous stored: BriefingRecord?, now: Date, calendar: Calendar) -> BriefingRecord {
+        let previous = valid(stored, now: now)
         if let previous, briefingDay(of: now, calendar: calendar) <= briefingDay(of: previous.shownAt, calendar: calendar) {
             return previous
         }

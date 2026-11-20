@@ -46,12 +46,14 @@ private let buy10 = line(id: "b1", dt: "2026-03-01T10:00:00Z", type: "BUY", shar
                              line(id: "t1", type: "TAX_REFUND", shares: "10", amount: "4.00"),
                              line(id: "t2", type: "CORPORATE_ACTION", shares: "10", amount: "0"),
                              line(id: "t3", type: "STOCK_SPLIT", shares: "10", amount: "0"),
-                             line(id: "t4", type: "TRANSFER_IN", shares: "5", amount: "-10.00")])
+                             line(id: "t4", type: "spin_off", shares: "5", amount: "-10.00")])
         #expect(e.transactions.map(\.id) == ["b1"])
         #expect(e.notTradeRows == 4)
+        #expect(e.notTradeTypes == ["CORPORATE_ACTION", "SPIN_OFF", "STOCK_SPLIT", "TAX_REFUND"])
         var p = Portfolio()
         let summary = p.merge(e, now: at(2026, 11, 20, 9, 0))
         #expect(summary.notTradeRows == 4)
+        #expect(summary.notAppliedTypes == ["CORPORATE_ACTION", "SPIN_OFF", "STOCK_SPLIT", "TAX_REFUND"])
         #expect(summary.added == 1)
         #expect(p.transactions.count == 1)
     }
@@ -84,6 +86,97 @@ private let buy10 = line(id: "b1", dt: "2026-03-01T10:00:00Z", type: "BUY", shar
         #expect(e.transactions.map(\.id) == ["a", "b", "c", "d", "e", "g"])
         #expect(e.transactions.first { $0.id == "d" }?.shares == -1)
         #expect(e.notTradeRows == 1)
+    }
+
+    // MARK: J1 — entradas de acciones que no son compra
+
+    @Test func entradasSinCompraSumanAcciones() throws {
+        let types = ["FREE_RECEIPT", "TRANSFER_IN", "SAVEBACK", "ROUND_UP", "free receipt", "Transfer-In", "saveback", "roundup"]
+        let lines = types.enumerated().map { line(id: "a\($0.offset)", dt: "2026-03-0\($0.offset + 1)T10:00:00Z", type: $0.element,
+                                                  shares: "1", amount: "0") }
+        let e = try extract(lines)
+        #expect(e.transactions.count == types.count)
+        #expect(e.notTradeRows == 0)
+        #expect(e.notTradeTypes.isEmpty)
+        #expect(e.transactions.allSatisfy { $0.acquired && $0.shares == 1 })
+        let p = try #require(positions(from: e.transactions).first)
+        #expect(p.shares == Decimal(types.count))
+        #expect(p.costCents == 0)
+        #expect(p.costIncomplete)
+    }
+
+    @Test func entradaConImporteTieneCosteYSinImporteMarcaIncompleto() throws {
+        let withCost = try extract([line(id: "t1", type: "TRANSFER_IN", shares: "5", amount: "-10.00")])
+        let a = try #require(positions(from: withCost.transactions).first)
+        #expect(a.costCents == 1_000)
+        #expect(!a.costIncomplete)
+        // Una compra normal más una entrega gratuita: el coste es el de la compra, pero la posición ya no cuenta ganancia.
+        let mixed = try extract([buy10, line(id: "f1", dt: "2026-04-01T10:00:00Z", type: "FREE_RECEIPT", shares: "2", amount: "0")])
+        let p = try #require(positions(from: mixed.transactions).first)
+        #expect(p.shares == 12)
+        #expect(p.costCents == 100_000)
+        #expect(p.costIncomplete)
+        var portfolio = Portfolio()
+        _ = portfolio.merge(mixed, now: at(2026, 11, 20, 9, 0))
+        portfolio.quotes[fund] = Quote(priceEUR: 110, previousCloseEUR: nil, fetchedAt: at(2026, 11, 20, 9, 0))
+        let s = try #require(portfolioSummary(portfolio, now: at(2026, 11, 20, 9, 0)))
+        #expect(s.valueCents == 132_000)
+        #expect(s.gainCents == nil)
+        #expect(s.positions.first?.gainCents == nil)
+    }
+
+    @Test func entradaGratuitaConPrecioNoInventaCoste() throws {
+        let t = InvestmentTransaction(id: "f", date: at(2026, 3, 1, 10, 0), instrument: fund, name: "F", assetClass: nil, shares: 2,
+                                      cashCents: 0, priceEUR: 100, acquired: true)
+        #expect(positions(from: [t]).first?.costCents == 0)
+        let buy = InvestmentTransaction(id: "b", date: at(2026, 3, 1, 10, 0), instrument: fund, name: "F", assetClass: nil, shares: 2,
+                                        cashCents: 0, priceEUR: 100)
+        #expect(positions(from: [buy]).first?.costCents == 20_000)
+    }
+
+    @Test func traspasoDeSalidaQuitaAccionesSinGanancia() throws {
+        let e = try extract([buy10, line(id: "o1", dt: "2026-04-01T10:00:00Z", type: "TRANSFER_OUT", shares: "4", amount: "0")])
+        let out = try #require(e.transactions.first { $0.id == "o1" })
+        #expect(out.shares == -4)
+        #expect(e.notTradeRows == 0)
+        let p = try #require(positions(from: e.transactions).first)
+        #expect(p.shares == 6)
+        #expect(p.costCents == 60_000)
+    }
+
+    @Test func laMarcaDeEntradaSobreviveALaCopia() throws {
+        let t = InvestmentTransaction(id: "f", date: at(2026, 3, 1, 10, 0), instrument: fund, name: "F", assetClass: nil, shares: 2,
+                                      cashCents: 0, priceEUR: nil, acquired: true)
+        let back = try JSONDecoder().decode(InvestmentTransaction.self, from: JSONEncoder().encode(t))
+        #expect(back == t)
+        #expect(back.acquired)
+        let old = try JSONDecoder().decode(InvestmentTransaction.self,
+                                           from: Data(#"{"id":"o","date":0,"instrument":"AA","name":"A","shares":"2","cashCents":-10}"#.utf8))
+        #expect(!old.acquired)
+    }
+
+    // MARK: J2 — día del cambio y cierre anterior
+
+    @Test func cambioPerteneceAlDiaDelPrecio() throws {
+        let now = at(2026, 11, 20, 9, 0)
+        var p = ownedFund()
+        p.quotes[fund] = Quote(priceEUR: 110, previousCloseEUR: 109, fetchedAt: now, marketTime: at(2026, 11, 19, 17, 30))
+        let s = try #require(portfolioSummary(p, now: now, calendar: madrid))
+        #expect(s.changeDay == at(2026, 11, 19, 0, 0))
+        p.quotes[fund] = Quote(priceEUR: 110, previousCloseEUR: nil, fetchedAt: now, marketTime: at(2026, 11, 19, 17, 30))
+        #expect(try #require(portfolioSummary(p, now: now, calendar: madrid)).changeDay == nil)
+    }
+
+    @Test func cierreAnteriorConLaSerieAcabadaElDiaAnterior() throws {
+        // Mercado el 20 (vie) pero la serie acaba el jueves 19: el cierre anterior es el del 19, no el penúltimo de la serie.
+        let data = Data((#"{"chart":{"result":[{"meta":{"currency":"EUR","regularMarketPrice":110.5,"gmtoffset":3600,"regularMarketTime":1795186800},"#
+            + #""timestamp":[1794556800,1794816000,1794902400,1794988800,1795075200],"#
+            + #""indicators":{"quote":[{"close":[100.0,101.0,102.0,103.0,104.5]}]}}]}}"#).utf8)
+        guard case .success(let q) = yahooChartQuote(data, fetchedAt: at(2026, 11, 20, 9, 0)) else {
+            Issue.record("sin precio")
+            return
+        }
+        #expect(q.previousCloseEUR == Decimal(string: "104.5"))
     }
 
     // MARK: Empates de fecha

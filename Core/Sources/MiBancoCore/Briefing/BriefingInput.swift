@@ -98,12 +98,14 @@ public struct BriefingInput: Equatable, Sendable {
     public var shortfalls: [Shortfall]
     public var budgetTip: BudgetTip?
     public var freeMoney: FreeMoney?
+    /// Bancos del resumen sin saldo conocido: no entran en el total ni en su cambio, y el texto lo dice.
+    public var totalLeftOut: [BankID]
 
     public init(now: Date, since: Date, isFirst: Bool, banks: [BankLine] = [], totalCents: Int? = nil, totalChangeCents: Int = 0,
                 income: [MovementDigest] = [], payments: [MovementDigest] = [], transfers: [TransferDigest] = [],
                 upcoming: [UpcomingCharge] = [], expected: ExpectedIncome? = nil, attention: [AttentionItem] = [],
                 month: MonthDigest? = nil, investments: PortfolioSummary? = nil, shortfalls: [Shortfall] = [],
-                budgetTip: BudgetTip? = nil, freeMoney: FreeMoney? = nil) {
+                budgetTip: BudgetTip? = nil, freeMoney: FreeMoney? = nil, totalLeftOut: [BankID] = []) {
         self.now = now
         self.since = since
         self.isFirst = isFirst
@@ -121,11 +123,15 @@ public struct BriefingInput: Equatable, Sendable {
         self.shortfalls = shortfalls
         self.budgetTip = budgetTip
         self.freeMoney = freeMoney
+        self.totalLeftOut = totalLeftOut
     }
 }
 
 private let fullMonthNames = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre",
                               "noviembre", "diciembre"]
+
+/// Cuántos días atrás se da por retrasado (y no por perdido) un cobro fijo que no llegó.
+let overdueWindowDays = 14
 
 /// Cobros de las suscripciones activas (todas, con su próxima fecha) como `UpcomingCharge`. Una suscripción que ya se cobró
 /// hoy no vuelve a contarse hoy (su próxima fecha ya es la del mes que viene) y una cuyo cobro de hoy ya está en el libro
@@ -136,9 +142,16 @@ func subscriptionCharges(in state: LedgerState, now: Date, calendar: Calendar, n
     for m in state.movements where m.kind == .payment && !m.flaggedNotMine && m.date >= today && m.date <= now {
         chargedToday.insert(m.bank.rawValue + "|" + normalizeMerchant(m.merchant ?? ""))
     }
+    let earliestOverdue = calendar.date(byAdding: .day, value: -overdueWindowDays, to: today) ?? today
     return activeSubscriptions(in: state, now: now, calendar: calendar, notSpending: notSpending).compactMap { sub in
         let isToday = calendar.isDate(sub.nextDate, inSameDayAs: now)
         if isToday && chargedToday.contains(sub.bank.rawValue + "|" + sub.id) { return nil }
+        // Un cobro cuya fecha cayó en los últimos 14 días y no está en el libro se da por retrasado: cuenta HOY.
+        let dueDay = calendar.startOfDay(for: sub.nextDate)
+        if dueDay < today, dueDay >= earliestOverdue {
+            return UpcomingCharge(name: sub.merchant, bank: sub.bank, cents: sub.amountCents, date: today, overdue: true,
+                                  dueDate: sub.nextDate)
+        }
         return UpcomingCharge(name: sub.merchant, bank: sub.bank, cents: sub.amountCents, date: sub.nextDate)
     }.sorted { $0.date != $1.date ? $0.date < $1.date : $0.name < $1.name }
 }
@@ -153,10 +166,21 @@ private let staleBankSeconds: TimeInterval = 172_800
 public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: AccountBook, record: BriefingRecord, isFirst: Bool,
                           now: Date, calendar: Calendar) -> BriefingInput {
     let since = record.since
-    func inPeriod(_ m: Movement) -> Bool { m.date > since && m.date <= now && !m.flaggedNotMine }
+    // Un movimiento pertenece al periodo por cuándo SE ENTERÓ la app (la fecha del banco puede ser anterior al resumen
+    // pasado y haber llegado después): así ninguno se pierde ni sale en dos resúmenes.
+    func inPeriod(_ m: Movement) -> Bool {
+        let knownAt = max(m.date, m.importedAt ?? m.date)
+        return knownAt > since && knownAt <= now && !m.flaggedNotMine
+    }
     let ledger = Ledger(state: state)
     // Se calcula una vez y se pasa a todas las sumas de gasto (traspasos, capturados sin confirmar y gemelos).
     let exclusions = spendingExclusions(in: state, now: now)
+    // Los capturados que ya cuentan en la fila de su banco (sin confirmar o con gemelo): fuera de ingresos y del cambio de
+    // cada banco. Los traspasos propios se quedan en el cambio del banco.
+    let ownTransfers = ownTransferIDs(in: state.movements)
+    let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
+    let twins = probableTwinCaptureIDs(in: state.movements, skipping: ownTransfers.union(unconfirmed))
+    let doubleCounted = unconfirmed.union(twins).subtracting(ownTransfers)
     let period = state.movements.filter(inPeriod)
     func name(_ m: Movement) -> String { m.displayMerchant ?? m.merchant ?? m.bank.displayName }
     func digest(_ m: Movement) -> MovementDigest {
@@ -174,11 +198,13 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
         return (payment.date, TransferDigest(from: payment.bank, to: income.bank, cents: abs(payment.amountCents)))
     }.sorted { $0.0 < $1.0 }.map { $0.1 }
 
-    let income = period.filter { $0.kind == .income && !transferIDs.contains($0.id) && !$0.excludedFromSpending }
+    let income = period.filter {
+        $0.kind == .income && !transferIDs.contains($0.id) && !$0.excludedFromSpending && !doubleCounted.contains($0.id)
+    }
         .map(digest).sorted(by: byAmount)
     let periodIDs = Set(period.map(\.id))
     let payments = spendingMovements(in: state.movements, notSpending: exclusions).filter { periodIDs.contains($0.id) }
-        .map(digest).sorted(by: byAmount)
+        .map(digest).filter { $0.cents > 0 }.sorted(by: byAmount)
 
     // Bancos
     var banks: [BankLine] = []
@@ -187,9 +213,11 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
         let mine = period.filter { $0.bank == bank }
         guard balance != nil || !mine.isEmpty else { continue }
         banks.append(BankLine(bank: bank, cents: balance?.cents, estimated: balance?.estimated ?? false,
-                              changeCents: mine.reduce(0) { $0 + $1.amountCents }))
+                              changeCents: mine.filter { !doubleCounted.contains($0.id) }.reduce(0) { $0 + $1.amountCents }))
     }
-    let totalChange = banks.reduce(0) { $0 + $1.changeCents }
+    // El cambio total solo suma bancos con saldo conocido; los que quedan fuera se dicen junto al total.
+    let totalChange = banks.filter { $0.cents != nil }.reduce(0) { $0 + $1.changeCents }
+    let leftOut = banks.filter { $0.cents == nil }.map(\.bank)
 
     // Lo que viene
     let startOfToday = calendar.startOfDay(for: now)
@@ -213,6 +241,8 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     }
     for bank in BankID.allCases {
         guard let link = state.links[bank], link.consentValidUntil > now else { continue }
+        // Con la conexión ya dada por caducada o rechazada, una sola línea: la que dice que se renueve.
+        if link.problem == .consentExpired || link.problem == .keyRejected { continue }
         let days = calendar.dateComponents([.day], from: startOfToday, to: calendar.startOfDay(for: link.consentValidUntil)).day ?? 99
         if days <= 10 { attention.append(.consentExpiring(bank, link.consentValidUntil)) }
     }
@@ -261,5 +291,5 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
                          totalChangeCents: totalChange, income: income, payments: payments, transfers: transfers,
                          upcoming: upcoming, expected: expected, attention: attention, month: month,
                          investments: portfolio.flatMap { portfolioSummary($0, now: now) }, shortfalls: short,
-                         budgetTip: budgetTip, freeMoney: free)
+                         budgetTip: budgetTip, freeMoney: free, totalLeftOut: leftOut)
 }

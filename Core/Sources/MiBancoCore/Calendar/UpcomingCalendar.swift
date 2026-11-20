@@ -28,6 +28,16 @@ public struct UpcomingDay: Equatable, Sendable {
     }
 }
 
+/// El primer día (de los que dan `days`) en que el saldo previsto de cada banco queda por debajo de su mínimo. Un banco que no
+/// baja en esos días no sale.
+public func firstBelowFloorDays(_ days: [UpcomingDay]) -> [BankID: Date] {
+    var first: [BankID: Date] = [:]
+    for day in days {
+        for bank in day.belowFloor where first[bank] == nil { first[bank] = day.day }
+    }
+    return first
+}
+
 /// Cuántos días mira el calendario, hoy incluido.
 public let upcomingCalendarDays = 14
 
@@ -35,7 +45,8 @@ public let upcomingCalendarDays = 14
 /// esperada y el saldo previsto de cada banco al terminar cada día. Se devuelven los 14 días aunque no pase nada.
 ///
 /// - Un cobro que ya está en el libro hoy no se cuenta otra vez (ni en el día ni en el saldo, que ya lo incluye).
-/// - Un cobro con fecha anterior a hoy (retrasado) no se coloca: no se sabe cuándo llegará.
+/// - Un cobro cuya fecha cayó en los 14 días anteriores a hoy y no está en el libro se coloca HOY con `overdue` (y su fecha
+///   debida en `dueDate`) y se resta del saldo previsto; uno más antiguo no se coloca: no se sabe si sigue vivo.
 /// - Un banco sin saldo conocido no tiene saldo previsto, pero sus cobros se listan.
 /// - Los gastos corrientes (comida, ocio) no se estiman: solo cobros fijos e ingreso esperado.
 public func upcomingCalendar(state: LedgerState, book: AccountBook, now: Date, calendar: Calendar) -> [UpcomingDay] {

@@ -152,7 +152,8 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         #expect(i.transfers == [TransferDigest(from: .ima, to: .rev, cents: 20_000)])
         #expect(i.banks == [BankLine(bank: .rev, cents: 34_020, estimated: true, changeCents: 13_755),
                             BankLine(bank: .ima, cents: nil, estimated: false, changeCents: 165_000)])
-        #expect(i.totalChangeCents == 178_755)
+        // imagin no tiene saldo conocido: su cambio no entra en el total.
+        #expect(i.totalChangeCents == 13_755)
         #expect(i.totalCents == 34_020)
         #expect(i.upcoming.first == UpcomingCharge(name: "Spotify", bank: .rev, cents: 1099, date: nov(22, 12)))
         #expect(i.since == nov(19, 22, 10))
@@ -167,6 +168,140 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
                            mv(.rev, -900, "Justo ahora", at: nov(20, 8, 30), shop: true),
                            mv(.rev, -1100, "Futuro", at: nov(20, 8, 30).addingTimeInterval(1), shop: true)]
         #expect(input(state).payments.map(\.name) == ["Justo ahora", "Justo después"])
+    }
+
+    // MARK: J3 — el periodo es cuándo se enteró la app
+
+    private func imported(_ bank: BankID, _ cents: Int, _ name: String, date: Date, at importedAt: Date) -> Movement {
+        Movement(bank: bank, amountCents: cents, merchant: name, kind: cents < 0 ? .payment : .income, source: .bank, date: date,
+                 isShop: true, bankRef: "ref-\(name)", bankStatus: .booked, importedAt: importedAt)
+    }
+
+    @Test func unMovimientoImportadoTardeSaleEnUnSoloResumen() {
+        var state = LedgerState()
+        // Fechado antes del «desde» del resumen de hoy, pero la app lo supo esta mañana.
+        state.movements = [imported(.rev, -2_000, "Cena", date: nov(19, 20), at: nov(20, 7))]
+        let previous = input(state, since: nov(18, 22, 10), now: nov(19, 22, 10))
+        let today = input(state, since: nov(19, 22, 10), now: nov(20, 8, 30))
+        #expect(previous.payments.isEmpty)
+        #expect(today.payments.map(\.name) == ["Cena"])
+        #expect(today.banks.first?.changeCents == -2_000)
+        // Y no se repite al día siguiente.
+        #expect(input(state, since: nov(20, 8, 30), now: nov(21, 8, 30)).payments.isEmpty)
+    }
+
+    @Test func fechadoHoyAlMediodiaEImportadoEstaManianaSaleHoy() {
+        var state = LedgerState()
+        state.movements = [imported(.rev, -2_000, "Comida", date: nov(20, 12), at: nov(20, 8)),
+                           imported(.rev, 90_000, "Nomina", date: nov(20, 12), at: nov(20, 8))]
+        let i = input(state, since: nov(20, 6), now: nov(20, 13))
+        #expect(i.payments.map(\.name) == ["Comida"])
+        #expect(i.income.map(\.name) == ["Nomina"])
+        #expect(i.banks.first?.changeCents == 88_000)
+        // Una importación del futuro no cuenta todavía.
+        #expect(input(state, since: nov(20, 6), now: nov(20, 7)).payments.isEmpty)
+    }
+
+    // MARK: J4 — el total solo suma bancos con saldo conocido
+
+    @Test func elCambioTotalNoCuentaBancosSinSaldo() {
+        let i = input(busyState())
+        #expect(i.totalChangeCents == 13_755)
+        #expect(i.totalLeftOut == [.ima])
+        let text = lines(makeBriefing(i, calendar: cal), .money).first
+        #expect(text?.hasSuffix(", sin contar imagin") == true)
+    }
+
+    private func lines(_ b: Briefing, _ kind: BriefingSectionKind) -> [String] {
+        b.sections.first { $0.kind == kind }?.lines.map { render($0.parts, .plain) } ?? []
+    }
+
+    // MARK: J5 — un capturado y su gemelo del banco cuentan una vez
+
+    @Test func capturadoYGemeloDelBancoCuentanUnaVez() {
+        var state = LedgerState()
+        state.balances[.rev] = ManualBalance(cents: 100_000, setAt: nov(19), origin: .bank)
+        let capture = Movement(bank: .rev, amountCents: -5_000, merchant: "Bar", kind: .payment, source: .notification,
+                               date: nov(20, 7), isShop: true)
+        let row = Movement(bank: .rev, amountCents: -5_200, merchant: "Bar", kind: .payment, source: .bank, date: nov(20, 7, 30),
+                           isShop: true, bankRef: "r1", bankStatus: .booked)
+        state.movements = [capture, row]
+        let i = input(state, since: nov(20, 6), now: nov(20, 9))
+        #expect(i.payments.map(\.cents) == [5_200])
+        #expect(i.banks.first?.changeCents == -5_200)
+        #expect(i.totalChangeCents == -5_200)
+        #expect(render(makeBriefing(i, calendar: cal).headline, .plain).contains("en 1 pago"))
+    }
+
+    @Test func unIngresoCapturadoSinConfirmarNoEntraDosVeces() {
+        var state = LedgerState()
+        state.links[.rev] = link(validUntil: date(12, 31), lastSuccess: nov(20, 8))
+        // La fila más antigua del banco marca desde cuándo se ve el banco; el aviso de ingreso nunca se confirmó.
+        let old = Movement(bank: .rev, amountCents: -100, merchant: "Antiguo", kind: .payment, source: .bank, date: nov(2),
+                           bankRef: "old", bankStatus: .booked)
+        let capture = mv(.rev, 10_000, "Bizum de un amigo", at: nov(10))
+        state.movements = [old, capture]
+        #expect(unconfirmedCaptureIDs(in: state, now: nov(20, 8, 30)) == [capture.id])
+        let i = input(state, since: nov(8), now: nov(20, 8, 30))
+        #expect(i.income.isEmpty)
+        #expect(i.banks.first { $0.bank == .rev }?.changeCents == 0)
+    }
+
+    // MARK: J12 — un cobro retrasado cuenta hoy
+
+    @Test func unCobroRetrasadoSaleEnLoQueVieneYSeResta() throws {
+        var state = LedgerState()
+        // Debía cobrarse el 18 y no llegó.
+        state.movements = subscription(.rev, "Spotify", 1099, date(9, 18), date(10, 18))
+        state.balances[.rev] = ManualBalance(cents: 500, setAt: nov(20, 8), origin: .bank)
+        state.balances[.ima] = ManualBalance(cents: 128_455, setAt: nov(20, 8), origin: .bank)
+        let i = input(state)
+        let charge = try #require(i.upcoming.first)
+        #expect(charge.overdue)
+        #expect(charge.dueDate == nov(18, 12))
+        #expect(charge.date == nov(20, 0))
+        // Falta saldo para él (500 < 1099), y el dinero libre ya lo descuenta.
+        #expect(i.shortfalls.first?.charge == charge)
+        var bare = LedgerState()
+        bare.balances = state.balances
+        let without = input(bare).freeMoney
+        #expect((without?.cents ?? 0) - (i.freeMoney?.cents ?? 0) == 1099)
+        let text = lines(makeBriefing(i, calendar: cal), .upcoming)
+        #expect(text.first == "Hoy: Spotify, 10,99\u{00A0}€ en Revolut (con retraso, debía cobrarse el 18)")
+    }
+
+    // MARK: J13 — detalles del resumen
+
+    @Test func unPagoDeCeroEurosNoCuentaComoPago() {
+        var state = LedgerState()
+        state.movements = [mv(.rev, 0, "Verificación", at: nov(20, 7), shop: true), mv(.rev, -500, "Café", at: nov(20, 7, 30), shop: true)]
+        // mv() pone «ingreso» a lo que no es negativo: se fuerza el tipo de pago.
+        state.movements[0] = Movement(bank: .rev, amountCents: 0, merchant: "Verificación", kind: .payment, source: .notification,
+                                      date: nov(20, 7), isShop: true)
+        #expect(input(state).payments.map(\.name) == ["Café"])
+    }
+
+    @Test func unaConexionCaducadaConConsentimientoFuturoEsUnaLinea() {
+        var state = LedgerState()
+        state.links[.rev] = link(validUntil: nov(25, 10), problem: .consentExpired)
+        #expect(input(state).attention == [.bankProblem(.rev, .consentExpired)])
+        state.links[.rev] = link(validUntil: nov(25, 10), problem: .keyRejected)
+        #expect(input(state).attention == [.bankProblem(.rev, .keyRejected)])
+        // Sin problema, sigue avisando de que caduca.
+        state.links[.rev] = link(validUntil: nov(25, 10))
+        #expect(input(state).attention == [.consentExpiring(.rev, nov(25, 10))])
+    }
+
+    // MARK: J6 — un registro del futuro no vale
+
+    @Test func unRegistroDelFuturoSeIgnora() {
+        let future = BriefingRecord(shownAt: nov(25, 9), since: nov(24, 9))
+        let expected = BriefingRecord(shownAt: nov(20, 8, 30), since: nov(19, 8, 30))
+        #expect(BriefingSchedule.due(previous: future, now: nov(20, 8, 30), calendar: cal) == expected)
+        #expect(BriefingSchedule.manual(previous: future, now: nov(20, 8, 30), calendar: cal) == expected)
+        // Justo ahora no es futuro: sigue mandando el de hoy.
+        let same = BriefingRecord(shownAt: nov(20, 8, 30), since: nov(19, 8, 30))
+        #expect(BriefingSchedule.due(previous: same, now: nov(20, 8, 30), calendar: cal) == nil)
     }
 
     @Test func conSaldoExactoNoEsEstimado() {

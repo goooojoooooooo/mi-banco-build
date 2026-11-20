@@ -416,8 +416,11 @@ public struct Ledger: Sendable {
         return true
     }
 
-    /// Capturado (o fusionado) enlazado a un registro del banco o a una fila de extracto.
-    private static func isLinked(_ m: Movement) -> Bool { m.bankRef != nil || m.statementRef != nil }
+    /// Capturado (o fusionado) enlazado a un registro del banco o a una fila de extracto. Las filas del propio banco o
+    /// extracto llevan su clave por definición: no son "enlazadas".
+    private static func isLinked(_ m: Movement) -> Bool {
+        !m.source.isBankSourced && (m.bankRef != nil || m.statementRef != nil)
+    }
 
     /// La parte del criterio que no mira la fecha. Un enlazado con hora precisa es elegible: solo cuenta si es
     /// posterior a la lectura (lo exige `countsTowardBalance`). Una fila de solo día nunca tiene hora real, y sobre un

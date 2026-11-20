@@ -210,7 +210,7 @@ struct OwnTransferRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Toggle(isOn: Binding(get: { isOn }, set: set)) {
+            Toggle(isOn: Binding(get: { isOn }, set: { newValue in apply(newValue) })) {
                 Text("Traspaso entre tus cuentas")
                     .titan(.option)
                     .foregroundStyle(Theme.label)
@@ -231,7 +231,7 @@ struct OwnTransferRow: View {
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
 
-    private func set(_ on: Bool) {
+    private func apply(_ on: Bool) {
         do {
             try model.setOwnTransfer(on, for: movement.id)
             tick += 1

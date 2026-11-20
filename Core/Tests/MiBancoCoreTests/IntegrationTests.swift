@@ -410,6 +410,62 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
         #expect(unconfirmedCaptureIDs(in: more.state, now: now) == [tip.id])
     }
 
+    // MARK: R38 — la cobertura de un extracto son intervalos por importación
+
+    @Test func r38DosExtractosConUnMesDeHuecoNoCubrenElHueco() throws {
+        var l = Ledger()
+        // Extracto de septiembre (importado el 1 de octubre) y extracto de noviembre (importado el 16).
+        let sep = revolutStatement([("2026-09-01 10:00:00", "-1.00"), ("2026-09-30 10:00:00", "-2.00")])
+        let nov = revolutStatement([("2026-11-02 10:00:00", "-3.00"), ("2026-11-14 10:00:00", "-4.00")])
+        l.importStatement(try parseStatement(Data(sep.utf8), expected: .rev, now: at(10, 1, 9), calendar: madrid),
+                          now: at(10, 1, 9), calendar: madrid)
+        l.importStatement(try parseStatement(Data(nov.utf8), expected: .rev, now: at(11, 16, 9), calendar: madrid),
+                          now: at(11, 16, 9), calendar: madrid)
+        #expect(l.state.statementCoverage[.rev]?.count == 2)
+        let now = at(11, 20, 18)
+        // A mitad del hueco (15 de octubre): ningún extracto lo cubre, no es «Sin confirmar» y cuenta en el gasto.
+        let gap = captured(.rev, -4200, "Cena", at(10, 15, 21))
+        // Controles: dentro de cada extracto sí es «Sin confirmar».
+        let inSep = captured(.rev, -700, "Cafe", at(9, 10, 9))
+        let inNov = captured(.rev, -900, "Menu", at(11, 5, 14))
+        l.state.movements.append(contentsOf: [gap, inSep, inNov])
+        let unconfirmed = unconfirmedCaptureIDs(in: l.state, now: now)
+        #expect(unconfirmed == [inSep.id, inNov.id])
+        let counted = spendingMovements(in: l.state.movements, notSpending: spendingExclusions(in: l.state, now: now))
+        #expect(counted.contains { $0.id == gap.id })
+        #expect(!counted.contains { $0.id == inSep.id || $0.id == inNov.id })
+        // Los intervalos se guardan y vuelven de una copia de seguridad; una copia antigua (sin el campo) se lee sin ellos.
+        let data = try encodeBackup(l.state, exportedAt: now)
+        #expect(try decodeBackup(data).ledger.statementCoverage == l.state.statementCoverage)
+        let old = try JSONEncoder().encode(LedgerState())
+        var json = try #require(try JSONSerialization.jsonObject(with: old) as? [String: Any])
+        json.removeValue(forKey: "statementCoverage")
+        let decoded = try JSONDecoder().decode(LedgerState.self, from: JSONSerialization.data(withJSONObject: json))
+        #expect(decoded.statementCoverage.isEmpty)
+    }
+
+    @Test func r38ElDiaDeImportacionNoCuentaComoCubierto() throws {
+        // Extracto con filas hasta el 18 de noviembre, importado ese mismo día a las 18:00.
+        let csv = revolutStatement([("2026-11-01 10:00:00", "-1.00"), ("2026-11-18 10:00:00", "-2.00")])
+        var l = Ledger()
+        l.importStatement(try parseStatement(Data(csv.utf8), expected: .rev, now: at(11, 18, 18), calendar: madrid),
+                          now: at(11, 18, 18), calendar: madrid)
+        let importDay = captured(.rev, -5000, "Restaurante", at(11, 18, 22))
+        let dayBefore = captured(.rev, -3000, "Bar", at(11, 17, 22))
+        l.state.movements.append(contentsOf: [importDay, dayBefore])
+        // Pasados más de 7 días: el del día anterior a la importación sí está cubierto, el del día de importación no.
+        let now = at(11, 27, 18)
+        #expect(unconfirmedCaptureIDs(in: l.state, now: now) == [dayBefore.id])
+        let counted = spendingMovements(in: l.state.movements, notSpending: spendingExclusions(in: l.state, now: now))
+        #expect(counted.contains { $0.id == importDay.id })
+        // Importado un día después, el 18 ya queda cubierto.
+        var later = Ledger()
+        later.importStatement(try parseStatement(Data(csv.utf8), expected: .rev, now: at(11, 19, 9), calendar: madrid),
+                              now: at(11, 19, 9), calendar: madrid)
+        later.state.movements.append(importDay)
+        #expect(unconfirmedCaptureIDs(in: later.state, now: now) == [importDay.id])
+    }
+
     // MARK: R34 — una operación de valores nunca genera avisos de pago
 
     private func insightKinds(_ m: Movement, others: [Movement], now: Date) -> Set<InsightKind> {
@@ -449,6 +505,87 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
         oct.excludedFromSpending = true
         nov.excludedFromSpending = true
         #expect(insightKinds(nov, others: [oct], now: now).isEmpty)
+    }
+
+    // MARK: R40 — ventas de valores, veto de pareja, cubos por día y `linkedAt`
+
+    @Test func r40UnaVentaDeValoresNuncaEsIngresoGrande() {
+        let now = at(11, 20, 18)
+        var sale = Movement(bank: .tr, amountCents: 150_000, merchant: "Test World Fund", kind: .income,
+                            source: .statement, date: at(11, 20, 17), statementRef: "tr|sell-1", bankStatus: .booked)
+        func kinds(_ m: Movement) -> Set<InsightKind> {
+            let state = LedgerState(movements: [m])
+            return Set(immediateAlerts(afterStoring: m, in: state, now: now, calendar: madrid).map(\.kind)
+                + insights(for: state, now: now, calendar: madrid).map(\.kind))
+        }
+        // Control: el mismo ingreso sin la marca sí es un ingreso grande.
+        #expect(kinds(sale).contains(.largeIncome))
+        sale.excludedFromSpending = true
+        #expect(!kinds(sale).contains(.largeIncome))
+    }
+
+    @Test func r40FilaConTextoDeOperacionQueNoEsDeTarjetaNoEsPareja() {
+        func isTwin(_ text: String?, notMine: Bool = false) -> Bool {
+            let cap = captured(.rev, -5000, "Restaurante Lua", at(11, 20, 14))
+            var row = bankRow(.rev, -5200, text, at(11, 20), ref: "b-1", importedAt: at(11, 20, 17))
+            row.flaggedNotMine = notMine
+            return probableTwinCaptureIDs(in: [cap, row]) == [cap.id]
+        }
+        #expect(isTwin("Restaurante Lua"))
+        #expect(isTwin(nil))
+        for text in ["Recibo luz", "RECIBO DE GAS", "Domiciliación seguro", "domiciliacion agua", "Adeudo cuota",
+                     "Transferencia de Ana", "Traspaso a ahorro", "Bizum de Luis", "Cajero Gran Via", "Comisión de mantenimiento",
+                     "comision tarjeta"] {
+            #expect(!isTwin(text), "\(text)")
+        }
+        // Palabra entera: «Recibos» o «Bizumeria» no son las palabras de la lista.
+        #expect(isTwin("Bar Los Recibos"))
+        #expect(isTwin("Bizumeria Lua"))
+        // Una fila marcada «no es mío» tampoco.
+        #expect(!isTwin("Restaurante Lua", notMine: true))
+    }
+
+    @Test func r40LaBusquedaDeParejaPorCubosDaElMismoResultado() {
+        // Tres bancos y varios días: cada capturado solo se empareja con filas de su banco y a un día de Madrid o menos.
+        let a = captured(.rev, -5000, "A", at(11, 10, 23, 50))
+        let b = captured(.rev, -2000, "B", at(11, 14, 0, 10))
+        let c = captured(.ima, -3000, "C", at(11, 14, 12))
+        let d = captured(.rev, -4000, "D", at(11, 18, 12))
+        let rowA = bankRow(.rev, -5100, "A", at(11, 11), ref: "ra", importedAt: at(11, 19))   // un día después de A
+        let rowB = bankRow(.rev, -2100, "B", at(11, 13), ref: "rb", importedAt: at(11, 19))   // un día antes de B
+        let rowC = bankRow(.rev, -3000, "C", at(11, 14), ref: "rc", importedAt: at(11, 19))   // otro banco que C
+        let rowD = bankRow(.rev, -4000, "D", at(11, 20), ref: "rd", importedAt: at(11, 21))   // dos días después de D
+        #expect(probableTwinCaptureIDs(in: [a, b, c, d, rowA, rowB, rowC, rowD]) == [a.id, b.id])
+    }
+
+    @Test func r40CapturadoEnlazadoPorLaMismaConsultaQueLaLecturaNoSeSumaDeNuevo() throws {
+        let capture = captured(.rev, -1250, "Cafe", at(11, 20, 13, 3))
+        let record = BankRecord(ref: "t-1", bank: .rev, amountCents: -1250, timing: .transactionDay(at(11, 20)),
+                                status: .booked, merchant: "CAFE")
+        // La consulta de las 13:10 trae la fila (enlaza el capturado) y una lectura de 100,00 € de las 13:00.
+        var same = Ledger(state: LedgerState(movements: [capture]))
+        _ = same.reconcile([record], bank: .rev, channel: .bank, coverage: nil, now: at(11, 20, 13, 10), calendar: madrid)
+        #expect(same.state.movements[0].linkedAt == at(11, 20, 13, 10))
+        #expect(same.state.movements[0].importedAt == nil)
+        #expect(!same.state.movements[0].isHistorical)
+        same.adoptBalance(.rev, cents: 10_000, at: at(11, 20, 13, 0), origin: .bank, fetchedAt: at(11, 20, 13, 10))
+        let exact = try #require(same.balance(.rev))
+        #expect(exact.cents == 10_000 && !exact.estimated)
+        // Enlazado por una consulta POSTERIOR a la lectura: la lectura no lo incluía, sigue contando (estimado).
+        var later = Ledger(state: LedgerState(movements: [capture]))
+        _ = later.reconcile([record], bank: .rev, channel: .bank, coverage: nil, now: at(11, 20, 13, 20), calendar: madrid)
+        later.adoptBalance(.rev, cents: 10_000, at: at(11, 20, 13, 0), origin: .bank, fetchedAt: at(11, 20, 13, 10))
+        let estimated = try #require(later.balance(.rev))
+        #expect(estimated.cents == 8750 && estimated.estimated)
+        // Sin `linkedAt` (libros anteriores) rige `importedAt`, que un capturado no tiene: cuenta como antes.
+        var old = same
+        old.state.movements[0].linkedAt = nil
+        #expect(old.balance(.rev)?.cents == 8750)
+        // El campo viaja en la copia de seguridad y los libros sin él se leen.
+        let back = try decodeBackup(try encodeBackup(same.state, exportedAt: at(11, 21))).ledger
+        #expect(back.movements[0].linkedAt == at(11, 20, 13, 10))
+        let plain = try JSONEncoder().encode(old.state.movements[0])
+        #expect(try JSONDecoder().decode(Movement.self, from: plain).linkedAt == nil)
     }
 
     // MARK: R35 — un capturado con pareja probable en una fila del banco no suma desde el primer día

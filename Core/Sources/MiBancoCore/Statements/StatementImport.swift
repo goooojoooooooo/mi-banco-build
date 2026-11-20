@@ -15,10 +15,26 @@ extension Ledger {
         let bank = statement.format.bank
         var report = reconcile(statement.records, bank: bank, channel: .statement, coverage: nil, now: now, calendar: calendar)
         report.ignoredRows = statement.ignoredRows
+        recordStatementCoverage(statement, bank: bank, now: now)
         if let balance = statement.latestBalance, state.balances[bank].map({ balance.at >= $0.setAt }) ?? true {
             adoptBalance(bank, cents: balance.cents, at: balance.at, origin: .statement)
         }
         return report
+    }
+
+    /// Guarda el periodo que cubre este extracto: desde el día de su primera fila hasta el final de su último día, pero
+    /// nunca el día en que se importó ni los siguientes (ese día aún puede haber pagos que el extracto no trae). Las
+    /// filas de un día sin cerrar no cubren nada más allá.
+    private mutating func recordStatementCoverage(_ statement: ParsedStatement, bank: BankID, now: Date) {
+        guard let first = statement.firstDate, let last = statement.lastDate else { return }
+        let start = madridCalendar.startOfDay(for: first)
+        let afterLast = madridCalendar.date(byAdding: .day, value: 1, to: madridCalendar.startOfDay(for: last)) ?? last
+        let end = min(afterLast, madridCalendar.startOfDay(for: now))
+        guard end > start else { return }
+        let interval = DateInterval(start: start, end: end)
+        if state.statementCoverage[bank]?.contains(interval) != true {
+            state.statementCoverage[bank, default: []].append(interval)
+        }
     }
 }
 

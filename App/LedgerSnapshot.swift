@@ -187,15 +187,10 @@ struct LedgerSnapshot: Sendable {
         // y el saldo del banco ya lo incluye), que son los que `Ledger.balance` tiene en cuenta;
         // de los anteriores no se sabe y no se enseña nada.
         for bank in BankID.allCases {
-            guard let current = balances[bank]?.cents, let reading = state.balances[bank] else { continue }
+            guard let current = balances[bank]?.cents, let base = balances[bank]?.setAt else { continue }
             var later = 0
             for m in byDate where m.bank == bank {
-                guard m.date >= reading.setAt else { break }
-                // Mismo criterio que `Ledger.balance`: lo que el saldo no suma (registros del banco, ya enlazados,
-                // extractos sobre un saldo del banco) no cambia la cuenta ni enseña "Te quedaban".
-                // El movimiento que cae justo en la base ya está dentro de la lectura.
-                let counts = Ledger.countsTowardBalance(m, base: reading)
-                guard counts || (m.date == reading.setAt && Ledger.isBalanceEligible(m, origin: reading.origin)) else { continue }
+                guard m.date >= base else { break }
                 balanceAfter[m.id] = current - later
                 later += m.amountCents
             }

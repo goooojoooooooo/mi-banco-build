@@ -218,7 +218,7 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         #expect(i.payments.map(\.name) == ["Hace dos dias"])
         #expect(i.income.isEmpty)
         #expect(i.banks.first?.changeCents == -2_222)
-        #expect(render(makeBriefing(i, calendar: cal).headline, .plain) == "Desde ayer a las 22:10 gastaste 22,22{00A0}€ en 1 pago.")
+        #expect(render(makeBriefing(i, calendar: cal).headline, .plain) == "Desde ayer a las 22:10 gastaste 22,22\u{00A0}€ en 1 pago.")
         // Justo dentro del límite entra; justo en él, no.
         var edge = LedgerState()
         let limit = nov(19, 22, 10).addingTimeInterval(-7 * 86_400)

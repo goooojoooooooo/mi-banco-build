@@ -65,8 +65,9 @@ enum DemoMode {
     }
 
     /// `-MiBancoDemoGuideHalfway`: la guía de Apple Pay de imagin queda a medias (paso 9), para ver la lista con una guía empezada.
-    static var guideProgressSeed: [String: Int] {
-        arguments.contains("-MiBancoDemoGuideHalfway") ? [GuideTrack.walletImagin.rawValue: 8] : [:]
+    static var guideProgressSeed: [String: String] {
+        arguments.contains("-MiBancoDemoGuideHalfway")
+            ? [GuideTrack.walletImagin.rawValue: GuideSavedStep(step: 8, of: guideSteps(for: .walletImagin).count).stored] : [:]
     }
 
     /// `-MiBancoDemoPersistGuide`: la demo guarda el último paso de cada guía en UserDefaults (prueba de reinicio);

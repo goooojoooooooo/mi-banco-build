@@ -91,6 +91,6 @@ private struct GuideTrackRow: View {
         if case .notYet = status, let resumeIndex {
             return guideResumeLine(index: resumeIndex, total: guideSteps(for: track).count)
         }
-        return guideStatusLine(status)
+        return guideStatusLine(status, applePay: track.isApplePay)
     }
 }

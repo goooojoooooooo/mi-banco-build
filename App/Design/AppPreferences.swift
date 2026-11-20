@@ -41,23 +41,29 @@ final class AppPreferences {
 
     /// Último paso (desde 0) en que se quedó cada guía de Atajos, por `GuideTrack.rawValue`. Vive aquí y no en el libro:
     /// es una preferencia del aparato, y iOS puede cerrar la app mientras él está en Atajos. Se lee con tolerancia.
-    private(set) var guideLastStep: [String: Int]
+    /// Se guarda con el número de pasos que tenía la guía («8/22»): si la guía cambia de largo, no se retoma.
+    private(set) var guideLastStep: [String: String]
 
     func guideResume(_ track: GuideTrack) -> Int? {
-        guideResumeIndex(saved: guideLastStep[track.rawValue], total: guideSteps(for: track).count)
+        guideResumeIndex(saved: GuideSavedStep(stored: guideLastStep[track.rawValue]), total: guideSteps(for: track).count)
     }
 
     /// Guarda el paso al que llega una guía; en el primero (o al terminar) no queda nada que retomar.
     func setGuideStep(_ track: GuideTrack, _ index: Int?) {
-        if let index, index > 0 { guideLastStep[track.rawValue] = index } else { guideLastStep.removeValue(forKey: track.rawValue) }
+        if let index, index > 0 {
+            guideLastStep[track.rawValue] = GuideSavedStep(step: index, of: guideSteps(for: track).count).stored
+        } else {
+            guideLastStep.removeValue(forKey: track.rawValue)
+        }
         #if DEBUG
         if DemoMode.isActive && !DemoMode.persistsGuideProgress { return }
         #endif
         UserDefaults.standard.set(guideLastStep, forKey: Self.guideStepKey)
     }
 
-    private static func storedGuideSteps() -> [String: Int] {
-        UserDefaults.standard.dictionary(forKey: guideStepKey)?.compactMapValues { $0 as? Int } ?? [:]
+    /// Lo guardado con la forma antigua (un número suelto) se descarta al leerlo: no hay retoma.
+    private static func storedGuideSteps() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: guideStepKey)?.compactMapValues { $0 as? String } ?? [:]
     }
 }
 

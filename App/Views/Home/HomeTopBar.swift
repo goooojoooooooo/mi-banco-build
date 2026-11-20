@@ -28,9 +28,8 @@ struct HomeTopBar: View {
                             .frame(height: 44)
                             .glassSurface(Capsule())
                             .glassID("cancel", in: glass)
-                            .contentShape(Capsule())
                     }
-                    .buttonStyle(.pressable)
+                    .buttonStyle(.plain)
                     .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .trailing)))
                 } else {
                     Text("Tu dinero")
@@ -50,9 +49,8 @@ struct HomeTopBar: View {
                             .frame(width: 44, height: 44)
                             .glassSurface(Circle())
                             .glassID("eye", in: glass)
-                            .contentShape(Circle())
                     }
-                    .buttonStyle(.pressable)
+                    .buttonStyle(.plain)
                     .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     .accessibilityLabel(hidden ? "Mostrar importes" : "Ocultar importes")
                     .accessibilityValue(hidden ? "Importes ocultos" : "Importes visibles")
@@ -63,9 +61,8 @@ struct HomeTopBar: View {
                             .frame(width: 44, height: 44)
                             .glassSurface(Circle())
                             .glassID("search", in: glass)
-                            .contentShape(Circle())
                     }
-                    .buttonStyle(.pressable)
+                    .buttonStyle(.plain)
                     .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     .accessibilityLabel("Buscar movimientos")
                 }

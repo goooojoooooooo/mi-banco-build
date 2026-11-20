@@ -143,7 +143,7 @@ targets:
     type: bundle.ui-testing
     platform: iOS
     sources:
-      - UITests
+      - Shared/UITests
     dependencies:
       - target: MiBanco
     settings:

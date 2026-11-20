@@ -39,22 +39,17 @@ public struct MerchantHistory: Equatable, Sendable {
     }
 }
 
-/// Solo pagos no marcados como "no es mío".
-private func countedPayments(_ movements: [Movement]) -> [Movement] {
-    movements.filter { $0.kind == .payment && !$0.flaggedNotMine }
-}
-
 private func spent(_ movements: [Movement], where include: (Date) -> Bool) -> Int {
     movements.reduce(0) { include($1.date) ? $0 + abs($1.amountCents) : $0 }
 }
 
 /// Gasto de este mes hasta `now` frente al del mes anterior hasta el mismo día y hora (el día se ajusta a la
 /// longitud de ese mes). nil si el mes anterior no tiene ningún pago.
-public func spendingPace(movements: [Movement], now: Date, calendar: Calendar) -> SpendingPace? {
+public func spendingPace(movements: [Movement], now: Date, calendar: Calendar, ownTransferIDs: Set<UUID>? = nil) -> SpendingPace? {
     guard let monthStart = calendar.dateInterval(of: .month, for: now)?.start,
           let prevStart = calendar.date(byAdding: .month, value: -1, to: monthStart),
           let prevDays = calendar.range(of: .day, in: .month, for: prevStart) else { return nil }
-    let payments = countedPayments(movements)
+    let payments = spendingMovements(in: movements, excluding: ownTransferIDs)
     guard payments.contains(where: { $0.date >= prevStart && $0.date < monthStart }) else { return nil }
     let clock = calendar.dateComponents([.day, .hour, .minute, .second], from: now)
     var cutoffParts = calendar.dateComponents([.year, .month], from: prevStart)
@@ -69,7 +64,8 @@ public func spendingPace(movements: [Movement], now: Date, calendar: Calendar) -
 }
 
 /// Semana de lunes a domingo que contiene `date`. `movementCount` cuenta los pagos de la semana.
-public func weekSummary(movements: [Movement], weekContaining date: Date, calendar: Calendar) -> WeekSummary {
+public func weekSummary(movements: [Movement], weekContaining date: Date, calendar: Calendar,
+                        ownTransferIDs: Set<UUID>? = nil) -> WeekSummary {
     var cal = calendar
     cal.firstWeekday = 2
     cal.minimumDaysInFirstWeek = 4
@@ -77,7 +73,7 @@ public func weekSummary(movements: [Movement], weekContaining date: Date, calend
           let prevStart = cal.date(byAdding: .day, value: -7, to: week.start) else {
         return WeekSummary(spentCents: 0, previousWeekSpentCents: 0, movementCount: 0, topMerchant: nil)
     }
-    let payments = countedPayments(movements)
+    let payments = spendingMovements(in: movements, excluding: ownTransferIDs)
     let inWeek = payments.filter { $0.date >= week.start && $0.date < week.end }
     let previous = spent(payments) { $0 >= prevStart && $0 < week.start }
 
@@ -99,10 +95,11 @@ public func weekSummary(movements: [Movement], weekContaining date: Date, calend
 }
 
 /// Pagos a un comercio (por clave normalizada): este mes, en total y el primero.
-public func merchantHistory(for merchant: String, in movements: [Movement], now: Date, calendar: Calendar) -> MerchantHistory {
+public func merchantHistory(for merchant: String, in movements: [Movement], now: Date, calendar: Calendar,
+                            ownTransferIDs: Set<UUID>? = nil) -> MerchantHistory {
     let key = normalizeMerchant(merchant)
     let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
-    let mine = key.isEmpty ? [] : countedPayments(movements).filter { normalizeMerchant($0.merchant ?? "") == key }
+    let mine = key.isEmpty ? [] : spendingMovements(in: movements, excluding: ownTransferIDs).filter { normalizeMerchant($0.merchant ?? "") == key }
     let month = mine.filter { $0.date >= monthStart && $0.date <= now }
     return MerchantHistory(countThisMonth: month.count, totalThisMonthCents: month.reduce(0) { $0 + abs($1.amountCents) },
                            countAllTime: mine.count, firstDate: mine.map(\.date).min())
@@ -110,13 +107,14 @@ public func merchantHistory(for merchant: String, in movements: [Movement], now:
 
 /// El historial de todos los comercios con pagos, en una sola pasada (cada movimiento se normaliza una vez).
 /// Para cada clave da exactamente lo mismo que `merchantHistory(for:in:now:calendar:)`.
-public func merchantHistories(in movements: [Movement], now: Date, calendar: Calendar) -> [String: MerchantHistory] {
+public func merchantHistories(in movements: [Movement], now: Date, calendar: Calendar,
+                              ownTransferIDs: Set<UUID>? = nil) -> [String: MerchantHistory] {
     let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
     var count: [String: Int] = [:]
     var monthCount: [String: Int] = [:]
     var monthTotal: [String: Int] = [:]
     var first: [String: Date] = [:]
-    for m in countedPayments(movements) {
+    for m in spendingMovements(in: movements, excluding: ownTransferIDs) {
         let key = normalizeMerchant(m.merchant ?? "")
         if key.isEmpty { continue }
         count[key, default: 0] += 1

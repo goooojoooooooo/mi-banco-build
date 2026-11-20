@@ -34,19 +34,19 @@ enum IngestRunner {
         // Si la app está abierta, Home se recarga con esto.
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         switch snap.outcome {
-        case .stored(let m), .merged(let m):
-            // Un registro del banco que se fusiona con su aviso no avisó antes: se trata como uno nuevo.
+        case .stored(let m):
             let now = Date()
             let calendar = Calendar.current
             let ledger = Ledger(state: snap.state)
+            let transfers = ownTransferIDs(in: snap.state.movements)
             // "Cada movimiento" apagado o comercio silenciado: el movimiento queda guardado (e Inicio se actualiza),
             // pero ni aviso básico ni Live Activity.
             if snap.state.alertSettings.everyMovement && !ledger.isMuted(merchant: m.merchant) {
-                let month = m.merchant.map { merchantHistory(for: $0, in: snap.state.movements, now: now, calendar: calendar) }
+                let month = m.merchant.map { merchantHistory(for: $0, in: snap.state.movements, now: now, calendar: calendar, ownTransferIDs: transfers) }
                 await AlertPoster.post(movement: m, balance: snap.after, estimated: snap.afterEstimated,
                                        balances: snap.balances, previousBalance: snap.before,
                                        merchantMonth: m.kind == .payment ? month : nil,
-                                       todaySpentCents: spentToday(snap.state.movements, now: now, calendar: calendar))
+                                       todaySpentCents: spentToday(snap.state.movements, now: now, calendar: calendar, ownTransferIDs: transfers))
                 _ = await LiveActivityController.show(movement: m, balance: snap.after, estimated: snap.afterEstimated,
                                                       total: snap.total)
             }
@@ -65,11 +65,11 @@ enum IngestRunner {
         }
     }
 
-    /// Pagos tuyos de hoy (los marcados "no es mío" no cuentan).
-    private static func spentToday(_ movements: [Movement], now: Date, calendar: Calendar) -> Int {
+    /// Pagos tuyos de hoy (ni los "no es mío" ni los traspasos entre tus cuentas cuentan).
+    private static func spentToday(_ movements: [Movement], now: Date, calendar: Calendar, ownTransferIDs: Set<UUID>) -> Int {
         let start = calendar.startOfDay(for: now)
-        return movements.reduce(0) { sum, m in
-            m.kind == .payment && !m.flaggedNotMine && m.date >= start && m.date <= now ? sum + abs(m.amountCents) : sum
+        return spendingMovements(in: movements, excluding: ownTransferIDs).reduce(0) { sum, m in
+            m.date >= start && m.date <= now ? sum + abs(m.amountCents) : sum
         }
     }
 }

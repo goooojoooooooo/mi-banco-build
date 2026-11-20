@@ -127,9 +127,14 @@ import Testing
         // Ni anteriores ni en el mismo instante de la lectura.
         #expect(!Ledger.countsTowardBalance(m(.wallet, at: t), base: bankBase))
         #expect(!Ledger.countsTowardBalance(m(.wallet, at: t - 1), base: bankBase))
-        // Registros del banco y capturados ya enlazados: nunca.
+        // Registros del banco: nunca.
         #expect(!Ledger.countsTowardBalance(m(.bank, at: t + 1), base: manualBase))
-        #expect(!Ledger.countsTowardBalance(m(.wallet, bankRef: "k", at: t + 1), base: bankBase))
+        // R21: enlazado a un registro del banco cuenta solo si es posterior a la lectura (hora precisa).
+        #expect(Ledger.countsTowardBalance(m(.wallet, bankRef: "k", at: t + 1), base: bankBase))
+        #expect(!Ledger.countsTowardBalance(m(.wallet, bankRef: "k", at: t), base: bankBase))
+        #expect(!Ledger.countsTowardBalance(m(.wallet, bankRef: "k", at: t - 1), base: bankBase))
+        #expect(!Ledger.countsTowardBalance(Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: .wallet,
+                                                     date: t + 1, bankRef: "k", dayOnly: true), base: bankBase))
         // Extracto: solo sobre una base a mano.
         #expect(Ledger.countsTowardBalance(m(.statement, at: t + 1), base: manualBase))
         #expect(!Ledger.countsTowardBalance(m(.statement, at: t + 1), base: bankBase))
@@ -190,7 +195,7 @@ import Testing
     }
 
     @Test func walletAfterBankRecordMerges() {
-        var l = bankFirstLedger(bankDate: iso("2026-11-19T11:00:00Z"))
+        var l = bankFirstLedger(bankDate: iso("2026-11-20T11:00:00Z"))
         let outcome = l.ingest(.wallet(bank: .rev, amount: "12,50", merchant: "Mercadona"), now: iso("2026-11-20T09:00:00Z"))
         guard case .merged(let m) = outcome else { Issue.record("esperaba .merged"); return }
         #expect(m.source == .wallet)
@@ -240,8 +245,42 @@ import Testing
                                           movements: [bankRecord(at: iso("2026-11-20T11:00:00Z"))]))
         #expect(l.balance(.rev)?.cents == 100_000)
         _ = l.ingest(.wallet(bank: .rev, amount: "12,50", merchant: "Mercadona"), now: iso("2026-11-20T17:00:00Z"))
-        // Ya enlazado a un registro del banco (bankRef): el saldo del banco lo incluye y no se resta otra vez.
-        #expect(l.balance(.rev)?.cents == 100_000)
+        // R21: el aviso (hora precisa, 17:00) es posterior a la lectura (08:00): sigue contando y el saldo es estimado.
+        #expect(l.balance(.rev)?.cents == 100_000 - 1250)
+        #expect(l.balance(.rev)?.estimated == true)
+    }
+
+    private func linkedCapture(readingAt: Date) -> Ledger {
+        let capture = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .notification,
+                               date: iso("2026-11-20T10:05:00Z"), bankRef: "t1", bankStatus: .booked)
+        return Ledger(state: LedgerState(balances: [.rev: ManualBalance(cents: 10_000, setAt: readingAt, origin: .bank)],
+                                         movements: [capture]))
+    }
+
+    @Test func linkedCaptureAfterReadingStillCounts() {
+        let l = linkedCapture(readingAt: iso("2026-11-20T10:02:00Z"))
+        #expect(l.balance(.rev)?.cents == 8750)
+        #expect(l.balance(.rev)?.estimated == true)
+    }
+
+    @Test func linkedCaptureBeforeReadingIsNotCounted() {
+        let l = linkedCapture(readingAt: iso("2026-11-20T13:00:00Z"))
+        #expect(l.balance(.rev)?.cents == 10_000)
+        #expect(l.balance(.rev)?.estimated == false)
+    }
+
+    @Test func captureDoesNotMergeIntoYesterdaysRow() {
+        var l = bankFirstLedger(bankDate: iso("2026-11-19T11:00:00Z"))
+        let outcome = l.ingest(.wallet(bank: .rev, amount: "12,50", merchant: "Mercadona"), now: iso("2026-11-20T08:00:00Z"))  // 09:00 Madrid
+        #expect(isStored(outcome))
+        #expect(l.state.movements.count == 2)
+    }
+
+    @Test func captureJustAfterMidnightMergesIntoYesterdaysRow() {
+        var l = bankFirstLedger(bankDate: iso("2026-11-19T11:00:00Z"))
+        let outcome = l.ingest(.wallet(bank: .rev, amount: "12,50", merchant: "Mercadona"), now: iso("2026-11-19T23:20:00Z"))  // 00:20 Madrid del 20
+        if case .merged = outcome {} else { Issue.record("esperaba .merged: \(outcome)") }
+        #expect(l.state.movements.count == 1)
     }
 
     // MARK: Secretos

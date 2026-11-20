@@ -19,6 +19,13 @@ private func bal(_ type: String, _ amount: String, _ currency: String = "EUR", r
         #expect(r == BalanceReading(cents: 10000, at: fetched, kind: .booked))
     }
 
+    @Test func lowerCaseEuroCodeIsAccepted() {
+        let r = chooseBalanceReading([bal("ITAV", "12.50", "eur")], fetchedAt: fetched)
+        #expect(r == BalanceReading(cents: 1250, at: fetched, kind: .available))
+        #expect(EBAmount(currency: "eur", amount: "1.00").euroCents == 100)
+        #expect(EBAmount(currency: "EURO", amount: "1.00").euroCents == nil)
+    }
+
     @Test func noEuroGivesNil() {
         #expect(chooseBalanceReading([bal("ITAV", "5.00", "USD")], fetchedAt: fetched) == nil)
         #expect(chooseBalanceReading([], fetchedAt: fetched) == nil)

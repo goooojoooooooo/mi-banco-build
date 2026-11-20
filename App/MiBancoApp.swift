@@ -74,6 +74,7 @@ struct MiBancoApp: App {
             }
             .environment(logos)
             .environment(preferences)
+            .motionEnvironment()
             .preferredColorScheme(.dark)
             .environment(\.locale, Locale(identifier: "es_ES"))
             .onChange(of: scenePhase) { _, phase in
@@ -124,7 +125,7 @@ struct MiBancoApp: App {
             Theme.canvas.ignoresSafeArea()
             VStack(spacing: Theme.Space.row) {
                 AppMark(size: 64)
-                Text("Mi Banco")
+                Text(AppIdentity.displayName)
                     .titan(.sheetTitle)
                     .foregroundStyle(Theme.label)
             }

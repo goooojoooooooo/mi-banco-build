@@ -28,8 +28,7 @@ public func chooseBalanceReading(_ balances: [EBBalance], fetchedAt: Date) -> Ba
     let order = ["ITAV", "CLAV", "XPCD", "ITBD", "CLBD", "OPBD", "PRCD"]
     var best: (rank: Int, cents: Int, ref: Date?)?
     for balance in balances {
-        guard balance.balanceAmount.currency == "EUR",
-              let cents = centsFromDecimalString(balance.balanceAmount.amount) else { continue }
+        guard let cents = balance.balanceAmount.euroCents else { continue }
         let rank = order.firstIndex(of: balance.balanceType) ?? order.count
         let ref = balance.lastChangeDateTime.flatMap(parseEnableBankingDate)
         if let current = best {

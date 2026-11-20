@@ -17,14 +17,31 @@ final class AppPreferences {
         }
     }
 
+    static let motionLevelKey = "motionLevel"
+    /// Intensidad con la que se estrena la app (el dueño aprobó el movimiento en «Expresivo»): una sola constante.
+    static let defaultMotionLevel = MotionLevel.expressive
+
+    /// Intensidad del movimiento (Ajustes › Animaciones). Se guarda en UserDefaults.
+    var motionLevel: MotionLevel {
+        didSet {
+            #if DEBUG
+            if DemoMode.isActive { return }
+            #endif
+            UserDefaults.standard.set(motionLevel.rawValue, forKey: Self.motionLevelKey)
+        }
+    }
+
     init() {
+        let stored = UserDefaults.standard.string(forKey: Self.motionLevelKey).flatMap(MotionLevel.init(rawValue:))
         #if DEBUG
         if DemoMode.isActive {
             privateMode = DemoMode.startsPrivate
+            motionLevel = Self.defaultMotionLevel
             return
         }
         #endif
         privateMode = UserDefaults.standard.bool(forKey: Self.privateModeKey)
+        motionLevel = stored ?? Self.defaultMotionLevel
     }
 }
 

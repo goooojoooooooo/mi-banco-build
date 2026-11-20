@@ -35,6 +35,15 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public var importedAt: Date?
     /// true = la fecha es un día sin hora (se guarda al mediodía de Madrid).
     public var dayOnly: Bool
+    /// Nombre que da el banco cuando se enlazó a un capturado. NUNCA sustituye a `merchant` (de él salen las
+    /// categorías, los silenciados y las suscripciones); solo se muestra si el capturado no trae nombre útil.
+    public var bankMerchant: String?
+    /// true = no es gasto aunque mueva el saldo (compras y ventas de valores de Trade Republic): las sumas de gasto
+    /// deben saltárselo.
+    public var excludedFromSpending: Bool
+
+    /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
+    public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
 
     /// Movimiento que ya existía de antes de importarse: no debe avisar ni contar como novedad.
     public var isHistorical: Bool { importedAt.map { date < $0.addingTimeInterval(-48 * 3600) } ?? false }
@@ -43,7 +52,8 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 pairedAcrossSources: Bool = false, fingerprint: String? = nil, pairedFingerprint: String? = nil,
                 isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false,
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
-                importedAt: Date? = nil, dayOnly: Bool = false) {
+                importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
+                excludedFromSpending: Bool = false) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -62,12 +72,14 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.bankStatus = bankStatus
         self.importedAt = importedAt
         self.dayOnly = dayOnly
+        self.bankMerchant = bankMerchant
+        self.excludedFromSpending = excludedFromSpending
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
         case note, flaggedNotMine
-        case bankRef, statementRef, bankStatus, importedAt, dayOnly
+        case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -91,6 +103,8 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         bankStatus = try c.decodeIfPresent(BankStatus.self, forKey: .bankStatus)
         importedAt = try c.decodeIfPresent(Date.self, forKey: .importedAt)
         dayOnly = try c.decodeIfPresent(Bool.self, forKey: .dayOnly) ?? false
+        bankMerchant = try c.decodeIfPresent(String.self, forKey: .bankMerchant)
+        excludedFromSpending = try c.decodeIfPresent(Bool.self, forKey: .excludedFromSpending) ?? false
     }
 }
 
@@ -220,7 +234,7 @@ extension Movement.Source {
 }
 
 public struct Ledger: Sendable {
-    public private(set) var state: LedgerState
+    public internal(set) var state: LedgerState
 
     /// Cartera y aviso del mismo banco con el mismo importe firmado dentro de esta ventana = el mismo pago.
     static let duplicateWindow: TimeInterval = 180
@@ -344,20 +358,25 @@ public struct Ledger: Sendable {
 
         // 4. Un registro del banco (o de un extracto) del mismo pago que aún no se había visto por aviso: se completa
         // en lugar de duplicarlo. Gana el más cercano en el tiempo.
+        // Solo filas del MISMO día de Madrid; las del día anterior solo si el aviso llega antes de las 03:00
+        // (las fechas del banco suelen venir en UTC o ser el día de autorización).
         let nowDay = madridCalendar.startOfDay(for: now)
+        let justAfterMidnight = madridCalendar.component(.hour, from: now) < 3
         let bankMatch = state.movements.indices.filter { i in
             let m = state.movements[i]
             guard m.source.isBankSourced, m.fingerprint == nil, m.bank == bank, m.amountCents == signed else { return false }
             let days = madridCalendar.dateComponents([.day], from: madridCalendar.startOfDay(for: m.date), to: nowDay).day ?? Int.max
-            return abs(days) <= 1
+            return days == 0 || (days == 1 && justAfterMidnight)
         }.min { abs(state.movements[$0].date.timeIntervalSince(now)) < abs(state.movements[$1].date.timeIntervalSince(now)) }
         if let i = bankMatch {
             state.movements[i].source = source
             state.movements[i].date = now
             state.movements[i].dayOnly = false
             state.movements[i].fingerprint = fingerprint
-            // Hasta que la Tarea 5 defina `richerMerchant`: el comercio del aviso si trae uno.
-            if let captured = parsed.merchant, !captured.isEmpty { state.movements[i].merchant = captured }
+            // El nombre del banco pasa a su campo propio; `merchant` queda con el del aviso si es útil.
+            let bankName = state.movements[i].merchant
+            state.movements[i].merchant = richerMerchant(captured: parsed.merchant, bank: bankName)
+            state.movements[i].bankMerchant = bankName
             state.movements[i].isShop = state.movements[i].isShop || parsed.merchantIsShop
             return .merged(state.movements[i])
         }
@@ -387,15 +406,31 @@ public struct Ledger: Sendable {
     }
 
     /// El ÚNICO criterio de qué movimientos se suman sobre una lectura de saldo (lo usan `balance` y "Te quedaban"):
-    /// posteriores a la lectura y capturados (no los del banco ni los ya enlazados a un registro suyo, que el saldo
-    /// del banco ya incluye); los de extracto solo cuentan sobre un saldo puesto a mano.
+    /// posteriores a la lectura y capturados (no los del banco: su saldo ya los incluye). Un capturado enlazado a un
+    /// registro del banco o de un extracto cuenta solo si su hora precisa es posterior a la lectura Y su registro no
+    /// se conocía ya cuando se tomó la lectura (`importedAt` nil o posterior): un aviso tardío fusionado en una fila
+    /// que el banco ya había dado está dentro de ese saldo. Los de extracto solo cuentan sobre un saldo puesto a mano.
     public static func countsTowardBalance(_ m: Movement, base: ManualBalance) -> Bool {
-        m.date > base.setAt && isBalanceEligible(m, origin: base.origin)
+        guard m.date > base.setAt, isBalanceEligible(m, origin: base.origin) else { return false }
+        if isLinked(m), let imported = m.importedAt, imported <= base.setAt { return false }
+        return true
     }
 
-    /// La parte del criterio que no mira la fecha.
+    /// Capturado (o fusionado) enlazado a un registro del banco o a una fila de extracto. Las filas del propio banco o
+    /// extracto llevan su clave por definición: no son "enlazadas".
+    private static func isLinked(_ m: Movement) -> Bool {
+        !m.source.isBankSourced && (m.bankRef != nil || m.statementRef != nil)
+    }
+
+    /// La parte del criterio que no mira la fecha. Un enlazado con hora precisa es elegible: solo cuenta si es
+    /// posterior a la lectura (lo exige `countsTowardBalance`). Una fila de solo día nunca tiene hora real, y sobre un
+    /// saldo de extracto (con hora de solo día) un capturado enlazado a una fila del extracto ya está en ese saldo.
     public static func isBalanceEligible(_ m: Movement, origin: BalanceOrigin) -> Bool {
-        m.bankRef == nil && m.source != .bank && (m.source != .statement || origin == .manual)
+        guard m.source != .bank, m.source != .statement || origin == .manual else { return false }
+        guard isLinked(m) else { return true }
+        if m.dayOnly { return false }
+        if m.statementRef != nil && origin == .statement { return false }
+        return true
     }
 
     public func total() -> Int? {

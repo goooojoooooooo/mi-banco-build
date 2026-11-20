@@ -134,6 +134,9 @@ public struct ManualBalance: Codable, Equatable, Sendable {
     /// true = la lectura es solo de lo contabilizado: los movimientos pendientes del banco siguen sumando encima y el
     /// resultado es siempre estimado.
     public var countsPending: Bool
+    /// true = la lectura mezcla cuentas con saldo disponible y cuentas solo contabilizadas: se suma tal cual (sin sumar
+    /// pendientes, que duplicarían las cuentas disponibles) pero nunca es exacta.
+    public var forcedEstimate: Bool
     /// true = el saldo lo comunicó el banco (aviso, API o extracto); false = puesto a mano.
     public var fromBank: Bool { origin != .manual }
 
@@ -141,15 +144,17 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         self.init(cents: cents, setAt: setAt, origin: fromBank ? .notice : .manual)
     }
 
-    public init(cents: Int, setAt: Date, origin: BalanceOrigin, fetchedAt: Date? = nil, countsPending: Bool = false) {
+    public init(cents: Int, setAt: Date, origin: BalanceOrigin, fetchedAt: Date? = nil, countsPending: Bool = false,
+                forcedEstimate: Bool = false) {
         self.cents = cents
         self.setAt = setAt
         self.origin = origin
         self.fetchedAt = fetchedAt
         self.countsPending = countsPending
+        self.forcedEstimate = forcedEstimate
     }
 
-    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank, fetchedAt, countsPending }
+    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank, fetchedAt, countsPending, forcedEstimate }
 
     /// Los libros anteriores solo traen `fromBank`: true era un aviso.
     public init(from decoder: any Decoder) throws {
@@ -163,6 +168,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         }
         fetchedAt = try c.decodeIfPresent(Date.self, forKey: .fetchedAt)
         countsPending = try c.decodeIfPresent(Bool.self, forKey: .countsPending) ?? false
+        forcedEstimate = try c.decodeIfPresent(Bool.self, forKey: .forcedEstimate) ?? false
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -173,6 +179,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         try c.encode(fromBank, forKey: .fromBank)
         try c.encodeIfPresent(fetchedAt, forKey: .fetchedAt)
         if countsPending { try c.encode(true, forKey: .countsPending) }
+        if forcedEstimate { try c.encode(true, forKey: .forcedEstimate) }
     }
 }
 
@@ -289,10 +296,11 @@ public struct Ledger: Sendable {
     /// `fetchedAt`: cuándo se consultó al banco (la API); los avisos y extractos no lo pasan.
     @discardableResult
     public mutating func adoptBalance(_ bank: BankID, cents: Int, at: Date, origin: BalanceOrigin,
-                                      fetchedAt: Date? = nil, countsPending: Bool = false) -> Bool {
+                                      fetchedAt: Date? = nil, countsPending: Bool = false,
+                                      forcedEstimate: Bool = false) -> Bool {
         if let current = state.balances[bank], current.origin != .manual, at < current.setAt { return false }
         state.balances[bank] = ManualBalance(cents: cents, setAt: at, origin: origin, fetchedAt: fetchedAt,
-                                          countsPending: countsPending)
+                                          countsPending: countsPending, forcedEstimate: forcedEstimate)
         return true
     }
 
@@ -503,14 +511,9 @@ public struct Ledger: Sendable {
 
     public func balance(_ bank: BankID) -> (cents: Int, estimated: Bool)? {
         guard let base = state.balances[bank] else { return nil }
-        let later = state.movements.filter { $0.bank == bank && Self.countsTowardBalance($0, base: base) }
-        // Lectura solo de lo contabilizado: lo pendiente del banco aún no está dentro, así que suma y es estimado.
-        let pending = base.countsPending
-            ? state.movements.filter { $0.bank == bank && $0.source == .bank && $0.bankStatus == .pending }
-            : []
-        let extra = pending.reduce(0) { $0 + $1.amountCents }
-        let exact = base.origin != .manual && later.isEmpty && !base.countsPending
-        return (base.cents + later.reduce(0) { $0 + $1.amountCents } + extra, !exact)
+        let later = state.movements.filter { $0.bank == bank && Self.addsToReading($0, base: base) }
+        let exact = base.origin != .manual && later.isEmpty && !base.countsPending && !base.forcedEstimate
+        return (base.cents + later.reduce(0) { $0 + $1.amountCents }, !exact)
     }
 
     /// El ÚNICO criterio de qué movimientos se suman sobre una lectura de saldo (lo usan `balance` y "Te quedaban"):
@@ -529,6 +532,32 @@ public struct Ledger: Sendable {
     /// extracto llevan su clave por definición: no son "enlazadas".
     private static func isLinked(_ m: Movement) -> Bool {
         !m.source.isBankSourced && (m.bankRef != nil || m.statementRef != nil)
+    }
+
+    /// El criterio ÚNICO de qué se suma sobre una lectura (lo usan `balance` y `balancesAfter`, o sea "Te quedaban"):
+    /// lo que ya exige `countsTowardBalance` O, si la lectura es solo de lo contabilizado, cualquier fila con un registro
+    /// pendiente del banco (sea del banco o un aviso enlazado a él) en cualquier fecha: el banco aún no la incluye.
+    /// Es un solo O: una fila nunca se cuenta dos veces.
+    public static func addsToReading(_ m: Movement, base: ManualBalance) -> Bool {
+        if countsTowardBalance(m, base: base) { return true }
+        return base.countsPending && m.bankStatus == .pending && m.bankRef != nil
+    }
+
+    /// Saldo justo después de cada movimiento de `bank` ("Te quedaban"). `movements` va de más nuevo a más antiguo.
+    /// Parte de `current` (lo que da `balance`) y resta lo que se suma después de cada fila; una fila que la lectura ya
+    /// incluía y cae justo en su hora también tiene saldo. Con una lectura normal, lo anterior a su hora se desconoce
+    /// (se para); con una lectura de solo contabilizado los pendientes cuentan a cualquier fecha, así que no se para.
+    public static func balancesAfter(bank: BankID, current: Int, reading: ManualBalance, movements: [Movement]) -> [UUID: Int] {
+        var out: [UUID: Int] = [:]
+        var later = 0
+        for m in movements where m.bank == bank {
+            if m.date < reading.setAt && !reading.countsPending && !addsToReading(m, base: reading) { break }
+            let adds = addsToReading(m, base: reading)
+            guard adds || (m.date == reading.setAt && isBalanceEligible(m, origin: reading.origin)) else { continue }
+            out[m.id] = current - later
+            later += m.amountCents
+        }
+        return out
     }
 
     /// La parte del criterio que no mira la fecha. Un enlazado con hora precisa es elegible: solo cuenta si es

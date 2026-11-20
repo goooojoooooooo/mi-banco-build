@@ -123,6 +123,21 @@ actor BankSync {
     private func sync(
         _ bank: BankID, dateFrom: Date, strategy: TransactionStrategy, store: FileStore, calendar: Calendar
     ) async -> SyncOutcome? {
+        // 0. Sesión y cliente ANTES de anotar nada: un fallo local (Llavero sin desbloquear tras reiniciar, credenciales
+        // ilegibles) no gasta uno de los intentos del día, no pone espera ni aparece como fallo del banco.
+        let session: StoredSession?
+        let client: EnableBankingClient
+        do {
+            session = try KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank))
+            client = try BankingCredentials.client()
+        } catch {
+            return nil
+        }
+        guard let session else {
+            // Hay conexión en el libro pero no sesión en el Llavero (otro dispositivo, copia restaurada): hay que renovar.
+            return await recordFailure(bank, BankingClientError.api(.consentExpired, code: nil), store: store)
+        }
+
         // 1. El intento queda anotado antes de llamar (cuenta para el límite diario aunque la app muera a mitad).
         let attemptAt = Date()
         let connected = (try? store.update { ledger -> Bool in
@@ -132,14 +147,8 @@ actor BankSync {
         }) ?? false
         guard connected else { return .skipped(.notConnected) }
 
+        let from = bankDateParameter(dateFrom, calendar: calendar)
         do {
-            guard let session = try KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)) else {
-                // Hay conexión en el libro pero no sesión en el Llavero (otro dispositivo, copia restaurada): hay que renovar.
-                throw BankingClientError.api(.consentExpired, code: nil)
-            }
-            let client = try BankingCredentials.client()
-            let from = bankDateParameter(dateFrom, calendar: calendar)
-
             // 2 y 3. Saldos y movimientos de cada cuenta. Todo se reúne antes de tocar el libro.
             var balances: [[EBBalance]] = []
             var transactions: [EBTransaction] = []
@@ -168,19 +177,24 @@ actor BankSync {
             NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
             return .updated(added: applied.report.added)
         } catch {
-            // Una cancelación (caducó la tarea de fondo, la app se va) no es un fallo del banco: no se anota.
-            if error is CancellationError || Task.isCancelled { return nil }
-            let problem = syncProblem(for: error)
-            _ = try? store.update { ledger in
-                guard let link = ledger.state.links[bank] else { return }
-                ledger.setLink(bank, link.applying(.failure(error), at: Date()))
-            }
-            if problem == .consentExpired {
-                try? KeychainVault.delete(KeychainVault.session(for: bank))
-            }
-            NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
-            return .failed(problem)
+            // Una cancelación (caducó la tarea de fondo, la app se va) o un fallo local (disco) no son un fallo del
+            // banco: no se anotan.
+            if error is CancellationError || Task.isCancelled || !isBankFailure(error) { return nil }
+            return await recordFailure(bank, error, store: store)
         }
+    }
+
+    private func recordFailure(_ bank: BankID, _ error: Error, store: FileStore) async -> SyncOutcome {
+        let problem = syncProblem(for: error)
+        _ = try? store.update { ledger in
+            guard let link = ledger.state.links[bank] else { return }
+            ledger.setLink(bank, link.applying(.failure(error), at: Date()))
+        }
+        if problem == .consentExpired {
+            try? KeychainVault.delete(KeychainVault.session(for: bank))
+        }
+        NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
+        return .failed(problem)
     }
 
     private func rescheduleReminders() async {

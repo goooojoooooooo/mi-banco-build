@@ -7,6 +7,8 @@ public struct BalanceReading: Equatable, Sendable {
         case available
         /// Solo lo contabilizado: los movimientos pendientes siguen sumando encima y el resultado es estimado.
         case booked
+        /// Cuentas de las dos clases a la vez (solo al juntar varias cuentas).
+        case mixed
     }
 
     public let cents: Int

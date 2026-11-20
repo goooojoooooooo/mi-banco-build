@@ -17,20 +17,22 @@ public func bankDateParameter(_ date: Date, calendar: Calendar) -> String {
 }
 
 /// Saldo del banco a partir de la lectura de cada cuenta. Una cuenta sin lectura en euros (nil) hace que no se adopte
-/// nada: una suma parcial enseñaría un saldo falso. La hora es la de la lectura más antigua; basta una lectura
-/// "solo contabilizada" para que el conjunto lo sea.
+/// nada: una suma parcial enseñaría un saldo falso. La hora es la de la lectura más antigua. Todas disponibles:
+/// disponible; todas contabilizadas: contabilizado; de las dos clases: `.mixed` (se suma y es estimado).
+/// Un saldo `.mixed` de una sola cuenta no existe.
 public func combineBalanceReadings(_ readings: [BalanceReading?]) -> BalanceReading? {
     guard !readings.isEmpty else { return nil }
     var cents = 0
     var at: Date?
-    var kind = BalanceReading.Kind.available
+    var kinds = Set<Int>()
     for reading in readings {
         guard let reading else { return nil }
         cents += reading.cents
         at = min(at ?? reading.at, reading.at)
-        if reading.kind == .booked { kind = .booked }
+        kinds.insert(reading.kind == .booked ? 1 : 0)
     }
     guard let at else { return nil }
+    let kind: BalanceReading.Kind = kinds.count > 1 ? .mixed : (kinds.contains(1) ? .booked : .available)
     return BalanceReading(cents: cents, at: at, kind: kind)
 }
 
@@ -56,7 +58,7 @@ extension Ledger {
         var adopted = false
         if let balance {
             adopted = adoptBalance(bank, cents: balance.cents, at: balance.at, origin: .bank, fetchedAt: fetchedAt,
-                                   countsPending: balance.kind == .booked)
+                                   countsPending: balance.kind == .booked, forcedEstimate: balance.kind == .mixed)
         }
         setLink(bank, link.recordingSuccess(at: fetchedAt))
         return BankFetchApplied(report: report, balanceAdopted: adopted)

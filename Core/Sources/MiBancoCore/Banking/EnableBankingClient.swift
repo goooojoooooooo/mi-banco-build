@@ -112,7 +112,7 @@ public struct EnableBankingClient: Sendable {
             guard let next = page.continuationKey, !next.isEmpty else {
                 return TransactionFetch(transactions: all, complete: true)
             }
-            // La misma clave dos veces seguidas de nada sirve: el banco no avanza.
+            // Una clave ya vista en cualquier página anterior: el banco da vueltas y no avanza.
             guard seenKeys.insert(next).inserted else {
                 return TransactionFetch(transactions: all, complete: false)
             }

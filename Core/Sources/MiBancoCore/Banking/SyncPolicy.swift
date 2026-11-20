@@ -135,6 +135,12 @@ public func syncProblem(for error: Error) -> SyncProblem {
     return error is URLError ? .offline : .unknown
 }
 
+/// ¿Es un fallo del banco o de la red (se anota, gasta un intento y puede poner espera)? Un fallo local (Llavero sin
+/// desbloquear tras reiniciar, credenciales ilegibles, disco) o una cancelación no lo es: no se anota nada.
+public func isBankFailure(_ error: Error) -> Bool {
+    error is BankingClientError || error is URLError
+}
+
 extension BankLinkInfo {
     /// Aplica el resultado de una consulta: éxito o el fallo clasificado.
     public func applying(_ outcome: Result<Void, Error>, at: Date) -> BankLinkInfo {

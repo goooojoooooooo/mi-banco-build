@@ -12,6 +12,7 @@ struct TitanSegmented<Value: Hashable>: View {
     var continuousPosition: CGFloat? = nil
 
     @Environment(\.motion) private var motion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var index: Int { options.firstIndex { $0.value == selection } ?? 0 }
     private var position: CGFloat { continuousPosition ?? CGFloat(index) }
@@ -26,8 +27,9 @@ struct TitanSegmented<Value: Hashable>: View {
                     Text(options[i].title)
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(selected ? Theme.label : Theme.label2)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.7)
+                        // Con tamaños de accesibilidad, una línea que se encoge: una palabra nunca se parte.
+                        .lineLimit(typeSize.isAccessibilitySize ? 1 : 2)
+                        .minimumScaleFactor(typeSize.isAccessibilitySize ? 0.45 : 0.7)
                         .multilineTextAlignment(.center)
                         .padding(.vertical, 6)
                         .padding(.horizontal, 4)

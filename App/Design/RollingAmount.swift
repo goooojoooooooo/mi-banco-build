@@ -468,7 +468,7 @@ private struct DigitCell: View {
 }
 
 /// Un punto de la máscara: ocupa el ancho de un dígito, descansa sobre la línea base (centrado a media altura de las
-/// cifras) y pesa como un trazo de cifra (13 % del cuerpo). Aparece con un pequeño salto.
+/// cifras) y pesa como un trazo de cifra (17 % del cuerpo). Aparece con un pequeño salto.
 private struct DotCell: View {
     let font: Font?
     let size: CGFloat
@@ -481,7 +481,7 @@ private struct DotCell: View {
             .hidden()
             .overlay(alignment: .bottom) {
                 Circle()
-                    .frame(width: size * 0.13, height: size * 0.13)
+                    .frame(width: size * 0.17, height: size * 0.17)
                     .padding(.bottom, size * 0.5)
                     .scaleEffect(visible ? 1 : 0.3)
                     .opacity(visible ? 0.9 : 0)

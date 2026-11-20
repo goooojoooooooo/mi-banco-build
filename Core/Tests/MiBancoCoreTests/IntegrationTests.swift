@@ -416,4 +416,118 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
         nov.excludedFromSpending = true
         #expect(insightKinds(nov, others: [oct], now: now).isEmpty)
     }
+
+    // MARK: R35 — un capturado con pareja probable en una fila del banco no suma desde el primer día
+
+    private func countedCents(_ state: LedgerState, now: Date) -> [Int] {
+        spendingMovements(in: state.movements, excluding: spendingExclusions(in: state, now: now)).map(\.amountCents).sorted()
+    }
+
+    @Test func r35PropinaCuentaLaFilaDelBancoYaElMismoDia() {
+        let now = at(11, 20, 18)
+        let tip = captured(.rev, -5000, "Restaurante Lua", at(11, 20, 14))
+        let row = bankRow(.rev, -5500, "RESTAURANTE LUA", at(11, 20), ref: "b-1", importedAt: at(11, 20, 17))
+        let state = LedgerState(movements: [tip, row])
+        // Sin conexión ni extracto: la definición de 7 días no aplica, pero para el gasto ya es pareja.
+        #expect(unconfirmedCaptureIDs(in: state, now: now).isEmpty)
+        #expect(probableTwinCaptureIDs(in: state.movements) == [tip.id])
+        #expect(countedCents(state, now: now) == [-5500])
+        #expect(monthSpending(in: state, month: now, now: now, calendar: madrid).totalCents == 5500)
+        // Un día de diferencia (Madrid) sigue valiendo; dos, no.
+        let nextDay = bankRow(.rev, -5500, "RESTAURANTE LUA", at(11, 21), ref: "b-2", importedAt: at(11, 21, 9))
+        #expect(probableTwinCaptureIDs(in: LedgerState(movements: [tip, nextDay]).movements) == [tip.id])
+        let twoDays = bankRow(.rev, -5500, "RESTAURANTE LUA", at(11, 22), ref: "b-3", importedAt: at(11, 22, 9))
+        #expect(probableTwinCaptureIDs(in: [tip, twoDays]).isEmpty)
+        // Otro banco: nunca.
+        let otherBank = bankRow(.ima, -5500, "RESTAURANTE LUA", at(11, 20), ref: "b-4", importedAt: at(11, 20, 17))
+        #expect(probableTwinCaptureIDs(in: [tip, otherBank]).isEmpty)
+    }
+
+    @Test func r35DosPagosSinRelacionCuentanLosDos() {
+        let now = at(11, 20, 18)
+        let cap = captured(.rev, -5000, "Gasolinera", at(11, 20, 9))
+        let row = bankRow(.rev, -8000, "Zara", at(11, 20), ref: "b-1", importedAt: at(11, 20, 17), isShop: true)
+        #expect(countedCents(LedgerState(movements: [cap, row]), now: now) == [-8000, -5000])
+    }
+
+    @Test func r35LimitesDelImporteYRegla7Dias() {
+        let cap = captured(.rev, -15_000, "Hotel", at(11, 10, 20))
+        let row = bankRow(.rev, -4300, "Bolt", at(11, 10), ref: "b-1", importedAt: at(11, 11, 8))
+        // Los límites: -5 % y +30 % del importe del capturado.
+        func twin(_ cents: Int, of capture: Int = -10_000) -> Bool {
+            let c = captured(.rev, capture, "X", at(11, 10, 20))
+            let r = bankRow(.rev, cents, "Y", at(11, 10), ref: "b-9", importedAt: at(11, 11, 8))
+            return probableTwinCaptureIDs(in: [c, r]) == [c.id]
+        }
+        #expect(twin(-9500) && twin(-13_000) && twin(-10_000))
+        #expect(!twin(-9499) && !twin(-13_001))
+        // 150,00 € frente a 43,00 €: no son pareja; ambos cuentan el primer día...
+        let day0 = at(11, 10, 22)
+        var info = BankLinkInfo(connectedAt: at(10, 1), consentValidUntil: at(12, 31))
+        info.lastSuccessAt = at(11, 10, 21)
+        let early = LedgerState(movements: [cap, row], links: [.rev: info])
+        #expect(countedCents(early, now: day0) == [-15_000, -4300])
+        // ...hasta que la regla de 7 días saca al capturado.
+        info.lastSuccessAt = at(11, 20, 8)
+        let later = LedgerState(movements: [cap, row], links: [.rev: info])
+        #expect(unconfirmedCaptureIDs(in: later, now: at(11, 20, 18)) == [cap.id])
+        #expect(countedCents(later, now: at(11, 20, 18)) == [-4300])
+    }
+
+    @Test func r35UnoAUnoYElImporteMasCercanoPrimero() {
+        let now = at(11, 20, 18)
+        let a = captured(.rev, -5000, "Bar A", at(11, 20, 10))
+        let b = captured(.rev, -5200, "Bar B", at(11, 20, 11))
+        let row = bankRow(.rev, -5300, "BAR", at(11, 20), ref: "b-1", importedAt: at(11, 20, 17))
+        // Una sola fila: solo se lleva uno, el de importe más cercano (52,00 €).
+        #expect(probableTwinCaptureIDs(in: [a, b, row]) == [b.id])
+        #expect(countedCents(LedgerState(movements: [a, b, row]), now: now) == [-5300, -5000])
+        // Dos filas, dos capturados: cada uno con la suya.
+        let row2 = bankRow(.rev, -5100, "BAR", at(11, 20), ref: "b-2", importedAt: at(11, 20, 17))
+        #expect(probableTwinCaptureIDs(in: [a, b, row, row2]) == [a.id, b.id])
+        #expect(countedCents(LedgerState(movements: [a, b, row, row2]), now: now) == [-5300, -5100])
+    }
+
+    @Test func r35UnTraspasoOUnaOperacionDeValoresNuncaEsPareja() {
+        let now = at(11, 20, 18)
+        let cap = captured(.rev, -5000, "Restaurante Lua", at(11, 20, 14))
+        var transferLeg = bankRow(.rev, -5500, "Envio", at(11, 20), ref: "b-1", importedAt: at(11, 20, 17))
+        transferLeg.ownTransfer = true
+        #expect(probableTwinCaptureIDs(in: [cap, transferLeg], skipping: ownTransferIDs(in: [cap, transferLeg])).isEmpty)
+        #expect(countedCents(LedgerState(movements: [cap, transferLeg]), now: now) == [-5000])
+        var trade = bankRow(.rev, -5500, "Fondo", at(11, 20), ref: "b-2", importedAt: at(11, 20, 17))
+        trade.excludedFromSpending = true
+        #expect(probableTwinCaptureIDs(in: [cap, trade]).isEmpty)
+        #expect(countedCents(LedgerState(movements: [cap, trade]), now: now) == [-5000])
+    }
+
+    @Test func r35UnCapturadoYaEnlazadoNuncaSeEmpareja() {
+        var linked = captured(.rev, -5000, "Restaurante Lua", at(11, 20, 14))
+        linked.bankRef = "b-0"
+        let row = bankRow(.rev, -5500, "RESTAURANTE LUA", at(11, 20), ref: "b-1", importedAt: at(11, 20, 17))
+        #expect(probableTwinCaptureIDs(in: [linked, row]).isEmpty)
+    }
+
+    // MARK: Ronda de la revisión de la integración
+
+    @Test func traspasoPrefiereLaContraparteConHoraAUnaFilaDeSoloDia() {
+        // Pago con hora a las 12:30; ingreso de otro banco a las 12:32 y fila de solo día (mediodía) de un tercer banco.
+        let pay = captured(.rev, -30_000, "Envio", at(11, 10, 12, 30), isShop: false)
+        let precise = captured(.ima, 30_000, "Abono", at(11, 10, 12, 32), isShop: false)
+        let dayOnly = bankRow(.tr, 30_000, "Abono", at(11, 10), ref: "t-1", importedAt: at(11, 11, 8))
+        let pairs = ownTransferPairs(in: [pay, precise, dayOnly])
+        #expect(pairs == [OwnTransferPair(paymentID: pay.id, incomeID: precise.id)])
+    }
+
+    @Test func categoriaDelComercioNoSePierdeSiCambiaLaClaveAlFusionarUnAvisoTardio() {
+        let bankName = "Zxq Shop Centro"
+        let row = Movement(bank: .rev, amountCents: -1250, merchant: bankName, kind: .payment, source: .bank,
+                           date: at(11, 20), bankRef: "b-1", bankStatus: .booked, importedAt: at(11, 20, 9), dayOnly: true)
+        var l = Ledger(state: LedgerState(movements: [row], categoryOverrides: [normalizeMerchant(bankName): .ocio]))
+        let outcome = l.ingest(.wallet(bank: .rev, amount: "12,50", merchant: "Zxq"), now: at(11, 20, 14))
+        guard case .merged(let merged) = outcome else { Issue.record("esperaba .merged: \(outcome)"); return }
+        #expect(normalizeMerchant(merged.merchant ?? "") != normalizeMerchant(bankName))
+        #expect(merged.category == .ocio)
+        #expect(categoryOf(merged, in: l.state, subscriptionKeys: []) == .ocio)
+    }
 }

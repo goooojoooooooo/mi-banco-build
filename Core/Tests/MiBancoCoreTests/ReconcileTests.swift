@@ -316,6 +316,20 @@ private func tx(
         #expect(l.state.movements.contains { $0.id == other.id })
     }
 
+    /// Un renombrado del banco que cambia la clave del comercio no pierde la categoría «para todo el comercio» de la clave
+    /// antigua.
+    @Test func renameByBankKeepsMerchantWideCategoryOnTheMovement() {
+        let oldName = "Zxq Shop Centro"
+        let row = Movement(bank: .rev, amountCents: -700, merchant: oldName, kind: .payment, source: .bank,
+                           date: at(11, 18), bankRef: "t1", bankStatus: .booked, importedAt: at(11, 19), dayOnly: true)
+        var l = Ledger(state: LedgerState(movements: [row], categoryOverrides: [normalizeMerchant(oldName): .ocio]))
+        let report = run(&l, [record("t1", -700, .transactionDay(at(11, 18)), merchant: "Zxq")])
+        #expect(report.updated == 1)
+        #expect(l.state.movements[0].merchant == "Zxq")
+        #expect(l.state.movements[0].category == .ocio)
+        #expect(categoryOf(l.state.movements[0], in: l.state, subscriptionKeys: []) == .ocio)
+    }
+
     @Test func statementAfterApiAddsNothing() {
         var l = ledger()
         _ = run(&l, [record("t1", -1250, .transactionDay(at(11, 18)), merchant: "Zara")])

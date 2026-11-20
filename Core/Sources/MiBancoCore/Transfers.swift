@@ -48,30 +48,30 @@ public func ownTransferPairs(in movements: [Movement]) -> [OwnTransferPair] {
     for m in movements where m.kind == .income && !m.flaggedNotMine && m.ownTransfer != false && !m.excludedFromSpending {
         incomes[abs(m.amountCents), default: []].append(m)
     }
-    var candidates: [(payment: Movement, income: Movement, gap: TimeInterval)] = []
+    // Cada candidato se ordena por (días de Madrid, segundos) sea cual sea el tipo de fila: una fila de solo día a 0 días
+    // no le quita el par a una contraparte con hora a dos minutos.
+    var candidates: [(payment: Movement, income: Movement, days: Int, seconds: TimeInterval)] = []
     for payment in payments {
         for income in incomes[abs(payment.amountCents)] ?? [] where income.bank != payment.bank {
-            let gap: TimeInterval
+            let days = abs(madridCalendar.dateComponents(
+                [.day], from: madridCalendar.startOfDay(for: payment.date),
+                to: madridCalendar.startOfDay(for: income.date)).day ?? Int.max / 2)
+            let seconds = abs(income.date.timeIntervalSince(payment.date))
+            let wording = hasTransferWording(payment.merchant) || hasTransferWording(income.merchant)
             let close: Bool
             if payment.dayOnly || income.dayOnly {
                 // Filas del banco de solo día (guardadas a mediodía): se cuentan días de Madrid, como en la conciliación.
                 // 1 día equivale a la ventana de 36 horas; 3 días, a la de las palabras de traspaso.
-                let days = abs(madridCalendar.dateComponents(
-                    [.day], from: madridCalendar.startOfDay(for: payment.date),
-                    to: madridCalendar.startOfDay(for: income.date)).day ?? Int.max / 2)
-                gap = TimeInterval(days) * 86_400
-                close = days <= 1
-                    || (days <= 3 && (hasTransferWording(payment.merchant) || hasTransferWording(income.merchant)))
+                close = days <= 1 || (days <= 3 && wording)
             } else {
-                gap = abs(income.date.timeIntervalSince(payment.date))
-                close = gap <= transferWindow
-                    || (gap <= transferWindowWithWording && (hasTransferWording(payment.merchant) || hasTransferWording(income.merchant)))
+                close = seconds <= transferWindow || (seconds <= transferWindowWithWording && wording)
             }
-            if close { candidates.append((payment, income, gap)) }
+            if close { candidates.append((payment, income, days, seconds)) }
         }
     }
     candidates.sort { a, b in
-        if a.gap != b.gap { return a.gap < b.gap }
+        if a.days != b.days { return a.days < b.days }
+        if a.seconds != b.seconds { return a.seconds < b.seconds }
         if a.payment.id != b.payment.id { return order(a.payment, b.payment) }
         return order(a.income, b.income)
     }
@@ -116,8 +116,57 @@ public func unconfirmedCaptureIDs(in state: LedgerState, now: Date) -> Set<UUID>
     return ids
 }
 
-/// Ids que nunca suman como gasto aunque sean pagos: los traspasos entre tus cuentas y los capturados sin confirmar.
+/// Capturados sin enlazar que casi seguro son el mismo pago que una fila del banco (R35): propina, preautorización,
+/// redondeo. Pareja probable = fila de un banco (API o extracto) del mismo banco, también un pago, a un día de Madrid o
+/// menos, con un importe entre un 5 % menos y un 30 % más que el del capturado. El emparejado es uno a uno, primero los
+/// de importe más cercano. Solo para las SUMAS DE GASTO: la etiqueta «Sin confirmar» sigue siendo la definición de 7 días
+/// (`unconfirmedCaptureIDs`). Los ids de `skip` (traspasos, capturados ya sin confirmar) ni se emparejan ni sirven de
+/// pareja; una operación de valores nunca es pareja.
+public func probableTwinCaptureIDs(in movements: [Movement], skipping skip: Set<UUID> = []) -> Set<UUID> {
+    let captures = movements.filter {
+        $0.kind == .payment && !$0.source.isBankSourced && $0.bankRef == nil && $0.statementRef == nil
+            && !$0.flaggedNotMine && !$0.excludedFromSpending && !skip.contains($0.id)
+    }
+    guard !captures.isEmpty else { return [] }
+    let rows = Dictionary(grouping: movements.filter {
+        $0.kind == .payment && $0.source.isBankSourced && !$0.excludedFromSpending && !skip.contains($0.id)
+    }, by: \.bank)
+    var candidates: [(capture: Movement, row: Movement, diff: Int, days: Int, seconds: TimeInterval)] = []
+    for capture in captures {
+        let cents = abs(capture.amountCents)
+        guard cents > 0 else { continue }
+        for row in rows[capture.bank] ?? [] {
+            let other = abs(row.amountCents)
+            guard other * 100 >= cents * 95, other * 100 <= cents * 130 else { continue }
+            let days = abs(madridCalendar.dateComponents(
+                [.day], from: madridCalendar.startOfDay(for: capture.date),
+                to: madridCalendar.startOfDay(for: row.date)).day ?? Int.max / 2)
+            guard days <= 1 else { continue }
+            candidates.append((capture, row, abs(other - cents), days, abs(row.date.timeIntervalSince(capture.date))))
+        }
+    }
+    candidates.sort { a, b in
+        if a.diff != b.diff { return a.diff < b.diff }
+        if a.days != b.days { return a.days < b.days }
+        if a.seconds != b.seconds { return a.seconds < b.seconds }
+        if a.capture.id != b.capture.id { return a.capture.id.uuidString < b.capture.id.uuidString }
+        return a.row.id.uuidString < b.row.id.uuidString
+    }
+    var usedCaptures = Set<UUID>()
+    var usedRows = Set<UUID>()
+    for c in candidates where !usedCaptures.contains(c.capture.id) && !usedRows.contains(c.row.id) {
+        usedCaptures.insert(c.capture.id)
+        usedRows.insert(c.row.id)
+    }
+    return usedCaptures
+}
+
+/// Ids que nunca suman como gasto aunque sean pagos: los traspasos entre tus cuentas, los capturados sin confirmar
+/// (definición de 7 días de Plan 2) y los capturados con pareja probable en una fila del banco (R35, ya el mismo día).
 /// Se calcula una vez por reconstrucción y se pasa a todas las sumas (parámetros `ownTransferIDs:` / `excluding:`).
 public func spendingExclusions(in state: LedgerState, now: Date) -> Set<UUID> {
-    ownTransferIDs(in: state.movements).union(unconfirmedCaptureIDs(in: state, now: now))
+    let transfers = ownTransferIDs(in: state.movements)
+    let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
+    return transfers.union(unconfirmed)
+        .union(probableTwinCaptureIDs(in: state.movements, skipping: transfers.union(unconfirmed)))
 }

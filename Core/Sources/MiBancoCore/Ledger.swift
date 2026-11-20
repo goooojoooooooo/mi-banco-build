@@ -448,7 +448,7 @@ public struct Ledger: Sendable {
             state.movements[i].fingerprint = fingerprint
             // El nombre del banco pasa a su campo propio; `merchant` queda con el del aviso si es útil.
             let bankName = state.movements[i].merchant
-            state.movements[i].merchant = richerMerchant(captured: parsed.merchant, bank: bankName)
+            setMerchantKeepingCategory(richerMerchant(captured: parsed.merchant, bank: bankName), at: i)
             state.movements[i].bankMerchant = bankName
             state.movements[i].isShop = state.movements[i].isShop || parsed.merchantIsShop
             return .merged(state.movements[i])
@@ -459,6 +459,19 @@ public struct Ledger: Sendable {
                                 date: now, fingerprint: fingerprint, isShop: parsed.merchantIsShop)
         state.movements.append(movement)
         return .stored(movement)
+    }
+
+    /// Cambia el comercio de un movimiento (un renombrado al conciliar, un aviso tardío fusionado). Si la clave del
+    /// comercio antiguo tenía una categoría «para todo el comercio» y la nueva no tiene ninguna, la categoría pasa al propio
+    /// movimiento para no perderla con el cambio de clave.
+    mutating func setMerchantKeepingCategory(_ merchant: String?, at i: Int) {
+        let oldKey = normalizeMerchant(state.movements[i].merchant ?? "")
+        let newKey = normalizeMerchant(merchant ?? "")
+        if oldKey != newKey, !oldKey.isEmpty, state.movements[i].category == nil,
+           let inherited = state.categoryOverrides[oldKey], state.categoryOverrides[newKey] == nil {
+            state.movements[i].category = inherited
+        }
+        state.movements[i].merchant = merchant
     }
 
     /// Un aviso sin leer idéntico dentro de la ventana de reentrega no se guarda dos veces.

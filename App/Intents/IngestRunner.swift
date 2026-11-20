@@ -53,7 +53,7 @@ enum IngestRunner {
                                                       total: snap.total)
             }
             // Avisos extra (saldo bajo, pago grande, duplicado...), uno por idea y nunca repetidos.
-            await InsightNotifier.post(immediateAlerts(afterStoring: m, in: snap.state, now: now, calendar: calendar))
+            await InsightNotifier.post(immediateAlerts(afterStoring: m, in: snap.state, now: now, calendar: calendar, notSpending: transfers))
             await AlertScheduler.reschedule(for: snap.state, now: now, calendar: calendar)
         case .unread:
             await AlertPoster.postUnread(bank: bank)

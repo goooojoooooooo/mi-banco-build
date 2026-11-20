@@ -146,11 +146,9 @@ struct LedgerSnapshot: Sendable {
             }
         }
         total = ledger.total()
-        // El emparejado de traspasos se calcula una sola vez por reconstrucción y se pasa a todas las sumas.
-        let transfers = ownTransferIDs(in: state.movements)
-        // Capturados sin confirmar (su pago ya está en la fila del banco): tampoco suman como gasto. Una vez también.
-        let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
-        let notSpending = transfers.union(unconfirmed)
+        // Lo que no suma como gasto (traspasos entre tus cuentas, capturados sin confirmar y capturados con pareja probable
+        // en una fila del banco) se calcula una sola vez por reconstrucción y se pasa a todas las sumas.
+        let notSpending = spendingExclusions(in: state, now: now)
         mutedMerchants = state.mutedMerchants
 
         let byDate = state.movements.sorted { $0.date > $1.date }

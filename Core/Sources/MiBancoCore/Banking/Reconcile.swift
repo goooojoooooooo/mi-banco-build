@@ -46,7 +46,7 @@ extension Ledger {
             guard let name, !name.isEmpty else { return false }
             if state.movements[i].source == channelSource {
                 guard state.movements[i].merchant != name else { return false }
-                state.movements[i].merchant = name
+                setMerchantKeepingCategory(name, at: i)
             } else if state.movements[i].source.isBankSourced {
                 return false
             } else {

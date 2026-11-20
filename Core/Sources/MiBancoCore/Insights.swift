@@ -93,7 +93,9 @@ struct MerchantIndex {
 private func movementInsights(_ m: Movement, in state: LedgerState, index: MerchantIndex, subscriptions: [Subscription],
                               ownTransfers: Set<UUID>,
                               calendar: Calendar) -> [Insight] {
-    // Lo que ya existía antes de importarse (historial del banco) no avisa ni cuenta como novedad.
+    // Lo que ya existía antes de importarse (historial del banco) no avisa ni cuenta como novedad. Un capturado excluido
+    // del gasto (traspaso, sin confirmar o con pareja probable en una fila del banco) tampoco saca sus propios avisos
+    // del feed: es el mismo pago que la fila del banco, que ya los lleva.
     if m.isHistorical || m.flaggedNotMine || ownTransfers.contains(m.id) || isMuted(m.merchant, in: state) { return [] }
     let settings = state.alertSettings
     let cents = abs(m.amountCents)
@@ -230,7 +232,9 @@ public func weeklyDigestText(for state: LedgerState, weekContaining date: Date, 
 /// Avisos extra para publicar justo después de guardar `movement` (nunca el aviso básico "Has pagado…").
 /// `state` es el libro DESPUÉS de guardarlo.
 /// El saldo bajo se avisa aunque el comercio esté silenciado: el saldo ha bajado de verdad.
-public func immediateAlerts(afterStoring movement: Movement, in state: LedgerState, now: Date, calendar: Calendar) -> [Insight] {
+/// `notSpending`: el conjunto de `spendingExclusions(in:now:)` si quien llama ya lo calculó (como en `insights`).
+public func immediateAlerts(afterStoring movement: Movement, in state: LedgerState, now: Date, calendar: Calendar,
+                            notSpending precomputed: Set<UUID>? = nil) -> [Insight] {
     // Lo que ya existía antes de importarse (historial del banco) no avisa de nada, tampoco de presupuestos ni de saldo.
     if movement.flaggedNotMine || movement.isHistorical { return [] }
     var out: [Insight] = []
@@ -248,7 +252,7 @@ public func immediateAlerts(afterStoring movement: Movement, in state: LedgerSta
     // El primer tramo de un traspaso real puede avisar antes de que exista su pareja (el segundo aún no ha llegado):
     // ese aviso ya salió y no se puede retirar. Se acepta; una vez emparejados, ningún tramo cuenta.
     // Traspasos y capturados sin confirmar (que ya están en la fila del banco): ni gasto ni avisos.
-    let transfers = spendingExclusions(in: state, now: now)
+    let transfers = precomputed ?? spendingExclusions(in: state, now: now)
     let subs = activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
     out += movementInsights(movement, in: state, index: MerchantIndex(state.movements, ownTransferIDs: transfers),
                             subscriptions: subs, ownTransfers: transfers, calendar: calendar)

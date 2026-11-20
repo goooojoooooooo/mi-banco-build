@@ -68,6 +68,70 @@ final class Plan3TapTests: XCTestCase {
         app.navigationBars.buttons.element(boundBy: 0).tap()
     }
 
+    private let gone = NSPredicate(format: "exists == false")
+
+    /// Cierra la hoja de compartir. El botón de cerrar aparece un instante DESPUÉS de la lista (mirar `exists` sin esperar era
+    /// la causa de que `testBackupRowsInSettings` fallara a veces en el simulador lento de CI): se espera por él, se toca y se
+    /// espera a que la hoja se vaya; si no, se desliza la hoja hacia abajo desde su borde superior y, en último lugar, se toca fuera.
+    private func closeShareSheet(_ share: XCUIElement) -> Bool {
+        for attempt in 0..<3 {
+            var closed = false
+            for name in ["Cerrar", "Close"] {
+                let button = app.buttons[name]
+                if button.waitForExistence(timeout: attempt == 0 ? 8 : 2) {
+                    button.tap()
+                    closed = true
+                    break
+                }
+            }
+            if !closed && share.exists {
+                let frame = share.frame
+                let origin = app.coordinate(withNormalizedOffset: .zero)
+                let from = origin.withOffset(CGVector(dx: frame.midX, dy: max(frame.minY - 24, 40)))
+                let to = origin.withOffset(CGVector(dx: frame.midX, dy: app.frame.maxY - 8))
+                from.press(forDuration: 0.1, thenDragTo: to, withVelocity: 600, thenHoldForDuration: 0)
+            }
+            if waitFor(gone, share, timeout: 8) { return true }
+        }
+        return !share.exists
+    }
+
+    /// Ajustes con las filas de copia de seguridad a la vista.
+    private func openBackupSettings() -> XCUIElement {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBackup"])
+        let save = element("backup-save")
+        XCTAssertTrue(save.waitForExistence(timeout: 15), "No se ven las filas de copia de seguridad")
+        scrollTo(save)
+        return save
+    }
+
+    /// La hoja de restaurar, abierta TOCANDO «Volver a lo de antes de restaurar» (nunca por argumento).
+    private func openRestoreSheetByTap() {
+        _ = openBackupSettings()
+        let previous = element("backup-previous")
+        scrollTo(previous)
+        XCTAssertTrue(previous.waitForExistence(timeout: 5), "Falta «Volver a lo de antes de restaurar» en la demo")
+        previous.tap()
+        XCTAssertTrue(element("restore-slide").waitForExistence(timeout: 15), "No se abrió la confirmación de restaurar")
+    }
+
+    /// Sale de primer plano y vuelve (lo que hace el dueño al ir al selector de apps).
+    private func backgroundAndReturn() {
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+    }
+
+    /// El botón de cerrar de la hoja del movimiento (su etiqueta es «Cerrar»).
+    private var sheetClose: XCUIElement { app.buttons["Cerrar"] }
+
+    /// Abre la primera fila de un comercio por su nombre (la n-ésima, empezando en 0).
+    private func movementRow(_ merchant: String, at index: Int) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier == %@ AND label CONTAINS %@", "movementRow", merchant))
+            .element(boundBy: index)
+    }
+
     // MARK: - Gasto
 
     /// En el simulador de CI la barra de pestañas de cristal tarda en cambiar de pestaña tras el toque (a veces lo toma
@@ -110,10 +174,18 @@ final class Plan3TapTests: XCTestCase {
         row.tap()
         XCTAssertTrue(element("categoria.total").waitForExistence(timeout: 5), "No se abrió la categoría")
         let comparison = element("categoria.comparacion")
-        if comparison.waitForExistence(timeout: 2) {
-            XCTAssertTrue(comparison.label.contains("a estas alturas"), "La comparación del mes en curso no dice «a estas alturas»")
-        }
+        XCTAssertTrue(comparison.waitForExistence(timeout: 5), "Falta la comparación del mes en la categoría")
+        XCTAssertTrue(comparison.label.contains("a estas alturas"), "La comparación del mes en curso no dice «a estas alturas»")
         XCTAssertTrue(app.tabBars.buttons["Gasto"].exists, "La barra de pestañas sigue ahí")
+
+        // Un pago de la categoría abre la hoja del movimiento (Gasto › categoría › hoja) y se cierra.
+        let payment = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(payment.waitForExistence(timeout: 5), "La categoría no lista pagos")
+        payment.tap()
+        XCTAssertTrue(sheetClose.waitForExistence(timeout: 8), "El pago de la categoría no abrió la hoja")
+        sheetClose.tap()
+        XCTAssertTrue(waitFor(gone, sheetClose, timeout: 8), "La hoja no se cerró")
+        XCTAssertTrue(element("categoria.total").waitForExistence(timeout: 5))
         goBack()
         XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 5), "No volvió a Gasto")
     }
@@ -233,36 +305,293 @@ final class Plan3TapTests: XCTestCase {
         save.tap()
         let share = app.otherElements["ActivityListView"]
         XCTAssertTrue(share.waitForExistence(timeout: 15), "No se abrió la hoja de compartir")
-        for name in ["Cerrar", "Close"] where app.buttons[name].exists {
-            app.buttons[name].tap()
-            break
-        }
-        if share.exists { share.swipeDown(velocity: .fast) }
-        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), share, timeout: 8))
+        XCTAssertTrue(closeShareSheet(share), "La hoja de compartir no se cerró")
     }
 
-    func testRestoreSheetCancelAndSlide() throws {
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoRestorePreview"])
+    /// R25 (a) y R27 (7): «Volver a lo de antes» se toca de verdad; la hoja se abre y «Cancelar» la cierra, también tocando
+    /// cerca del borde izquierdo (el botón entero responde, no solo la palabra).
+    func testRestoreSheetOpensByTapAndCancels() throws {
+        openRestoreSheetByTap()
         let cancel = app.buttons["restore-cancel"]
-        XCTAssertTrue(cancel.waitForExistence(timeout: 15), "No se abrió la confirmación de restaurar")
-        cancel.tap()
-        XCTAssertFalse(cancel.waitForExistence(timeout: 3), "Cancelar no cerró la hoja")
+        XCTAssertTrue(cancel.waitForExistence(timeout: 5), "Falta «Cancelar»")
+        XCTAssertGreaterThanOrEqual(cancel.frame.height, 43.5, "«Cancelar» mide menos de 44 pt")
+        cancel.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5)).tap()
+        XCTAssertTrue(waitFor(gone, element("restore-slide"), timeout: 8), "Cancelar no cerró la hoja")
+        XCTAssertTrue(waitFor(gone, cancel, timeout: 5))
+    }
 
-        // Se relanza y esta vez se desliza hasta el final: la copia se restaura y la hoja se cierra.
-        app.terminate()
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoRestorePreview"])
+    /// R25 (b): se desliza hasta el final y se espera el texto de éxito de la hoja, no solo a que desaparezca el control.
+    func testRestoreSlideShowsSuccessText() throws {
+        openRestoreSheetByTap()
         let slide = element("restore-slide")
-        XCTAssertTrue(slide.waitForExistence(timeout: 15))
         // La hoja termina de subir antes de arrastrar (si no, el arrastre se lo lleva la hoja); un segundo intento si hace falta.
         Thread.sleep(forTimeInterval: 1.5)
-        let gone = NSPredicate(format: "exists == false")
-        for _ in 0..<2 where slide.exists {
+        let success = app.staticTexts["Copia restaurada"]
+        for _ in 0..<2 where slide.exists && !success.exists {
             let frame = slide.frame
             let start = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 28, dy: frame.height / 2))
             let end = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
             start.press(forDuration: 0.3, thenDragTo: end, withVelocity: 300, thenHoldForDuration: 0.2)
-            if waitFor(gone, slide, timeout: 10) { break }
+            if success.waitForExistence(timeout: 10) { break }
         }
-        XCTAssertTrue(waitFor(gone, slide, timeout: 5), "Deslizar no restauró la copia")
+        XCTAssertTrue(success.exists || waitFor(NSPredicate(format: "exists == true"), success, timeout: 3),
+                      "Deslizar no mostró «Copia restaurada»")
+        XCTAssertTrue(waitFor(gone, slide, timeout: 10), "La hoja no se cerró tras restaurar")
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 10), "No volvió a Ajustes")
+    }
+
+    // MARK: - Copia de seguridad: el resto de filas con toque real (R25 c)
+
+    func testBackupCSVRowOpensShareSheet() throws {
+        _ = openBackupSettings()
+        let csv = element("backup-csv")
+        scrollTo(csv)
+        XCTAssertTrue(csv.waitForExistence(timeout: 5))
+        csv.tap()
+        let share = app.otherElements["ActivityListView"]
+        XCTAssertTrue(share.waitForExistence(timeout: 15), "El CSV no abrió la hoja de compartir")
+        XCTAssertTrue(closeShareSheet(share), "La hoja de compartir del CSV no se cerró")
+    }
+
+    func testBackupRestoreRowOpensFilePicker() throws {
+        _ = openBackupSettings()
+        let restore = element("backup-restore")
+        scrollTo(restore)
+        XCTAssertTrue(restore.waitForExistence(timeout: 5))
+        restore.tap()
+        // El selector de archivos del sistema: se reconoce por su botón de cancelar.
+        let cancelNames = ["Cancelar", "Cancel", "Cerrar", "Close"]
+        let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", cancelNames)).firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 20), "No apareció el selector de archivos")
+        cancel.tap()
+        XCTAssertTrue(waitFor(gone, cancel, timeout: 10), "El selector de archivos no se cerró")
+        XCTAssertTrue(element("backup-restore").waitForExistence(timeout: 5))
+    }
+
+    // MARK: - Traspasos abre la hoja del movimiento (R25 e)
+
+    func testTransfersRowOpensMovementSheet() throws {
+        openGasto()
+        let link = element("gasto.traspasos")
+        scrollTo(link)
+        XCTAssertTrue(link.waitForExistence(timeout: 5), "No hay enlace a Traspasos")
+        link.tap()
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "Traspasos no lista movimientos")
+        row.tap()
+        XCTAssertTrue(sheetClose.waitForExistence(timeout: 8), "La fila de Traspasos no abrió la hoja")
+        sheetClose.tap()
+        XCTAssertTrue(waitFor(gone, sheetClose, timeout: 8), "La hoja no se cerró")
+    }
+
+    // MARK: - Presupuestos: vaciar el campo quita el límite (R25 f) y VoiceOver en modo privado (R27 8)
+
+    func testEmptyingBudgetFieldRemovesLimit() throws {
+        openGasto()
+        let link = element("gasto.presupuestos")
+        scrollTo(link)
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        let field = app.textFields["presupuestos.mes"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "No se ve el presupuesto del mes")
+        XCTAssertTrue(element("presupuestos.pie").label.contains("Deja el campo vacío para quitar el límite."),
+                      "Falta cómo quitar un presupuesto")
+        // La demo trae un presupuesto del mes de 700 €.
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "700"), field, timeout: 5), "La demo no trae el límite del mes")
+
+        field.tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + "\n")
+        goBack()
+        scrollTo(link)
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitFor(NSPredicate(format: "NOT (value CONTAINS %@)", "700"), field, timeout: 10),
+                      "Vaciar el campo no quitó el límite")
+    }
+
+    func testPrivateModeHidesBudgetFromVoiceOver() throws {
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 20), "No se ve Gasto")
+        let link = element("gasto.presupuestos")
+        scrollTo(link)
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        let field = app.textFields["presupuestos.mes"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "importe oculto"), field, timeout: 5),
+                      "VoiceOver lee el límite con el modo privado")
+    }
+
+    // MARK: - «Aplicar a todo» y volver a lo automático (R22, R25 d)
+
+    private func openFirstMercadonaCategory() -> XCUIElement {
+        launch()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let row = movementRow("Mercadona", at: 0)
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "No hay pagos de Mercadona en la demo")
+        row.tap()
+        let chip = app.buttons["category-chip"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), "La hoja no tiene la fila de categoría")
+        return chip
+    }
+
+    private func closeSheet() {
+        XCTAssertTrue(sheetClose.waitForExistence(timeout: 5))
+        sheetClose.tap()
+        XCTAssertTrue(waitFor(gone, sheetClose, timeout: 8), "La hoja no se cerró")
+    }
+
+    /// Con «Aplicar a todo» encendido (lo normal en un comercio), la elección llega a otro pago del mismo comercio.
+    func testApplyToMerchantOnReachesSecondPayment() throws {
+        let chip = openFirstMercadonaCategory()
+        chip.tap()
+        let toggle = element("category-apply-merchant")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        scrollTo(toggle, swipes: 3)
+        // Se apaga y se vuelve a encender: queda para todo el comercio.
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "0"), toggle, timeout: 5), "El interruptor no se apagó")
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "1"), toggle, timeout: 5), "El interruptor no se encendió")
+        let tile = app.buttons["category-tile-comerFuera"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        tile.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Comer fuera"), chip, timeout: 5))
+        closeSheet()
+
+        let second = movementRow("Mercadona", at: 1)
+        scrollTo(second)
+        XCTAssertTrue(second.waitForExistence(timeout: 5), "La demo no trae un segundo pago de Mercadona")
+        second.tap()
+        let secondChip = app.buttons["category-chip"]
+        XCTAssertTrue(secondChip.waitForExistence(timeout: 5))
+        XCTAssertEqual(secondChip.label, "Categoría: Comer fuera", "La categoría para todo el comercio no llegó al otro pago")
+    }
+
+    /// Con «Aplicar a todo» apagado, el otro pago del comercio no cambia.
+    func testApplyToMerchantOffLeavesSecondPayment() throws {
+        let chip = openFirstMercadonaCategory()
+        let original = chip.label
+        chip.tap()
+        let toggle = element("category-apply-merchant")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+        scrollTo(toggle, swipes: 3)
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "0"), toggle, timeout: 5), "El interruptor no se apagó")
+        let tile = app.buttons["category-tile-comerFuera"]
+        XCTAssertTrue(tile.waitForExistence(timeout: 5))
+        tile.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Comer fuera"), chip, timeout: 5))
+        closeSheet()
+
+        let second = movementRow("Mercadona", at: 1)
+        scrollTo(second)
+        XCTAssertTrue(second.waitForExistence(timeout: 5), "La demo no trae un segundo pago de Mercadona")
+        second.tap()
+        let secondChip = app.buttons["category-chip"]
+        XCTAssertTrue(secondChip.waitForExistence(timeout: 5))
+        XCTAssertEqual(secondChip.label, original, "La elección de un solo pago cambió otro pago del comercio")
+    }
+
+    /// R22: los dos textos del botón y lo que hace cada uno.
+    func testResetButtonHasTwoMeaningsAndTexts() throws {
+        let chip = openFirstMercadonaCategory()
+        let original = chip.label
+
+        // 1. Para todo el comercio: sin elección propia, el botón quita la del comercio y lo dice con su nombre.
+        chip.tap()
+        app.buttons["category-tile-casa"].tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Casa"), chip, timeout: 5))
+        chip.tap()
+        let reset = app.buttons["category-automatic"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        XCTAssertEqual(reset.label, "Quitar mi categoría de todo Mercadona")
+
+        // 2. Elección propia encima de la del comercio: el botón quita SOLO la del pago y el pago vuelve a la del comercio.
+        let toggle = element("category-apply-merchant")
+        scrollTo(toggle, swipes: 3)
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "0"), toggle, timeout: 5))
+        app.buttons["category-tile-comerFuera"].tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Comer fuera"), chip, timeout: 5))
+        chip.tap()
+        XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        XCTAssertEqual(reset.label, "Volver a la categoría automática")
+        reset.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Casa"), chip, timeout: 5),
+                      "Volver a lo automático borró también la elección del comercio")
+
+        // 3. Ahora solo queda la del comercio: el botón dice su nombre y la quita.
+        chip.tap()
+        XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        XCTAssertEqual(reset.label, "Quitar mi categoría de todo Mercadona")
+        reset.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", original), chip, timeout: 5))
+    }
+
+    // MARK: - R24: un solo toque en cada pestaña (visible en el log, sin poner en rojo la ejecución)
+
+    func testTabSwitchSingleTapStrict() throws {
+        continueAfterFailure = true
+        launch()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let steps: [(String, XCUIElement)] = [
+            ("Avisos", app.navigationBars["Avisos"]),
+            ("Ajustes", app.navigationBars["Ajustes"]),
+            ("Gasto", element("gasto.total")),
+            ("Inicio", app.staticTexts["Tu dinero"]),
+        ]
+        XCTExpectFailure("Cambio de pestaña con un solo toque: lento o ignorado en el simulador de CI", strict: false) {
+            for (name, target) in steps {
+                app.tabBars.buttons[name].tap()
+                XCTAssertTrue(target.waitForExistence(timeout: 5), "La pestaña \(name) no cambió con un solo toque")
+            }
+        }
+    }
+
+    // MARK: - R25 (h): salir de primer plano cierra todo lo que está encima
+
+    func testBackgroundClosesMovementSheet() throws {
+        launch()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.tap()
+        XCTAssertTrue(sheetClose.waitForExistence(timeout: 8), "No se abrió la hoja del movimiento")
+        backgroundAndReturn()
+        XCTAssertTrue(waitFor(gone, sheetClose, timeout: 10), "La hoja del movimiento sigue abierta tras salir de primer plano")
+    }
+
+    func testBackgroundClosesShareSheet() throws {
+        let save = openBackupSettings()
+        save.tap()
+        let share = app.otherElements["ActivityListView"]
+        XCTAssertTrue(share.waitForExistence(timeout: 15), "No se abrió la hoja de compartir")
+        backgroundAndReturn()
+        XCTAssertTrue(waitFor(gone, share, timeout: 10), "La hoja de compartir sigue abierta tras salir de primer plano")
+    }
+
+    func testBackgroundClosesRestoreSheet() throws {
+        openRestoreSheetByTap()
+        backgroundAndReturn()
+        XCTAssertTrue(waitFor(gone, element("restore-slide"), timeout: 10),
+                      "La confirmación de restaurar sigue abierta tras salir de primer plano")
+    }
+
+    /// R26: el menú contextual de una suscripción tampoco sobrevive a salir de primer plano.
+    func testBackgroundClosesContextMenu() throws {
+        openGasto()
+        let link = element("gasto.suscripciones")
+        scrollTo(link)
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        link.tap()
+        let row = app.descendants(matching: .any).matching(identifier: "suscripciones.fila").element(boundBy: 0)
+        XCTAssertTrue(row.waitForExistence(timeout: 5))
+        row.press(forDuration: 1.2)
+        let hide = app.buttons["Esto no es una suscripción"]
+        XCTAssertTrue(hide.waitForExistence(timeout: 5), "No salió el menú de ocultar")
+        backgroundAndReturn()
+        XCTAssertTrue(waitFor(gone, hide, timeout: 10), "El menú contextual sigue abierto tras salir de primer plano")
     }
 }

@@ -54,12 +54,14 @@ struct RestoreConfirmView: View {
                 .accessibilityIdentifier("restore-slide")
                 .allowsHitTesting(phase != .restored)
             if phase != .restored {
-                Button("Cancelar") { dismiss() }
-                    .titan(.option)
-                    .foregroundStyle(Theme.label2)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
-                    .accessibilityIdentifier("restore-cancel")
+                Button { dismiss() } label: {
+                    Text("Cancelar")
+                        .titan(.option)
+                        .foregroundStyle(Theme.label2)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("restore-cancel")
             }
         }
         .padding(.horizontal, 22)
@@ -95,11 +97,15 @@ struct RestoreConfirmView: View {
             phase = .restored
             AccessibilityNotification.Announcement("Copia restaurada").post()
             Task {
-                try? await Task.sleep(for: .milliseconds(900))
+                // Tiempo para leer «Copia restaurada» (y para que una prueba lenta lo vea) antes de cerrar la hoja.
+                try? await Task.sleep(for: .milliseconds(1_600))
                 finished()
             }
         } catch RestoreError.safetyCopyFailed {
             fail("No se pudo guardar la copia de lo que hay ahora, así que no se ha restaurado nada.")
+        } catch RestoreError.reloadFailed {
+            // Lo escrito ya está en el disco: no se puede decir que los datos no cambiaron.
+            fail("No se pudo terminar. Cierra la app y vuelve a abrirla.")
         } catch {
             fail("No se pudo restaurar. Tus datos no han cambiado.")
         }

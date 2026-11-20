@@ -220,7 +220,9 @@ final class LedgerModel {
         try store.restoreKeepingCopy(file.ledger, copyName: Self.safetyCopyName)
         // Se publica lo que quedó en disco aunque coincida con lo anterior: así se rehacen siempre el snapshot y los
         // recordatorios (`reschedule`) con los datos restaurados.
-        publish(try store.load())
+        let reloaded: LedgerState
+        do { reloaded = try store.load() } catch { throw RestoreError.reloadFailed }
+        publish(reloaded)
         restoreCount += 1
     }
 

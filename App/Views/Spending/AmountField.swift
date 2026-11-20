@@ -14,6 +14,8 @@ struct AmountField<ID: Hashable>: View {
     let stacked: Bool
     let onSubmit: () -> Void
 
+    @Environment(AppPreferences.self) private var preferences
+
     var body: some View {
         HStack(spacing: 8) {
             if saved {
@@ -33,11 +35,14 @@ struct AmountField<ID: Hashable>: View {
                 .onSubmit(onSubmit)
                 .padding(.horizontal, 10)
                 .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 44)
-                .background(Color(hex: "#2A2A2D").opacity(focused.wrappedValue == id ? 1 : 0),
+                .background(Theme.fieldFill.opacity(focused.wrappedValue == id ? 1 : 0),
                             in: .rect(cornerRadius: Theme.Radius.field))
                 .animation(Theme.Motion.quick, value: focused.wrappedValue == id)
                 .privateField(editing: focused.wrappedValue == id)
                 .accessibilityLabel(label)
+                // Con el modo privado, VoiceOver no lee el límite (solo mientras no se edita y hay algo escrito).
+                .accessibilityValue(preferences.privateMode && focused.wrappedValue != id && !text.isEmpty
+                                    ? "importe oculto" : text)
                 .accessibilityIdentifier(identifier)
         }
         .contentShape(Rectangle())

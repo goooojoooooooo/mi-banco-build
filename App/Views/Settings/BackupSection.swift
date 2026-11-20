@@ -93,13 +93,13 @@ struct BackupSection: View {
                     case .working:
                         ProgressView().tint(Theme.label).transition(.opacity)
                     case .done:
-                        DrawnCheck(lineWidth: 2, color: .black)
+                        DrawnCheck(lineWidth: 2, color: Theme.onTileSelected)
                             .frame(width: 16, height: 16)
                             .transition(.opacity)
                     }
                 }
                 .frame(width: 30, height: 30)
-                .background(state == .done ? Color.white : Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
+                .background(state == .done ? Theme.tileSelected : Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
                 .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph, value: state)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {

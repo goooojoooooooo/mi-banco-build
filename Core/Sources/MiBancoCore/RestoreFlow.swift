@@ -3,6 +3,8 @@ import Foundation
 public enum RestoreError: Error, Equatable, Sendable {
     /// No se pudo guardar la copia de lo que había: la restauración se aborta y no se toca nada.
     case safetyCopyFailed
+    /// La restauración se escribió bien pero no se pudo volver a leer el libro: los datos SÍ cambiaron en el disco.
+    case reloadFailed
 }
 
 public extension FileStore {

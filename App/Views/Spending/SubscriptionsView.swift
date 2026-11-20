@@ -263,7 +263,7 @@ struct SubscriptionRowView: View {
                 .opacity(isLast ? 0 : 1)
         }
         .contentShape(Rectangle())
-        .contextMenu {
+        .gatedContextMenu(privateTitle: row.merchant) {
             if let hideAction {
                 Button("Esto no es una suscripción", systemImage: "eye.slash", action: hideAction)
             }

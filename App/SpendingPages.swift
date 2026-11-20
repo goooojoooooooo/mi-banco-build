@@ -110,9 +110,9 @@ extension LedgerSnapshot {
         return "\(formatEUR(abs(difference))) \(difference < 0 ? "menos" : "más") que en \(previous)"
     }
 
-    /// "12 % más que el mes pasado".
+    /// "12 % más que el mes pasado a estas alturas" (el mes en curso se compara con el mismo punto del mes anterior).
     private static func spoken(percent: Int, current: Bool) -> String {
-        let reference = current ? "el mes pasado" : "el mes anterior"
+        let reference = current ? "el mes pasado a estas alturas" : "el mes anterior"
         if percent == 0 { return "igual que \(reference)" }
         return "\(abs(percent)) % \(percent > 0 ? "más" : "menos") que \(reference)"
     }

@@ -21,11 +21,14 @@ struct RootView: View {
     /// Bloqueo y primer plano en vivo, para los cierres que llevan una copia de esta vista (ver `PresentationGate`).
     @State private var gate = PresentationGate()
     @State private var noticeTask: Task<Void, Never>?
+    /// La espera de 250 ms antes de abrir el detalle de un aviso tocado: se cancela al cerrar todo.
+    @State private var routeTask: Task<Void, Never>?
     /// Hoja de un movimiento abierta desde Avisos o desde un aviso tocado.
     private var detail: DetailRoute? {
         get { if case .movement(let route) = sheet { route } else { nil } }
         nonmutating set {
-            if let newValue { sheet = .movement(newValue) } else if case .movement = sheet { sheet = nil }
+            // Toda hoja nueva pasa por el estado VIVO (`gate`): esta copia de la vista puede ser de antes.
+            if let newValue { if gate.canPresent { sheet = .movement(newValue) } } else if case .movement = sheet { sheet = nil }
         }
     }
     @State private var pendingDelete: UUID?
@@ -52,11 +55,12 @@ struct RootView: View {
             .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
             Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
                 SettingsScrollHost {
-                    SettingsView(model: model, focusRequest: $settingsFocus, present: present, importBackup: { importing = true })
+                    SettingsView(model: model, focusRequest: $settingsFocus, present: present, importBackup: startImport)
                 }
             }
         }
         .tint(Theme.label)
+        .environment(\.presentationGate, gate)
         .modifier(MinimizesTabBarOnScroll())
         .overlay(alignment: .bottom) {
             TabBarCurtain(token: revealToken)
@@ -155,11 +159,20 @@ struct RootView: View {
     /// Hoja y selector de archivos fuera: al bloquear y al salir de primer plano.
     private func closeEverything() {
         if case .share(let share) = sheet { BackupService.remove(share.url) }
+        gate.generation += 1
+        routeTask?.cancel()
+        routeTask = nil
         sheet = nil
         importing = false
     }
 
     /// Las hojas nuevas (compartir, restaurar) nunca suben con el bloqueo delante ni fuera de primer plano.
+    /// El selector de archivos, también con el estado vivo.
+    private func startImport() {
+        guard gate.canPresent, !isLocked, scenePhase == .active else { return }
+        importing = true
+    }
+
     private func present(_ item: RootSheet) {
         // `gate` es vivo; `isLocked` y `scenePhase` de esta copia de la vista pueden ser de antes del toque.
         guard gate.canPresent, !isLocked, scenePhase == .active else {
@@ -206,7 +219,7 @@ struct RootView: View {
 
     /// Nunca con el bloqueo delante ni con la app fuera de primer plano.
     private func openDetail(_ id: UUID, zooms: Bool = false) {
-        guard !isLocked, scenePhase == .active, model.movement(id) != nil else { return }
+        guard gate.canPresent, !isLocked, scenePhase == .active, model.movement(id) != nil else { return }
         detail = DetailRoute(id: id, zooms: zooms)
     }
 
@@ -219,8 +232,10 @@ struct RootView: View {
         }
         if let id = route.movementID {
             // Tras el cambio de pestaña, para que la hoja suba sobre la pantalla buena.
-            Task {
+            routeTask?.cancel()
+            routeTask = Task {
                 try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled else { return }
                 openDetail(id)
             }
         }
@@ -255,7 +270,7 @@ struct RootView: View {
         if DemoMode.opensRestorePreview {
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
-                sheet = .restore(DemoMode.demoRestorePreview(currentCount: model.state.movements.count))
+                if gate.canPresent { sheet = .restore(DemoMode.demoRestorePreview(currentCount: model.state.movements.count)) }
             }
         }
     }

@@ -18,6 +18,7 @@ struct BackupSection: View {
     @State private var doneTick = 0
     @State private var errorTick = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.presentationGate) private var gate
 
     static let scrollID = "copia-seguridad"
 
@@ -38,7 +39,8 @@ struct BackupSection: View {
             if let previous {
                 Button {
                     // Se vuelve a leer al tocar: así el recuento de "lo de ahora" es el de ese momento.
-                    if let fresh = model.previousPreview() { present(.restore(fresh)) }
+                    // Si la copia desapareció desde que se pintó la fila, la fila se actualiza en vez de no hacer nada.
+                    if let fresh = model.previousPreview() { present(.restore(fresh)) } else { self.previous = nil }
                 } label: {
                     OptionLabel(title: "Volver a lo de antes de restaurar", detail: "Datos del \(Self.dayText(previous.file.exportedAt))",
                                 systemImage: "clock.arrow.circlepath")
@@ -86,7 +88,7 @@ struct BackupSection: View {
                     case .idle:
                         Image(systemName: systemImage)
                             .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(Theme.card2High)
+                            .foregroundStyle(Theme.iconGlyph)
                             .transition(.opacity)
                     case .working:
                         ProgressView().tint(Theme.label).transition(.opacity)
@@ -133,6 +135,9 @@ struct BackupSection: View {
 
     private func export(_ kind: Kind) async {
         failed = false
+        // Si desde este toque la app se bloquea o sale de primer plano (aunque luego se desbloquee), el resultado se descarta.
+        let generation = gate?.generation
+        func stale() -> Bool { gate != nil && gate?.generation != generation }
         set(kind, .working)
         let state = model.state
         let now = Date()
@@ -141,9 +146,19 @@ struct BackupSection: View {
         }.value
         switch result {
         case .success(let url):
+            if stale() {
+                BackupService.remove(url)
+                set(kind, .idle)
+                return
+            }
             set(kind, .done)
             doneTick += 1
             try? await Task.sleep(for: .milliseconds(550))
+            if stale() {
+                BackupService.remove(url)
+                set(kind, .idle)
+                return
+            }
             present(.share(ShareItem(url: url)))
             try? await Task.sleep(for: .milliseconds(700))
             set(kind, .idle)

@@ -255,7 +255,7 @@ private struct BalanceRow: View {
                         .onSubmit(onSubmit)
                         .padding(.horizontal, 10)
                         .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
-                        .background(Color(hex: "#2A2A2D").opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                        .background(Theme.fieldFill.opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                         .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
                         .privateField(editing: focused.wrappedValue == bank)
                         .accessibilityLabel("Saldo de \(bank.displayName)")
@@ -298,9 +298,9 @@ struct OptionLabel: View {
         HStack(spacing: 14) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color(hex: "#D1D1D6"))
+                .foregroundStyle(Theme.iconGlyph)
                 .frame(width: 30, height: 30)
-                .background(Color(hex: "#232325"), in: .rect(cornerRadius: 8, style: .continuous))
+                .background(Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).titan(.option).foregroundStyle(Theme.label)

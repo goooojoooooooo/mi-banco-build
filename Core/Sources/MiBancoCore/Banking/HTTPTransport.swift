@@ -36,3 +36,9 @@ public enum BankingClientError: Error, Equatable {
     case tooManyPages
     case badResponse
 }
+
+/// Sin cabeceras, cuerpo ni consulta: llevan el token, el código y el `state`.
+extension HTTPRequest: CustomStringConvertible, CustomDebugStringConvertible {
+    public var description: String { "HTTPRequest(\(method) \(url.host ?? "?"), redacted)" }
+    public var debugDescription: String { description }
+}

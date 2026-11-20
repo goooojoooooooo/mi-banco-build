@@ -1,3 +1,4 @@
+import MiBancoCore
 import SwiftUI
 import UserNotifications
 
@@ -91,7 +92,14 @@ struct MiBancoApp: App {
             .environment(preferences)
             .preferredColorScheme(.dark)
             .environment(\.locale, Locale(identifier: "es_ES"))
+            // Conexión bancaria (tarea 9): solo `mibanco://cb`; cualquier otra dirección se ignora sin ruido.
+            .onOpenURL { url in
+                guard isBankCallbackURL(url) else { return }
+                Task { await BankConnector.shared.handle(url: url) }
+            }
             .onChange(of: scenePhase) { _, phase in
+                // Conexión bancaria (tarea 9): el conector decide con su propio estado; el bloqueo no interviene.
+                BankConnector.shared.sceneDidChange(to: phase)
                 switch phase {
                 case .active:
                     model.reload()

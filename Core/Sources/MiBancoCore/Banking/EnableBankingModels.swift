@@ -37,6 +37,12 @@ public struct EBAmount: Codable, Equatable, Sendable {
         self.currency = currency
         self.amount = amount
     }
+
+    /// Céntimos solo si la divisa es EUR; con cualquier otra no se interpreta el número como euros.
+    public var euroCents: Int? {
+        guard currency.uppercased() == "EUR" else { return nil }
+        return centsFromDecimalString(amount)
+    }
 }
 
 public enum EBTransactionStatus: String, Codable, Sendable {
@@ -107,8 +113,9 @@ public struct EBTransaction: Codable, Equatable, Sendable {
     }
 
     /// DBIT negativo, CRDT positivo, siempre sobre el valor absoluto del importe.
+    /// Solo importes en euros: otra divisa da `nil` y nunca se casa ni se cuenta.
     public var signedCents: Int? {
-        guard let cents = centsFromDecimalString(transactionAmount.amount) else { return nil }
+        guard let cents = transactionAmount.euroCents else { return nil }
         switch creditDebitIndicator {
         case "DBIT": return -abs(cents)
         case "CRDT": return abs(cents)

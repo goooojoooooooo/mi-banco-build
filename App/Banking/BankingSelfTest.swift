@@ -68,7 +68,9 @@ enum BankingSelfTest {
             guard try KeychainVault.data(for: .appID, service: testService) == nil else { return failure("llavero") }
         } catch {
             try? KeychainVault.deleteAll(service: testService)
-            return failure("llavero")
+            // El código del sistema (OSStatus) no es secreto y dice por qué falla el Llavero.
+            if case KeychainError.status(let code) = error { return failure("llavero (\(code))") }
+            return failure("llavero (\(error))")
         }
 
         // 6. El transporte se construye (no se envía nada).

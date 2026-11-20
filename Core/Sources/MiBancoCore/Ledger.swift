@@ -24,6 +24,10 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public var note: String?
     /// true = el usuario dice que este movimiento no es suyo: se excluye de sumas, detecciones y avisos.
     public var flaggedNotMine: Bool
+    /// La categoría que el dueño puso a este movimiento (nil = la decide la app).
+    public var category: SpendingCategory?
+    /// nil = lo decide la app (ver `ownTransferPairs`); true = el dueño dice que es un traspaso entre sus cuentas; false = dice que no.
+    public var ownTransfer: Bool?
 
     // MARK: Datos del banco (Plan 2)
     /// Clave del registro de la API del banco una vez enlazado.
@@ -35,6 +39,18 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public var importedAt: Date?
     /// true = la fecha es un día sin hora (se guarda al mediodía de Madrid).
     public var dayOnly: Bool
+    /// Nombre que da el banco cuando se enlazó a un capturado. NUNCA sustituye a `merchant` (de él salen las
+    /// categorías, los silenciados y las suscripciones); solo se muestra si el capturado no trae nombre útil.
+    public var bankMerchant: String?
+    /// true = no es gasto aunque mueva el saldo (compras y ventas de valores de Trade Republic): las sumas de gasto
+    /// deben saltárselo.
+    public var excludedFromSpending: Bool
+    /// Cuándo enlazó el canal del banco a este capturado con su registro (nil = no se sabe o no se enlazó por ahí). El
+    /// criterio de saldo lo compara con la consulta de la lectura; `importedAt` no sirve: también decide `isHistorical`.
+    public var linkedAt: Date?
+
+    /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
+    public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
 
     /// Movimiento que ya existía de antes de importarse: no debe avisar ni contar como novedad.
     public var isHistorical: Bool { importedAt.map { date < $0.addingTimeInterval(-48 * 3600) } ?? false }
@@ -42,8 +58,10 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     public init(id: UUID = UUID(), bank: BankID, amountCents: Int, merchant: String?, kind: MovementKind, source: Source, date: Date,
                 pairedAcrossSources: Bool = false, fingerprint: String? = nil, pairedFingerprint: String? = nil,
                 isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false,
+                category: SpendingCategory? = nil, ownTransfer: Bool? = nil,
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
-                importedAt: Date? = nil, dayOnly: Bool = false) {
+                importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
+                excludedFromSpending: Bool = false, linkedAt: Date? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -57,17 +75,22 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.isShop = isShop
         self.note = note
         self.flaggedNotMine = flaggedNotMine
+        self.category = category
+        self.ownTransfer = ownTransfer
         self.bankRef = bankRef
         self.statementRef = statementRef
         self.bankStatus = bankStatus
         self.importedAt = importedAt
         self.dayOnly = dayOnly
+        self.bankMerchant = bankMerchant
+        self.excludedFromSpending = excludedFromSpending
+        self.linkedAt = linkedAt
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
-        case note, flaggedNotMine
-        case bankRef, statementRef, bankStatus, importedAt, dayOnly
+        case note, flaggedNotMine, category, ownTransfer
+        case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -86,11 +109,16 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         isShop = try c.decodeIfPresent(Bool.self, forKey: .isShop) ?? false
         note = try c.decodeIfPresent(String.self, forKey: .note)
         flaggedNotMine = try c.decodeIfPresent(Bool.self, forKey: .flaggedNotMine) ?? false
+        category = try c.decodeIfPresent(SpendingCategory.self, forKey: .category)
+        ownTransfer = try c.decodeIfPresent(Bool.self, forKey: .ownTransfer)
         bankRef = try c.decodeIfPresent(String.self, forKey: .bankRef)
         statementRef = try c.decodeIfPresent(String.self, forKey: .statementRef)
         bankStatus = try c.decodeIfPresent(BankStatus.self, forKey: .bankStatus)
         importedAt = try c.decodeIfPresent(Date.self, forKey: .importedAt)
         dayOnly = try c.decodeIfPresent(Bool.self, forKey: .dayOnly) ?? false
+        bankMerchant = try c.decodeIfPresent(String.self, forKey: .bankMerchant)
+        excludedFromSpending = try c.decodeIfPresent(Bool.self, forKey: .excludedFromSpending) ?? false
+        linkedAt = try c.decodeIfPresent(Date.self, forKey: .linkedAt)
     }
 }
 
@@ -105,6 +133,9 @@ public struct ManualBalance: Codable, Equatable, Sendable {
     public var setAt: Date
     /// De dónde salió la lectura (a mano, aviso, API del banco o extracto).
     public var origin: BalanceOrigin
+    /// Cuándo se consultó al banco para obtener esta lectura (puede ser posterior a `setAt`, la hora de referencia del
+    /// saldo). nil = no se sabe: se usa `setAt`.
+    public var fetchedAt: Date?
     /// true = el saldo lo comunicó el banco (aviso, API o extracto); false = puesto a mano.
     public var fromBank: Bool { origin != .manual }
 
@@ -112,13 +143,14 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         self.init(cents: cents, setAt: setAt, origin: fromBank ? .notice : .manual)
     }
 
-    public init(cents: Int, setAt: Date, origin: BalanceOrigin) {
+    public init(cents: Int, setAt: Date, origin: BalanceOrigin, fetchedAt: Date? = nil) {
         self.cents = cents
         self.setAt = setAt
         self.origin = origin
+        self.fetchedAt = fetchedAt
     }
 
-    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank }
+    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank, fetchedAt }
 
     /// Los libros anteriores solo traen `fromBank`: true era un aviso.
     public init(from decoder: any Decoder) throws {
@@ -130,6 +162,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         } else {
             origin = (try c.decodeIfPresent(Bool.self, forKey: .fromBank) ?? false) ? .notice : .manual
         }
+        fetchedAt = try c.decodeIfPresent(Date.self, forKey: .fetchedAt)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -138,6 +171,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         try c.encode(setAt, forKey: .setAt)
         try c.encode(origin, forKey: .origin)
         try c.encode(fromBank, forKey: .fromBank)
+        try c.encodeIfPresent(fetchedAt, forKey: .fetchedAt)
     }
 }
 
@@ -162,23 +196,37 @@ public struct LedgerState: Codable, Equatable, Sendable {
     public var alertSettings: AlertSettings
     /// Comercios silenciados, con la clave de `normalizeMerchant`.
     public var mutedMerchants: Set<String>
+    /// Categoría recordada por comercio (clave de `normalizeMerchant`).
+    public var categoryOverrides: [String: SpendingCategory]
+    public var budgets: Budgets
+    /// Suscripciones que el dueño ocultó, con id `"<banco>|<clave del comercio>"`.
+    public var dismissedSubscriptions: Set<String>
     // MARK: Datos del banco (Plan 2)
     /// Estado (sin secretos) de la conexión de cada banco.
     public var links: [BankID: BankLinkInfo]
+    /// Periodos que cubren los extractos importados, por banco (R38): de la primera fila al último día completo antes de
+    /// importarlo. Un día solo está cubierto dentro de uno de ellos; entre dos extractos no hay cobertura.
+    public var statementCoverage: [BankID: [DateInterval]]
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
                 alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
-                links: [BankID: BankLinkInfo] = [:]) {
+                categoryOverrides: [String: SpendingCategory] = [:], budgets: Budgets = Budgets(),
+                dismissedSubscriptions: Set<String> = [],
+                links: [BankID: BankLinkInfo] = [:], statementCoverage: [BankID: [DateInterval]] = [:]) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
         self.alertSettings = alertSettings
         self.mutedMerchants = mutedMerchants
+        self.categoryOverrides = categoryOverrides
+        self.budgets = budgets
+        self.dismissedSubscriptions = dismissedSubscriptions
         self.links = links
+        self.statementCoverage = statementCoverage
     }
 
-    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants
-        case links
+    private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides, budgets, dismissedSubscriptions
+        case links, statementCoverage
     }
 
     /// Los libros guardados antes de los avisos no traen ajustes ni silenciados: valores por defecto.
@@ -189,7 +237,11 @@ public struct LedgerState: Codable, Equatable, Sendable {
         unread = try c.decode([UnreadNotice].self, forKey: .unread)
         alertSettings = try c.decodeIfPresent(AlertSettings.self, forKey: .alertSettings) ?? AlertSettings()
         mutedMerchants = try c.decodeIfPresent(Set<String>.self, forKey: .mutedMerchants) ?? []
+        categoryOverrides = try c.decodeIfPresent([String: SpendingCategory].self, forKey: .categoryOverrides) ?? [:]
+        budgets = try c.decodeIfPresent(Budgets.self, forKey: .budgets) ?? Budgets()
+        dismissedSubscriptions = try c.decodeIfPresent(Set<String>.self, forKey: .dismissedSubscriptions) ?? []
         links = try c.decodeIfPresent([BankID: BankLinkInfo].self, forKey: .links) ?? [:]
+        statementCoverage = try c.decodeIfPresent([BankID: [DateInterval]].self, forKey: .statementCoverage) ?? [:]
     }
 }
 
@@ -220,7 +272,7 @@ extension Movement.Source {
 }
 
 public struct Ledger: Sendable {
-    public private(set) var state: LedgerState
+    public internal(set) var state: LedgerState
 
     /// Cartera y aviso del mismo banco con el mismo importe firmado dentro de esta ventana = el mismo pago.
     static let duplicateWindow: TimeInterval = 180
@@ -238,10 +290,12 @@ public struct Ledger: Sendable {
     }
 
     /// Adopta una lectura de saldo si no hay otra, si la actual es a mano (el banco siempre manda) o si no es más antigua.
+    /// `fetchedAt`: cuándo se consultó al banco (la API); los avisos y extractos no lo pasan.
     @discardableResult
-    public mutating func adoptBalance(_ bank: BankID, cents: Int, at: Date, origin: BalanceOrigin) -> Bool {
+    public mutating func adoptBalance(_ bank: BankID, cents: Int, at: Date, origin: BalanceOrigin,
+                                      fetchedAt: Date? = nil) -> Bool {
         if let current = state.balances[bank], current.origin != .manual, at < current.setAt { return false }
-        state.balances[bank] = ManualBalance(cents: cents, setAt: at, origin: origin)
+        state.balances[bank] = ManualBalance(cents: cents, setAt: at, origin: origin, fetchedAt: fetchedAt)
         return true
     }
 
@@ -266,6 +320,75 @@ public struct Ledger: Sendable {
     public mutating func setFlaggedNotMine(_ flagged: Bool, for id: UUID) {
         guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
         state.movements[i].flaggedNotMine = flagged
+    }
+
+    /// Pone (o quita, con nil) la categoría de un movimiento. Con `applyToMerchant` se recuerda para todo el
+    /// comercio y se limpian las categorías sueltas de sus movimientos.
+    public mutating func setCategory(_ category: SpendingCategory?, for id: UUID, applyToMerchant: Bool) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        let key = normalizeMerchant(state.movements[i].merchant ?? "")
+        if applyToMerchant, !key.isEmpty {
+            state.categoryOverrides[key] = category
+            for j in state.movements.indices where normalizeMerchant(state.movements[j].merchant ?? "") == key {
+                state.movements[j].category = nil
+            }
+        } else {
+            state.movements[i].category = category
+        }
+    }
+
+    /// true si la categoría de este pago la eligió el dueño (en el pago o para todo su comercio), no la app.
+    public func hasChosenCategory(_ id: UUID) -> Bool {
+        guard let m = state.movements.first(where: { $0.id == id }) else { return false }
+        if m.category != nil { return true }
+        let key = normalizeMerchant(m.merchant ?? "")
+        return !key.isEmpty && state.categoryOverrides[key] != nil
+    }
+
+    /// «Volver a la categoría automática»: quita la elegida en el pago y, si la había para todo su comercio, también esa
+    /// (sin tocar lo elegido a mano en otros pagos de ese comercio).
+    public mutating func resetCategoryToAutomatic(for id: UUID) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        state.movements[i].category = nil
+        let key = normalizeMerchant(state.movements[i].merchant ?? "")
+        if !key.isEmpty { state.categoryOverrides[key] = nil }
+    }
+
+    public mutating func setOwnTransfer(_ value: Bool?, for id: UUID) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        state.movements[i].ownTransfer = value
+    }
+
+    /// Presupuesto mensual total; un importe de 0 o menos lo quita.
+    public mutating func setMonthlyBudget(_ cents: Int?) {
+        state.budgets.monthlyCents = cents.flatMap { $0 > 0 ? $0 : nil }
+    }
+
+    /// Presupuesto mensual de una categoría; un importe de 0 o menos lo quita.
+    public mutating func setBudget(_ cents: Int?, for category: SpendingCategory) {
+        if let cents, cents > 0 { state.budgets.byCategory[category] = cents } else { state.budgets.byCategory[category] = nil }
+    }
+
+    /// Sustituye todo el libro por el de una copia. Los campos que dependen de este dispositivo (p. ej. las conexiones
+    /// con bancos, ligadas al Llavero) NO se restauran: para excluir uno, añade una línea `restored.x = state.x` aquí.
+    public mutating func restore(_ backup: LedgerState) {
+        var restored = backup
+        // La conexión con cada banco es de este aparato (su sesión vive en el Llavero): nunca sale de una copia. Se queda,
+        // pero con el cursor de sincronización REBOBINADO (sin última consulta con éxito y sin historial cargado): la
+        // siguiente sincronización vuelve a pedir todo el historial. Si no, lo ocurrido entre la fecha de la copia y el
+        // cursor no se pediría nunca, y los capturados de la última semana de la copia se darían por «sin confirmar».
+        // Se conservan el consentimiento, el problema, la espera y el registro de consultas (el límite diario sigue).
+        restored.links = state.links.mapValues { link in
+            var rewound = link
+            rewound.lastSuccessAt = nil
+            rewound.historyLoaded = false
+            return rewound
+        }
+        state = restored
+    }
+
+    public mutating func setSubscriptionDismissed(_ dismissed: Bool, id: String) {
+        if dismissed { state.dismissedSubscriptions.insert(id) } else { state.dismissedSubscriptions.remove(id) }
     }
 
     public mutating func setMuted(_ muted: Bool, merchant: String) {
@@ -344,20 +467,25 @@ public struct Ledger: Sendable {
 
         // 4. Un registro del banco (o de un extracto) del mismo pago que aún no se había visto por aviso: se completa
         // en lugar de duplicarlo. Gana el más cercano en el tiempo.
+        // Solo filas del MISMO día de Madrid; las del día anterior solo si el aviso llega antes de las 03:00
+        // (las fechas del banco suelen venir en UTC o ser el día de autorización).
         let nowDay = madridCalendar.startOfDay(for: now)
+        let justAfterMidnight = madridCalendar.component(.hour, from: now) < 3
         let bankMatch = state.movements.indices.filter { i in
             let m = state.movements[i]
             guard m.source.isBankSourced, m.fingerprint == nil, m.bank == bank, m.amountCents == signed else { return false }
             let days = madridCalendar.dateComponents([.day], from: madridCalendar.startOfDay(for: m.date), to: nowDay).day ?? Int.max
-            return abs(days) <= 1
+            return days == 0 || (days == 1 && justAfterMidnight)
         }.min { abs(state.movements[$0].date.timeIntervalSince(now)) < abs(state.movements[$1].date.timeIntervalSince(now)) }
         if let i = bankMatch {
             state.movements[i].source = source
             state.movements[i].date = now
             state.movements[i].dayOnly = false
             state.movements[i].fingerprint = fingerprint
-            // Hasta que la Tarea 5 defina `richerMerchant`: el comercio del aviso si trae uno.
-            if let captured = parsed.merchant, !captured.isEmpty { state.movements[i].merchant = captured }
+            // El nombre del banco pasa a su campo propio; `merchant` queda con el del aviso si es útil.
+            let bankName = state.movements[i].merchant
+            setMerchantKeepingCategory(richerMerchant(captured: parsed.merchant, bank: bankName), at: i)
+            state.movements[i].bankMerchant = bankName
             state.movements[i].isShop = state.movements[i].isShop || parsed.merchantIsShop
             return .merged(state.movements[i])
         }
@@ -367,6 +495,19 @@ public struct Ledger: Sendable {
                                 date: now, fingerprint: fingerprint, isShop: parsed.merchantIsShop)
         state.movements.append(movement)
         return .stored(movement)
+    }
+
+    /// Cambia el comercio de un movimiento (un renombrado al conciliar, un aviso tardío fusionado). Si la clave del
+    /// comercio antiguo tenía una categoría «para todo el comercio» y la nueva no tiene ninguna, la categoría pasa al propio
+    /// movimiento para no perderla con el cambio de clave.
+    mutating func setMerchantKeepingCategory(_ merchant: String?, at i: Int) {
+        let oldKey = normalizeMerchant(state.movements[i].merchant ?? "")
+        let newKey = normalizeMerchant(merchant ?? "")
+        if oldKey != newKey, !oldKey.isEmpty, state.movements[i].category == nil,
+           let inherited = state.categoryOverrides[oldKey], state.categoryOverrides[newKey] == nil {
+            state.movements[i].category = inherited
+        }
+        state.movements[i].merchant = merchant
     }
 
     /// Un aviso sin leer idéntico dentro de la ventana de reentrega no se guarda dos veces.
@@ -387,15 +528,34 @@ public struct Ledger: Sendable {
     }
 
     /// El ÚNICO criterio de qué movimientos se suman sobre una lectura de saldo (lo usan `balance` y "Te quedaban"):
-    /// posteriores a la lectura y capturados (no los del banco ni los ya enlazados a un registro suyo, que el saldo
-    /// del banco ya incluye); los de extracto solo cuentan sobre un saldo puesto a mano.
+    /// posteriores a la lectura y capturados (no los del banco: su saldo ya los incluye). Un capturado enlazado a un
+    /// registro del banco o de un extracto cuenta solo si su hora precisa es posterior a la lectura Y su registro no
+    /// se conocía ya cuando se tomó la lectura (`linkedAt ?? importedAt` nil o posterior a la CONSULTA, `fetchedAt ?? setAt`, no a la
+    /// hora de referencia del saldo, que puede ser anterior): un aviso tardío fusionado en una fila que el banco ya
+    /// había dado está dentro de ese saldo. Los de extracto solo cuentan sobre un saldo puesto a mano.
     public static func countsTowardBalance(_ m: Movement, base: ManualBalance) -> Bool {
-        m.date > base.setAt && isBalanceEligible(m, origin: base.origin)
+        guard m.date > base.setAt, isBalanceEligible(m, origin: base.origin) else { return false }
+        // Un capturado enlazado por la misma consulta que la lectura (`linkedAt`) se trata como un aviso tardío fusionado en
+        // una fila ya conocida: la lectura ya lo incluye.
+        if isLinked(m), let known = m.linkedAt ?? m.importedAt, known <= (base.fetchedAt ?? base.setAt) { return false }
+        return true
     }
 
-    /// La parte del criterio que no mira la fecha.
+    /// Capturado (o fusionado) enlazado a un registro del banco o a una fila de extracto. Las filas del propio banco o
+    /// extracto llevan su clave por definición: no son "enlazadas".
+    private static func isLinked(_ m: Movement) -> Bool {
+        !m.source.isBankSourced && (m.bankRef != nil || m.statementRef != nil)
+    }
+
+    /// La parte del criterio que no mira la fecha. Un enlazado con hora precisa es elegible: solo cuenta si es
+    /// posterior a la lectura (lo exige `countsTowardBalance`). Una fila de solo día nunca tiene hora real, y sobre un
+    /// saldo de extracto (con hora de solo día) un capturado enlazado a una fila del extracto ya está en ese saldo.
     public static func isBalanceEligible(_ m: Movement, origin: BalanceOrigin) -> Bool {
-        m.bankRef == nil && m.source != .bank && (m.source != .statement || origin == .manual)
+        guard m.source != .bank, m.source != .statement || origin == .manual else { return false }
+        guard isLinked(m) else { return true }
+        if m.dayOnly { return false }
+        if m.statementRef != nil && origin == .statement { return false }
+        return true
     }
 
     public func total() -> Int? {

@@ -10,7 +10,7 @@ final class BankingSelfTestUITests: XCTestCase {
         let ok = app.staticTexts["Autoprueba: OK"]
         if !ok.waitForExistence(timeout: 20) {
             // Dice en qué paso falla (o si la pantalla ni apareció) en vez de un fallo mudo.
-            let shown = app.staticTexts.allElementsBoundByIndex.map(\.label).joined(separator: " | ")
+            let shown = app.staticTexts.allElementsBoundByIndex.map { $0.label }.joined(separator: " | ")
             XCTFail("La autoprueba no termina en OK. Texto en pantalla: \(shown)")
         }
     }

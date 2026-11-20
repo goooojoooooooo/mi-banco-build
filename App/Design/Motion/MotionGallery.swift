@@ -25,17 +25,14 @@ extension View {
 
 private struct MotionGalleryOverlay: ViewModifier {
     func body(content: Content) -> some View {
-        let active = MotionGalleryLaunch.isActive
-        content
-            .accessibilityHidden(active)
-            .overlay {
-                if active {
-                    // La superposición no ve el `\.motion` del contenido: lo pone ella misma.
-                    MotionGallery()
-                        .motionEnvironment()
-                        .background(Color.black.ignoresSafeArea())
-                }
-            }
+        // Con la galería, la app de debajo ni se monta (así no deja elementos de accesibilidad ni tareas).
+        if MotionGalleryLaunch.isActive {
+            MotionGallery()
+                .motionEnvironment()
+                .background(Color.black.ignoresSafeArea())
+        } else {
+            content
+        }
     }
 }
 

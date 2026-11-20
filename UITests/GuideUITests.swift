@@ -21,7 +21,8 @@ final class GuideUITests: XCTestCase {
     }
 
     /// El contador lleva identificador, así que se lee su etiqueta («Parte 1 de 4 · Paso 3 de 22»), no se busca por texto.
-    private func waitForStep(_ n: Int, _ message: String) {
+    private func waitForStep(_ n: Int, _ message: String, total: Int = GuideUITests.revolutSteps,
+                             partEnds: [Int] = [8, 11, 16]) {
         let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
         if !counter.waitForExistence(timeout: 10) {
             // Si falla, el árbol de accesibilidad (en una línea) queda en el registro para ver qué había en pantalla.
@@ -29,9 +30,9 @@ final class GuideUITests: XCTestCase {
             XCTFail("\(message). Árbol: \(tree.prefix(6000))")
             return
         }
-        // Partes de la guía de Revolut: pasos 1–8, 9–11, 12–16 y 17–22.
-        let part = n <= 8 ? 1 : (n <= 11 ? 2 : (n <= 16 ? 3 : 4))
-        let expected = "Parte \(part) de 4 · Paso \(n) de \(Self.revolutSteps)"
+        // Partes de la guía de Revolut: pasos 1–8, 9–11, 12–16 y 17–22 (Apple Pay: 1–7, 8–10, 11–15 y 16–20).
+        let part = (partEnds.firstIndex { n <= $0 } ?? partEnds.count) + 1
+        let expected = "Parte \(part) de 4 · Paso \(n) de \(total)"
         let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", expected), object: counter)
         XCTAssertEqual(XCTWaiter().wait(for: [reached], timeout: 6), .completed, "\(message) (se esperaba «\(expected)»)")
     }
@@ -79,37 +80,99 @@ final class GuideUITests: XCTestCase {
         }
     }
 
-    /// iOS puede cerrar la app mientras él está en Atajos: al volver, la guía sigue en el mismo paso.
+    private let base = ["-MiBancoDemo", "-MiBancoDemoScreen", "ajustes", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
+
+    private func openList() {
+        let link = app.buttons["settings-alerts-guide"]
+        XCTAssertTrue(link.waitForExistence(timeout: 15), "Ajustes no muestra «Avisos al instante»")
+        link.tap()
+    }
+
+    private func waitForApplePayStep(_ n: Int, _ message: String) {
+        waitForStep(n, message, total: 20, partEnds: [7, 10, 15])
+    }
+
+    /// iOS puede cerrar la app mientras él está en Atajos: al volver, la guía sigue en el mismo paso. Se prueba con una
+    /// guía que en los datos de demo no ha recibido ningún aviso (la fila de la lista muestra entonces dónde se quedó).
     func testGuideResumesAfterRelaunch() throws {
         app.terminate()
-        let base = ["-MiBancoDemo", "-MiBancoDemoScreen", "ajustes", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES",
-                    "-MiBancoDemoPersistGuide"]
-        app.launchArguments = base + ["-MiBancoDemoGuideReset"]
+        let persist = base + ["-MiBancoDemoPersistGuide"]
+        app.launchArguments = persist + ["-MiBancoDemoGuideReset"]
         app.launch()
-        openRevolutGuide()
+        openList()
+        let track = app.buttons["guide-track-walletRevolut"]
+        XCTAssertTrue(track.waitForExistence(timeout: 5), "La lista de guías no aparece")
+        track.tap()
+        waitForApplePayStep(1, "No abrió el paso 1")
         let next = app.buttons["guide-next"]
         for step in 2...4 {
             next.tap()
-            waitForStep(step, "No llegó al paso \(step)")
+            waitForApplePayStep(step, "No llegó al paso \(step)")
         }
         XCTAssertFalse(app.buttons["guide-restart"].exists, "«Empezar desde el principio» solo se ofrece al retomar")
 
         app.terminate()
-        app.launchArguments = base
+        app.launchArguments = persist
         app.launch()
-        let link = app.buttons["settings-alerts-guide"]
-        XCTAssertTrue(link.waitForExistence(timeout: 15), "Ajustes no muestra «Avisos al instante»")
-        link.tap()
-        let revolut = app.buttons["guide-track-revolut"]
-        XCTAssertTrue(revolut.waitForExistence(timeout: 5), "La lista de guías no aparece")
-        XCTAssertTrue(revolut.label.contains("Vas por el paso 4 de 22") || revolut.label.contains("Funciona"),
-                      "La lista no dice dónde se quedó: \(revolut.label)")
-        revolut.tap()
-        waitForStep(4, "No retomó en el paso 4 tras reiniciar")
+        openList()
+        let row = app.buttons["guide-track-walletRevolut"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "La lista de guías no aparece")
+        XCTAssertTrue(row.label.contains("Vas por el paso 4 de 20"), "La lista no dice dónde se quedó: \(row.label)")
+        row.tap()
+        waitForApplePayStep(4, "No retomó en el paso 4 tras reiniciar")
         let restart = app.buttons["guide-restart"]
         XCTAssertTrue(restart.waitForExistence(timeout: 5), "Falta «Empezar desde el principio»")
         restart.tap()
-        waitForStep(1, "«Empezar desde el principio» no volvió al paso 1")
+        waitForApplePayStep(1, "«Empezar desde el principio» no volvió al paso 1")
+
+        // Y tras otro cierre la guía abre en el paso 1, sin retomar nada.
+        app.terminate()
+        app.launchArguments = persist
+        app.launch()
+        openList()
+        let again = app.buttons["guide-track-walletRevolut"]
+        XCTAssertTrue(again.waitForExistence(timeout: 5), "La lista de guías no aparece")
+        XCTAssertFalse(again.label.contains("Vas por el paso"), "No debería quedar nada que retomar: \(again.label)")
+        again.tap()
+        waitForApplePayStep(1, "Tras empezar de nuevo debía abrir el paso 1")
+        XCTAssertFalse(app.buttons["guide-restart"].exists, "No debería ofrecer empezar de nuevo en el paso 1")
+    }
+
+    /// Retomando una guía en un paso con mucho texto, lo que él necesita se ve sin deslizar: la ayuda se puede tocar y la
+    /// instrucción entera queda por encima de «Abrir Atajos».
+    func testResumedStepFitsWithoutScrolling() throws {
+        for step in [19, 10] {
+            app.terminate()
+            app.launchArguments = base + ["-MiBancoDemoGuideSeed", "rev", String(step)]
+            app.launch()
+            waitForStep(step, "No retomó en el paso \(step)")
+            let help = app.buttons["guide-help"]
+            XCTAssertTrue(help.waitForExistence(timeout: 5), "Falta «¿No te sale esto?» en el paso \(step)")
+            XCTAssertTrue(help.isHittable, "«¿No te sale esto?» no se ve sin deslizar en el paso \(step)")
+            let instruction = app.staticTexts["guide-instruction"]
+            XCTAssertTrue(instruction.exists, "Falta la instrucción en el paso \(step)")
+            let open = app.buttons["guide-open-shortcuts"]
+            XCTAssertTrue(open.exists)
+            XCTAssertLessThanOrEqual(instruction.frame.maxY, open.frame.minY,
+                                     "La instrucción del paso \(step) queda bajo «Abrir Atajos»")
+            XCTAssertLessThanOrEqual(help.frame.maxY, open.frame.minY, "La ayuda del paso \(step) queda bajo «Abrir Atajos»")
+            XCTAssertTrue(app.buttons["guide-restart"].exists, "Falta «Empezar desde el principio» al retomar el paso \(step)")
+        }
+    }
+
+    /// «Empezar desde el principio» no se ofrece en el primer paso, tampoco si se vuelve atrás hasta él.
+    func testRestartIsNotOfferedOnStepOne() throws {
+        app.terminate()
+        app.launchArguments = base + ["-MiBancoDemoGuideSeed", "rev", "4"]
+        app.launch()
+        waitForStep(4, "No retomó en el paso 4")
+        XCTAssertTrue(app.buttons["guide-restart"].waitForExistence(timeout: 5))
+        let back = app.buttons["guide-back"]
+        for step in [3, 2, 1] {
+            back.tap()
+            waitForStep(step, "Atrás no llegó al paso \(step)")
+        }
+        XCTAssertFalse(app.buttons["guide-restart"].exists, "«Empezar desde el principio» sigue en el paso 1")
     }
 
     func testLastStepIsDone() throws {

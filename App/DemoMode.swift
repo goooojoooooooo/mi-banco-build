@@ -66,8 +66,31 @@ enum DemoMode {
 
     /// `-MiBancoDemoGuideHalfway`: la guía de Apple Pay de imagin queda a medias (paso 9), para ver la lista con una guía empezada.
     static var guideProgressSeed: [String: String] {
-        arguments.contains("-MiBancoDemoGuideHalfway")
-            ? [GuideTrack.walletImagin.rawValue: GuideSavedStep(step: 8, of: guideSteps(for: .walletImagin).count).stored] : [:]
+        var seed: [String: String] = [:]
+        if arguments.contains("-MiBancoDemoGuideHalfway") {
+            seed[GuideTrack.walletImagin.rawValue] = GuideSavedStep(step: 8, of: guideSteps(for: .walletImagin).count).stored
+        }
+        if let (track, number) = guideSeed {
+            seed[track.rawValue] = GuideSavedStep(step: number - 1, of: guideSteps(for: track).count).stored
+        }
+        return seed
+    }
+
+    /// `-MiBancoDemoGuideSeed <rev|tr|wallet|wallet-rev|wallet-tr> <paso>`: la guía queda guardada en ese paso (desde 1) y
+    /// se abre retomándola, como al volver a entrar desde la lista.
+    static var guideSeed: (track: GuideTrack, number: Int)? {
+        guard let flag = arguments.firstIndex(of: "-MiBancoDemoGuideSeed"), flag + 2 < arguments.count,
+              let number = Int(arguments[flag + 2]), number >= 2 else { return nil }
+        let track: GuideTrack
+        switch arguments[flag + 1] {
+        case "rev": track = .revolut
+        case "tr": track = .tradeRepublic
+        case "wallet", "wallet-ima": track = .walletImagin
+        case "wallet-rev": track = .walletRevolut
+        case "wallet-tr": track = .walletTradeRepublic
+        default: return nil
+        }
+        return (track, number)
     }
 
     /// `-MiBancoDemoPersistGuide`: la demo guarda el último paso de cada guía en UserDefaults (prueba de reinicio);

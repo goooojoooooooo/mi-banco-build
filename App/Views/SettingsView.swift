@@ -96,7 +96,7 @@ struct SettingsView: View {
             .navigationTitle("Ajustes")
             #if DEBUG
             .navigationDestination(isPresented: $demoOpensGuide) { AlertsGuideView(model: model) }
-            .task { if DemoMode.guideStart != nil { demoOpensGuide = true } }
+            .task { if DemoMode.guideStart != nil || DemoMode.guideSeed != nil { demoOpensGuide = true } }
             #endif
         }
         .onAppear {
@@ -346,6 +346,7 @@ struct AlertsGuideView: View {
     #if DEBUG
     /// Demo (`-MiBancoDemoAlertsGuide`): paso concreto al que se salta nada más abrir.
     @State private var demoStart: DemoGuideStart?
+    @Environment(AppPreferences.self) private var preferences
     #endif
 
     var body: some View {
@@ -360,10 +361,13 @@ struct AlertsGuideView: View {
         .navigationBarTitleDisplayMode(.inline)
         #if DEBUG
         .navigationDestination(item: $demoStart) { start in
-            GuideStepView(track: start.track, model: model, start: start.step)
+            GuideStepView(track: start.track, model: model, start: start.resume ? nil : start.step,
+                          resume: start.resume ? preferences.guideResume(start.track) : nil)
         }
         .task {
-            if let start = DemoMode.guideStart, let track = start.track {
+            if let seed = DemoMode.guideSeed {
+                demoStart = DemoGuideStart(track: seed.track, step: seed.number - 1, resume: true)
+            } else if let start = DemoMode.guideStart, let track = start.track {
                 demoStart = DemoGuideStart(track: track, step: start.step)
             }
         }
@@ -375,5 +379,7 @@ struct AlertsGuideView: View {
 struct DemoGuideStart: Hashable {
     let track: GuideTrack
     let step: Int
+    /// Con `-MiBancoDemoGuideSeed`: se abre retomando el paso guardado.
+    var resume = false
 }
 #endif

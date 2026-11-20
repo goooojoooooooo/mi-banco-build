@@ -261,10 +261,23 @@ private struct MockToggleRow: View {
 struct GuideIllustrationView: View {
     let step: GuideStep
     let track: GuideTrack
+    /// El dibujo se encoge (con sus proporciones) al espacio que le dan; sin esto mide siempre 295 × 395 pt.
+    var fitted = false
 
     var body: some View {
-        PhoneFrame { mock }
-            .accessibilityElement(children: .ignore)
+        Group {
+            if fitted {
+                GeometryReader { geo in
+                    let scale = min(1, geo.size.width / 295, geo.size.height / 395)
+                    PhoneFrame { mock }
+                        .scaleEffect(scale)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                }
+            } else {
+                PhoneFrame { mock }
+            }
+        }
+        .accessibilityElement(children: .ignore)
             .accessibilityLabel(step.spokenLabel)
     }
 

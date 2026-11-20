@@ -106,21 +106,6 @@ struct GuideStepView: View {
             }
             .animation(reduceMotion ? nil : Theme.Motion.morph, value: index)
             .accessibilityHidden(true)
-            if resumed {
-                Button {
-                    resumed = false
-                    if index > 0 { move(to: 0) }
-                } label: {
-                    Text("Empezar desde el principio")
-                        .font(.system(.callout, weight: .semibold))
-                        .foregroundStyle(Theme.label)
-                        .frame(minHeight: 44)
-                        .padding(.horizontal, Theme.Space.row)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("guide-restart")
-            }
         }
         .frame(maxWidth: .infinity)
         // La cabecera es una guía de orientación: con letra enorme se queda en un tamaño que no come la pantalla.
@@ -131,23 +116,49 @@ struct GuideStepView: View {
 
     // MARK: Contenido del paso
 
-    private var page: some View {
-        ScrollView {
-            VStack(spacing: Theme.Space.gutter) {
-                if firstNoticeSeen { workingBanner.transition(.opacity.combined(with: .scale(scale: 0.96))) }
-                // Con letra de accesibilidad primero lo que hay que hacer y después el dibujo.
-                if bigText {
-                    textBlock
+    /// Con letra normal el dibujo es el elemento flexible: se encoge (con sus proporciones) hasta el alto que deja el texto,
+    /// y todo cabe sin deslizar. Solo si el dibujo quedaría por debajo de `minDrawing` pt el contenido se desliza.
+    private static let minDrawing: CGFloat = 180
+
+    @ViewBuilder private var page: some View {
+        if bigText {
+            // Con letra de accesibilidad primero lo que hay que hacer y después el dibujo; se desliza.
+            ScrollView {
+                VStack(spacing: Theme.Space.gutter) {
+                    stepText
                     GuideIllustrationView(step: step, track: track)
-                } else {
-                    GuideIllustrationView(step: step, track: track)
-                    textBlock
                 }
+                .padding(.horizontal, Theme.Space.gutter)
+                .padding(.bottom, Theme.Space.gutter)
             }
-            .padding(.horizontal, Theme.Space.gutter)
-            .padding(.bottom, Theme.Space.gutter)
+            .scrollIndicatorsFlash(onAppear: true)
+        } else {
+            ViewThatFits(in: .vertical) {
+                GuideFitLayout(spacing: Theme.Space.gutter, minDrawing: Self.minDrawing, maxDrawing: 395) {
+                    GuideIllustrationView(step: step, track: track, fitted: true)
+                    stepText
+                }
+                .padding(.horizontal, Theme.Space.gutter)
+                .padding(.bottom, Theme.Space.small)
+                ScrollView {
+                    VStack(spacing: Theme.Space.gutter) {
+                        GuideIllustrationView(step: step, track: track, fitted: true)
+                            .frame(height: 240)
+                        stepText
+                    }
+                    .padding(.horizontal, Theme.Space.gutter)
+                    .padding(.bottom, Theme.Space.gutter)
+                }
+                .scrollIndicatorsFlash(onAppear: true)
+            }
         }
-        .scrollIndicators(.hidden)
+    }
+
+    private var stepText: some View {
+        VStack(spacing: Theme.Space.row) {
+            if firstNoticeSeen { workingBanner.transition(.opacity.combined(with: .scale(scale: 0.96))) }
+            textBlock
+        }
     }
 
     private var textBlock: some View {
@@ -159,7 +170,23 @@ struct GuideStepView: View {
             Text(Self.styled(step.instruction))
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("guide-instruction")
             helpDisclosure
+            // Solo en una guía retomada y nunca en el primer paso: texto dentro del contenido, después de la ayuda.
+            if resumed && index > 0 {
+                Button {
+                    resumed = false
+                    move(to: 0)
+                } label: {
+                    Text("Empezar desde el principio")
+                        .font(.system(.callout, weight: .semibold))
+                        .foregroundStyle(Theme.label2)
+                        .frame(minHeight: 44, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("guide-restart")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -343,5 +370,35 @@ struct GuideStepView: View {
         }
         flush()
         return out
+    }
+}
+
+/// Dibujo flexible arriba y texto debajo: el texto toma su alto y el dibujo, lo que queda (entre `minDrawing` y
+/// `maxDrawing`). Sin alto propuesto devuelve el mínimo, que es lo que `ViewThatFits` necesita para decidir si cabe.
+private struct GuideFitLayout: Layout {
+    let spacing: CGFloat
+    let minDrawing: CGFloat
+    let maxDrawing: CGFloat
+
+    private func drawingHeight(room: CGFloat?, text: CGFloat) -> CGFloat {
+        guard let room else { return minDrawing }
+        return min(max(room - text - spacing, minDrawing), maxDrawing)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard subviews.count == 2 else { return .zero }
+        let width = proposal.width ?? 295
+        let text = subviews[1].sizeThatFits(ProposedViewSize(width: width, height: nil)).height
+        return CGSize(width: width, height: drawingHeight(room: proposal.height, text: text) + spacing + text)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 2 else { return }
+        let text = subviews[1].sizeThatFits(ProposedViewSize(width: bounds.width, height: nil)).height
+        let drawing = drawingHeight(room: bounds.height, text: text)
+        subviews[0].place(at: bounds.origin, anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: drawing))
+        subviews[1].place(at: CGPoint(x: bounds.minX, y: bounds.minY + drawing + spacing), anchor: .topLeading,
+                          proposal: ProposedViewSize(width: bounds.width, height: text))
     }
 }

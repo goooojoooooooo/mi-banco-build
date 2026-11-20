@@ -264,11 +264,14 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
     }
 
     @Test func valenAlMenosDiceDeCualesEs() {
-        let partial = investmentLines(summary(missing: 1))
+        // Con un día movido (no tranquilo) sale también la línea de la ganancia.
+        var input = busy()
+        input.investments = summary(missing: 1)
+        let partial = lines(makeBriefing(input, calendar: cal), .investments)
         #expect(partial[0].hasPrefix(nb("Valen al menos 1.510,00 € de las que tienen precio")))
         #expect(partial[1].hasPrefix(nb("Desde la compra, de las que tienen precio: +173,33 €")))
-        let complete = investmentLines(summary())
-        #expect(!complete.joined().contains("de las que tienen precio"))
+        input.investments = summary()
+        #expect(!lines(makeBriefing(input, calendar: cal), .investments).joined().contains("de las que tienen precio"))
     }
 
     @Test func nombresLargosSeRecortanA40() {

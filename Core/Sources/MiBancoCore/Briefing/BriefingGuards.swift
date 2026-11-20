@@ -67,7 +67,7 @@ private let numberWords: Set<String> = [
     "cero", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve", "diez", "once", "doce", "trece", "catorce", "quince",
     "dieciseis", "diecisiete", "dieciocho", "diecinueve", "veinte", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta",
     "ochenta", "noventa", "cien", "ciento", "cientos", "cientas", "quinientos", "quinientas", "mil", "millon", "millones", "medio", "media", "mitad", "doble",
-    "triple",
+    "triple", "double",
     "zero", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "thirteen", "fourteen",
     "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty",
     "ninety", "hundred", "thousand", "million", "half",

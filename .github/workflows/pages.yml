@@ -1,0 +1,37 @@
+name: pages
+run-name: pages ${{ github.ref_name }}
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Redirect/**"
+      - "tools/check_redirect.sh"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash tools/check_redirect.sh
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: Redirect
+  deploy:
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -270,8 +270,8 @@ private func briefing(_ s: OpeningSituation) -> Briefing {
         let section = makeBriefing(input, calendar: cal).sections.first { $0.kind == .investments }!
         for line in section.lines.prefix(2) {
             let masked = render(line.parts, .masked)
-            #expect(!masked.contains("%"), masked)
-            #expect(masked.range(of: "[0-9]", options: .regularExpression) == nil, masked)
+            #expect(!masked.contains("%"), "(masked)")
+            #expect(masked.range(of: "[0-9]", options: .regularExpression) == nil, "(masked)")
         }
         #expect(render(section.lines[1].parts, .masked) == "Lo que más subió: Alfa (•••). Lo que más bajó: Beta (•••).")
         #expect(render(section.lines[1].parts, .plain).contains("\u{2212}1,3"))

@@ -14,7 +14,9 @@ struct GuideView: View {
                 .listRowBackground(Theme.grouped)
 
             ForEach(GuideTrack.allCases, id: \.self) { track in
-                NavigationLink(value: track) {
+                NavigationLink {
+                    GuideStepView(track: track, model: model)
+                } label: {
                     GuideTrackRow(track: track, status: guideStatus(track, in: model.state))
                 }
                 .accessibilityIdentifier("guide-track-\(track.rawValue)")

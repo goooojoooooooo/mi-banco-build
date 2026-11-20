@@ -358,9 +358,6 @@ struct AlertsGuideView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Avisos al instante")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(for: GuideTrack.self) { track in
-            GuideStepView(track: track, model: model)
-        }
         #if DEBUG
         .navigationDestination(item: $demoStart) { start in
             GuideStepView(track: start.track, model: model, start: start.step)

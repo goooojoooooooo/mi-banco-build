@@ -96,6 +96,7 @@ extension Ledger {
                     state.movements[i].bankMerchant = name
                 }
                 state.movements[i].isShop = state.movements[i].isShop || r.isShop
+                state.movements[i].excludedFromSpending = state.movements[i].excludedFromSpending || r.excludedFromSpending
                 report.linked += 1
                 continue
             }
@@ -105,7 +106,8 @@ extension Ledger {
                 bank: bank, amountCents: r.amountCents, merchant: r.merchant, kind: r.amountCents < 0 ? .payment : .income,
                 source: channelSource, date: r.timing.date, isShop: r.isShop,
                 bankRef: channel == .bank ? r.ref : nil, statementRef: channel == .statement ? r.ref : nil,
-                bankStatus: channel == .bank ? r.status : .booked, importedAt: now, dayOnly: !r.timing.isExact)
+                bankStatus: channel == .bank ? r.status : .booked, importedAt: now, dayOnly: !r.timing.isExact,
+                excludedFromSpending: r.excludedFromSpending)
             state.movements.append(movement)
             report.added += 1
             report.addedIDs.append(movement.id)
@@ -125,6 +127,18 @@ extension Ledger {
                 } else {
                     state.movements[i].bankRef = nil
                     state.movements[i].bankStatus = nil
+                    // Si el mismo pago ya llegó apuntado como fila propia del banco, se funden en UN movimiento.
+                    if let j = foldCandidate(for: state.movements[i], excluding: toDelete, calendar: calendar) {
+                        let row = state.movements[j]
+                        state.movements[i].bankRef = row.bankRef
+                        state.movements[i].bankStatus = row.bankStatus
+                        if state.movements[i].statementRef == nil { state.movements[i].statementRef = row.statementRef }
+                        if let name = row.merchant, !name.isEmpty { state.movements[i].bankMerchant = name }
+                        state.movements[i].isShop = state.movements[i].isShop || row.isShop
+                        state.movements[i].excludedFromSpending =
+                            state.movements[i].excludedFromSpending || row.excludedFromSpending
+                        toDelete.insert(row.id)
+                    }
                 }
             }
             if !toDelete.isEmpty {
@@ -148,6 +162,23 @@ extension Ledger {
             m.bank == bank && !m.source.isBankSourced && m.bankRef == nil && m.statementRef == nil
                 && m.date <= cutoff && madridCalendar.startOfDay(for: m.date) >= firstDay
         }.map(\.id))
+    }
+
+    /// Fila propia del banco (apuntada, sin enlazar a nada) que es el mismo pago que un capturado que acaba de perder
+    /// su pendiente: mismo banco e importe, con el día del banco entre 1 día antes y 5 días después del capturado.
+    /// Gana la de menor distancia en días y luego en tiempo.
+    private func foldCandidate(for capture: Movement, excluding deleted: Set<UUID>, calendar: Calendar) -> Int? {
+        let day = calendar.startOfDay(for: capture.date)
+        var winner: (index: Int, days: Int, seconds: TimeInterval)?
+        for (j, row) in state.movements.enumerated() {
+            guard row.source == .bank, row.bankStatus == .booked, row.bankRef != nil, row.bank == capture.bank,
+                  row.amountCents == capture.amountCents, !deleted.contains(row.id) else { continue }
+            let diff = calendar.dateComponents([.day], from: day, to: calendar.startOfDay(for: row.date)).day ?? Int.max
+            guard (-1...5).contains(diff) else { continue }
+            let seconds = abs(row.date.timeIntervalSince(capture.date))
+            if winner == nil || (abs(diff), seconds) < (winner!.days, winner!.seconds) { winner = (j, abs(diff), seconds) }
+        }
+        return winner?.index
     }
 
     /// El mejor movimiento para el registro: mismo banco e importe, dentro de la ventana, el de menor distancia en
@@ -180,14 +211,8 @@ extension Ledger {
             guard seconds <= 36 * hour else { return nil }
             return (abs(diff), seconds)
         case .transactionDay:
-            if m.source.isBankSourced {
-                guard abs(diff) <= 1 else { return nil }
-            } else {
-                // Un capturado solo cae el mismo día; el día de al lado solo cerca de medianoche (fechas en UTC o
-                // día de autorización).
-                let h = calendar.component(.hour, from: m.date)
-                guard diff == 0 || (diff == 1 && h < 3) || (diff == -1 && h >= 21) else { return nil }
-            }
+            // Día del pago ± 1 (algunos bancos dan como `transaction_date` el día en que se liquida): gana el más cercano.
+            guard abs(diff) <= 1 else { return nil }
             return (abs(diff), seconds)
         case .bookingDay:
             guard (-5...1).contains(diff) else { return nil }

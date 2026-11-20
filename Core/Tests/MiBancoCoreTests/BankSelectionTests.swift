@@ -48,8 +48,9 @@ import Testing
         }
         // Un banco que permite menos de un día manda; aun así queda después de `now`.
         #expect(until(3600) == now.addingTimeInterval(3600))
-        #expect(until(0) > now)
-        #expect(until(-5) > now)
+        // R-cheap (a): un plazo de 0 o negativo es desconocido (90 días), no un consentimiento de 1 segundo.
+        #expect(until(0) == now.addingTimeInterval(90 * day - 3600))
+        #expect(until(-5) == now.addingTimeInterval(90 * day - 3600))
         // Un banco que permite justo algo más de un día: 1 día (el mínimo cabe).
         #expect(until(Int(day) + 1800) == now.addingTimeInterval(day))
         // El mínimo es 1 día cuando el banco permite más.

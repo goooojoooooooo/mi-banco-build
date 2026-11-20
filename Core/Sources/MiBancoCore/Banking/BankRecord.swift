@@ -31,9 +31,12 @@ public struct BankRecord: Equatable, Sendable {
     public var isShop: Bool
     /// Saldo tras el movimiento, si el banco lo da (nadie lo consume todavía).
     public var balanceAfterCents: Int?
+    /// true = operación de inversión (compra o venta de valores): mueve el saldo pero no es gasto.
+    public var excludedFromSpending: Bool
 
     public init(ref: String, bank: BankID, amountCents: Int, timing: RecordTiming, status: BankStatus,
-                merchant: String? = nil, isShop: Bool = false, balanceAfterCents: Int? = nil) {
+                merchant: String? = nil, isShop: Bool = false, balanceAfterCents: Int? = nil,
+                excludedFromSpending: Bool = false) {
         self.ref = ref
         self.bank = bank
         self.amountCents = amountCents
@@ -42,13 +45,14 @@ public struct BankRecord: Equatable, Sendable {
         self.merchant = merchant
         self.isShop = isShop
         self.balanceAfterCents = balanceAfterCents
+        self.excludedFromSpending = excludedFromSpending
     }
 }
 
 /// De dónde vienen los registros: la API del banco o un extracto importado.
 public enum RecordChannel: Sendable { case bank, statement }
 
-private let nonShopMCC: Set<String> = ["4829", "6010", "6011", "6012", "6051", "6540"]
+let nonShopMCC: Set<String> = ["4829", "6010", "6011", "6012", "6051", "6540"]
 
 /// "2026-11-18" (o "2026-11-18T10:00:00...") -> ese día al mediodía en `calendar`; nil si no es una fecha válida.
 func noonOfDay(_ text: String, calendar: Calendar) -> (day: String, date: Date)? {
@@ -64,7 +68,7 @@ func noonOfDay(_ text: String, calendar: Calendar) -> (day: String, date: Date)?
     return (day, date)
 }
 
-private func fnv1aHex(_ s: String) -> String {
+func fnv1aHex(_ s: String) -> String {
     var hash: UInt64 = 0xcbf2_9ce4_8422_2325
     for byte in s.utf8 {
         hash ^= UInt64(byte)

@@ -38,6 +38,9 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     /// Nombre que da el banco cuando se enlazó a un capturado. NUNCA sustituye a `merchant` (de él salen las
     /// categorías, los silenciados y las suscripciones); solo se muestra si el capturado no trae nombre útil.
     public var bankMerchant: String?
+    /// true = no es gasto aunque mueva el saldo (compras y ventas de valores de Trade Republic): las sumas de gasto
+    /// deben saltárselo.
+    public var excludedFromSpending: Bool
 
     /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
     public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
@@ -49,7 +52,8 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 pairedAcrossSources: Bool = false, fingerprint: String? = nil, pairedFingerprint: String? = nil,
                 isShop: Bool = false, note: String? = nil, flaggedNotMine: Bool = false,
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
-                importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil) {
+                importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
+                excludedFromSpending: Bool = false) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -69,12 +73,13 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.importedAt = importedAt
         self.dayOnly = dayOnly
         self.bankMerchant = bankMerchant
+        self.excludedFromSpending = excludedFromSpending
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
         case note, flaggedNotMine
-        case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant
+        case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -99,6 +104,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         importedAt = try c.decodeIfPresent(Date.self, forKey: .importedAt)
         dayOnly = try c.decodeIfPresent(Bool.self, forKey: .dayOnly) ?? false
         bankMerchant = try c.decodeIfPresent(String.self, forKey: .bankMerchant)
+        excludedFromSpending = try c.decodeIfPresent(Bool.self, forKey: .excludedFromSpending) ?? false
     }
 }
 

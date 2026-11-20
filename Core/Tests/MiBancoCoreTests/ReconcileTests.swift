@@ -240,17 +240,60 @@ private func tx(
         #expect(far.state.movements[1].source == .statement)
     }
 
-    /// R22 aplicado al enlazar: un capturado solo cae el mismo día, o el de al lado cerca de medianoche.
-    @Test func transactionDayLinksOnlySameDayOrNearMidnight() {
+    /// R28: un capturado enlaza con un registro de solo día si su día de Madrid está a ±1 día del del registro.
+    @Test func transactionDayLinksWithinOneDay() {
         let r = record("t1", -1250, .transactionDay(at(11, 18)))
         var nextMorning = ledger([captured(-1250, at(11, 19, 10, 0))])
-        #expect(run(&nextMorning, [r]).added == 1)
+        #expect(run(&nextMorning, [r]).linked == 1)
         var justAfterMidnight = ledger([captured(-1250, at(11, 19, 0, 20))])
         #expect(run(&justAfterMidnight, [r]).linked == 1)
-        var lateBefore = ledger([captured(-1250, at(11, 17, 23, 40))])
-        #expect(run(&lateBefore, [r]).linked == 1)
         var earlyBefore = ledger([captured(-1250, at(11, 17, 15, 0))])
-        #expect(run(&earlyBefore, [r]).added == 1)
+        #expect(run(&earlyBefore, [r]).linked == 1)
+        var twoDays = ledger([captured(-1250, at(11, 20, 10, 0))])
+        #expect(run(&twoDays, [r]).added == 1)
+    }
+
+    @Test func captureLinksToARecordDatedTheNextDayWhenNothingIsCloser() {
+        // El banco da como fecha el día de liquidación (D+1).
+        var l = ledger([captured(-1250, at(11, 18, 20, 0))])
+        let report = run(&l, [record("t1", -1250, .transactionDay(at(11, 19)))])
+        #expect(report.linked == 1)
+        #expect(report.added == 0)
+        #expect(l.state.movements.count == 1)
+    }
+
+    @Test func sameDayCandidateWinsOverNeighbouringDay() {
+        let near = captured(-1250, at(11, 18, 20, 0))
+        let far = captured(-1250, at(11, 19, 9, 0))
+        var l = ledger([far, near])
+        _ = run(&l, [record("t1", -1250, .transactionDay(at(11, 18)))])
+        let linked = l.state.movements.filter { $0.bankRef == "t1" }
+        #expect(linked.count == 1)
+        #expect(linked[0].id == near.id)
+    }
+
+    /// R29: pendiente y apuntado del mismo pago en un lote no acaban como dos movimientos.
+    @Test func pendingAndBookedInOneBatchEndAsOneMovement() {
+        let capture = captured(-1250, at(11, 18, 10, 5))
+        var l = ledger([capture])
+        let day = RecordTiming.transactionDay(at(11, 18))
+        let coverage = DateInterval(start: at(11, 10, 0), end: at(11, 20, 0))
+        let pending = record("p1", -1250, day, status: .pending)
+        let booked = record("b1", -1250, day, status: .booked, merchant: "Mercadona Valencia")
+        _ = run(&l, [pending, booked], coverage: coverage)
+        _ = run(&l, [booked], coverage: coverage)
+        #expect(l.state.movements.count == 1)
+        let m = l.state.movements[0]
+        #expect(m.id == capture.id)
+        #expect(m.merchant == capture.merchant)
+        #expect(m.date == capture.date)
+        #expect(m.bankRef == "b1")
+        #expect(m.bankStatus == .booked)
+        #expect(m.bankMerchant == "Mercadona Valencia")
+        let before = l.state
+        let third = run(&l, [booked], coverage: coverage)
+        #expect(l.state == before)
+        #expect(third.added == 0 && third.removed == 0)
     }
 
     @Test func statementAfterApiAddsNothing() {

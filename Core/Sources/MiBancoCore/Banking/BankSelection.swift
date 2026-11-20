@@ -20,12 +20,14 @@ public func matchASPSP(for bank: BankID, in list: [EBASPSP]) -> EBASPSP? {
     return matches.first { $0.country.uppercased() == BankingConstants.country } ?? matches.first
 }
 
-/// Consentimiento: lo que permite el banco (90 días si no lo dice), máximo 180 días, menos 1 hora de margen.
+/// Consentimiento: lo que permite el banco (90 días si no lo dice o si da 0 o menos), máximo 180 días, menos 1 hora de margen.
 /// Nunca queda en el pasado: al menos 1 día desde `now`, y nunca más de lo que el banco permite
 /// (si el banco permite menos de un día, manda el banco, con 1 s como mínimo).
 public func consentValidUntil(for aspsp: EBASPSP, now: Date) -> Date {
     let day: TimeInterval = 86_400
-    let allowed = min(TimeInterval(aspsp.maximumConsentValidity ?? Int(90 * day)), 180 * day)
+    // 0 o negativo no es un plazo real: se trata como desconocido.
+    let stated = aspsp.maximumConsentValidity.flatMap { $0 > 0 ? $0 : nil }
+    let allowed = min(TimeInterval(stated ?? Int(90 * day)), 180 * day)
     let seconds = min(max(allowed - 3600, day), max(allowed, 1))
     return now.addingTimeInterval(seconds)
 }

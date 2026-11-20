@@ -21,6 +21,9 @@ public enum SyncPolicy {
     public static let backoff: TimeInterval = 21_600
     public static let overlapDays = 7
     public static let firstHistoryDays = 365
+    /// Un pendiente de hace más días que esto está atascado: la ventana no llega hasta él y, si una consulta completa ya
+    /// no lo trae, se quita (R52).
+    public static let pendingReachDays = 45
 
     public static func decide(
         _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar, oldestPending: Date? = nil
@@ -49,8 +52,9 @@ public enum SyncPolicy {
             ?? dayStart(daysBefore: firstHistoryDays, of: now, calendar)
         var from = calendar.date(byAdding: .day, value: -overlapDays, to: base) ?? base
         // La consulta llega siempre hasta el pendiente más antiguo (sin pasar del máximo): así su registro apuntado
-        // vuelve en el lote y un pendiente no se da por desaparecido solo porque la ventana avanzó.
-        if let oldestPending {
+        // vuelve en el lote y un pendiente no se da por desaparecido solo porque la ventana avanzó. Uno atascado (más de
+        // `pendingReachDays` días) no ensancha la ventana (R52).
+        if let oldestPending, !Ledger.isStuckPending(oldestPending, now: now, calendar: calendar) {
             let floor = dayStart(daysBefore: firstHistoryDays, of: now, calendar)
             let reach = max(calendar.startOfDay(for: oldestPending), floor)
             if reach < from { from = reach }

@@ -48,6 +48,10 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     /// Cuándo enlazó el canal del banco a este capturado con su registro (nil = no se sabe o no se enlazó por ahí). El
     /// criterio de saldo lo compara con la consulta de la lectura; `importedAt` no sirve: también decide `isHistorical`.
     public var linkedAt: Date?
+    /// Con qué estado llegó la fila del banco la primera vez (nil = no se guardó: se toma el estado actual). Solo una fila
+    /// que llegó ya apuntada puede ser el gemelo de un pendiente (R50): la que llegó pendiente y se apuntó con su propia
+    /// clave es el mismo pago que ese pendiente, no otro.
+    public var firstSeenStatus: BankStatus?
 
     /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
     public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
@@ -61,7 +65,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 category: SpendingCategory? = nil, ownTransfer: Bool? = nil,
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
                 importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
-                excludedFromSpending: Bool = false, linkedAt: Date? = nil) {
+                excludedFromSpending: Bool = false, linkedAt: Date? = nil, firstSeenStatus: BankStatus? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -85,12 +89,14 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.bankMerchant = bankMerchant
         self.excludedFromSpending = excludedFromSpending
         self.linkedAt = linkedAt
+        self.firstSeenStatus = firstSeenStatus
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
         case note, flaggedNotMine, category, ownTransfer
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
+        case firstSeenStatus
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -119,6 +125,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         bankMerchant = try c.decodeIfPresent(String.self, forKey: .bankMerchant)
         excludedFromSpending = try c.decodeIfPresent(Bool.self, forKey: .excludedFromSpending) ?? false
         linkedAt = try c.decodeIfPresent(Date.self, forKey: .linkedAt)
+        firstSeenStatus = try c.decodeIfPresent(BankStatus.self, forKey: .firstSeenStatus)
     }
 }
 
@@ -142,6 +149,9 @@ public struct ManualBalance: Codable, Equatable, Sendable {
     /// true = la lectura mezcla cuentas con saldo disponible y cuentas solo contabilizadas: se suma tal cual (sin sumar
     /// pendientes, que duplicarían las cuentas disponibles) pero nunca es exacta.
     public var forcedEstimate: Bool
+    /// Inicio (en Madrid) del día D cuando la lectura es el cierre de un día ya pasado (R49): lo de D y antes ya está
+    /// dentro; todo lo de un día posterior a D suma encima una vez. nil = lectura normal.
+    public var closingDay: Date?
     /// true = el saldo lo comunicó el banco (aviso, API o extracto); false = puesto a mano.
     public var fromBank: Bool { origin != .manual }
 
@@ -150,16 +160,19 @@ public struct ManualBalance: Codable, Equatable, Sendable {
     }
 
     public init(cents: Int, setAt: Date, origin: BalanceOrigin, fetchedAt: Date? = nil, countsPending: Bool = false,
-                forcedEstimate: Bool = false) {
+                forcedEstimate: Bool = false, closingDay: Date? = nil) {
         self.cents = cents
         self.setAt = setAt
         self.origin = origin
         self.fetchedAt = fetchedAt
         self.countsPending = countsPending
         self.forcedEstimate = forcedEstimate
+        self.closingDay = closingDay
     }
 
-    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank, fetchedAt, countsPending, forcedEstimate }
+    private enum CodingKeys: String, CodingKey { case cents, setAt, origin, fromBank, fetchedAt, countsPending, forcedEstimate
+        case closingDay
+    }
 
     /// Los libros anteriores solo traen `fromBank`: true era un aviso.
     public init(from decoder: any Decoder) throws {
@@ -174,6 +187,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         fetchedAt = try c.decodeIfPresent(Date.self, forKey: .fetchedAt)
         countsPending = try c.decodeIfPresent(Bool.self, forKey: .countsPending) ?? false
         forcedEstimate = try c.decodeIfPresent(Bool.self, forKey: .forcedEstimate) ?? false
+        closingDay = try c.decodeIfPresent(Date.self, forKey: .closingDay)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -185,6 +199,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
         try c.encodeIfPresent(fetchedAt, forKey: .fetchedAt)
         if countsPending { try c.encode(true, forKey: .countsPending) }
         if forcedEstimate { try c.encode(true, forKey: .forcedEstimate) }
+        try c.encodeIfPresent(closingDay, forKey: .closingDay)
     }
 }
 
@@ -307,10 +322,11 @@ public struct Ledger: Sendable {
     @discardableResult
     public mutating func adoptBalance(_ bank: BankID, cents: Int, at: Date, origin: BalanceOrigin,
                                       fetchedAt: Date? = nil, countsPending: Bool = false,
-                                      forcedEstimate: Bool = false) -> Bool {
+                                      forcedEstimate: Bool = false, closingDay: Date? = nil) -> Bool {
         guard Self.isAdoptable(cents: cents, at: at, origin: origin, over: state.balances[bank]) else { return false }
         state.balances[bank] = ManualBalance(cents: cents, setAt: at, origin: origin, fetchedAt: fetchedAt,
-                                          countsPending: countsPending, forcedEstimate: forcedEstimate)
+                                          countsPending: countsPending, forcedEstimate: forcedEstimate,
+                                          closingDay: closingDay)
         return true
     }
 
@@ -323,9 +339,19 @@ public struct Ledger: Sendable {
         return true
     }
 
-    /// El pendiente del banco más antiguo (la consulta debe llegar hasta él para volver a verlo).
-    public func oldestPendingBankRow(_ bank: BankID) -> Date? {
-        state.movements.filter { $0.bank == bank && $0.bankStatus == .pending && $0.bankRef != nil }.map(\.date).min()
+    /// El pendiente del banco más antiguo (la consulta debe llegar hasta él para volver a verlo). Uno de hace más de
+    /// `SyncPolicy.pendingReachDays` días está atascado: no ensancha la ventana (R52) y no se tiene en cuenta aquí.
+    public func oldestPendingBankRow(_ bank: BankID, now: Date, calendar: Calendar) -> Date? {
+        state.movements.filter {
+            $0.bank == bank && $0.bankStatus == .pending && $0.bankRef != nil
+                && !Self.isStuckPending($0.date, now: now, calendar: calendar)
+        }.map(\.date).min()
+    }
+
+    /// Un pendiente con fecha de hace más de `SyncPolicy.pendingReachDays` días de Madrid (R52).
+    public static func isStuckPending(_ date: Date, now: Date, calendar: Calendar) -> Bool {
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: calendar.startOfDay(for: now)).day ?? 0
+        return days > SyncPolicy.pendingReachDays
     }
 
     public mutating func setLink(_ bank: BankID, _ info: BankLinkInfo?) {
@@ -535,24 +561,22 @@ public struct Ledger: Sendable {
 
     public func balance(_ bank: BankID) -> (cents: Int, estimated: Bool)? {
         guard let base = state.balances[bank] else { return nil }
-        let twinned = base.countsPending ? Self.twinnedPending(state.movements, bank: bank, base: base) : []
-        let later = state.movements.filter { $0.bank == bank && Self.addsToReading($0, base: base, twinned: twinned) }
+        let adding = Self.rowsAddingToReading(state.movements, bank: bank, base: base)
+        let later = state.movements.filter { adding.contains($0.id) }
         let exact = base.origin != .manual && later.isEmpty && !base.countsPending && !base.forcedEstimate
         return (base.cents + later.reduce(0) { $0 + $1.amountCents }, !exact)
     }
 
-    /// El ÚNICO criterio de qué movimientos se suman sobre una lectura de saldo (lo usan `balance` y "Te quedaban"):
-    /// posteriores a la lectura y capturados (no los del banco: su saldo ya los incluye). Un capturado enlazado a un
-    /// registro del banco o de un extracto cuenta solo si su hora precisa es posterior a la lectura Y su registro no
-    /// se conocía ya cuando se tomó la lectura (`linkedAt ?? importedAt` nil o posterior a la CONSULTA, `fetchedAt ?? setAt`, no a la
-    /// hora de referencia del saldo, que puede ser anterior): un aviso tardío fusionado en una fila que el banco ya
-    /// había dado está dentro de ese saldo. Los de extracto solo cuentan sobre un saldo puesto a mano.
+    /// Los movimientos de `bank` que suman sobre la lectura: el ÚNICO criterio de «Te quedan» (`balance`) y «Te quedaban»
+    /// (`balancesAfter`). Calcula los gemelos una vez y aplica `addsToReading` a cada fila.
+    public static func rowsAddingToReading(_ movements: [Movement], bank: BankID, base: ManualBalance) -> Set<UUID> {
+        let twinned = twinnedPending(movements, bank: bank, base: base)
+        return Set(movements.filter { $0.bank == bank && addsToReading($0, base: base, twinned: twinned) }.map(\.id))
+    }
+
+    /// Lo mismo que `addsToReading` sin gemelos (una sola fila suelta).
     public static func countsTowardBalance(_ m: Movement, base: ManualBalance) -> Bool {
-        guard m.date > base.setAt, isBalanceEligible(m, origin: base.origin) else { return false }
-        // Un capturado enlazado por la misma consulta que la lectura (`linkedAt`) se trata como un aviso tardío fusionado en
-        // una fila ya conocida: la lectura ya lo incluye.
-        if isLinked(m), let known = m.linkedAt ?? m.importedAt, known <= (base.fetchedAt ?? base.setAt) { return false }
-        return true
+        addsToReading(m, base: base)
     }
 
     /// Capturado (o fusionado) enlazado a un registro del banco o a una fila de extracto. Las filas del propio banco o
@@ -561,37 +585,67 @@ public struct Ledger: Sendable {
         !m.source.isBankSourced && (m.bankRef != nil || m.statementRef != nil)
     }
 
-    /// El criterio ÚNICO de qué se suma sobre una lectura (lo usan `balance` y `balancesAfter`, o sea "Te quedaban"):
-    /// lo que ya exige `countsTowardBalance` O, si la lectura es solo de lo contabilizado, cualquier fila con un registro
-    /// pendiente del banco (sea del banco o un aviso enlazado a él) en cualquier fecha: el banco aún no la incluye.
-    /// Es un solo O: una fila nunca se cuenta dos veces.
-    /// Un pendiente solo cuenta si es de los últimos 30 días antes de la lectura (una retención olvidada no resta para
-    /// siempre) y si no tiene un gemelo apuntado en la misma consulta (`twinned`): ese pago ya está en la lectura.
+    /// ¿Suma esta fila sobre la lectura? Se responde con lo que la lectura YA incluye y si el dinero de la fila ya había
+    /// salido de ella (R53, matriz en `BalanceMatrixTests`):
+    /// 1. Fuente: una fila del banco nunca suma sobre un saldo puesto a mano; las de extracto solo sobre uno a mano; un
+    ///    capturado enlazado a una fila de extracto, nunca sobre un saldo de extracto (`isBalanceEligible`).
+    /// 2. Un pendiente con su gemelo apuntado (`twinned`) no suma: ese pago ya cuenta por el apuntado.
+    /// 3. Lectura de solo contabilizado: lo pendiente del banco (fila del banco o capturado enlazado a un pendiente) no
+    ///    está dentro, sea cual sea su fecha; suma si es de los últimos 30 días antes de la lectura (una retención
+    ///    olvidada no resta para siempre).
+    /// 4. Cierre de un día D (`closingDay`): lo de D y antes está dentro; lo de un día de Madrid posterior a D suma una
+    ///    vez, sea fila del banco, enlazado (en esta consulta o antes) o capturado suelto.
+    /// 5. Lectura normal: una fila del banco ya está dentro (la consulta la trajo con el saldo).
+    /// 6. Lectura normal: un capturado o una fila de extracto suma si su hora es posterior a la lectura, salvo que su
+    ///    registro ya se conociera en la CONSULTA de la lectura (`linkedAt ?? importedAt` hasta `fetchedAt ?? setAt`):
+    ///    un aviso tardío fusionado en una fila que el banco ya había dado está dentro de ese saldo (R27, R31, R40).
     public static func addsToReading(_ m: Movement, base: ManualBalance, twinned: Set<UUID> = []) -> Bool {
-        if countsTowardBalance(m, base: base) { return true }
-        guard base.countsPending, m.bankStatus == .pending, m.bankRef != nil, !twinned.contains(m.id) else { return false }
-        return m.date >= base.setAt.addingTimeInterval(-pendingLookback)
+        if m.source == .bank {
+            guard base.origin != .manual else { return false }
+        } else {
+            guard isBalanceEligible(m, origin: base.origin) else { return false }
+        }
+        let pendingAtBank = m.bankRef != nil && m.bankStatus == .pending
+        if pendingAtBank, twinned.contains(m.id) { return false }
+        if pendingAtBank, base.countsPending { return m.date >= base.setAt.addingTimeInterval(-pendingLookback) }
+        if let closingDay = base.closingDay { return isAfterClosingDay(m.date, closingDay) }
+        if m.source == .bank { return false }
+        guard m.date > base.setAt else { return false }
+        if isLinked(m), let known = m.linkedAt ?? m.importedAt, known <= (base.fetchedAt ?? base.setAt) { return false }
+        return true
     }
 
     static let pendingLookback: TimeInterval = 30 * 86_400
 
-    /// Pendientes del banco que ya tienen su pago apuntado: una lectura de solo contabilizado ya lo incluye, así que el
-    /// pendiente no debe sumar encima. Gemelo = fila propia del banco, mismo banco e importe con signo, que (1) se vio por
-    /// primera vez a la vez o después que el pendiente y no después de la consulta de la lectura, (2) tiene fecha de 0 a 5
-    /// días DESPUÉS del pendiente (nunca antes), (3) tiene el mismo comercio (sin mayúsculas ni tildes) si los dos lo
-    /// traen y (4) no es ya el gemelo de otro pendiente: uno a uno, el más cercano primero.
+    /// El día de Madrid de `date` es posterior al día D del cierre.
+    private static func isAfterClosingDay(_ date: Date, _ closingDay: Date) -> Bool {
+        madridCalendar.startOfDay(for: date) > madridCalendar.startOfDay(for: closingDay)
+    }
+
+    /// Pendientes del banco que ya tienen su pago apuntado: el apuntado ya cuenta (dentro de la lectura o sumando encima),
+    /// así que el pendiente no debe sumar otra vez. Gemelo = fila propia del banco, mismo banco e importe con signo, que
+    /// (0) llegó YA apuntada (`firstSeenStatus`, R50: la que llegó pendiente y se apuntó con su clave es ese mismo pago),
+    /// (1) se vio por primera vez a la vez o después que el pendiente (de un capturado enlazado cuenta `linkedAt ?? importedAt`,
+    /// R51) y está contada: con una lectura normal, vista no después de su consulta; con un cierre, siempre (lo decide su
+    /// día), (2) tiene fecha de 0 a 5 días DESPUÉS del pendiente (nunca antes), (3) tiene el mismo comercio (texto del
+    /// banco si lo hay, sin mayúsculas ni tildes) si los dos lo traen y (4) no es ya el gemelo de otro pendiente: uno a
+    /// uno, el más cercano primero.
     static func twinnedPending(_ movements: [Movement], bank: BankID, base: ManualBalance) -> Set<UUID> {
+        let pending = movements.filter { $0.bank == bank && $0.bankStatus == .pending && $0.bankRef != nil }
+        guard !pending.isEmpty else { return [] }
         let known = base.fetchedAt ?? base.setAt
         let booked = movements.filter {
-            $0.bank == bank && $0.source == .bank && $0.bankStatus == .booked && ($0.importedAt.map { $0 <= known } ?? false)
+            guard $0.bank == bank, $0.source == .bank, $0.bankStatus == .booked,
+                  ($0.firstSeenStatus ?? .booked) == .booked, let imported = $0.importedAt else { return false }
+            return base.closingDay != nil || imported <= known
         }
-        let pending = movements.filter { $0.bank == bank && $0.bankStatus == .pending && $0.bankRef != nil }
-        func name(_ m: Movement) -> String { normalizeMerchant(m.merchant ?? "") }
+        func name(_ m: Movement) -> String { normalizeMerchant(m.bankMerchant ?? m.merchant ?? "") }
+        func firstSeen(_ m: Movement) -> Date? { m.source.isBankSourced ? m.importedAt : (m.linkedAt ?? m.importedAt) }
         var pairs: [(p: Int, b: Int, days: Int, seconds: TimeInterval)] = []
         for (i, p) in pending.enumerated() {
             let pDay = madridCalendar.startOfDay(for: p.date)
             for (j, b) in booked.enumerated() where b.amountCents == p.amountCents {
-                guard let bImported = b.importedAt, bImported >= (p.importedAt ?? .distantPast) else { continue }
+                guard let bImported = b.importedAt, bImported >= (firstSeen(p) ?? .distantPast) else { continue }
                 let days = madridCalendar.dateComponents([.day], from: pDay, to: madridCalendar.startOfDay(for: b.date)).day ?? -1
                 guard days >= 0, days <= 5 else { continue }
                 let pn = name(p), bn = name(b)
@@ -611,18 +665,19 @@ public struct Ledger: Sendable {
     }
 
     /// Saldo justo después de cada movimiento de `bank` ("Te quedaban"). `movements` va de más nuevo a más antiguo.
-    /// Parte de `current` (lo que da `balance`) y resta lo que se suma después de cada fila; una fila que la lectura ya
-    /// incluía y cae justo en su hora también tiene saldo. Con una lectura normal, lo anterior a su hora se desconoce
-    /// (se para), sea cual sea la clase de lectura: `current` ya incluye los pendientes viejos, y a las filas con cifra
-    /// les resta exactamente lo que `balance` sumó después de ellas.
+    /// Parte de `current` (lo que da `balance`) y resta lo que se suma después de cada fila, con el mismo criterio
+    /// (`rowsAddingToReading`); una fila que la lectura ya incluía y cae justo en su hora también tiene saldo. Lo anterior
+    /// a la hora de la lectura se desconoce (se para), sea cual sea la clase de lectura: `current` ya incluye los
+    /// pendientes viejos, y a las filas con cifra les resta exactamente lo que `balance` sumó después de ellas. Con un
+    /// cierre del día D la hora es el final de D: tienen cifra las filas posteriores a D.
     public static func balancesAfter(bank: BankID, current: Int, reading: ManualBalance, movements: [Movement]) -> [UUID: Int] {
         var out: [UUID: Int] = [:]
         var later = 0
-        let twinned = reading.countsPending ? twinnedPending(movements, bank: bank, base: reading) : []
+        let adding = rowsAddingToReading(movements, bank: bank, base: reading)
         for m in movements where m.bank == bank {
             // Lo anterior a la lectura no tiene cifra (aunque un pendiente viejo cuente en el saldo actual).
             if m.date < reading.setAt { break }
-            let adds = addsToReading(m, base: reading, twinned: twinned)
+            let adds = adding.contains(m.id)
             guard adds || (m.date == reading.setAt && isBalanceEligible(m, origin: reading.origin)) else { continue }
             out[m.id] = current - later
             later += m.amountCents

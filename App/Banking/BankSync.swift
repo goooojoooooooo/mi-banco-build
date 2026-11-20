@@ -95,7 +95,7 @@ actor BankSync {
         let calendar = bankingCalendar
         let plans = banksToFetch(
             links: links.filter { banks.contains($0.key) }, trigger: trigger, now: Date(), calendar: calendar,
-            oldestPending: oldestPending(in: loaded))
+            oldestPending: oldestPending(in: loaded, calendar: calendar))
         let planned = Dictionary(uniqueKeysWithValues: plans.map { ($0.bank, $0) })
 
         for bank in banks {
@@ -112,7 +112,7 @@ actor BankSync {
             links = live.links
             let decision = SyncPolicy.decide(
                 links[bank], trigger: trigger, now: Date(), calendar: calendar,
-                oldestPending: Ledger(state: live).oldestPendingBankRow(bank))
+                oldestPending: Ledger(state: live).oldestPendingBankRow(bank, now: Date(), calendar: calendar))
             guard case let .fetch(dateFrom, strategy) = decision else {
                 if case let .skip(reason) = decision { results[bank] = .skipped(reason) }
                 continue
@@ -200,12 +200,13 @@ actor BankSync {
         }
     }
 
-    /// Si mientras tanto hubo una reconexión o renovación, el fallo es de la sesión vieja: no se anota, no se borra la
-    /// sesión nueva del Llavero y no hay resultado (decide Core: `syncFailureAction`).
-    private func oldestPending(in state: LedgerState) -> [BankID: Date] {
+    private func oldestPending(in state: LedgerState, calendar: Calendar) -> [BankID: Date] {
         let ledger = Ledger(state: state)
+        let now = Date()
         var out: [BankID: Date] = [:]
-        for bank in BankID.allCases { if let date = ledger.oldestPendingBankRow(bank) { out[bank] = date } }
+        for bank in BankID.allCases {
+            if let date = ledger.oldestPendingBankRow(bank, now: now, calendar: calendar) { out[bank] = date }
+        }
         return out
     }
 
@@ -216,6 +217,8 @@ actor BankSync {
         return .unreadable
     }
 
+    /// Si mientras tanto hubo una reconexión o renovación, el fallo es de la sesión vieja: no se anota, no se borra la
+    /// sesión nueva del Llavero y no hay resultado (decide Core: `syncFailureAction`).
     private func recordFailure(
         _ bank: BankID, _ error: Error, startedSession: String?, attemptAt: Date, store: FileStore
     ) async -> SyncOutcome? {

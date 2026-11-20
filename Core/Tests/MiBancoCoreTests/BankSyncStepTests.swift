@@ -455,12 +455,8 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         #expect(from(iso("2026-11-03T12:00:00Z")) == iso("2026-11-02T23:00:00Z"))
         // Un pendiente más reciente que la ventana habitual no la cambia.
         #expect(from(iso("2026-11-18T12:00:00Z")) == usual)
-        // Nunca más atrás del máximo de la política.
-        let floor: Date? = {
-            if case let .fetch(dateFrom, _) = SyncPolicy.decide(l, trigger: .afterConnect, now: now, calendar: cal) { return dateFrom }
-            return nil
-        }()
-        #expect(from(iso("2024-01-01T12:00:00Z")) == floor)
+        // R52: un pendiente atascado (más de 45 días) no ensancha la ventana (antes la llevaba hasta el máximo de 365).
+        #expect(from(iso("2024-01-01T12:00:00Z")) == usual)
         #expect(banksToFetch(links: [.rev: l], trigger: .appOpen, now: now, calendar: cal,
                              oldestPending: [.rev: iso("2026-11-03T12:00:00Z")]).first?.dateFrom == iso("2026-11-02T23:00:00Z"))
     }
@@ -488,7 +484,8 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         // Día 10: la ventana llega hasta el pendiente más antiguo, así que su registro apuntado vuelve en el lote.
         let now = day(10)
         guard case let .fetch(dateFrom, _) = SyncPolicy.decide(
-            l.state.links[.rev], trigger: .appOpen, now: now, calendar: cal, oldestPending: l.oldestPendingBankRow(.rev))
+            l.state.links[.rev], trigger: .appOpen, now: now, calendar: cal,
+            oldestPending: l.oldestPendingBankRow(.rev, now: now, calendar: cal))
         else { Issue.record("debía consultar"); return }
         let batch = [pendingRecord(.booked)].filter { $0.timing.date >= dateFrom }
         _ = l.applyBankFetch(bank: .rev, records: batch,
@@ -502,7 +499,8 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         #expect(l.balance(.rev)?.cents == 8_750)
     }
 
-    @Test func pendingRowOlderThanTheWindowIsKeptButDoesNotCount() {
+    /// R52 cambia R47 (3): un pendiente atascado (más de 45 días) que una consulta completa ya no trae se quita.
+    @Test func pendingRowOlderThanTheWindowIsRemovedWhenNoLongerListed() {
         let old = Movement(bank: .rev, amountCents: -5000, merchant: "Hotel", kind: .payment, source: .bank,
                            date: iso("2025-01-01T12:00:00Z"), bankRef: "old", bankStatus: .pending,
                            importedAt: iso("2025-01-01T12:00:00Z"))
@@ -510,7 +508,7 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         let from = iso("2025-11-20T00:00:00Z")
         _ = l.applyBankFetch(bank: .rev, records: [], balance: BalanceReading(cents: 10_000, at: iso("2026-11-20T12:59:00Z"), kind: .booked),
                              dateFrom: from, complete: true, fetchedAt: fetched, calendar: cal)
-        #expect(l.state.movements.count == 1)
+        #expect(l.state.movements.isEmpty)
         #expect(l.balance(.rev)?.cents == 10_000)
     }
 
@@ -553,6 +551,187 @@ private func record(_ ref: String, cents: Int = -1250, status: BankStatus = .boo
         // La hora de cambio, si la hay, manda sobre el día de referencia.
         #expect(chooseBalanceReading(closing("2026-11-19", change: "2026-11-20T09:00:00Z"), fetchedAt: fetchedAt)?.at
             == iso("2026-11-20T09:00:00Z"))
+    }
+
+    // MARK: R49 cierre de un día pasado
+
+    private let closingFetchAt = iso("2026-11-20T10:00:00Z")
+    /// Inicio del 19 en Madrid.
+    private let day19 = iso("2026-11-18T23:00:00Z")
+
+    private func applyClosing19(_ l: inout Ledger, _ records: [BankRecord]) {
+        _ = l.applyBankFetch(bank: .rev, records: records,
+                             balance: chooseBalanceReading(closing("2026-11-19"), fetchedAt: closingFetchAt),
+                             dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: closingFetchAt, calendar: cal)
+    }
+
+    private func teQuedaban(_ l: Ledger) -> [UUID: Int] {
+        guard let reading = l.state.balances[.rev] else { return [:] }
+        return Ledger.balancesAfter(bank: .rev, current: l.balance(.rev)?.cents ?? 0, reading: reading,
+                                    movements: l.state.movements.sorted { $0.date > $1.date })
+    }
+
+    @Test func closingReadingOfAPastDayIsMarkedWithThatDay() {
+        #expect(chooseBalanceReading(closing("2026-11-19"), fetchedAt: closingFetchAt)?.closingDay == day19)
+        // Cierre de hoy, o con hora de cambio: lectura normal.
+        #expect(chooseBalanceReading(closing("2026-11-20"), fetchedAt: closingFetchAt)?.closingDay == nil)
+        #expect(chooseBalanceReading(closing("2026-11-19", change: "2026-11-20T09:00:00Z"), fetchedAt: closingFetchAt)?.closingDay == nil)
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        applyClosing19(&l, [])
+        #expect(l.state.balances[.rev]?.closingDay == day19)
+        #expect(l.state.balances[.rev]?.countsPending == true)
+    }
+
+    @Test func closingReadingAddsTheNextDaysBookedRowFromTheSameBatch() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        applyClosing19(&l, [record("b", cents: -1250, day: "2026-11-20T11:00:00Z")])
+        #expect(l.balance(.rev)?.cents == 8_750)
+        #expect(l.state.movements.count == 1)
+        let id = l.state.movements.first?.id ?? UUID()
+        #expect(teQuedaban(l)[id] == 8_750)
+    }
+
+    @Test func closingReadingCountsACaptureLinkedInThisFetchOnce() {
+        let capture = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .notification,
+                               date: iso("2026-11-20T08:00:00Z"))
+        var l = Ledger(state: LedgerState(movements: [capture], links: [.rev: link()]))
+        applyClosing19(&l, [record("b", cents: -1250, day: "2026-11-20T11:00:00Z")])
+        #expect(l.state.movements.count == 1)
+        #expect(l.state.movements.first?.bankRef == "b")
+        #expect(l.state.movements.first?.linkedAt == closingFetchAt)
+        #expect(l.balance(.rev)?.cents == 8_750)
+        #expect(teQuedaban(l)[capture.id] == 8_750)
+    }
+
+    @Test func closingReadingDoesNotAddARowOfTheClosingDay() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        applyClosing19(&l, [record("b", cents: -1250, day: "2026-11-19T11:00:00Z")])
+        #expect(l.balance(.rev)?.cents == 10_000)
+        #expect(teQuedaban(l).isEmpty)
+    }
+
+    /// Decisión de esta ronda (ver informe): un pendiente del día D tampoco está en un cierre CONTABILIZADO de D.
+    @Test func pendingRowOfTheClosingDayStillCountsOnABookedClosing() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        applyClosing19(&l, [record("p", cents: -1250, status: .pending, day: "2026-11-19T11:00:00Z")])
+        #expect(l.balance(.rev)?.cents == 8_750)
+        #expect(teQuedaban(l).isEmpty)
+    }
+
+    @Test func newStoredFieldsRoundTripAndOldFilesLoad() throws {
+        let b = ManualBalance(cents: 5, setAt: fetched, origin: .bank, fetchedAt: fetched, countsPending: true, closingDay: day19)
+        #expect(try JSONDecoder().decode(ManualBalance.self, from: JSONEncoder().encode(b)) == b)
+        let plain = String(decoding: try JSONEncoder().encode(ManualBalance(cents: 5, setAt: fetched, origin: .bank)), as: UTF8.self)
+        #expect(!plain.contains("closingDay"))
+        let oldBalance = #"{"cents":1,"setAt":1000,"origin":"bank"}"#
+        #expect(try JSONDecoder().decode(ManualBalance.self, from: Data(oldBalance.utf8)).closingDay == nil)
+        let m = Movement(bank: .rev, amountCents: -240, merchant: "Cafe", kind: .payment, source: .bank, date: fetched,
+                         bankRef: "c", bankStatus: .booked, importedAt: fetched, firstSeenStatus: .pending)
+        #expect(try JSONDecoder().decode(Movement.self, from: JSONEncoder().encode(m)) == m)
+        let oldMovement = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","bank":"rev","amountCents":-500,"kind":"payment","source":"bank","date":2000,"bankStatus":"booked"}"#
+        #expect(try JSONDecoder().decode(Movement.self, from: Data(oldMovement.utf8)).firstSeenStatus == nil)
+    }
+
+    // MARK: R50 solo una fila que llegó apuntada es gemelo
+
+    @Test func rowThatArrivedPendingAndBookedUnderItsOwnKeyIsNeverATwin() {
+        var l = Ledger(state: LedgerState(links: [.rev: link()]))
+        let from = iso("2026-11-13T00:00:00Z")
+        func coffee(_ ref: String, _ status: BankStatus) -> BankRecord {
+            BankRecord(ref: ref, bank: .rev, amountCents: -240, timing: .bookingDay(iso("2026-11-20T11:00:00Z")), status: status,
+                       merchant: "Cafe")
+        }
+        _ = l.applyBankFetch(bank: .rev, records: [coffee("c1", .pending), coffee("c2", .pending)],
+                             balance: BalanceReading(cents: 10_000, at: iso("2026-11-20T11:59:00Z"), kind: .booked),
+                             dateFrom: from, complete: true, fetchedAt: iso("2026-11-20T12:00:00Z"), calendar: cal)
+        _ = l.applyBankFetch(bank: .rev, records: [coffee("c1", .booked), coffee("c2", .pending)],
+                             balance: BalanceReading(cents: 10_000, at: iso("2026-11-20T17:59:00Z"), kind: .booked),
+                             dateFrom: from, complete: true, fetchedAt: iso("2026-11-20T18:00:00Z"), calendar: cal)
+        let c1 = l.state.movements.first { $0.bankRef == "c1" }
+        #expect(c1?.bankStatus == .booked)
+        #expect(c1?.firstSeenStatus == .pending)
+        #expect(l.balance(.rev)?.cents == 9_760)
+    }
+
+    // MARK: R51 gemelo de un capturado enlazado
+
+    private func linkedPendingCapture(linkedAt: String) -> Movement {
+        Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .notification,
+                 date: iso("2026-11-20T09:30:00Z"), bankRef: "p", bankStatus: .pending,
+                 bankMerchant: "MERCADONA 1234 TORREJON", linkedAt: iso(linkedAt))
+    }
+
+    private let bookedMercadona = Movement(
+        bank: .rev, amountCents: -1250, merchant: "MERCADONA 1234 TORREJON", kind: .payment, source: .bank,
+        date: iso("2026-11-20T11:00:00Z"), bankRef: "b", bankStatus: .booked, importedAt: iso("2026-11-20T12:50:00Z"),
+        dayOnly: true, firstSeenStatus: .booked)
+
+    @Test func captureLinkedToAPendingRowIsTwinnedByTheBankText() {
+        let capture = linkedPendingCapture(linkedAt: "2026-11-20T10:00:00Z")
+        #expect(ledger(reading: bookedReading, [capture, bookedMercadona]).balance(.rev)?.cents == 10_000)
+    }
+
+    @Test func aBookedRowSeenBeforeTheCaptureWasLinkedIsNotItsTwin() {
+        let capture = linkedPendingCapture(linkedAt: "2026-11-20T12:55:00Z")
+        #expect(ledger(reading: bookedReading, [capture, bookedMercadona]).balance(.rev)?.cents == 8_750)
+    }
+
+    // MARK: R52 pendientes atascados
+
+    private func stuckRow(_ ref: String = "old", day: String = "2026-10-01T11:00:00Z") -> Movement {
+        Movement(bank: .rev, amountCents: -5000, merchant: "Hotel", kind: .payment, source: .bank, date: iso(day),
+                 bankRef: ref, bankStatus: .pending, importedAt: iso(day), dayOnly: true, firstSeenStatus: .pending)
+    }
+
+    @Test func stuckPendingRowNeverWidensTheWindow() {
+        var l = link()
+        l.lastSuccessAt = iso("2026-11-19T10:00:00Z")
+        let now = iso("2026-11-20T12:00:00Z")
+        func from(_ pending: Date?) -> Date? {
+            if case let .fetch(dateFrom, _) = SyncPolicy.decide(l, trigger: .appOpen, now: now, calendar: cal, oldestPending: pending) {
+                return dateFrom
+            }
+            return nil
+        }
+        // 300 días.
+        #expect(from(iso("2026-01-24T12:00:00Z")) == from(nil))
+        // Con uno atascado de 300 días y otro de 40, la ventana llega al de 40.
+        let both = Ledger(state: LedgerState(movements: [
+            stuckRow(day: "2026-01-24T11:00:00Z"), stuckRow("recent", day: "2026-10-11T11:00:00Z")]))
+        #expect(both.oldestPendingBankRow(.rev, now: now, calendar: cal) == iso("2026-10-11T11:00:00Z"))
+        let onlyStuck = Ledger(state: LedgerState(movements: [stuckRow(day: "2026-01-24T11:00:00Z")]))
+        #expect(onlyStuck.oldestPendingBankRow(.rev, now: now, calendar: cal) == nil)
+    }
+
+    @Test func stuckPendingRowAbsentFromACompleteFetchIsRemoved() {
+        let capture = Movement(bank: .rev, amountCents: -3000, merchant: "Taller", kind: .payment, source: .notification,
+                               date: iso("2026-10-01T09:00:00Z"), bankRef: "old2", bankStatus: .pending,
+                               linkedAt: iso("2026-10-01T12:00:00Z"))
+        var l = Ledger(state: LedgerState(movements: [stuckRow(), capture], links: [.rev: link()]))
+        let applied = l.applyBankFetch(
+            bank: .rev, records: [], balance: BalanceReading(cents: 10_000, at: iso("2026-11-20T12:59:00Z"), kind: .available),
+            dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: fetched, calendar: cal)
+        #expect(applied?.report.removed == 1)
+        #expect(l.state.movements.count == 1)
+        let kept = l.state.movements.first
+        #expect(kept?.id == capture.id)
+        #expect(kept?.bankRef == nil)
+        #expect(kept?.bankStatus == nil)
+    }
+
+    @Test func stuckPendingRowStillListedStays() {
+        var l = Ledger(state: LedgerState(movements: [stuckRow()], links: [.rev: link()]))
+        _ = l.applyBankFetch(bank: .rev, records: [record("old", cents: -5000, status: .pending, day: "2026-10-01T11:00:00Z")],
+                             balance: BalanceReading(cents: 10_000, at: iso("2026-11-20T12:59:00Z"), kind: .available),
+                             dateFrom: iso("2026-11-13T00:00:00Z"), complete: true, fetchedAt: fetched, calendar: cal)
+        #expect(l.state.movements.count == 1)
+    }
+
+    @Test func stuckPendingRowIsNotRemovedUnderAHold() {
+        var l = Ledger(state: LedgerState(balances: [.rev: bookedReading], movements: [stuckRow()], links: [.rev: link()]))
+        _ = l.applyBankFetch(bank: .rev, records: [], balance: nil, dateFrom: iso("2026-11-13T00:00:00Z"), complete: true,
+                             fetchedAt: iso("2026-11-20T14:00:00Z"), calendar: cal)
+        #expect(l.state.movements.count == 1)
     }
 
     // MARK: disco

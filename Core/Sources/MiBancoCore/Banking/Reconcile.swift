@@ -118,18 +118,20 @@ extension Ledger {
                 source: channelSource, date: r.timing.date, isShop: r.isShop,
                 bankRef: channel == .bank ? r.ref : nil, statementRef: channel == .statement ? r.ref : nil,
                 bankStatus: channel == .bank ? r.status : .booked, importedAt: now, dayOnly: !r.timing.isExact,
-                excludedFromSpending: r.excludedFromSpending)
+                excludedFromSpending: r.excludedFromSpending, firstSeenStatus: channel == .bank ? r.status : nil)
             state.movements.append(movement)
             report.added += 1
             report.addedIDs.append(movement.id)
         }
 
-        // Pendientes que el banco ya no devuelve (solo con cobertura y solo del canal del banco).
+        // Pendientes que el banco ya no devuelve (solo con cobertura y solo del canal del banco): los de dentro de lo
+        // consultado y los atascados (más de `SyncPolicy.pendingReachDays` días, R52), que la ventana ya no alcanza.
         if channel == .bank, let coverage {
             let vanished = state.movements.indices.filter { i in
                 let m = state.movements[i]
                 return m.bank == bank && m.bankStatus == .pending && m.bankRef != nil
-                    && !batchRefs.contains(m.bankRef ?? "") && coverage.contains(m.date)
+                    && !batchRefs.contains(m.bankRef ?? "")
+                    && (coverage.contains(m.date) || Ledger.isStuckPending(m.date, now: now, calendar: calendar))
             }
             var toDelete = Set<UUID>()
             for i in vanished {

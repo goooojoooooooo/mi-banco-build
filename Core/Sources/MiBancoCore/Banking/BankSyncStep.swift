@@ -19,21 +19,26 @@ public func bankDateParameter(_ date: Date, calendar: Calendar) -> String {
 /// Saldo del banco a partir de la lectura de cada cuenta. Una cuenta sin lectura en euros (nil) hace que no se adopte
 /// nada: una suma parcial enseñaría un saldo falso. La hora es la de la lectura más antigua. Todas disponibles:
 /// disponible; todas contabilizadas: contabilizado; de las dos clases: `.mixed` (se suma y es estimado).
-/// Un saldo `.mixed` de una sola cuenta no existe.
+/// Un saldo `.mixed` de una sola cuenta no existe. Cierres: si todas las cuentas son el cierre del mismo día, la suma
+/// también lo es; si unas son cierre y otras no (o de días distintos), lo posterior a ese día está dentro de unas
+/// cuentas y fuera de otras: se suma como `.mixed` (estimado, sin cierre).
 public func combineBalanceReadings(_ readings: [BalanceReading?]) -> BalanceReading? {
     guard !readings.isEmpty else { return nil }
     var cents = 0
     var at: Date?
     var kinds = Set<Int>()
+    var closingDays = Set<Date?>()
     for reading in readings {
         guard let reading else { return nil }
         cents += reading.cents
         at = min(at ?? reading.at, reading.at)
         kinds.insert(reading.kind == .booked ? 1 : 0)
+        closingDays.insert(reading.closingDay)
     }
     guard let at else { return nil }
+    if closingDays.count > 1 { return BalanceReading(cents: cents, at: at, kind: .mixed) }
     let kind: BalanceReading.Kind = kinds.count > 1 ? .mixed : (kinds.contains(1) ? .booked : .available)
-    return BalanceReading(cents: cents, at: at, kind: kind)
+    return BalanceReading(cents: cents, at: at, kind: kind, closingDay: kind == .mixed ? nil : closingDays.first ?? nil)
 }
 
 /// Qué pasó al aplicar una consulta al libro.
@@ -68,7 +73,8 @@ extension Ledger {
         var adopted = false
         if let balance {
             adopted = adoptBalance(bank, cents: balance.cents, at: balance.at, origin: .bank, fetchedAt: fetchedAt,
-                                   countsPending: balance.kind == .booked, forcedEstimate: balance.kind == .mixed)
+                                   countsPending: balance.kind == .booked, forcedEstimate: balance.kind == .mixed,
+                                   closingDay: balance.closingDay)
         }
         setLink(bank, link.recordingSuccess(at: fetchedAt))
         return BankFetchApplied(report: report, balanceAdopted: adopted)

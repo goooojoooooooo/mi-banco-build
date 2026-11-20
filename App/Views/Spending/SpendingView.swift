@@ -76,7 +76,7 @@ struct SpendingView: View {
                             }
 
                             if content.rows.isEmpty {
-                                Text(index == months.count - 1 ? "Este mes aún no has gastado nada." : "Ese mes no gastaste nada.")
+                                Text("Este mes aún no has gastado nada.")
                                     .titan(.callout)
                                     .foregroundStyle(Theme.label2)
                                     .padding(.horizontal, Theme.Space.gutter)
@@ -140,8 +140,7 @@ struct SpendingView: View {
             guard DemoMode.monthOffset != 0 else { return }
             let months = model.snapshot.spendingMonths
             guard !months.isEmpty else { return }
-            let target = max(0, min(months.count - 1, months.count - 1 + DemoMode.monthOffset))
-            selection.month = target == months.count - 1 ? nil : months[target]
+            selection.month = months[max(0, min(months.count - 1, months.count - 1 + DemoMode.monthOffset))]
         }
         #endif
         .onChange(of: isVisible) { _, visible in
@@ -165,8 +164,7 @@ struct SpendingView: View {
         tick += 1
         if !reduceMotion { begin(.list) }
         withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
-            // El mes en curso se guarda como nil: así sigue al mes nuevo cuando cambia el mes con la app abierta.
-            selection = Selection(month: target == months.count - 1 ? nil : months[target], direction: step)
+            selection = Selection(month: months[target], direction: step)
         }
     }
 

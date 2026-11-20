@@ -4,8 +4,7 @@ import MiBancoCore
 /// Cabecera de la pantalla de una categoría en un mes, ya redactada.
 struct CategoryHeader: Equatable, Sendable {
     let cents: Int
-    /// "-30 % frente a octubre" (mes pasado) o "+77 % frente a octubre a estas alturas" (mes en curso); nil sin gasto
-    /// previo en la categoría.
+    /// "-30 % frente a octubre"; nil sin gasto previo en la categoría.
     let comparison: String?
 }
 
@@ -72,17 +71,14 @@ extension LedgerSnapshot {
         let monthName = { (date: Date) in date.formatted(Date.FormatStyle(locale: spanish).month(.wide)) }
         for start in months {
             guard let page = pages[start] else { continue }
-            // Mes en curso: se compara con el mismo punto del mes anterior, y la frase lo dice («… a estas alturas»).
-            let previousName = (calendar.date(byAdding: .month, value: -1, to: start).map(monthName) ?? "")
-                + (start == currentStart ? " a estas alturas" : "")
+            let previousName = calendar.date(byAdding: .month, value: -1, to: start).map(monthName) ?? ""
             for row in page.rows {
                 let key = categoryKey(month: start, category: row.category, calendar: calendar)
                 let sorted = (grouped[key] ?? []).sorted {
                     $0.date != $1.date ? $0.date > $1.date : $0.id.uuidString > $1.id.uuidString
                 }
                 out.categoryEntries[key] = ListEntry.flatten(
-                    sections(for: sorted.map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar,
-                             ownTransfers: transfers),
+                    sections(for: sorted.map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar),
                     prefix: "cat-\(key)")
                 out.categoryHeaders[key] = CategoryHeader(
                     cents: row.cents, comparison: row.change.map { "\($0) frente a \(previousName)" })
@@ -92,8 +88,7 @@ extension LedgerSnapshot {
         // Traspasos entre tus cuentas: los más recientes primero.
         let moved = state.movements.filter { transfers.contains($0.id) }.sorted { $0.date > $1.date }
         out.transferEntries = ListEntry.flatten(
-            sections(for: moved.prefix(maxTransferRows).map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar,
-                     ownTransfers: transfers),
+            sections(for: moved.prefix(maxTransferRows).map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar),
             prefix: "tr")
 
         out.links.budgets = budgetsSummary(state.budgets)

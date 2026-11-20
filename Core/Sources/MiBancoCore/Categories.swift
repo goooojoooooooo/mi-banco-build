@@ -101,18 +101,3 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
     }
     return .sinCategoria
 }
-
-/// Palabras de un concepto genérico (Bizum, transferencias, recibos…): el «comercio» no es un comercio, así que elegir una
-/// categoría para un pago así no debería aplicarse por defecto a todo lo que lleva ese texto.
-private let genericPayeeWords: Set<String> = [
-    "bizum", "transferencia", "transferencias", "traspaso", "transfer", "recibo", "domiciliacion", "adeudo", "cajero",
-    "retirada", "ingreso", "pago", "pagos", "cargo", "devolucion", "comision",
-]
-
-/// true si el texto del comercio es un concepto genérico («Bizum a Ana», «Transferencia enviada», «Recibo»): palabra
-/// entera, sin mayúsculas ni tildes.
-public func isGenericPayee(_ merchant: String?) -> Bool {
-    guard let merchant else { return false }
-    let folded = merchant.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
-    return folded.components(separatedBy: CharacterSet.alphanumerics.inverted).contains { genericPayeeWords.contains($0) }
-}

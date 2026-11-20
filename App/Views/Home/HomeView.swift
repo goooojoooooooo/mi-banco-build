@@ -46,8 +46,8 @@ struct HomeView: View {
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                 if searching {
-                    SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains,
-                                  ownTransfers: snapshot.ownTransfers, query: query, zoom: zoom, onOpen: open)
+                    SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains, query: query,
+                                  zoom: zoom, onOpen: open)
                 } else if snapshot.total != nil {
                     CardCarousel(snapshot: snapshot, selection: $selection, flipped: $flipped, motion: motion,
                                  onEdit: openSettings)
@@ -277,13 +277,8 @@ struct HomeView: View {
         }
         if DemoMode.opensDetail, let first = model.snapshot.searchIndex.first {
             Task {
-                // Se reintenta unos segundos: `openDetail` no abre con la app aún fuera de primer plano (arranque en el simulador de CI);
-                // repetir la misma ruta no hace nada una vez abierta.
                 try? await Task.sleep(for: .seconds(1.5))
-                for _ in 0..<10 {
-                    openDetail(first.id)
-                    try? await Task.sleep(for: .milliseconds(500))
-                }
+                openDetail(first.id)
             }
         }
     }

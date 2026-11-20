@@ -2,7 +2,7 @@ import Foundation
 
 /// Texto de un campo de saldo -> céntimos con signo, o nil si no se entiende.
 /// Acepta "-" inicial, miles con punto y 0, 1 o 2 decimales tras `,` o `.` ("340,5" = 340,50).
-public func parseBalanceInput(_ text: String) -> Int? {
+func parseBalanceInput(_ text: String) -> Int? {
     var s = text.filter { !$0.isWhitespace && $0 != "€" }
     let negative = s.hasPrefix("-")
     if negative { s.removeFirst() }

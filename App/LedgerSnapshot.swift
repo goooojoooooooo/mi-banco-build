@@ -148,11 +148,6 @@ struct LedgerSnapshot: Sendable {
     var hiddenSubscriptions: [SubscriptionRow] = []
     var subscriptionsMonthlyCents = 0
     var subscriptionsYearlyCents = 0
-    /// Categoría de cada pago (la del movimiento, la recordada del comercio o la que deduce la app); los ingresos no tienen.
-    /// Se calcula una sola vez por reconstrucción: la hoja y las listas solo leen.
-    var categories: [UUID: SpendingCategory] = [:]
-    /// Ids de los traspasos entre tus cuentas (pares detectados y marcados a mano), calculados una sola vez.
-    var ownTransfers: Set<UUID> = []
     /// Día en que se calculó; al cambiar de día hay que recalcular aunque el estado no cambie.
     var day = Date.distantPast
 
@@ -173,7 +168,6 @@ struct LedgerSnapshot: Sendable {
         let transfers = ownTransferIDs(in: state.movements)
         let notSpending = spendingExclusions(in: state, now: now, ownTransfers: transfers)
         mutedMerchants = state.mutedMerchants
-        ownTransfers = transfers
 
         let byDate = state.movements.sorted { $0.date > $1.date }
         searchIndex = byDate
@@ -187,8 +181,7 @@ struct LedgerSnapshot: Sendable {
         hasItems = !items.isEmpty
         for card in AccountCard.allCases {
             let mine = card.bank.map { bank in items.filter { $0.bank == bank } } ?? items
-            let grouped = Self.sections(for: Array(mine.prefix(Self.maxRows)), showsBank: card == .all, now: now, calendar: calendar,
-                                       ownTransfers: transfers)
+            let grouped = Self.sections(for: Array(mine.prefix(Self.maxRows)), showsBank: card == .all, now: now, calendar: calendar)
             entries[card] = ListEntry.flatten(grouped, prefix: card.rawValue)
             weeks[card] = WeekSpend(movements: state.movements, bank: card.bank, now: now, calendar: calendar, notSpending: notSpending)
         }
@@ -265,12 +258,6 @@ struct LedgerSnapshot: Sendable {
         let dismissed = state.dismissedSubscriptions
         let subscriptions = detected.filter { !dismissed.contains("\($0.bank.rawValue)|\($0.id)") }
         let hiddenDetected = detected.filter { dismissed.contains("\($0.bank.rawValue)|\($0.id)") }
-        // Categoría de cada pago (la hoja y las listas solo leen): las claves de las suscripciones activas son las de
-        // esta misma detección, no se recalculan por movimiento.
-        let activeKeys = Set(subscriptions.map(\.id))
-        for m in state.movements {
-            if let category = categoryOf(m, in: state, subscriptionKeys: activeKeys) { categories[m.id] = category }
-        }
         let built = Self.spendingPages(state: state, now: now, calendar: calendar, notSpending: notSpending,
                                        subscriptions: subscriptions, pace: corePace)
         spendingMonths = built.months
@@ -302,14 +289,12 @@ struct LedgerSnapshot: Sendable {
 
     // MARK: - Agrupar por día
 
-    /// `items` ya ordenados del más reciente al más antiguo. `ownTransfers` (los traspasos solos, sin valor por defecto:
-    /// toda lista lo pasa) pone «Traspaso» en vez de la hora.
-    static func sections(for items: [LedgerItem], showsBank: Bool, now: Date, calendar: Calendar,
-                         ownTransfers: Set<UUID>) -> [DaySection] {
+    /// `items` ya ordenados del más reciente al más antiguo.
+    static func sections(for items: [LedgerItem], showsBank: Bool, now: Date, calendar: Calendar) -> [DaySection] {
         var out: [DaySection] = []
         for (order, item) in items.enumerated() {
             let day = calendar.startOfDay(for: item.date)
-            let row = ListRow(item: item, order: order, title: title(of: item), subtitle: subtitle(of: item, showsBank: showsBank, ownTransfers: ownTransfers))
+            let row = ListRow(item: item, order: order, title: title(of: item), subtitle: subtitle(of: item, showsBank: showsBank))
             if out.last?.id == day {
                 out[out.count - 1].rows.append(row)
             } else {
@@ -326,12 +311,11 @@ struct LedgerSnapshot: Sendable {
         }
     }
 
-    /// Todo: "Revolut · 18:47". Un banco: "18:47". La nota, si la hay, sustituye a la hora; un traspaso entre tus
-    /// cuentas pone "Traspaso" en su lugar (la nota tiene prioridad).
-    private static func subtitle(of item: LedgerItem, showsBank: Bool, ownTransfers: Set<UUID>) -> String {
+    /// Todo: "Revolut · 18:47". Un banco: "18:47". La nota, si la hay, sustituye a la hora.
+    private static func subtitle(of item: LedgerItem, showsBank: Bool) -> String {
         switch item {
         case .movement(let m):
-            let detail = m.note ?? (ownTransfers.contains(m.id) ? "Traspaso" : m.date.formatted(timeStyle))
+            let detail = m.note ?? m.date.formatted(timeStyle)
             return showsBank ? "\(m.bank.displayName) · \(detail)" : detail
         case .unread(let n):
             return showsBank ? "\(n.bank.displayName) · \(n.text)" : n.text

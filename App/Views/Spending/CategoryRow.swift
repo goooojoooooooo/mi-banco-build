@@ -13,8 +13,6 @@ struct CategoryRow: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var grown = false
-    /// Cabe «+1.234 %» al tamaño de letra que sea.
-    @ScaledMetric(relativeTo: .caption) private var changeWidth: CGFloat = 66
 
     var body: some View {
         HStack(spacing: 14) {
@@ -43,15 +41,10 @@ struct CategoryRow: View {
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
                         .lineLimit(1)
-                        .frame(width: changeWidth, alignment: .trailing)
+                        .frame(width: 56, alignment: .trailing)
                         .privateAmount(radius: 6)
                 }
             }
-            // Empuja la pantalla de la categoría.
-            Image(systemName: "chevron.right")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Theme.passive)
-                .accessibilityHidden(true)
         }
         .padding(.horizontal, Theme.Space.gutter)
         .frame(minHeight: 64)

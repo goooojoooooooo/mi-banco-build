@@ -54,9 +54,7 @@ enum DemoMode {
     /// `-MiBancoDemoSubscriptions`: abre Suscripciones.
     static var opensSubscriptions: Bool { arguments.contains("-MiBancoDemoSubscriptions") }
 
-    static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") || opensCategory }
-    /// `-MiBancoDemoDetailCategory`: la hoja del movimiento más reciente, con la rejilla de categorías desplegada.
-    static var opensCategory: Bool { arguments.contains("-MiBancoDemoDetailCategory") }
+    static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".
     static var showsAlertRules: Bool { arguments.contains("-MiBancoDemoRules") }
     static var startsPrivate: Bool { arguments.contains("-MiBancoDemoPrivate") }
@@ -103,15 +101,9 @@ enum DemoMode {
         ]
 
         // Gasto: lo de este mes se fecha siempre dentro del mes en curso y nunca en el futuro, sea el día que sea.
-        // Hora fija (R19): el día sale de la fracción del mes transcurrido y la hora es siempre las 9:00 (hoy, las 0:30),
-        // así las cifras de las capturas no cambian con la hora del día.
         let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? startOfToday
         func thisMonth(_ fraction: Double) -> Date {
-            let today = calendar.component(.day, from: now)
-            let target = max(1, Int((Double(today) * fraction).rounded(.down)))
-            let dayStart = calendar.date(byAdding: .day, value: target - 1, to: monthStart) ?? monthStart
-            let fixed = dayStart.addingTimeInterval(target < today ? 9 * 3600 : 30 * 60)
-            return min(fixed, now.addingTimeInterval(-120))
+            monthStart.addingTimeInterval(max(1, now.timeIntervalSince(monthStart) * fraction))
         }
 
         // Lo reciente (lo que se ve en Inicio).
@@ -178,14 +170,6 @@ enum DemoMode {
         movements.append(transfer(.ima, 20_000, "Transferencia de Revolut"))
         movements.append(movement(.rev, -4_650, "Restaurante Lateral", thisMonth(0.5)))
         movements.append(movement(.rev, -1_240, "Bar Pepe", thisMonth(0.65)))
-
-        // Un traspaso de Revolut a imagin ayer por la noche (mismo importe, a un minuto): Inicio lo lista como "Traspaso" y no cuenta como gasto.
-        // Los textos hablan de transferencias y no son compras en tienda (`isShop` falso).
-        let transferDate = day(1, hour: 22)
-        movements.append(Movement(bank: .rev, amountCents: -5_000, merchant: "Transferencia a imagin", kind: .payment,
-                                  source: .notification, date: transferDate))
-        movements.append(Movement(bank: .ima, amountCents: 5_000, merchant: "Transferencia de Revolut", kind: .income,
-                                  source: .notification, date: transferDate.addingTimeInterval(60)))
 
         if includesUnknownShop {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.

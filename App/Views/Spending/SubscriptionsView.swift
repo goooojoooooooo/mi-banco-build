@@ -34,15 +34,6 @@ struct SubscriptionsView: View {
                             .staggeredEntrance(1 + i)
                             .transition(rowTransition)
                     }
-                    // Ocultar una fila es un menú contextual: se dice aquí para que se pueda descubrir.
-                    Text("Mantén pulsada una suscripción para ocultarla.")
-                        .titan(.caption)
-                        .foregroundStyle(Theme.label3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, Theme.Space.gutter)
-                        .padding(.top, Theme.Space.row)
-                        .accessibilityIdentifier("suscripciones.pie")
-                        .staggeredEntrance(1 + snapshot.subscriptions.count)
                 }
 
                 if !snapshot.hiddenSubscriptions.isEmpty {

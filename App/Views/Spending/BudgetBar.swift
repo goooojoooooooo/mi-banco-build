@@ -10,8 +10,6 @@ struct BudgetBar: View {
     let name: String
     /// Orden: escalona el llenado de la barra.
     var index = 0
-    /// Margen a la derecha de «77 de 90 €  85 %» (en Presupuestos, el porcentaje se alinea con el texto del campo).
-    var textTrailingInset: CGFloat = 0
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -33,7 +31,6 @@ struct BudgetBar: View {
                     .fontWeight(.medium)
                     .foregroundStyle(exceeded ? Theme.warning : Theme.label)
             }
-            .padding(.trailing, textTrailingInset)
             .privateAmount(radius: 7)
             GeometryReader { geo in
                 let fraction = min(1, Double(status.spentCents) / Double(max(status.limitCents, 1)))

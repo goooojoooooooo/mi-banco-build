@@ -76,12 +76,10 @@ jobs:
           # Arranca en Revolut y a los 2 s pasa a imagin por el mismo camino que un toque en el segmentado.
           shot inicio-imagin 10 -MiBancoDemoCard rev -MiBancoDemoSwitch
           shot detalle 10 -MiBancoDemoDetail
-          shot detalle-categoria 10 -MiBancoDemoDetailCategory
           shot privado 10 -MiBancoDemoPrivate
           shot buscar 10 -MiBancoDemoSearch merca
           shot gasto 10 -MiBancoDemoScreen gasto
           shot gasto-mes-anterior 10 -MiBancoDemoScreen gasto -MiBancoDemoMonth -1
-          shot gasto-privado 10 -MiBancoDemoScreen gasto -MiBancoDemoPrivate
           shot gasto-categoria 10 -MiBancoDemoScreen gasto -MiBancoDemoCategory comerFuera
           shot presupuestos 10 -MiBancoDemoScreen gasto -MiBancoDemoBudgets
           shot suscripciones 10 -MiBancoDemoScreen gasto -MiBancoDemoSubscriptions

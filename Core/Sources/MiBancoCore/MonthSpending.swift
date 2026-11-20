@@ -64,18 +64,26 @@ private struct MonthWindow {
     }
 }
 
-/// El mes pedido y el anterior. Si el mes pedido es el actual, el anterior llega solo hasta el final del mismo día del mes
-/// (R19: granularidad de día; el día se ajusta a la longitud de ese mes, como `spendingPace`); si no, meses enteros.
+/// El mes pedido y el anterior. Si el mes pedido es el actual, el anterior llega solo hasta el mismo día y hora
+/// (el día se ajusta a la longitud de ese mes, como `spendingPace`); si no, se comparan meses enteros.
 private func monthWindows(month: Date, now: Date, calendar: Calendar) -> (current: MonthWindow, previous: MonthWindow)? {
     guard let interval = calendar.dateInterval(of: .month, for: month),
-          let prevStart = calendar.date(byAdding: .month, value: -1, to: interval.start) else { return nil }
+          let prevStart = calendar.date(byAdding: .month, value: -1, to: interval.start),
+          let prevDays = calendar.range(of: .day, in: .month, for: prevStart) else { return nil }
     let current = now < interval.end
         ? MonthWindow(start: interval.start, upper: now, upperInclusive: true)
         : MonthWindow(start: interval.start, upper: interval.end, upperInclusive: false)
     var previous = MonthWindow(start: prevStart, upper: interval.start, upperInclusive: false)
-    if now >= interval.start && now < interval.end,
-       let cutoff = sameDayCutoff(now: now, previousMonthStart: prevStart, calendar: calendar) {
-        previous = MonthWindow(start: prevStart, upper: min(cutoff, interval.start), upperInclusive: false)
+    if now >= interval.start && now < interval.end {
+        let clock = calendar.dateComponents([.day, .hour, .minute, .second], from: now)
+        var parts = calendar.dateComponents([.year, .month], from: prevStart)
+        parts.day = min(clock.day ?? 1, prevDays.count)
+        parts.hour = clock.hour
+        parts.minute = clock.minute
+        parts.second = clock.second
+        if let cutoff = calendar.date(from: parts) {
+            previous = MonthWindow(start: prevStart, upper: cutoff, upperInclusive: true)
+        }
     }
     return (current, previous)
 }

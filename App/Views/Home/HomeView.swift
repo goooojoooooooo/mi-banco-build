@@ -46,8 +46,8 @@ struct HomeView: View {
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                 if searching {
-                    SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains, query: query,
-                                  zoom: zoom, onOpen: open)
+                    SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains,
+                                  ownTransfers: snapshot.ownTransfers, query: query, zoom: zoom, onOpen: open)
                 } else if snapshot.total != nil {
                     CardCarousel(snapshot: snapshot, selection: $selection, flipped: $flipped, motion: motion,
                                  onEdit: openSettings)

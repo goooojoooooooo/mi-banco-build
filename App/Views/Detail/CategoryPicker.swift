@@ -3,7 +3,8 @@ import MiBancoCore
 
 /// Fila «Categoría» de la hoja del movimiento (solo pagos): un chip con el símbolo y el nombre. Al tocarlo, la propia
 /// fila se despliega (sin hoja nueva ni popover: la hoja de detalle es la única que hay y la cierra el bloqueo)
-/// en una rejilla de 4 x 3 fichas que entran escalonadas. La elegida va en blanco con símbolo negro y una marca que se
+/// en una rejilla de fichas que entran escalonadas (4 x 3; 3 columnas en tamaños grandes y 2, de alto libre, en los de
+/// accesibilidad). La elegida va en blanco con símbolo negro y una marca que se
 /// dibuja con un muelle. Elegir guarda, da una háptica de selección y pliega la rejilla; el chip cambia de símbolo y de
 /// nombre con un fundido. Con Reducir movimiento todo son fundidos.
 struct CategoryPickerRow: View {
@@ -13,11 +14,13 @@ struct CategoryPickerRow: View {
     let model: LedgerModel
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var tileHeight: CGFloat = 60
     @State private var expanded: Bool
-    @State private var applyToMerchant = true
+    @State private var applyToMerchant: Bool
     @State private var selectTick = 0
     @State private var errorTick = 0
+    @State private var failed = false
 
     init(movement: Movement, current: SpendingCategory, model: LedgerModel) {
         self.movement = movement
@@ -28,9 +31,15 @@ struct CategoryPickerRow: View {
         open = DemoMode.isActive && DemoMode.opensCategory
         #endif
         _expanded = State(initialValue: open)
+        // Un concepto genérico («Bizum a Ana», «Transferencia…») no es un comercio: por defecto, solo este pago.
+        _applyToMerchant = State(initialValue: !isGenericPayee(movement.merchant))
     }
 
-    private static let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 4)
+    /// 4 columnas; 3 en los tamaños grandes; 2 en los de accesibilidad (ahí la ficha crece con su texto).
+    private var columns: [GridItem] {
+        let count = typeSize.isAccessibilitySize ? 2 : (typeSize >= .xxLarge ? 3 : 4)
+        return Array(repeating: GridItem(.flexible(), spacing: 8), count: count)
+    }
 
     /// El comercio con el nombre con que llegó; nil si el movimiento no lo tiene (entonces no hay "aplicar a todo").
     private var merchantName: String? {
@@ -55,6 +64,12 @@ struct CategoryPickerRow: View {
             if expanded {
                 picker
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            }
+            if failed {
+                SaveErrorText()
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
             }
         }
         .overlay(alignment: .top) {
@@ -85,7 +100,7 @@ struct CategoryPickerRow: View {
             .foregroundStyle(Theme.label)
             .padding(.horizontal, 14)
             .frame(minHeight: 44)
-            .background(.white.opacity(0.10), in: Capsule())
+            .background(Theme.chipFill, in: Capsule())
             .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
@@ -97,12 +112,27 @@ struct CategoryPickerRow: View {
 
     private var picker: some View {
         VStack(spacing: 14) {
-            LazyVGrid(columns: Self.columns, spacing: 8) {
+            LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(Array(SpendingCategory.allCases.enumerated()), id: \.element) { index, category in
-                    CategoryTile(category: category, selected: category == current, index: index, height: tileHeight) {
+                    CategoryTile(category: category, selected: category == current, index: index, height: tileHeight,
+                                 fixedHeight: !typeSize.isAccessibilitySize) {
                         choose(category)
                     }
                 }
+            }
+            if model.hasChosenCategory(movement.id) {
+                Button(action: resetToAutomatic) {
+                    Text("Volver a la categoría automática")
+                        .titan(.option)
+                        .foregroundStyle(Theme.label)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Theme.chipFill, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("category-automatic")
             }
             if let merchant = merchantName {
                 Toggle(isOn: $applyToMerchant) {
@@ -129,9 +159,27 @@ struct CategoryPickerRow: View {
         do {
             try model.setCategory(category, for: movement.id, applyToMerchant: applyToMerchant && merchantName != nil)
             selectTick += 1
-            withAnimation(fold) { expanded = false }
+            withAnimation(fold) {
+                failed = false
+                expanded = false
+            }
         } catch {
             errorTick += 1
+            withAnimation(fold) { failed = true }
+        }
+    }
+
+    private func resetToAutomatic() {
+        do {
+            try model.resetCategory(for: movement.id)
+            selectTick += 1
+            withAnimation(fold) {
+                failed = false
+                expanded = false
+            }
+        } catch {
+            errorTick += 1
+            withAnimation(fold) { failed = true }
         }
     }
 }
@@ -142,6 +190,8 @@ private struct CategoryTile: View {
     let selected: Bool
     let index: Int
     let height: CGFloat
+    /// false en tamaños de accesibilidad: la ficha crece con su texto en vez de recortarlo.
+    let fixedHeight: Bool
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -157,20 +207,21 @@ private struct CategoryTile: View {
                     .frame(height: 24)
                 Text(category.displayName)
                     .titan(.caption)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.8)
+                    .lineLimit(fixedHeight ? 2 : nil)
+                    .minimumScaleFactor(fixedHeight ? 0.8 : 1)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: !fixedHeight)
             }
-            .foregroundStyle(selected ? Color.black : Theme.label)
+            .foregroundStyle(selected ? Theme.onTileSelected : Theme.label)
             .padding(.horizontal, 4)
             .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: height, maxHeight: height)
-            .background(selected ? Color.white : Color.white.opacity(0.10), in: shape)
+            .frame(maxWidth: .infinity, minHeight: height, maxHeight: fixedHeight ? height : nil)
+            .background(selected ? Theme.tileSelected : Theme.chipFill, in: shape)
             .overlay(alignment: .topTrailing) {
                 if selected {
                     ZStack {
-                        Circle().fill(Color.black)
-                        DrawnCheck(lineWidth: 1.8, color: .white).frame(width: 9, height: 9)
+                        Circle().fill(Theme.onTileSelected)
+                        DrawnCheck(lineWidth: 1.8, color: Theme.tileSelected).frame(width: 9, height: 9)
                     }
                     .frame(width: 16, height: 16)
                     .padding(5)
@@ -207,6 +258,7 @@ struct OwnTransferRow: View {
 
     @State private var tick = 0
     @State private var errorTick = 0
+    @State private var failed = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -220,7 +272,12 @@ struct OwnTransferRow: View {
             Text("No cuenta como gasto ni como ingreso.")
                 .titan(.meta)
                 .foregroundStyle(Theme.label2)
-                .padding(.bottom, 10)
+                .padding(.bottom, failed ? 4 : 10)
+            if failed {
+                SaveErrorText()
+                    .padding(.bottom, 10)
+                    .transition(.opacity)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 4)
@@ -235,8 +292,21 @@ struct OwnTransferRow: View {
         do {
             try model.setOwnTransfer(on, for: movement.id)
             tick += 1
+            failed = false
         } catch {
             errorTick += 1
+            withAnimation(Theme.Motion.quick) { failed = true }
         }
+    }
+}
+
+/// Mensaje visible cuando no se pudo guardar (además de la háptica de error).
+private struct SaveErrorText: View {
+    var body: some View {
+        Text("No se pudo guardar. Inténtalo de nuevo.")
+            .titan(.meta)
+            .foregroundStyle(Theme.warning)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("detail-save-error")
     }
 }

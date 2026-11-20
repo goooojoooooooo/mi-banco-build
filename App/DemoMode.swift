@@ -103,9 +103,15 @@ enum DemoMode {
         ]
 
         // Gasto: lo de este mes se fecha siempre dentro del mes en curso y nunca en el futuro, sea el día que sea.
+        // Hora fija (R19): el día sale de la fracción del mes transcurrido y la hora es siempre las 9:00 (hoy, las 0:30),
+        // así las cifras de las capturas no cambian con la hora del día.
         let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? startOfToday
         func thisMonth(_ fraction: Double) -> Date {
-            monthStart.addingTimeInterval(max(1, now.timeIntervalSince(monthStart) * fraction))
+            let today = calendar.component(.day, from: now)
+            let target = max(1, Int((Double(today) * fraction).rounded(.down)))
+            let dayStart = calendar.date(byAdding: .day, value: target - 1, to: monthStart) ?? monthStart
+            let fixed = dayStart.addingTimeInterval(target < today ? 9 * 3600 : 30 * 60)
+            return min(fixed, now.addingTimeInterval(-120))
         }
 
         // Lo reciente (lo que se ve en Inicio).

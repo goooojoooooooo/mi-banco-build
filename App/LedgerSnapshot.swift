@@ -302,9 +302,10 @@ struct LedgerSnapshot: Sendable {
 
     // MARK: - Agrupar por día
 
-    /// `items` ya ordenados del más reciente al más antiguo.
+    /// `items` ya ordenados del más reciente al más antiguo. `ownTransfers` (los traspasos solos, sin valor por defecto:
+    /// toda lista lo pasa) pone «Traspaso» en vez de la hora.
     static func sections(for items: [LedgerItem], showsBank: Bool, now: Date, calendar: Calendar,
-                         ownTransfers: Set<UUID> = []) -> [DaySection] {
+                         ownTransfers: Set<UUID>) -> [DaySection] {
         var out: [DaySection] = []
         for (order, item) in items.enumerated() {
             let day = calendar.startOfDay(for: item.date)

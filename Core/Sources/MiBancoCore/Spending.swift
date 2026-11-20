@@ -43,23 +43,27 @@ private func spent(_ movements: [Movement], where include: (Date) -> Bool) -> In
     movements.reduce(0) { include($1.date) ? $0 + abs($1.amountCents) : $0 }
 }
 
-/// Gasto de este mes hasta `now` frente al del mes anterior hasta el mismo día y hora (el día se ajusta a la
-/// longitud de ese mes). nil si el mes anterior no tiene ningún pago.
+/// Fin (exclusivo) del tramo comparable del mes anterior cuando se mira el mes en curso: el FINAL del mismo día del mes
+/// (R19, granularidad de día: la cifra no cambia con la hora). El día se ajusta a la longitud de ese mes
+/// (el 31 de diciembre compara con todo el 30 de noviembre). nil si el calendario no puede construir la fecha.
+func sameDayCutoff(now: Date, previousMonthStart prevStart: Date, calendar: Calendar) -> Date? {
+    guard let prevDays = calendar.range(of: .day, in: .month, for: prevStart) else { return nil }
+    var parts = calendar.dateComponents([.year, .month], from: prevStart)
+    parts.day = min(calendar.component(.day, from: now), prevDays.count)
+    guard let day = calendar.date(from: parts) else { return nil }
+    return calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: day))
+}
+
+/// Gasto de este mes hasta `now` frente al del mes anterior hasta el final del mismo día (el día se ajusta a la
+/// longitud de ese mes; ver `sameDayCutoff`). nil si el mes anterior no tiene ningún pago.
 public func spendingPace(movements: [Movement], now: Date, calendar: Calendar, notSpending: Set<UUID>? = nil) -> SpendingPace? {
     guard let monthStart = calendar.dateInterval(of: .month, for: now)?.start,
-          let prevStart = calendar.date(byAdding: .month, value: -1, to: monthStart),
-          let prevDays = calendar.range(of: .day, in: .month, for: prevStart) else { return nil }
+          let prevStart = calendar.date(byAdding: .month, value: -1, to: monthStart) else { return nil }
     let payments = spendingMovements(in: movements, notSpending: notSpending)
     guard payments.contains(where: { $0.date >= prevStart && $0.date < monthStart }) else { return nil }
-    let clock = calendar.dateComponents([.day, .hour, .minute, .second], from: now)
-    var cutoffParts = calendar.dateComponents([.year, .month], from: prevStart)
-    cutoffParts.day = min(clock.day ?? 1, prevDays.count)
-    cutoffParts.hour = clock.hour
-    cutoffParts.minute = clock.minute
-    cutoffParts.second = clock.second
-    guard let cutoff = calendar.date(from: cutoffParts) else { return nil }
+    guard let cutoff = sameDayCutoff(now: now, previousMonthStart: prevStart, calendar: calendar) else { return nil }
     let thisMonth = spent(payments) { $0 >= monthStart && $0 <= now }
-    let lastMonth = spent(payments) { $0 >= prevStart && $0 <= cutoff }
+    let lastMonth = spent(payments) { $0 >= prevStart && $0 < cutoff }
     return SpendingPace(thisMonthCents: thisMonth, lastMonthSamePointCents: lastMonth)
 }
 

@@ -337,6 +337,23 @@ public struct Ledger: Sendable {
         }
     }
 
+    /// true si la categoría de este pago la eligió el dueño (en el pago o para todo su comercio), no la app.
+    public func hasChosenCategory(_ id: UUID) -> Bool {
+        guard let m = state.movements.first(where: { $0.id == id }) else { return false }
+        if m.category != nil { return true }
+        let key = normalizeMerchant(m.merchant ?? "")
+        return !key.isEmpty && state.categoryOverrides[key] != nil
+    }
+
+    /// «Volver a la categoría automática»: quita la elegida en el pago y, si la había para todo su comercio, también esa
+    /// (sin tocar lo elegido a mano en otros pagos de ese comercio).
+    public mutating func resetCategoryToAutomatic(for id: UUID) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        state.movements[i].category = nil
+        let key = normalizeMerchant(state.movements[i].merchant ?? "")
+        if !key.isEmpty { state.categoryOverrides[key] = nil }
+    }
+
     public mutating func setOwnTransfer(_ value: Bool?, for id: UUID) {
         guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
         state.movements[i].ownTransfer = value

@@ -31,6 +31,9 @@ final class LedgerModel {
     /// Publicación aplazada de una llegada; cualquier publicación posterior la deja sin efecto.
     @ObservationIgnored private var staged: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
+    /// Presupuestos escritos que no se entienden («abc»): se quedan (solo en memoria) para enseñarlos con su error al
+    /// volver a la pantalla, en vez de perderse sin decir nada.
+    @ObservationIgnored var budgetDrafts: [BudgetScope: String] = [:]
     #if DEBUG
     /// Demo: lo que "escribiría el intent en el almacén"; `reload` lo recoge como si lo leyera de disco.
     @ObservationIgnored private var demoIncoming: LedgerState?
@@ -169,6 +172,16 @@ final class LedgerModel {
         try mutate { $0.setCategory(category, for: id, applyToMerchant: applyToMerchant) }
     }
 
+    /// «Volver a la categoría automática» (ver `Ledger.resetCategoryToAutomatic`).
+    func resetCategory(for id: UUID) throws {
+        try mutate { $0.resetCategoryToAutomatic(for: id) }
+    }
+
+    /// true si la categoría del pago la eligió el dueño (en el pago o para su comercio).
+    func hasChosenCategory(_ id: UUID) -> Bool {
+        Ledger(state: state).hasChosenCategory(id)
+    }
+
     /// true = traspaso entre tus cuentas; false = no lo es (aunque lo parezca); nil = que lo decida la app.
     func setOwnTransfer(_ value: Bool?, for id: UUID) throws {
         try mutate { $0.setOwnTransfer(value, for: id) }
@@ -191,7 +204,10 @@ final class LedgerModel {
     func restore(_ file: BackupFile) throws {
         #if DEBUG
         if DemoMode.isActive {
-            publish(file.ledger)
+            // Las mismas reglas que en disco (`Ledger.restore`: las conexiones con bancos no salen de la copia).
+            var ledger = Ledger(state: state)
+            ledger.restore(file.ledger)
+            publish(ledger.state)
             restoreCount += 1
             return
         }

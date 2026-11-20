@@ -139,7 +139,8 @@ private struct DetailContent: View {
                         }
                     }
                     DetailPair(key: "Tipo", divided: true) { Text(kindText) }
-                    if movement.kind == .payment {
+                    // Un traspaso entre tus cuentas no es gasto: no tiene categoría (la fila vuelve al apagar el interruptor).
+                    if movement.kind == .payment && !snapshot.ownTransfers.contains(movement.id) {
                         CategoryPickerRow(movement: movement, current: snapshot.categories[movement.id] ?? .sinCategoria, model: model)
                     }
                     OwnTransferRow(movement: movement, isOn: snapshot.ownTransfers.contains(movement.id), model: model)

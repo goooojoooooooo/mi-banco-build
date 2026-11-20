@@ -19,6 +19,8 @@ struct BudgetsView: View {
     @State private var errorTick = 0
     @FocusState private var focused: BudgetScope?
 
+    private static let invalidText = "Escribe un importe como 120,00"
+
     private static let scopes: [BudgetScope] = [.month] + SpendingCategory.allCases.filter { $0 != .sinCategoria }.map { .category($0) }
 
     var body: some View {
@@ -29,7 +31,10 @@ struct BudgetsView: View {
                     ForEach(Array(Self.scopes.enumerated()), id: \.element) { i, scope in
                         row(scope, index: i, snapshot: snapshot)
                         if i < Self.scopes.count - 1 {
-                            Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 70)
+                            // Desde el texto de la fila (o el borde, en tamaños de accesibilidad) hasta el margen de 16 pt.
+                            Rectangle().fill(Theme.separator).frame(height: 0.5)
+                                .padding(.leading, typeSize.isAccessibilitySize ? 16 : 70)
+                                .padding(.trailing, 16)
                         }
                     }
                 }
@@ -38,7 +43,7 @@ struct BudgetsView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, Theme.Space.small)
 
-                Text("Te avisamos al 80 % y cuando te pasas. El aviso llega con los pagos al instante (notificaciones y Wallet); lo que solo entra por una importación o una sincronización cuenta en las barras, pero no avisa.")
+                Text("Deja el campo vacío para quitar el límite. Te avisamos al 80 % y cuando te pasas. El aviso llega con los pagos al instante (notificaciones y Wallet); lo que solo entra por una importación o una sincronización cuenta en las barras, pero no avisa.")
                     .titan(.caption)
                     .foregroundStyle(Theme.label3)
                     .fixedSize(horizontal: false, vertical: true)
@@ -54,7 +59,10 @@ struct BudgetsView: View {
         .navigationTitle("Presupuestos")
         .navigationBarTitleDisplayMode(.large)
         .assemblesOnFirstAppear()
-        .onAppear(perform: refreshUntouched)
+        .onAppear {
+            restoreDrafts()
+            refreshUntouched()
+        }
         .onChange(of: model.state.budgets) { _, _ in refreshUntouched() }
         .onChange(of: focused) { old, _ in
             if let old { commit(old) }
@@ -107,7 +115,8 @@ struct BudgetsView: View {
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
             if let status {
-                BudgetBar(status: status, name: barName, index: index)
+                // El porcentaje queda alineado con el texto del campo (que lleva 10 pt de margen dentro).
+                BudgetBar(status: status, name: barName, index: index, textTrailingInset: stacked ? 0 : 10)
                     .padding(.leading, stacked ? 0 : 54)
                     .transition(.opacity)
             }
@@ -173,6 +182,15 @@ struct BudgetsView: View {
         errors[scope] = nil
     }
 
+    /// Lo que quedó mal escrito la última vez vuelve a su campo, con su error, sin guardarse.
+    private func restoreDrafts() {
+        for (scope, text) in model.budgetDrafts {
+            texts[scope] = text
+            dirty.insert(scope)
+            errors[scope] = Self.invalidText
+        }
+    }
+
     private func refreshUntouched() {
         for scope in Self.scopes where !dirty.contains(scope) && focused != scope { refresh(scope) }
     }
@@ -187,10 +205,12 @@ struct BudgetsView: View {
         } else if let parsed = parseBalanceInput(text), parsed >= 0 {
             cents = parsed > 0 ? parsed : nil
         } else {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[scope] = "Escribe un importe como 120,00" }
+            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[scope] = Self.invalidText }
             errorTick += 1
+            model.budgetDrafts[scope] = text
             return
         }
+        model.budgetDrafts[scope] = nil
         if cents == limit(scope) {
             dirty.remove(scope)
             return refresh(scope)

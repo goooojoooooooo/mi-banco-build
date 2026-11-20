@@ -13,15 +13,6 @@ struct MovementDetailSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var entrance = Entrance()
 
-    /// Solo en la demo de capturas con la hoja abierta por argumento (la fase de escena parpadea en el simulador de CI).
-    private var demoKeepsVisible: Bool {
-        #if DEBUG
-        return DemoMode.isActive && DemoMode.opensDetail
-        #else
-        return false
-        #endif
-    }
-
     var body: some View {
         Group {
             if let movement = model.movement(id) {
@@ -34,7 +25,7 @@ struct MovementDetailSheet: View {
         .environment(\.entrance, entrance)
         // Segunda línea de defensa (la primera: RootView cierra la hoja): fuera de primer plano, la hoja es negra.
         .overlay {
-            if scenePhase != .active && !demoKeepsVisible {
+            if scenePhase != .active {
                 Theme.canvas
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
@@ -139,10 +130,6 @@ private struct DetailContent: View {
                         }
                     }
                     DetailPair(key: "Tipo", divided: true) { Text(kindText) }
-                    if movement.kind == .payment {
-                        CategoryPickerRow(movement: movement, current: snapshot.categories[movement.id] ?? .sinCategoria, model: model)
-                    }
-                    OwnTransferRow(movement: movement, isOn: snapshot.ownTransfers.contains(movement.id), model: model)
                 }
                 .staggeredEntrance(7)
 
@@ -209,6 +196,8 @@ private struct DetailContent: View {
 
     private var kindText: String {
         if movement.source == .wallet { return "Apple Pay" }
+        if movement.source == .bank { return "Tu banco" }
+        if movement.source == .statement { return "Extracto importado" }
         if movement.kind == .income { return "Ingreso" }
         return movement.isShop ? "Compra con tarjeta" : "Pago"
     }

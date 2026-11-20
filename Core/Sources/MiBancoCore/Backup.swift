@@ -60,8 +60,9 @@ public func movementsCSVFileName(exportedAt: Date, calendar: Calendar) -> String
     "MiBanco-movimientos-\(datePart(exportedAt, calendar: calendar)).csv"
 }
 
-/// Hora del movimiento para el CSV. Vacía cuando el movimiento no tiene hora real (R13); hoy todos la tienen.
+/// Hora del movimiento para el CSV. Vacía cuando el movimiento no tiene hora real (R13): filas del banco de solo día.
 private func csvTime(of movement: Movement, calendar: Calendar) -> String {
+    if movement.dayOnly { return "" }
     let c = calendar.dateComponents([.hour, .minute], from: movement.date)
     return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
 }
@@ -80,7 +81,9 @@ private func csvField(_ value: String) -> String {
 /// Todos los movimientos, por fecha ascendente, separados por `;` (Excel en español), con fin de línea CRLF.
 public func movementsCSV(_ state: LedgerState, now: Date, calendar: Calendar) -> String {
     let transfers = ownTransferIDs(in: state.movements)
-    let keys = subscriptionKeys(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
+    // La categoría de un pago de suscripción sale de las suscripciones detectadas, que van sobre el gasto real: el
+    // conjunto completo (traspasos, sin confirmar, pareja probable), una vez.
+    let keys = subscriptionKeys(in: state, now: now, calendar: calendar, notSpending: spendingExclusions(in: state, now: now))
     var lines = ["Fecha;Hora;Banco;Tipo;Comercio;Categoría;Importe;Nota;No es mío;Traspaso propio"]
     let sorted = state.movements.sorted { $0.date != $1.date ? $0.date < $1.date : $0.id.uuidString < $1.id.uuidString }
     for m in sorted {

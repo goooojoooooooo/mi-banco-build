@@ -44,9 +44,7 @@ enum DemoMode {
     /// `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente como lo haría un toque en el segmentado.
     static var switchesCard: Bool { arguments.contains("-MiBancoDemoSwitch") }
 
-    static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") || opensCategory }
-    /// `-MiBancoDemoDetailCategory`: la hoja del movimiento más reciente, con la rejilla de categorías desplegada.
-    static var opensCategory: Bool { arguments.contains("-MiBancoDemoDetailCategory") }
+    static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".
     static var showsAlertRules: Bool { arguments.contains("-MiBancoDemoRules") }
     static var startsPrivate: Bool { arguments.contains("-MiBancoDemoPrivate") }
@@ -140,14 +138,6 @@ enum DemoMode {
                   date < monthStart else { continue }
             movements.append(movement(bank, cents, merchant, date))
         }
-
-        // Un traspaso de Revolut a imagin ayer por la noche (mismo importe, a un minuto): Inicio lo lista como "Traspaso" y no cuenta como gasto.
-        // Los textos hablan de transferencias y no son compras en tienda (`isShop` falso).
-        let transferDate = day(1, hour: 22)
-        movements.append(Movement(bank: .rev, amountCents: -5_000, merchant: "Transferencia a imagin", kind: .payment,
-                                  source: .notification, date: transferDate))
-        movements.append(Movement(bank: .ima, amountCents: 5_000, merchant: "Transferencia de Revolut", kind: .income,
-                                  source: .notification, date: transferDate.addingTimeInterval(60)))
 
         if includesUnknownShop {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.

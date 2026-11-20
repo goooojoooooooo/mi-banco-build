@@ -53,10 +53,6 @@ struct RootView: View {
             .modifier(ZoomFromRow(route: route, namespace: zoom))
         }
         .onChange(of: scenePhase) { _, phase in
-            #if DEBUG
-            // Demo de capturas (hoja abierta por argumento): en el simulador de CI la fase de escena parpadea y cerraría la hoja.
-            if DemoMode.isActive && DemoMode.opensDetail { return }
-            #endif
             if phase != .active { detail = nil }
         }
         .overlay(alignment: .top) {
@@ -103,11 +99,7 @@ struct RootView: View {
 
     /// Nunca con el bloqueo delante ni con la app fuera de primer plano.
     private func openDetail(_ id: UUID, zooms: Bool = false) {
-        var foreground = scenePhase == .active
-        #if DEBUG
-        if DemoMode.isActive && DemoMode.opensDetail { foreground = true }
-        #endif
-        guard !isLocked, foreground, model.movement(id) != nil else { return }
+        guard !isLocked, scenePhase == .active, model.movement(id) != nil else { return }
         detail = DetailRoute(id: id, zooms: zooms)
     }
 

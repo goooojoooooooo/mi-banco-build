@@ -296,6 +296,40 @@ private func tx(
         #expect(third.added == 0 && third.removed == 0)
     }
 
+    /// R32 (R29): solo se funde con una fila apuntada que viene en el lote actual; una de otra consulta no es su pareja.
+    @Test func foldOnlyUsesBookedRowFromCurrentBatch() {
+        let capture = captured(-1250, at(11, 18, 10, 5))
+        var l = ledger([capture])
+        let day = RecordTiming.transactionDay(at(11, 18))
+        let coverage = DateInterval(start: at(11, 10, 0), end: at(11, 20, 0))
+        _ = run(&l, [record("p1", -1250, day, status: .pending)], coverage: coverage)
+        // Otra fila apuntada del mismo importe llegó en una consulta anterior y no vuelve en este lote.
+        var other = Movement(bank: .rev, amountCents: -1250, merchant: "Otro", kind: .payment, source: .bank,
+                             date: at(11, 18), bankRef: "old-b", bankStatus: .booked, importedAt: at(11, 19), dayOnly: true)
+        other.id = UUID()
+        l.state.movements.append(other)
+        let report = run(&l, [], coverage: coverage)
+        #expect(report.removed == 0)
+        #expect(l.state.movements.count == 2)
+        let kept = l.state.movements.first { $0.id == capture.id }
+        #expect(kept?.bankRef == nil)
+        #expect(l.state.movements.contains { $0.id == other.id })
+    }
+
+    /// Un renombrado del banco que cambia la clave del comercio no pierde la categoría «para todo el comercio» de la clave
+    /// antigua.
+    @Test func renameByBankKeepsMerchantWideCategoryOnTheMovement() {
+        let oldName = "Zxq Shop Centro"
+        let row = Movement(bank: .rev, amountCents: -700, merchant: oldName, kind: .payment, source: .bank,
+                           date: at(11, 18), bankRef: "t1", bankStatus: .booked, importedAt: at(11, 19), dayOnly: true)
+        var l = Ledger(state: LedgerState(movements: [row], categoryOverrides: [normalizeMerchant(oldName): .ocio]))
+        let report = run(&l, [record("t1", -700, .transactionDay(at(11, 18)), merchant: "Zxq")])
+        #expect(report.updated == 1)
+        #expect(l.state.movements[0].merchant == "Zxq")
+        #expect(l.state.movements[0].category == .ocio)
+        #expect(categoryOf(l.state.movements[0], in: l.state, subscriptionKeys: []) == .ocio)
+    }
+
     @Test func statementAfterApiAddsNothing() {
         var l = ledger()
         _ = run(&l, [record("t1", -1250, .transactionDay(at(11, 18)), merchant: "Zara")])

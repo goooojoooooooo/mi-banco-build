@@ -33,10 +33,13 @@ public struct BankRecord: Equatable, Sendable {
     public var balanceAfterCents: Int?
     /// true = operación de inversión (compra o venta de valores): mueve el saldo pero no es gasto.
     public var excludedFromSpending: Bool
+    /// Claves con las que una versión anterior de la app guardó esta misma fila (solo los extractos). Un movimiento del
+    /// libro que lleve una de ellas es esta fila: se reconoce y pasa a la clave nueva en lugar de duplicarse.
+    public var legacyRefs: [String]
 
     public init(ref: String, bank: BankID, amountCents: Int, timing: RecordTiming, status: BankStatus,
                 merchant: String? = nil, isShop: Bool = false, balanceAfterCents: Int? = nil,
-                excludedFromSpending: Bool = false) {
+                excludedFromSpending: Bool = false, legacyRefs: [String] = []) {
         self.ref = ref
         self.bank = bank
         self.amountCents = amountCents
@@ -46,6 +49,7 @@ public struct BankRecord: Equatable, Sendable {
         self.isShop = isShop
         self.balanceAfterCents = balanceAfterCents
         self.excludedFromSpending = excludedFromSpending
+        self.legacyRefs = legacyRefs
     }
 }
 

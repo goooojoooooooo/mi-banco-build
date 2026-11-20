@@ -130,13 +130,13 @@ private let fullMonthNames = ["enero", "febrero", "marzo", "abril", "mayo", "jun
 /// Cobros de las suscripciones activas (todas, con su próxima fecha) como `UpcomingCharge`. Una suscripción que ya se cobró
 /// hoy no vuelve a contarse hoy (su próxima fecha ya es la del mes que viene) y una cuyo cobro de hoy ya está en el libro
 /// tampoco.
-func subscriptionCharges(in state: LedgerState, now: Date, calendar: Calendar) -> [UpcomingCharge] {
+func subscriptionCharges(in state: LedgerState, now: Date, calendar: Calendar, notSpending: Set<UUID>? = nil) -> [UpcomingCharge] {
     let today = calendar.startOfDay(for: now)
     var chargedToday = Set<String>()
     for m in state.movements where m.kind == .payment && !m.flaggedNotMine && m.date >= today && m.date <= now {
         chargedToday.insert(m.bank.rawValue + "|" + normalizeMerchant(m.merchant ?? ""))
     }
-    return activeSubscriptions(in: state, now: now, calendar: calendar).compactMap { sub in
+    return activeSubscriptions(in: state, now: now, calendar: calendar, notSpending: notSpending).compactMap { sub in
         let isToday = calendar.isDate(sub.nextDate, inSameDayAs: now)
         if isToday && chargedToday.contains(sub.bank.rawValue + "|" + sub.id) { return nil }
         return UpcomingCharge(name: sub.merchant, bank: sub.bank, cents: sub.amountCents, date: sub.nextDate)
@@ -155,6 +155,8 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     let since = record.since
     func inPeriod(_ m: Movement) -> Bool { m.date > since && m.date <= now && !m.flaggedNotMine }
     let ledger = Ledger(state: state)
+    // Se calcula una vez y se pasa a todas las sumas de gasto (traspasos, capturados sin confirmar y gemelos).
+    let exclusions = spendingExclusions(in: state, now: now)
     let period = state.movements.filter(inPeriod)
     func name(_ m: Movement) -> String { m.displayMerchant ?? m.merchant ?? m.bank.displayName }
     func digest(_ m: Movement) -> MovementDigest {
@@ -175,7 +177,7 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     let income = period.filter { $0.kind == .income && !transferIDs.contains($0.id) && !$0.excludedFromSpending }
         .map(digest).sorted(by: byAmount)
     let periodIDs = Set(period.map(\.id))
-    let payments = spendingMovements(in: state.movements).filter { periodIDs.contains($0.id) }
+    let payments = spendingMovements(in: state.movements, notSpending: exclusions).filter { periodIDs.contains($0.id) }
         .map(digest).sorted(by: byAmount)
 
     // Bancos
@@ -192,7 +194,7 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     // Lo que viene
     let startOfToday = calendar.startOfDay(for: now)
     let weekEnd = calendar.date(byAdding: .day, value: 7, to: startOfToday) ?? now
-    let allCharges = subscriptionCharges(in: state, now: now, calendar: calendar)
+    let allCharges = subscriptionCharges(in: state, now: now, calendar: calendar, notSpending: exclusions)
     let upcoming = allCharges.filter { $0.date >= startOfToday && $0.date < weekEnd }
     var expected = expectedIncome(in: state, now: now, calendar: calendar)
     if let date = expected?.date, date > (calendar.date(byAdding: .day, value: 7, to: now) ?? now) { expected = nil }
@@ -214,7 +216,7 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
         let days = calendar.dateComponents([.day], from: startOfToday, to: calendar.startOfDay(for: link.consentValidUntil)).day ?? 99
         if days <= 10 { attention.append(.consentExpiring(bank, link.consentValidUntil)) }
     }
-    let statuses = budgetStatuses(in: state, month: now, now: now, calendar: calendar)
+    let statuses = budgetStatuses(in: state, month: now, now: now, calendar: calendar, notSpending: exclusions)
     func budgetName(_ status: BudgetStatus) -> String {
         switch status.scope {
         case .month: "tu presupuesto del mes"
@@ -224,7 +226,7 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     for status in statuses where status.level == .exceeded {
         attention.append(.budgetExceeded(name: budgetName(status), spentCents: status.spentCents, limitCents: status.limitCents))
     }
-    for insight in insights(for: state, now: now, calendar: calendar)
+    for insight in insights(for: state, now: now, calendar: calendar, notSpending: exclusions)
     where insight.severity == .warning && !excludedInsightKinds.contains(insight.kind) && insight.date > since && insight.date <= now {
         attention.append(.warning(title: insight.title, detail: insight.detail))
     }
@@ -232,9 +234,9 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     let budgetTip = tipStatus.map { BudgetTip(name: budgetName($0), remainingCents: $0.remainingCents) }
 
     // El mes
-    let forecast = monthForecast(in: state, now: now, calendar: calendar)
-    let pace = spendingPace(movements: state.movements, now: now, calendar: calendar)
-    let spent = forecast?.spentCents ?? monthSpending(in: state, month: now, now: now, calendar: calendar).totalCents
+    let forecast = monthForecast(in: state, now: now, calendar: calendar, notSpending: exclusions)
+    let pace = spendingPace(movements: state.movements, now: now, calendar: calendar, notSpending: exclusions)
+    let spent = forecast?.spentCents ?? monthSpending(in: state, month: now, now: now, calendar: calendar, notSpending: exclusions).totalCents
     var month: MonthDigest?
     if spent > 0 || pace != nil {
         let monthIndex = (calendar.component(.month, from: now) + 10) % 12

@@ -28,36 +28,64 @@ func parseCaixaBankStatement(_ table: CSVTable, now: Date, calendar: Calendar) t
     guard missing.isEmpty else { throw StatementError.missingColumns(missing) }
     let balance = table.column(balanceAliases)
 
+
     var records: [BankRecord] = []
     var ignored = 0
     var counter = OccurrenceCounter()
-    var latest: (day: Date, cents: Int)?
+    var legacyCounter = OccurrenceCounter()
+    // Las filas con saldo, en el orden del fichero.
+    var withBalance: [(day: Date, amount: Int, balance: Int)] = []
 
     for row in table.rows {
-        guard let iso = isoDay(fromSpanish: row.cell(date)), let day = noonOfDay(iso, calendar: calendar),
-              let cents = parseSignedEuropeanAmount(row.cell(amount)) else {
+        guard let iso = isoDay(fromSpanish: table.cell(row, date)), let day = noonOfDay(iso, calendar: calendar),
+              let cents = parseSignedEuropeanAmount(table.cell(row, amount)) else {
             ignored += 1
             continue
         }
-        let raw = row.cell(text)
+        let raw = table.cell(row, text)
         let merchant = cleanBankMerchant(raw)
-        let key = [row.cell(date), row.cell(amount), raw, row.cell(balance)].joined(separator: "|")
+        // La clave sale de los valores LEÍDOS (día, céntimos, texto normalizado): otro formato de fecha o de número en
+        // una reexportación da la misma clave.
+        let key = [day.day, String(cents), normalizedStatementText(raw)].joined(separator: "|")
         let ref = "c|" + fnv1aHex(key) + "|" + String(counter.next(key))
+        // La clave de la versión anterior (texto de las celdas), para reconocer filas ya importadas con ella.
+        let legacyKey = [table.cell(row, date), table.cell(row, amount), raw, table.cell(row, balance)].joined(separator: "|")
+        let legacyRef = "c|" + fnv1aHex(legacyKey) + "|" + String(legacyCounter.next(legacyKey))
         records.append(BankRecord(
             ref: ref, bank: .ima, amountCents: cents, timing: .transactionDay(day.date), status: .booked,
             merchant: merchant.isEmpty ? nil : merchant,
-            isShop: !merchant.isEmpty && merchantDomain(for: merchant) != nil))
+            isShop: !merchant.isEmpty && merchantDomain(for: merchant) != nil,
+            legacyRefs: legacyRef == ref ? [] : [legacyRef]))
 
-        // La fecha más reciente; con empate, la primera fila del fichero.
-        if let b = parseSignedEuropeanAmount(row.cell(balance)), latest == nil || day.date > latest!.day {
-            latest = (day.date, b)
-        }
+        if let b = parseSignedEuropeanAmount(table.cell(row, balance)) { withBalance.append((day.date, cents, b)) }
     }
+
     var latestBalance: StatementBalance?
-    if let latest {
-        let start = calendar.startOfDay(for: latest.day)
-        let endOfDay = (calendar.date(byAdding: .day, value: 1, to: start) ?? latest.day).addingTimeInterval(-1)
-        latestBalance = StatementBalance(cents: latest.cents, at: min(now, endOfDay))
+    if let newestDay = withBalance.map(\.day).max() {
+        let sameDay = withBalance.filter { $0.day == newestDay }
+        // El saldo de cierre es el de la ÚLTIMA fila del día más reciente EN EL TIEMPO: según el orden del fichero eso es
+        // la primera (más nuevo primero) o la última (más antiguo primero) de las de ese día.
+        let closing = fileIsOldestFirst(withBalance) ? sameDay.last! : sameDay.first!
+        let start = calendar.startOfDay(for: newestDay)
+        let endOfDay = (calendar.date(byAdding: .day, value: 1, to: start) ?? newestDay).addingTimeInterval(-1)
+        latestBalance = StatementBalance(cents: closing.balance, at: min(now, endOfDay))
     }
     return ParsedStatement(format: .caixabank, records: records, ignoredRows: ignored, latestBalance: latestBalance)
+}
+
+/// ¿Viene el fichero del más antiguo al más nuevo? Primero por la cadena del saldo (entre filas contiguas, saldo anterior
+/// + importe siguiente = saldo siguiente si va hacia delante, o al revés si va hacia atrás: sirve aunque todas las filas
+/// sean del mismo día); si no concluye, por las fechas de la primera y la última fila; si tampoco, el orden habitual de
+/// los bancos: el más nuevo primero.
+private func fileIsOldestFirst(_ rows: [(day: Date, amount: Int, balance: Int)]) -> Bool {
+    var forward = 0
+    var backward = 0
+    for i in rows.indices.dropLast() {
+        let a = rows[i], b = rows[i + 1]
+        if a.balance + b.amount == b.balance { forward += 1 }
+        if b.balance + a.amount == a.balance { backward += 1 }
+    }
+    if forward != backward { return forward > backward }
+    if let first = rows.first, let last = rows.last, first.day != last.day { return first.day < last.day }
+    return false
 }

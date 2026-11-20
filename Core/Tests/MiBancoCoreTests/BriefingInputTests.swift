@@ -253,7 +253,7 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
 
     // MARK: Nómina prevista
 
-    private func salary(_ cents: Int = 185_000, _ dates: [Date], bank: BankID = .ima) -> LedgerState {
+    private func salary(_ dates: [Date], cents: Int = 185_000, bank: BankID = .ima) -> LedgerState {
         var state = LedgerState()
         state.movements = dates.map { mv(bank, cents, "Nómina ACME", at: $0) }
         return state
@@ -266,8 +266,8 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         let third = salary([date(9, 27), date(10, 28), nov(27)])
         #expect(expectedIncome(in: third, now: nov(28, 9), calendar: cal)
             == ExpectedIncome(name: "Nómina ACME", bank: .ima, cents: 185_000, date: date(12, 27, 12)))
-        #expect(expectedIncome(in: salary(29_999, [date(9, 27), date(10, 28)]), now: nov(20, 8, 30), calendar: cal) == nil)
-        #expect(expectedIncome(in: salary(30_000, [date(9, 27), date(10, 28)]), now: nov(20, 8, 30), calendar: cal)?.cents == 30_000)
+        #expect(expectedIncome(in: salary([date(9, 27), date(10, 28)], cents: 29_999), now: nov(20, 8, 30), calendar: cal) == nil)
+        #expect(expectedIncome(in: salary([date(9, 27), date(10, 28)], cents: 30_000), now: nov(20, 8, 30), calendar: cal)?.cents == 30_000)
         #expect(expectedIncome(in: salary([date(10, 28)]), now: nov(20, 8, 30), calendar: cal) == nil)
         #expect(expectedIncome(in: salary([date(9, 5), date(10, 20)]), now: nov(20, 8, 30), calendar: cal) == nil)
         // Dentro de ±3 días, sí; a 4, no.

@@ -146,11 +146,9 @@ struct LedgerSnapshot: Sendable {
             }
         }
         total = ledger.total()
-        // El emparejado de traspasos se calcula una sola vez por reconstrucción y se pasa a todas las sumas.
-        let transfers = ownTransferIDs(in: state.movements)
-        // Capturados sin confirmar (su pago ya está en la fila del banco): tampoco suman como gasto. Una vez también.
-        let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
-        let notSpending = transfers.union(unconfirmed)
+        // Lo que no suma como gasto (traspasos entre tus cuentas, capturados sin confirmar y capturados con pareja probable
+        // en una fila del banco) se calcula una sola vez por reconstrucción y se pasa a todas las sumas.
+        let notSpending = spendingExclusions(in: state, now: now)
         mutedMerchants = state.mutedMerchants
 
         let byDate = state.movements.sorted { $0.date > $1.date }
@@ -167,13 +165,13 @@ struct LedgerSnapshot: Sendable {
             let mine = card.bank.map { bank in items.filter { $0.bank == bank } } ?? items
             let grouped = Self.sections(for: Array(mine.prefix(Self.maxRows)), showsBank: card == .all, now: now, calendar: calendar)
             entries[card] = ListEntry.flatten(grouped, prefix: card.rawValue)
-            weeks[card] = WeekSpend(movements: state.movements, bank: card.bank, now: now, calendar: calendar, ownTransferIDs: notSpending)
+            weeks[card] = WeekSpend(movements: state.movements, bank: card.bank, now: now, calendar: calendar, notSpending: notSpending)
         }
 
         // Gasto del mes por tarjeta.
         let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
         var spent: [AccountCard: Int] = [:]
-        for m in spendingMovements(in: state.movements, excluding: notSpending) where m.date >= monthStart && m.date <= now {
+        for m in spendingMovements(in: state.movements, notSpending: notSpending) where m.date >= monthStart && m.date <= now {
             spent[.all, default: 0] += abs(m.amountCents)
             spent[AccountCard(bank: m.bank), default: 0] += abs(m.amountCents)
         }
@@ -181,7 +179,7 @@ struct LedgerSnapshot: Sendable {
 
         let previousMonth = calendar.date(byAdding: .day, value: -1, to: monthStart) ?? monthStart
         let monthName = previousMonth.formatted(Date.FormatStyle(locale: Locale(identifier: "es_ES")).month(.wide))
-        if let p = spendingPace(movements: state.movements, now: now, calendar: calendar, ownTransferIDs: notSpending) {
+        if let p = spendingPace(movements: state.movements, now: now, calendar: calendar, notSpending: notSpending) {
             pace = PaceLine(thisMonthCents: p.thisMonthCents, differenceCents: p.differenceCents, previousMonthName: monthName)
         } else if let month = spent[.all] {
             pace = PaceLine(thisMonthCents: month, differenceCents: nil, previousMonthName: monthName)
@@ -221,7 +219,7 @@ struct LedgerSnapshot: Sendable {
         recentPayments = payments
         merchantNames = names
         // Una sola pasada para todos los comercios (antes: una pasada completa por comercio).
-        let all = merchantHistories(in: state.movements, now: now, calendar: calendar, ownTransferIDs: notSpending)
+        let all = merchantHistories(in: state.movements, now: now, calendar: calendar, notSpending: notSpending)
         let empty = MerchantHistory(countThisMonth: 0, totalThisMonthCents: 0, countAllTime: 0, firstDate: nil)
         for key in names.keys {
             histories[key] = all[key] ?? empty
@@ -231,7 +229,7 @@ struct LedgerSnapshot: Sendable {
             .map { MutedMerchant(key: $0, name: names[$0] ?? $0.capitalized, raw: names[$0] ?? $0) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
-        insights = MiBancoCore.insights(for: state, now: now, calendar: calendar, spendingExclusions: notSpending)
+        insights = MiBancoCore.insights(for: state, now: now, calendar: calendar, notSpending: notSpending)
         warningInsightIDs = insights.filter { $0.severity == .warning }.map(\.id)
     }
 

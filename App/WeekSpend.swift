@@ -22,12 +22,12 @@ struct WeekSpend: Sendable, Equatable {
 
     init() {}
 
-    init(movements: [Movement], bank: BankID?, now: Date, calendar: Calendar = .current, ownTransferIDs: Set<UUID>? = nil) {
+    init(movements: [Movement], bank: BankID?, now: Date, calendar: Calendar = .current, notSpending: Set<UUID>? = nil) {
         let today = calendar.startOfDay(for: now)
         guard let start = calendar.date(byAdding: .day, value: -6, to: today) else { return }
 
         var spent = Array(repeating: 0, count: 7)
-        for m in spendingMovements(in: movements, excluding: ownTransferIDs) where m.date >= start && m.amountCents < 0 {
+        for m in spendingMovements(in: movements, notSpending: notSpending) where m.date >= start && m.amountCents < 0 {
             if let bank, m.bank != bank { continue }
             let index = calendar.dateComponents([.day], from: start, to: calendar.startOfDay(for: m.date)).day ?? -1
             guard (0..<7).contains(index) else { continue }

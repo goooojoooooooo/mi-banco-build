@@ -98,7 +98,9 @@ private func income(_ cents: Int, _ merchant: String, _ when: Date, bank: BankID
 
     @Test func exclusionesConLosTraspasosYaCalculados() {
         let state = LedgerState(movements: [
-            pay(20_000, "Transferencia a imagin", at(11, 15, 10)),
+            // Un traspaso nunca es una compra en tienda (`isShop` falso).
+            Movement(bank: .rev, amountCents: -20_000, merchant: "Transferencia a imagin", kind: .payment,
+                     source: .notification, date: at(11, 15, 10)),
             income(20_000, "Transferencia de Revolut", at(11, 15, 10, 5)),
             pay(1_250, "Mercadona", at(11, 16)),
         ])

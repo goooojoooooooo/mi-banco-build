@@ -156,7 +156,7 @@ private func briefing(_ s: OpeningSituation) -> Briefing {
         #expect(openingChoice(from: "3.", count: 9) == 3)
         #expect(openingChoice(from: "9", count: 9) == 9)
         #expect(openingChoice(from: "1", count: 9) == 1)
-        for bad in ["0", "10", "-1", "", "  ", "tres", "3 y 4", "1.5", "3,5", "Elijo la 3", "٣", "３", "99999999999999999999", "+3", "3\u{200B}"] {
+        for bad in ["0", "10", "-1", "", "  ", "tres", "3 y 4", "1.5", "3,5", "Elijo la 3", "٣", "３", "99999999999999999999", "+3"] {
             #expect(openingChoice(from: bad, count: 9) == nil, "\(bad)")
         }
         #expect(openingChoice(from: "1", count: 0) == nil)

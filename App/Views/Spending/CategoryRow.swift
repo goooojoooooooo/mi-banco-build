@@ -34,13 +34,13 @@ struct CategoryRow: View {
                 }
                 HStack(spacing: 10) {
                     SpendBar(fraction: row.fraction, previous: row.previousFraction, grown: grown)
-                    if let change = row.change {
-                        Text(change)
-                            .titan(.meta)
-                            .foregroundStyle(Theme.label3)
-                            .frame(minWidth: 52, alignment: .trailing)
-                            .privateAmount(radius: 6)
-                    }
+                    // Columna fija (aunque no haya cambio): todas las barras comparten escala y se pueden comparar.
+                    Text(row.change ?? "")
+                        .titan(.meta)
+                        .foregroundStyle(Theme.label3)
+                        .lineLimit(1)
+                        .frame(width: 56, alignment: .trailing)
+                        .privateAmount(radius: 6)
                 }
             }
         }

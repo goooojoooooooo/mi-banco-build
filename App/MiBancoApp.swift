@@ -75,6 +75,9 @@ struct MiBancoApp: App {
             .environment(logos)
             .environment(preferences)
             .motionEnvironment()
+            #if DEBUG
+            .motionGalleryOverlay()
+            #endif
             .preferredColorScheme(.dark)
             .environment(\.locale, Locale(identifier: "es_ES"))
             .onChange(of: scenePhase) { _, phase in

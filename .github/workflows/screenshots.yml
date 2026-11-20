@@ -85,6 +85,11 @@ jobs:
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.
           shot bloqueo 3.5 -MiBancoDemoLock
+          # Galeria de movimiento (solo DEBUG): marca, cifras, controles, modo privado y movimiento reducido.
+          shot motion-galeria 10 -MiBancoMotionGallery
+          shot motion-galeria-controles 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage controles
+          shot motion-galeria-privado 10 -MiBancoMotionGallery -MiBancoDemoPrivate
+          shot motion-galeria-reducido 10 -MiBancoMotionGallery -MiBancoMotionReduce
           ls -l out
       - uses: actions/upload-artifact@v4
         if: always()

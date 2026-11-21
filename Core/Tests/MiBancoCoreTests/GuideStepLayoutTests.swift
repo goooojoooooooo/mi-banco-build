@@ -28,6 +28,9 @@ import Testing
             Row(h: 552, t: 300, r: 64, order: .drawingFirst, drawing: 188),
             Row(h: 0, t: 100, r: 0, order: .textFirst, drawing: 180),
             Row(h: .nan, t: 100, r: 0, order: .textFirst, drawing: 180),
+            // Valores negativos (G27): R < 0 cuenta como 0; T < 0 no tiene sentido y deja el texto arriba.
+            Row(h: 450, t: 250, r: -100, order: .drawingFirst, drawing: 200),
+            Row(h: 450, t: -10, r: 0, order: .textFirst, drawing: 180),
         ]
         for row in table {
             let got = guideStepArrangement(visible: row.h, essentials: row.t, restart: row.r)

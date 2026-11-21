@@ -130,6 +130,7 @@ struct GuideStepView: View {
             ScrollView {
                 GuideStepStack(visible: visibleHeight, accessibility: bigText) {
                     GuideIllustrationView(step: step, track: track, fitted: true)
+                        .accessibilityIdentifier("guide-drawing")
                         .layoutValue(key: GuidePieceKey.self, value: .drawing)
                     essentials
                         .layoutValue(key: GuidePieceKey.self, value: .essentials)
@@ -162,6 +163,7 @@ struct GuideStepView: View {
                 // Con cualquier alto propuesto el título se parte en líneas: nunca se corta con «…».
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier("guide-title")
             Text(Self.styled(step.instruction))
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)

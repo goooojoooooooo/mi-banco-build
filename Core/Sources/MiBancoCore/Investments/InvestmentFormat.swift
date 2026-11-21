@@ -69,16 +69,34 @@ public func formatPortfolioImportSummary(_ summary: ImportSummary) -> String {
     }
     if summary.notTradeRows > 0 {
         let base = summary.notTradeRows == 1 ? "1 fila no aplicada" : "\(summary.notTradeRows) filas no aplicadas"
-        if summary.notAppliedTypes.isEmpty {
+        let spanish = spanishNotAppliedTypes(summary.notAppliedTypes)
+        if spanish.isEmpty {
             parts.append(base)
         } else {
-            parts.append("\(base) (\(summary.notAppliedTypes.joined(separator: ", ")))")
+            parts.append("\(base) (\(spanish.joined(separator: ", ")))")
         }
     }
     if summary.unreadableRows > 0 {
         parts.append(summary.unreadableRows == 1 ? "1 fila que no se pudo leer" : "\(summary.unreadableRows) filas que no se pudieron leer")
     }
     return parts.joined(separator: " · ")
+}
+
+private func spanishNotAppliedTypes(_ rawTypes: [String]) -> [String] {
+    var seen = Set<Int>()
+    let labels = ["dividendos", "intereses", "impuestos", "cambios de la empresa", "otros movimientos"]
+    for raw in rawTypes {
+        let key = raw.uppercased().filter { $0 != "_" && !$0.isWhitespace }
+        guard !key.isEmpty else { continue }
+        switch key {
+        case "DIVIDEND", "DIVIDENDS": seen.insert(0)
+        case "INTEREST", "INTERESTS": seen.insert(1)
+        case "TAXREFUND", "TAX", "TAXES": seen.insert(2)
+        case "CORPORATEACTION", "SPLIT", "REVERSESPLIT", "SPINOFF", "MERGER": seen.insert(3)
+        default: seen.insert(4)
+        }
+    }
+    return seen.sorted().map { labels[$0] }
 }
 
 /// Errores de importación de cartera (U15).
@@ -88,6 +106,11 @@ public enum PortfolioImportFailure: Error, Equatable, Sendable {
 
 /// Mensaje que ve el dueño cuando falla la importación de cartera (U15).
 public func portfolioImportMessage(_ failure: PortfolioImportFailure) -> String {
-    // Stub temporal para prueba roja U15 (comportamiento antiguo).
-    "Ese fichero no parece la exportación de Trade Republic."
+    switch failure {
+    case .tooLarge: return "Ese fichero es demasiado grande: pasa de 10 MB."
+    case .empty: return "Ese fichero está vacío."
+    case .unreadable: return "No pude leer ese fichero. Inténtalo de nuevo."
+    case .notTradeRepublic: return "Ese fichero no parece la exportación de Trade Republic."
+    case .saveFailed: return "No se pudo guardar. Inténtalo de nuevo."
+    }
 }

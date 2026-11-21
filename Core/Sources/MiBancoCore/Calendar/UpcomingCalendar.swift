@@ -55,8 +55,24 @@ public struct CalendarTopUp: Equatable, Sendable {
 
 /// Un elemento por banco que baja de su mínimo en los 14 días, con el redondeo a 10 € del mayor hueco (U21).
 public func calendarTopUps(days: [UpcomingDay], floors: [BankID: Int]) -> [CalendarTopUp] {
-    // Stub temporal para prueba roja U21.
-    []
+    var result: [CalendarTopUp] = []
+    for bank in BankID.allCases {
+        guard let firstIdx = days.firstIndex(where: { $0.belowFloor.contains(bank) }) else { continue }
+        let floor = floors[bank] ?? 0
+        var maxShortfall = 0
+        for day in days[firstIdx...] {
+            if let bal = day.balanceAfter[bank] {
+                maxShortfall = max(maxShortfall, floor - bal)
+            }
+        }
+        guard maxShortfall > 0 else { continue }
+        let suggested = (maxShortfall + 999) / 1000 * 1000
+        let first = days[firstIdx]
+        result.append(CalendarTopUp(bank: bank, firstDay: first.day, suggestedCents: suggested,
+                                    isEstimated: first.estimatedBanks.contains(bank)))
+    }
+    func bankOrder(_ bank: BankID) -> Int { BankID.allCases.firstIndex(of: bank) ?? 0 }
+    return result.sorted { $0.firstDay != $1.firstDay ? $0.firstDay < $1.firstDay : bankOrder($0.bank) < bankOrder($1.bank) }
 }
 
 /// Cuántos días mira el calendario, hoy incluido.

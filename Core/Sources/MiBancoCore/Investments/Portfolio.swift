@@ -43,10 +43,52 @@ public func parseDecimal(_ raw: String) -> Decimal? {
     return negative ? -value : value
 }
 
-/// Lectura española para el precio a mano (U9): «,» es decimal; «.» seguido de 3 cifras son miles.
+/// Lectura española para el precio a mano (U9): «,» es decimal; «.» seguido de 3 cifras son miles;
+/// un único «.» seguido de 1, 2 o 4+ cifras (o tras «0.») sin coma se lee como decimal. Quita espacios y «€».
 public func parseManualPriceES(_ raw: String) -> Decimal? {
-    // Stub temporal para prueba roja U9 (comportamiento antiguo).
-    parseDecimal(raw)
+    let s = raw.filter { !$0.isWhitespace && $0 != "€" }
+    guard !s.isEmpty, s.allSatisfy({ $0.isASCII && ($0.isNumber || $0 == "." || $0 == ",") }) else { return nil }
+    let digits = s.filter { $0.isNumber }
+    guard !digits.isEmpty, digits.count <= 30 else { return nil }
+
+    if s.contains(",") {
+        guard s.filter({ $0 == "," }).count == 1 else { return nil }
+        let parts = s.split(separator: ",", omittingEmptySubsequences: false).map(String.init)
+        guard parts.count == 2 else { return nil }
+        let intPart = parts[0], fracPart = parts[1]
+        guard !intPart.isEmpty, !fracPart.isEmpty, fracPart.allSatisfy(\.isNumber) else { return nil }
+        let cleanInt: String
+        if intPart.contains(".") {
+            let groups = intPart.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+            guard groups.count >= 2,
+                  (1...3).contains(groups[0].count), !groups[0].hasPrefix("0"), groups[0].allSatisfy(\.isNumber),
+                  groups.dropFirst().allSatisfy({ $0.count == 3 && $0.allSatisfy(\.isNumber) }) else { return nil }
+            cleanInt = groups.joined()
+        } else {
+            guard intPart.allSatisfy(\.isNumber) else { return nil }
+            cleanInt = intPart
+        }
+        guard let d = Decimal(string: "\(cleanInt).\(fracPart)", locale: nil), d.isFinite else { return nil }
+        return d
+    }
+
+    if s.contains(".") {
+        let groups = s.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard groups.count >= 2, groups.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }) else { return nil }
+        if (1...3).contains(groups[0].count), !groups[0].hasPrefix("0"),
+           groups.dropFirst().allSatisfy({ $0.count == 3 }) {
+            guard let d = Decimal(string: groups.joined(), locale: nil), d.isFinite else { return nil }
+            return d
+        }
+        if groups.count == 2 && (groups[1].count != 3 || groups[0] == "0") {
+            guard let d = Decimal(string: "\(groups[0]).\(groups[1])", locale: nil), d.isFinite else { return nil }
+            return d
+        }
+        return nil
+    }
+
+    guard let d = Decimal(string: s, locale: nil), d.isFinite else { return nil }
+    return d
 }
 
 /// Decimal -> entero redondeando las mitades hacia fuera del cero; nil si no es finito o no cabe con holgura.
@@ -175,14 +217,15 @@ public struct InvestmentExtract: Equatable, Sendable {
 /// Tipo de una fila. BUY, SELL, SAVINGS_PLAN (y sus grafías: "SAVINGS PLAN", "SavingsPlan") y TRADE son operaciones;
 /// FREE_RECEIPT, TRANSFER_IN, SAVEBACK y ROUND_UP añaden acciones sin ser una compra (`acquire`); TRANSFER_OUT las quita como
 /// una venta (sin ganancia que contar); cualquier otro tipo no mueve nada. Tipo vacío o ausente -> nil (se decide por el signo).
-private enum RowKind { case buy, sell, trade, acquire, other }
+private enum RowKind { case buy, sell, dispose, trade, acquire, other }
 
 private func rowKind(_ type: String?) -> RowKind? {
     let folded = (type ?? "").uppercased().filter { $0.isLetter || $0.isNumber }
     if folded.isEmpty { return nil }
     switch folded {
     case "BUY", "SAVINGSPLAN": return .buy
-    case "SELL", "TRANSFEROUT": return .sell
+    case "SELL": return .sell
+    case "TRANSFEROUT": return .dispose
     case "FREERECEIPT", "TRANSFERIN", "SAVEBACK", "SAVEBACKS", "ROUNDUP", "ROUNDUPS": return .acquire
     case "TRADE": return .trade
     default: return .other
@@ -233,7 +276,7 @@ public func investmentTransactions(from rows: [TradeRepublicRow]) -> InvestmentE
         let amount = row.amountCents ?? 0
         let shares: Decimal
         switch kind {
-        case .sell?:
+        case .sell?, .dispose?:
             shares = -parsed.magnitude
         case .buy?:
             shares = parsed
@@ -255,7 +298,8 @@ public func investmentTransactions(from rows: [TradeRepublicRow]) -> InvestmentE
         let price = row.price.flatMap(parseDecimal).flatMap { $0 > 0 ? $0 : nil }
         let name = (row.name ?? "").isEmpty ? symbol : row.name!
         result.append(InvestmentTransaction(id: id, date: date, instrument: symbol, name: name, assetClass: row.assetClass,
-                                            shares: shares, cashCents: row.cashEffectCents, priceEUR: price, acquired: kind == .acquire))
+                                            shares: shares, cashCents: row.cashEffectCents, priceEUR: price,
+                                            acquired: kind == .acquire, disposed: kind == .dispose))
     }
     return InvestmentExtract(transactions: result, ignoredRows: ignored, unreadableRows: unreadable, notTradeRows: notTrade,
                              notTradeTypes: notTradeTypes.sorted())
@@ -566,9 +610,20 @@ public func portfolioSummary(_ portfolio: Portfolio, now: Date, calendar: Calend
     guard !values.isEmpty else { return nil }
     let priced = values.filter { $0.valueCents != nil }
     let totalValue = priced.reduce(0) { $0 + ($1.valueCents ?? 0) }
+    let cal = calendar ?? madridCalendar
     let withToday = priced.filter { $0.todayChangeCents != nil }
-    let today = withToday.reduce(0) { $0 + ($1.todayChangeCents ?? 0) }
-    let valueWithToday = withToday.reduce(0) { $0 + ($1.valueCents ?? 0) }
+    let changeDates: [Date] = withToday.compactMap {
+        if case .market(let d) = $0.origin { return d }
+        return nil
+    }
+    let changeDay = changeDates.max().map { cal.startOfDay(for: $0) }
+    // U11 (J10): «hoy» suma SOLO las posiciones cuyo día de cotización de mercado (Madrid) es `changeDay`.
+    let withTodayForDay = withToday.filter { pv in
+        guard let changeDay, case .market(let d) = pv.origin else { return false }
+        return cal.startOfDay(for: d) == changeDay
+    }
+    let today = withTodayForDay.reduce(0) { $0 + ($1.todayChangeCents ?? 0) }
+    let valueWithToday = withTodayForDay.reduce(0) { $0 + ($1.valueCents ?? 0) }
     let withCost = priced.filter { $0.position.hasKnownCost }
     let gain = withCost.reduce(0) { $0 + ($1.valueCents ?? 0) - $1.position.costCents }
     let gainBase = withCost.reduce(0) { $0 + $1.position.costCents }
@@ -578,16 +633,11 @@ public func portfolioSummary(_ portfolio: Portfolio, now: Date, calendar: Calend
         case .none: return nil
         }
     }
-    let cal = calendar ?? madridCalendar
-    let changeDates: [Date] = withToday.compactMap {
-        if case .market(let d) = $0.origin { return d }
-        return nil
-    }
     return PortfolioSummary(
         valueCents: priced.isEmpty ? nil : totalValue,
-        todayChangeCents: withToday.isEmpty ? nil : today,
-        todayChangeTenths: withToday.isEmpty ? nil : roundedQuotient(1000 * today, valueWithToday - today),
-        changeDay: changeDates.max().map { cal.startOfDay(for: $0) },
+        todayChangeCents: withTodayForDay.isEmpty ? nil : today,
+        todayChangeTenths: withTodayForDay.isEmpty ? nil : roundedQuotient(1000 * today, valueWithToday - today),
+        changeDay: changeDay,
         costCents: values.reduce(0) { $0 + $1.position.costCents },
         gainCents: withCost.isEmpty ? nil : gain,
         gainTenths: roundedQuotient(1000 * gain, gainBase), pricedAt: dates.max(), oldestPriceAt: dates.min(),

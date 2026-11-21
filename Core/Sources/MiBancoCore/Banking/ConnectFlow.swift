@@ -184,7 +184,11 @@ public struct ConnectFlow: Equatable, Sendable {
 
         case .cancel:
             switch phase {
-            case .opening(let bank), .waitingForBank(let bank):
+            case .opening:
+                // U50: antes de abrir la hoja web no tiene sentido preguntar si ya lo aprobó.
+                phase = .idle
+                return [.cancelWebSession, .deletePending]
+            case .waitingForBank(let bank):
                 phase = .needsResume(bank)
                 return [.cancelWebSession]
             default:
@@ -209,8 +213,14 @@ public struct ConnectFlow: Equatable, Sendable {
             }
 
         case .forgetAll:
-            // Stub temporal para prueba roja U42 (comportamiento antiguo: delegaba en .reset).
-            return handle(.reset)
+            // U42: desde cualquier fase vuelve a .idle; cancela la hoja web si estaba abierta o abriéndose.
+            let hasWeb: Bool
+            switch phase {
+            case .opening, .waitingForBank: hasWeb = true
+            default: hasWeb = false
+            }
+            phase = .idle
+            return hasWeb ? [.cancelWebSession, .deletePending] : [.deletePending]
         }
     }
 }
@@ -222,14 +232,13 @@ public func forgetEverythingPlan(
     unlinkLedger: @Sendable () async -> Void,
     deleteRemote: @Sendable (String) async -> Void
 ) async {
-    // Stub temporal para prueba roja U43 (comportamiento antiguo: red primero y luego local).
     let ids = await readSessionIDs()
+    await deleteLocal()
+    await unlinkLedger()
     for id in ids {
         if Task.isCancelled { break }
         await deleteRemote(id)
     }
-    await deleteLocal()
-    await unlinkLedger()
 }
 
 /// Error al guardar las credenciales de Enable Banking (U53).
@@ -239,8 +248,10 @@ public enum BankingCredentialErrorKind: Equatable, Sendable {
 
 /// Mensaje que ve el dueño al fallar el guardado de la clave de Enable Banking (U53).
 public func bankingCredentialMessage(_ kind: BankingCredentialErrorKind) -> String {
-    // Stub temporal para prueba roja U53.
-    "No es una clave válida. Elige el archivo .pem de Enable Banking."
+    switch kind {
+    case .invalidKey: return "No es una clave válida. Elige el archivo .pem de Enable Banking."
+    case .keychain: return "No se pudo guardar la clave en este iPhone. Inténtalo de nuevo."
+    }
 }
 
 /// Textos de error de la conexión, exactos. Nunca texto crudo de la API.

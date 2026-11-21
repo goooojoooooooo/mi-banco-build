@@ -32,8 +32,17 @@ public func restorePortfolioSafetyCopyPlan(
     promoteTemp: () throws -> Void,
     removeTemp: () -> Void
 ) throws {
-    // Stub temporal para prueba roja U57 (comportamiento antiguo: guarda la copia definitiva antes de restaurar el libro).
     try saveTemp()
-    try promoteTemp()
-    try restoreLedger()
+    do {
+        try restoreLedger()
+    } catch {
+        removeTemp()
+        throw error
+    }
+    do {
+        try promoteTemp()
+    } catch {
+        removeTemp()
+        throw error
+    }
 }

@@ -260,15 +260,39 @@ public enum CappedDownloadError: Error, Equatable, Sendable {
 public func collectCapped<S: AsyncSequence>(
     _ bytes: S, expectedLength: Int64, limit: Int
 ) async throws -> Data where S.Element == UInt8 {
-    // Stub temporal para prueba roja U10 (comportamiento antiguo: lee todo y comprueba al final).
+    guard limit >= 0 else { throw CappedDownloadError.tooLarge }
+    if expectedLength > Int64(limit) { throw CappedDownloadError.tooLarge }
     var data = Data()
-    for try await byte in bytes { data.append(byte) }
-    if data.count > limit { throw CappedDownloadError.tooLarge }
+    if expectedLength > 0 {
+        data.reserveCapacity(Int(min(expectedLength, 65_536)))
+    }
+    for try await byte in bytes {
+        if data.count >= limit { throw CappedDownloadError.tooLarge }
+        data.append(byte)
+    }
     return data
 }
 
-/// Decide qué código puede salir hacia Yahoo Finance (U16); nil si no es un código seguro.
+private let knownCryptoCodes: Set<String> = [
+    "BTC", "ETH", "SOL", "ADA", "XRP", "DOT", "DOGE", "MATIC", "POL", "AVAX", "LINK", "LTC",
+    "BCH", "UNI", "ATOM", "XLM", "ALGO", "NEAR", "APT", "SUI", "ARB", "OP", "USDC", "USDT",
+]
+
+private func isSafeYahooCode(_ code: String) -> Bool {
+    let bytes = Array(code.utf8)
+    guard (1...12).contains(bytes.count), let first = bytes.first else { return false }
+    let firstOK = (first >= 65 && first <= 90) || (first >= 48 && first <= 57)
+    guard firstOK else { return false }
+    return bytes.allSatisfy { ($0 >= 65 && $0 <= 90) || ($0 >= 48 && $0 <= 57) || $0 == 46 || $0 == 45 }
+}
+
+/// Decide qué código puede salir hacia Yahoo Finance (U16): ISIN válido, par de cripto (`ETH-EUR`),
+/// símbolo recordado o código `^[A-Z0-9][A-Z0-9.\-]{0,11}$`; cualquier otra cosa -> nil.
 public func yahooQueryTerm(for instrument: String, assetClass: String? = nil, rememberedSymbol: String? = nil) -> String? {
-    // Stub temporal para prueba roja U16 (comportamiento antiguo: manda el instrumento tal cual).
-    rememberedSymbol ?? instrument
+    if let rem = rememberedSymbol, isSafeYahooCode(rem) { return rem }
+    if isISIN(instrument) { return instrument }
+    if let crypto = cryptoSymbol(instrument: instrument, assetClass: assetClass) { return crypto }
+    if assetClass == nil && knownCryptoCodes.contains(instrument) { return instrument + "-EUR" }
+    if isSafeYahooCode(instrument) { return instrument }
+    return nil
 }

@@ -9,7 +9,7 @@ public let defaultMorningBriefingMinutes = 510
 /// Texto fijo del aviso de la mañana (sin cifras, sin importes ni consejos: seguro en pantalla bloqueada y modo privado).
 public let morningReminderText: (title: String, body: String) = (
     title: "Tu resumen de hoy",
-    body: "Mira qué ha pasado desde ayer."
+    body: "Mira qué ha pasado desde la última vez."
 )
 
 /// Minutos desde medianoche -> "08:30" (fuera de 0..<1440 cae a "08:30"). Sin DateFormatter: igual en Linux y en iOS.
@@ -20,9 +20,9 @@ public func formatMinutesOfDay(_ minutes: Int) -> String {
     return (h < 10 ? "0" : "") + String(h) + ":" + (m < 10 ? "0" : "") + String(m)
 }
 
-/// Subtítulo de la regla en Avisos («A las 08:30, con lo que ha pasado.»).
+/// Subtítulo de la regla en Avisos («A las 08:30, si aún no has visto el resumen.»).
 public func morningReminderSubtitle(minutes: Int) -> String {
-    "A las \(formatMinutesOfDay(minutes)), con lo que ha pasado."
+    "A las \(formatMinutesOfDay(minutes)), si aún no has visto el resumen."
 }
 
 /// Las próximas tres fechas del aviso matinal a `minutes` (minutos desde medianoche) en `calendar`.

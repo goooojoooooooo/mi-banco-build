@@ -35,10 +35,19 @@ public struct KeypadAmount: Equatable, Sendable {
         formatEUR(cents)
     }
 
-    /// Texto que ve el dueño mientras teclea (U26).
+    /// Texto que ve el dueño mientras teclea (U26): euros con punto de miles + coma y decimales tecleados + « €».
     public var typedText: String {
-        // Stub temporal para prueba roja U26 (comportamiento antiguo: pintaba formattedEUR).
-        formattedEUR
+        let rawEuros = eurosText.isEmpty ? "0" : eurosText
+        var grouped = ""
+        for (i, ch) in rawEuros.reversed().enumerated() {
+            if i > 0 && i % 3 == 0 { grouped.append(".") }
+            grouped.append(ch)
+        }
+        let whole = String(grouped.reversed())
+        if hasDecimal {
+            return "\(whole),\(centsText)\u{00A0}€"
+        }
+        return "\(whole)\u{00A0}€"
     }
 
     @discardableResult

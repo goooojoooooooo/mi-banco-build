@@ -127,14 +127,14 @@ private func move(_ cents: Int = 20000) -> PendingMove {
     @Test func dondeLoPago() {
         let upcoming = [spotify, netflix]
         #expect(whereToPay(amountCents: 4500, balances: balances, floors: floors, upcoming: upcoming) == [
-            PayOption(bank: .ima, leftAfterCents: 123955, fits: true),
-            PayOption(bank: .rev, leftAfterCents: 22022, fits: true),
-            PayOption(bank: .tr, leftAfterCents: 210500, fits: true),
+            PayOption(bank: .ima, leftAfterCents: 123955, fits: true, balanceAfterCents: 123955, floorCents: 0),
+            PayOption(bank: .rev, leftAfterCents: 22022, fits: true, balanceAfterCents: 29520, floorCents: 5000),
+            PayOption(bank: .tr, leftAfterCents: 210500, fits: true, balanceAfterCents: 210500, floorCents: 0),
         ])
         #expect(whereToPay(amountCents: 30000, balances: balances, floors: floors, upcoming: upcoming) == [
-            PayOption(bank: .ima, leftAfterCents: 98455, fits: true),
-            PayOption(bank: .tr, leftAfterCents: 185000, fits: true),
-            PayOption(bank: .rev, leftAfterCents: -3478, fits: false),
+            PayOption(bank: .ima, leftAfterCents: 98455, fits: true, balanceAfterCents: 98455, floorCents: 0),
+            PayOption(bank: .tr, leftAfterCents: 185000, fits: true, balanceAfterCents: 185000, floorCents: 0),
+            PayOption(bank: .rev, leftAfterCents: -3478, fits: false, balanceAfterCents: 4020, floorCents: 5000),
         ])
     }
 
@@ -238,8 +238,8 @@ private func move(_ cents: Int = 20000) -> PendingMove {
         let options = whereToPay(amountCents: 4500, balances: balances, floors: floors, upcoming: [spotify, netflix],
                                  included: [.rev, .ima], estimated: [.ima])
         #expect(options == [
-            PayOption(bank: .ima, leftAfterCents: 123955, fits: true, isEstimated: true),
-            PayOption(bank: .rev, leftAfterCents: 22022, fits: true),
+            PayOption(bank: .ima, leftAfterCents: 123955, fits: true, isEstimated: true, balanceAfterCents: 123955, floorCents: 0),
+            PayOption(bank: .rev, leftAfterCents: 22022, fits: true, balanceAfterCents: 29520, floorCents: 5000),
         ])
     }
 

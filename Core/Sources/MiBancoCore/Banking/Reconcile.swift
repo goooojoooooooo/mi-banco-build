@@ -139,6 +139,7 @@ extension Ledger {
                 bookedDay: channel == .bank ? r.bookedDay : nil)
             state.movements.append(movement)
             report.added += 1
+            if r.excludedFromSpending { report.addedInvestments += 1 }
             report.addedIDs.append(movement.id)
         }
 

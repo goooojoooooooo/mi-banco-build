@@ -762,11 +762,16 @@ public struct Ledger: Sendable {
 }
 
 /// Decide en el arranque si abrir la bienvenida y si marcar `onboardingDone` (U56).
+/// Solo arranca si la lectura fue bien, el libro está vacío y `onboardingDone` es falso.
 public func onboardingDecision(load: Result<LedgerState, Error>, onboardingDone: Bool) -> (startSession: Bool, markDone: Bool) {
-    // Stub temporal para prueba roja U56 (comportamiento antiguo: fallo de lectura tratado como libro vacío).
-    let state = (try? load.get()) ?? LedgerState()
-    let empty = state.balances.isEmpty && state.movements.isEmpty
-    return (startSession: !onboardingDone && empty, markDone: false)
+    guard !onboardingDone else { return (false, false) }
+    switch load {
+    case .failure:
+        return (false, false)
+    case .success(let state):
+        let isEmpty = state.balances.isEmpty && state.movements.isEmpty && state.links.isEmpty
+        return isEmpty ? (true, false) : (false, true)
+    }
 }
 
 /// Huella estable (FNV-1a de 64 bits, en hexadecimal) del texto de entrada normalizado:

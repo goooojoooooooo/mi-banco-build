@@ -38,6 +38,27 @@ public func firstBelowFloorDays(_ days: [UpcomingDay]) -> [BankID: Date] {
     return first
 }
 
+/// Un único aviso «Pasar X €» por banco en el calendario de 14 días (U21).
+public struct CalendarTopUp: Equatable, Sendable {
+    public let bank: BankID
+    public let firstDay: Date
+    public let suggestedCents: Int
+    public let isEstimated: Bool
+
+    public init(bank: BankID, firstDay: Date, suggestedCents: Int, isEstimated: Bool = false) {
+        self.bank = bank
+        self.firstDay = firstDay
+        self.suggestedCents = suggestedCents
+        self.isEstimated = isEstimated
+    }
+}
+
+/// Un elemento por banco que baja de su mínimo en los 14 días, con el redondeo a 10 € del mayor hueco (U21).
+public func calendarTopUps(days: [UpcomingDay], floors: [BankID: Int]) -> [CalendarTopUp] {
+    // Stub temporal para prueba roja U21.
+    []
+}
+
 /// Cuántos días mira el calendario, hoy incluido.
 public let upcomingCalendarDays = 14
 

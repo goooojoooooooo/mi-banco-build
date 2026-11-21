@@ -49,6 +49,8 @@ public enum ConnectEvent: Equatable, Sendable {
     case cancel
     case resume(pending: PendingCheck, hasAuthURL: Bool)
     case reset
+    /// «Olvidar clave y conexiones» reinicia el flujo desde cualquier fase (U42).
+    case forgetAll
 }
 
 /// Lo único que la app ejecuta.
@@ -205,8 +207,40 @@ public struct ConnectFlow: Equatable, Sendable {
                 phase = .idle
                 return [.deletePending]
             }
+
+        case .forgetAll:
+            // Stub temporal para prueba roja U42 (comportamiento antiguo: delegaba en .reset).
+            return handle(.reset)
         }
     }
+}
+
+/// Secuencia de «Olvidar clave y conexiones» (U43): borra lo local antes que la red.
+public func forgetEverythingPlan(
+    readSessionIDs: @Sendable () async -> [String],
+    deleteLocal: @Sendable () async -> Void,
+    unlinkLedger: @Sendable () async -> Void,
+    deleteRemote: @Sendable (String) async -> Void
+) async {
+    // Stub temporal para prueba roja U43 (comportamiento antiguo: red primero y luego local).
+    let ids = await readSessionIDs()
+    for id in ids {
+        if Task.isCancelled { break }
+        await deleteRemote(id)
+    }
+    await deleteLocal()
+    await unlinkLedger()
+}
+
+/// Error al guardar las credenciales de Enable Banking (U53).
+public enum BankingCredentialErrorKind: Equatable, Sendable {
+    case invalidKey, keychain
+}
+
+/// Mensaje que ve el dueño al fallar el guardado de la clave de Enable Banking (U53).
+public func bankingCredentialMessage(_ kind: BankingCredentialErrorKind) -> String {
+    // Stub temporal para prueba roja U53.
+    "No es una clave válida. Elige el archivo .pem de Enable Banking."
 }
 
 /// Textos de error de la conexión, exactos. Nunca texto crudo de la API.

@@ -94,3 +94,37 @@ public func bankStatusLines(
             + (estimated == true ? "estimado" : "exacto"),
         secondary: expiry, action: days <= 10 ? .renew : .refresh)
 }
+
+/// Estado de la fila de saldo en Ajustes para un banco conectado (U45): nombra el origen real.
+public func connectedBalanceRowStatus(
+    estimated: Bool, origin: BalanceOrigin, setAt: Date, now: Date, calendar: Calendar
+) -> String {
+    // Stub temporal para prueba roja U45 (comportamiento antiguo: ignora origin).
+    let kind = estimated ? "estimado" : "exacto"
+    return "\(kind) · \(relativeUpdated(setAt, now: now, calendar: calendar))"
+}
+
+/// Explicación del saldo en el reverso de la tarjeta (U52: preposiciones correctas tras verbo).
+public func balanceExplanationText(
+    origin: BalanceOrigin, estimated: Bool, fromBank: Bool, setAt: Date, bank: BankID, now: Date, calendar: Calendar
+) -> String {
+    // Stub temporal para prueba roja U52 (comportamiento antiguo: «de las»/«del» también tras verbo).
+    let isToday = calendar.isDate(setAt, inSameDayAs: now)
+    let sameYear = calendar.component(.year, from: setAt) == calendar.component(.year, from: now)
+    let when = isToday ? "de las \(clock(setAt, calendar: calendar))" : "del \(shortSpanishDate(setAt, calendar: calendar, withYear: !sameYear))"
+    switch origin {
+    case .bank:
+        if !estimated { return "Lo dio \(bank.displayName) \(when)." }
+        return "Parte del saldo que dio el banco \(when) y suma lo que ha llegado después."
+    case .statement:
+        if !estimated { return "Viene del extracto de \(bank.displayName) \(when)." }
+        return "Parte del saldo del extracto \(when) y suma lo que ha llegado después."
+    case .notice:
+        if !estimated { return "Lo dijo \(bank.displayName) en su aviso \(when)." }
+        return "Parte del saldo que dio el banco en su aviso \(when) y suma lo que ha llegado después."
+    case .manual:
+        if !estimated, fromBank { return "Lo dijo \(bank.displayName) en su aviso \(when)." }
+        if fromBank { return "Parte del saldo que dio el banco en su aviso \(when) y suma lo que ha llegado después." }
+        return "Lo corregiste \(isToday ? "hoy" : "el \(shortSpanishDate(setAt, calendar: calendar, withYear: !sameYear))") y desde entonces suma los movimientos que llegan."
+    }
+}

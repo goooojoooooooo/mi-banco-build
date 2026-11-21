@@ -131,18 +131,24 @@ private func nov(_ day: Int, _ hour: Int, _ minute: Int = 0, _ second: Int = 0) 
         #expect(formatMinutesOfDay(510) == "08:30")
         #expect(formatMinutesOfDay(1_439) == "23:59")
         #expect(formatMinutesOfDay(-5) == "08:30")
-        #expect(morningReminderSubtitle(minutes: 510) == "A las 08:30, con lo que ha pasado.")
+        #expect(morningReminderSubtitle(minutes: 510) == "A las 08:30, si aún no has visto el resumen.")
     }
 
     @Test func avisoDeLaMananaSinCifras() {
         #expect(morningReminderText.title == "Tu resumen de hoy")
-        #expect(morningReminderText.body == "Mira qué ha pasado desde ayer.")
+        #expect(morningReminderText.body == "Mira qué ha pasado desde la última vez.")
         for part in [morningReminderText.title, morningReminderText.body] {
             #expect(!part.contains { $0.isNumber }, "\(part)")
             #expect(!part.contains("€") && !part.contains("%"), "\(part)")
             #expect(!containsNumber(part), "\(part)")
             #expect(!containsAdvice(part), "\(part)")
         }
+    }
+
+    @Test func textosDelAvisoDeLaManana() {
+        #expect(morningReminderText.title == "Tu resumen de hoy")
+        #expect(morningReminderText.body == "Mira qué ha pasado desde la última vez.")
+        #expect(morningReminderSubtitle(minutes: 510) == "A las 08:30, si aún no has visto el resumen.")
     }
 
     @Test func ajustesAntiguos() throws {

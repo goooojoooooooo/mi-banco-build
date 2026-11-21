@@ -43,6 +43,12 @@ public func parseDecimal(_ raw: String) -> Decimal? {
     return negative ? -value : value
 }
 
+/// Lectura española para el precio a mano (U9): «,» es decimal; «.» seguido de 3 cifras son miles.
+public func parseManualPriceES(_ raw: String) -> Decimal? {
+    // Stub temporal para prueba roja U9 (comportamiento antiguo).
+    parseDecimal(raw)
+}
+
 /// Decimal -> entero redondeando las mitades hacia fuera del cero; nil si no es finito o no cabe con holgura.
 func roundedInt(_ value: Decimal) -> Int? {
     guard value.isFinite else { return nil }
@@ -98,9 +104,11 @@ public struct InvestmentTransaction: Codable, Equatable, Sendable, Identifiable 
     /// true = las acciones entraron sin ser una compra (entrega gratuita, traspaso de entrada, saveback, redondeo): su coste es
     /// el importe de la fila si lo trae y, si no, desconocido (0), y la posición no cuenta ganancia.
     public let acquired: Bool
+    /// true = las acciones salieron por traspaso (`TRANSFER_OUT`), no por una venta (U14).
+    public let disposed: Bool
 
     public init(id: String, date: Date, instrument: String, name: String, assetClass: String?, shares: Decimal, cashCents: Int,
-                priceEUR: Decimal?, acquired: Bool = false) {
+                priceEUR: Decimal?, acquired: Bool = false, disposed: Bool = false) {
         self.id = id
         self.date = date
         self.instrument = instrument
@@ -110,9 +118,10 @@ public struct InvestmentTransaction: Codable, Equatable, Sendable, Identifiable 
         self.cashCents = cashCents
         self.priceEUR = priceEUR
         self.acquired = acquired
+        self.disposed = disposed
     }
 
-    private enum Keys: String, CodingKey { case id, date, instrument, name, assetClass, shares, cashCents, priceEUR, acquired }
+    private enum Keys: String, CodingKey { case id, date, instrument, name, assetClass, shares, cashCents, priceEUR, acquired, disposed }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -125,6 +134,7 @@ public struct InvestmentTransaction: Codable, Equatable, Sendable, Identifiable 
         cashCents = (try? c.decode(Int.self, forKey: .cashCents)) ?? 0
         priceEUR = c.decimalIfPresent(.priceEUR)
         acquired = ((try? c.decodeIfPresent(Bool.self, forKey: .acquired)) ?? nil) ?? false
+        disposed = ((try? c.decodeIfPresent(Bool.self, forKey: .disposed)) ?? nil) ?? false
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -138,6 +148,7 @@ public struct InvestmentTransaction: Codable, Equatable, Sendable, Identifiable 
         try c.encode(cashCents, forKey: .cashCents)
         try c.encodeIfPresent(priceEUR.map(text), forKey: .priceEUR)
         if acquired { try c.encode(true, forKey: .acquired) }
+        if disposed { try c.encode(true, forKey: .disposed) }
     }
 }
 

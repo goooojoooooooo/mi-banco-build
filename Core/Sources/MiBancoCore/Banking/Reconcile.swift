@@ -9,10 +9,17 @@ public struct ReconcileReport: Equatable, Sendable {
     /// Filas que quien llama no pudo leer (la conciliación en sí no descarta ninguna: lo rellena el parser de extractos).
     public var ignoredRows: Int
     public var addedIDs: [UUID]
+    /// De las filas añadidas (`added`), cuántas son operaciones de inversión (`excludedFromSpending`) — U46.
+    public var addedInvestments: Int
+    /// true si la importación añade un periodo nuevo de cobertura al libro — U47.
+    public var addsPeriod: Bool
+    /// true si la importación actualiza el saldo del banco con el del extracto — U47.
+    public var adoptsBalance: Bool
     public var alreadyThere: Int { linked + unchanged }
 
     public init(added: Int = 0, linked: Int = 0, updated: Int = 0, unchanged: Int = 0, removed: Int = 0,
-                ignoredRows: Int = 0, addedIDs: [UUID] = []) {
+                ignoredRows: Int = 0, addedIDs: [UUID] = [], addedInvestments: Int = 0,
+                addsPeriod: Bool = false, adoptsBalance: Bool = false) {
         self.added = added
         self.linked = linked
         self.updated = updated
@@ -20,6 +27,9 @@ public struct ReconcileReport: Equatable, Sendable {
         self.removed = removed
         self.ignoredRows = ignoredRows
         self.addedIDs = addedIDs
+        self.addedInvestments = addedInvestments
+        self.addsPeriod = addsPeriod
+        self.adoptsBalance = adoptsBalance
     }
 }
 

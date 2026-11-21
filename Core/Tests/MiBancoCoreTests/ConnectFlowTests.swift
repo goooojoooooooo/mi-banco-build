@@ -239,6 +239,96 @@ private func flow(in phase: ConnectPhase) -> ConnectFlow {
         #expect(!ConnectPhase.connected(.rev).isActive)
         #expect(!ConnectPhase.idle.isActive)
     }
+
+    // MARK: Ronda U0–U68 (U42, U43, U50, U53)
+
+    @Test func olvidarTodoVuelveAIdleDesdeCualquierFase() {
+        let phases: [ConnectPhase] = [
+            .idle,
+            .chooseASPSP(.rev, []),
+            .opening(.rev),
+            .waitingForBank(.rev),
+            .finishing(.rev),
+            .connected(.rev),
+            .needsResume(.rev),
+            .failed(.rev, "error"),
+        ]
+        for p in phases {
+            var f = flow(in: p)
+            let effects = f.handle(.forgetAll)
+            #expect(f.phase == .idle, "desde \(p)")
+            #expect(effects.contains(.deletePending), "deletePending desde \(p)")
+            if p == .opening(.rev) || p == .waitingForBank(.rev) {
+                #expect(effects.contains(.cancelWebSession), "cancelWebSession desde \(p)")
+            }
+        }
+    }
+
+    @Test func cancelarAlAbrirVuelveAIdle() {
+        var opening = flow(in: .opening(.rev))
+        #expect(opening.handle(.cancel) == [.cancelWebSession, .deletePending])
+        #expect(opening.phase == .idle)
+
+        // Control: desde waitingForBank sigue preguntando si ya aprobó en el banco.
+        var waiting = flow(in: .waitingForBank(.rev))
+        #expect(waiting.handle(.cancel) == [.cancelWebSession])
+        #expect(waiting.phase == .needsResume(.rev))
+    }
+
+    private final class OrderLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var entries: [String] = []
+        func append(_ item: String) {
+            lock.lock(); defer { lock.unlock() }
+            entries.append(item)
+        }
+        var items: [String] {
+            lock.lock(); defer { lock.unlock() }
+            return entries
+        }
+    }
+
+    @Test func olvidarBorraLoLocalAntesQueLaRed() async {
+        let log = OrderLog()
+        await forgetEverythingPlan(
+            readSessionIDs: { log.append("read"); return ["s1", "s2"] },
+            deleteLocal: { log.append("local") },
+            unlinkLedger: { log.append("ledger") },
+            deleteRemote: { id in log.append("remote:\(id)") }
+        )
+        let items = log.items
+        let idxLocal = items.firstIndex(of: "local")
+        let idxLedger = items.firstIndex(of: "ledger")
+        let idxRemote = items.firstIndex(of: "remote:s1")
+        #expect(idxLocal != nil && idxLedger != nil && idxRemote != nil)
+        if let l = idxLocal, let g = idxLedger, let r = idxRemote {
+            #expect(l < r)
+            #expect(g < r)
+        }
+
+        // Si la red se queda colgada y la tarea se cancela a los 100 ms, lo local YA se borró.
+        let hangLog = OrderLog()
+        let task = Task {
+            await forgetEverythingPlan(
+                readSessionIDs: { ["s-hang"] },
+                deleteLocal: { hangLog.append("local") },
+                unlinkLedger: { hangLog.append("ledger") },
+                deleteRemote: { _ in try? await Task.sleep(for: .seconds(60)) }
+            )
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        await task.value
+        #expect(hangLog.items.contains("local"))
+        #expect(hangLog.items.contains("ledger"))
+    }
+
+    @Test func mensajeDeErrorDeCredenciales() {
+        #expect(bankingCredentialMessage(.invalidKey)
+            == "No es una clave válida. Elige el archivo .pem de Enable Banking.")
+        #expect(bankingCredentialMessage(.keychain)
+            == "No se pudo guardar la clave en este iPhone. Inténtalo de nuevo.")
+    }
 }
 
 @Suite struct ConnectMessagesTests {

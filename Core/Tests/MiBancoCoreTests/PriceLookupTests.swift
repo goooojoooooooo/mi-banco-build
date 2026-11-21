@@ -188,4 +188,90 @@ private func json(_ s: String) -> Data { Data(s.utf8) }
         #expect(shouldRefreshPrices(lastFetch: nil, now: now))
         #expect(shouldRefreshPrices(lastFetch: now.addingTimeInterval(60), now: now))
     }
+
+    // MARK: Ronda U0–U68 (U10, U16)
+
+    private final class AtomicCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func increment() -> Int {
+            lock.lock(); defer { lock.unlock() }
+            count += 1
+            return count
+        }
+        var value: Int {
+            lock.lock(); defer { lock.unlock() }
+            return count
+        }
+    }
+
+    @Test func topeDuranteLaDescarga() async throws {
+        let limit = 2_000_000
+
+        // 1. expectedLength > limit corta con 0 bytes entregados.
+        let zeroCounter = AtomicCounter()
+        let stream1 = AsyncStream<UInt8> { cont in
+            let task = Task {
+                for _ in 0..<100 {
+                    if Task.isCancelled { break }
+                    _ = zeroCounter.increment()
+                    cont.yield(0x41)
+                }
+                cont.finish()
+            }
+            cont.onTermination = { _ in task.cancel() }
+        }
+        var threwExpected = false
+        do {
+            _ = try await collectCapped(stream1, expectedLength: 3_000_000, limit: limit)
+        } catch {
+            threwExpected = true
+        }
+        #expect(threwExpected)
+        #expect(zeroCounter.value == 0)
+
+        // 2. Sin Content-Length conocido, un flujo de 3.000.000 bytes corta al pasar del tope (<= 2.000.001).
+        let streamCounter = AtomicCounter()
+        struct CountedBytes: AsyncSequence, Sendable {
+            typealias Element = UInt8
+            let total: Int
+            let counter: AtomicCounter
+            struct Iterator: AsyncIteratorProtocol {
+                var remaining: Int
+                let counter: AtomicCounter
+                mutating func next() async -> UInt8? {
+                    guard remaining > 0 else { return nil }
+                    remaining -= 1
+                    _ = counter.increment()
+                    return 0x42
+                }
+            }
+            func makeAsyncIterator() -> Iterator { Iterator(remaining: total, counter: counter) }
+        }
+        var threwOver = false
+        do {
+            _ = try await collectCapped(CountedBytes(total: 3_000_000, counter: streamCounter),
+                                        expectedLength: -1, limit: limit)
+        } catch {
+            threwOver = true
+        }
+        #expect(threwOver)
+        #expect(streamCounter.value <= limit + 1)
+
+        // Control: por debajo del tope devuelve los datos exactos.
+        let smallCounter = AtomicCounter()
+        let ok = try await collectCapped(CountedBytes(total: 128, counter: smallCounter), expectedLength: 128, limit: limit)
+        #expect(ok.count == 128)
+        #expect(smallCounter.value == 128)
+    }
+
+    @Test func queSaleAYahoo() {
+        #expect(yahooQueryTerm(for: "US0378331005") == "US0378331005")
+        #expect(yahooQueryTerm(for: "ETH") == "ETH-EUR")
+        #expect(yahooQueryTerm(for: "APC.DE") == "APC.DE")
+        #expect(yahooQueryTerm(for: "Apple Inc. Acciones") == nil)
+        #expect(yahooQueryTerm(for: "mi fondo") == nil)
+        #expect(yahooQueryTerm(for: "SOL", assetClass: "CRYPTO") == "SOL-EUR")
+        #expect(yahooQueryTerm(for: "US0378331005", rememberedSymbol: "APC.DE") == "APC.DE")
+    }
 }

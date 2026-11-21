@@ -24,3 +24,16 @@ public extension FileStore {
         }
     }
 }
+
+/// Orden seguro de la copia previa de la cartera al restaurar el libro (U57): solo sustituye la copia previa tras restaurar bien el libro.
+public func restorePortfolioSafetyCopyPlan(
+    saveTemp: () throws -> Void,
+    restoreLedger: () throws -> Void,
+    promoteTemp: () throws -> Void,
+    removeTemp: () -> Void
+) throws {
+    // Stub temporal para prueba roja U57 (comportamiento antiguo: guarda la copia definitiva antes de restaurar el libro).
+    try saveTemp()
+    try promoteTemp()
+    try restoreLedger()
+}

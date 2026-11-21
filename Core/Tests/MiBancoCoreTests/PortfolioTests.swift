@@ -258,7 +258,7 @@ private func portfolioWithFixture() throws -> Portfolio {
         let single = ImportSummary(added: 1, alreadyThere: 1, ignoredRows: 1, unreadableRows: 1,
                                    notTradeRows: 1, notAppliedTypes: ["DIVIDEND"])
         #expect(formatPortfolioImportSummary(single)
-                == "Importada 1 operación nueva · 1 ya estaba · 1 fila sin acciones ignorada · 1 fila no aplicada (DIVIDEND) · 1 fila que no se pudo leer")
+                == "Importada 1 operación nueva · 1 ya estaba · 1 fila sin acciones ignorada · 1 fila no aplicada (dividendos) · 1 fila que no se pudo leer")
 
         let onlyNew = ImportSummary(added: 5, alreadyThere: 0, ignoredRows: 0, unreadableRows: 0)
         #expect(formatPortfolioImportSummary(onlyNew) == "Importadas 5 operaciones nuevas")
@@ -315,5 +315,93 @@ private func portfolioWithFixture() throws -> Portfolio {
         // También conserva una copia explícitamente vacía para deshacer una restauración cuando antes no había cartera.
         try store.saveCopy(Portfolio(), named: "portfolio-antes-de-restaurar.json")
         #expect(store.loadCopy(named: "portfolio-antes-de-restaurar.json") == Portfolio())
+    }
+
+    // MARK: Ronda U0–U68 (U9, U11, U14, U15)
+
+    @Test func precioAManoEnEspanol() {
+        // Con `parseDecimal`, "3.000" da 3; `parseManualPriceES` lee el punto seguido de tres cifras como separador de miles.
+        #expect(parseDecimal("3.000") == Decimal(3))
+        #expect(parseManualPriceES("3.000") == Decimal(3000))
+        #expect(parseManualPriceES("3.000,5") == Decimal(string: "3000.5"))
+        #expect(parseManualPriceES("3.000,00") == Decimal(3000))
+        #expect(parseManualPriceES("1.234.567,89") == Decimal(string: "1234567.89"))
+        #expect(parseManualPriceES("110,50") == Decimal(string: "110.5"))
+        #expect(parseManualPriceES("110.5") == Decimal(string: "110.5"))
+        #expect(parseManualPriceES("0,0042") == Decimal(string: "0.0042"))
+        #expect(parseManualPriceES("3 000,00 €") == Decimal(3000))
+        #expect(parseManualPriceES("3\u{202F}000,00\u{00A0}€") == Decimal(3000))
+        #expect(parseManualPriceES("3.00") == Decimal(3))
+        #expect(parseManualPriceES("0.005") == Decimal(string: "0.005"))
+        #expect(parseManualPriceES("abc") == nil)
+        #expect(parseManualPriceES("1,2,3") == nil)
+        #expect(parseManualPriceES("") == nil)
+    }
+
+    @Test func hoySoloSumaLosDeHoy() throws {
+        // Domingo 22 nov 2026 12:00 Madrid; Apple con cotización del viernes (-6,00 €), Ethereum de hoy (+1,00 €).
+        let friday = at(2026, 11, 20, 17, 30)
+        let sunday = at(2026, 11, 22, 12, 0)
+        var p = Portfolio(transactions: [
+            InvestmentTransaction(id: "a1", date: at(2026, 6, 1, 10, 0), instrument: apple, name: "Apple",
+                                  assetClass: "STOCK", shares: 3, cashCents: -54_000, priceEUR: 180),
+            InvestmentTransaction(id: "e1", date: at(2026, 6, 1, 10, 0), instrument: "ETH", name: "Ethereum",
+                                  assetClass: "CRYPTO", shares: 1, cashCents: -200_000, priceEUR: 2000),
+        ])
+        p.quotes[apple] = Quote(priceEUR: 198, previousCloseEUR: 200, fetchedAt: sunday, marketTime: friday)
+        p.quotes["ETH"] = Quote(priceEUR: 2001, previousCloseEUR: 2000, fetchedAt: sunday, marketTime: sunday)
+        let s = try #require(portfolioSummary(p, now: sunday, calendar: madrid))
+        #expect(s.changeDay == madrid.startOfDay(for: sunday))
+        #expect(s.todayChangeCents == 100)
+
+        // Control: las dos del viernes -> -500 y changeDay = viernes.
+        p.quotes["ETH"] = Quote(priceEUR: 2001, previousCloseEUR: 2000, fetchedAt: sunday, marketTime: friday)
+        let bothFriday = try #require(portfolioSummary(p, now: sunday, calendar: madrid))
+        #expect(bothFriday.changeDay == madrid.startOfDay(for: friday))
+        #expect(bothFriday.todayChangeCents == -500)
+    }
+
+    @Test func resumenDeImportacionEnEspanol() {
+        let div = ImportSummary(added: 1, alreadyThere: 0, ignoredRows: 0, unreadableRows: 0,
+                                notTradeRows: 1, notAppliedTypes: ["DIVIDEND"])
+        let divText = formatPortfolioImportSummary(div)
+        #expect(divText.contains("dividendos"))
+        #expect(!divText.contains("DIVIDEND"))
+
+        let mixed = ImportSummary(added: 2, alreadyThere: 0, ignoredRows: 0, unreadableRows: 0,
+                                  notTradeRows: 3, notAppliedTypes: ["XYZ", "TAX_REFUND", "DIVIDEND"])
+        let mixedText = formatPortfolioImportSummary(mixed)
+        #expect(mixedText.contains("(dividendos, impuestos, otros movimientos)"))
+
+        let taxOther = ImportSummary(added: 0, alreadyThere: 1, ignoredRows: 0, unreadableRows: 0,
+                                     notTradeRows: 2, notAppliedTypes: ["TAX_REFUND", "XYZ"])
+        #expect(formatPortfolioImportSummary(taxOther).contains("(impuestos, otros movimientos)"))
+    }
+
+    @Test func salidaNoEsVenta() throws {
+        let extracted = investmentTransactions(from: try rows([
+            line(id: "out-1", dt: "2026-11-17T10:00:00Z", type: "TRANSFER_OUT", asset: "STOCK", name: "Apple",
+                 symbol: apple, shares: "2", price: "200", amount: "0"),
+            line(id: "sell-1", dt: "2026-11-18T10:00:00Z", type: "SELL", asset: "STOCK", name: "Apple",
+                 symbol: apple, shares: "1", price: "200", amount: "200"),
+        ]))
+        let out = try #require(extracted.transactions.first { $0.id == "out-1" })
+        let sell = try #require(extracted.transactions.first { $0.id == "sell-1" })
+        #expect(out.disposed == true)
+        #expect(out.shares == Decimal(-2))
+        #expect(sell.disposed == false)
+
+        // Transacción guardada en versión anterior sin `disposed` decodifica con `false`.
+        let legacyJSON = #"{"id":"old","date":0,"instrument":"US0378331005","name":"Apple","shares":"-1","cashCents":10000}"#
+        let decoded = try JSONDecoder().decode(InvestmentTransaction.self, from: Data(legacyJSON.utf8))
+        #expect(decoded.disposed == false)
+    }
+
+    @Test func mensajesDeImportacionDeCartera() {
+        #expect(portfolioImportMessage(.tooLarge) == "Ese fichero es demasiado grande: pasa de 10 MB.")
+        #expect(portfolioImportMessage(.empty) == "Ese fichero está vacío.")
+        #expect(portfolioImportMessage(.unreadable) == "No pude leer ese fichero. Inténtalo de nuevo.")
+        #expect(portfolioImportMessage(.notTradeRepublic) == "Ese fichero no parece la exportación de Trade Republic.")
+        #expect(portfolioImportMessage(.saveFailed) == "No se pudo guardar. Inténtalo de nuevo.")
     }
 }

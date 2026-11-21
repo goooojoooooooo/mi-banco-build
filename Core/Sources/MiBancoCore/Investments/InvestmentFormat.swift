@@ -80,3 +80,14 @@ public func formatPortfolioImportSummary(_ summary: ImportSummary) -> String {
     }
     return parts.joined(separator: " · ")
 }
+
+/// Errores de importación de cartera (U15).
+public enum PortfolioImportFailure: Error, Equatable, Sendable {
+    case tooLarge, empty, unreadable, notTradeRepublic, saveFailed
+}
+
+/// Mensaje que ve el dueño cuando falla la importación de cartera (U15).
+public func portfolioImportMessage(_ failure: PortfolioImportFailure) -> String {
+    // Stub temporal para prueba roja U15 (comportamiento antiguo).
+    "Ese fichero no parece la exportación de Trade Republic."
+}

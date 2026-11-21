@@ -250,3 +250,25 @@ public func shouldRefreshPrices(lastFetch: Date?, now: Date) -> Bool {
     let elapsed = now.timeIntervalSince(lastFetch)
     return elapsed < 0 || elapsed >= 900
 }
+
+/// Error de descarga con tope de bytes (U10).
+public enum CappedDownloadError: Error, Equatable, Sendable {
+    case tooLarge
+}
+
+/// Lee bytes aplicando un tope de tamaño MIENTRAS descarga (U10).
+public func collectCapped<S: AsyncSequence>(
+    _ bytes: S, expectedLength: Int64, limit: Int
+) async throws -> Data where S.Element == UInt8 {
+    // Stub temporal para prueba roja U10 (comportamiento antiguo: lee todo y comprueba al final).
+    var data = Data()
+    for try await byte in bytes { data.append(byte) }
+    if data.count > limit { throw CappedDownloadError.tooLarge }
+    return data
+}
+
+/// Decide qué código puede salir hacia Yahoo Finance (U16); nil si no es un código seguro.
+public func yahooQueryTerm(for instrument: String, assetClass: String? = nil, rememberedSymbol: String? = nil) -> String? {
+    // Stub temporal para prueba roja U16 (comportamiento antiguo: manda el instrumento tal cual).
+    rememberedSymbol ?? instrument
+}

@@ -23,6 +23,12 @@ public struct PendingMove: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// Decodifica una lista de traspasos pendientes elemento a elemento, saltando los corruptos (U31).
+public func decodePendingMoves(_ data: Data) -> [PendingMove] {
+    // Stub temporal para prueba roja U31 (comportamiento antiguo: todo o nada).
+    (try? JSONDecoder().decode([PendingMove].self, from: data)) ?? []
+}
+
 public enum MoveState: Equatable, Sendable {
     case waiting
     case done(movementID: UUID)

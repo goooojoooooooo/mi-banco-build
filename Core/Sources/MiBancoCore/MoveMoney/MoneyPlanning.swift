@@ -32,13 +32,37 @@ public struct PayOption: Equatable, Sendable {
     public let fits: Bool
     /// true = el saldo de ese banco es una estimación (no lo dijo el banco).
     public let isEstimated: Bool
+    /// Saldo menos importe (sin descontar colchón ni cobros próximos) — U20.
+    public let balanceAfterCents: Int
+    /// Colchón configurado para ese banco (0 si no tiene) — U20.
+    public let floorCents: Int
 
-    public init(bank: BankID, leftAfterCents: Int, fits: Bool, isEstimated: Bool = false) {
+    public init(bank: BankID, leftAfterCents: Int, fits: Bool, isEstimated: Bool = false,
+                balanceAfterCents: Int? = nil, floorCents: Int = 0) {
         self.bank = bank
         self.leftAfterCents = leftAfterCents
         self.fits = fits
         self.isEstimated = isEstimated
+        self.balanceAfterCents = balanceAfterCents ?? leftAfterCents
+        self.floorCents = floorCents
     }
+}
+
+/// Texto visible de una ficha «Desde» en Mover dinero (U20).
+public func payOptionDetail(_ option: PayOption, hasKnownBalance: Bool) -> String {
+    // Stub temporal para prueba roja U20 (comportamiento antiguo).
+    guard hasKnownBalance else { return "sin saldo" }
+    guard option.fits else { return "no llega" }
+    return "te quedarían \(option.isEstimated ? "≈ " : "")\(formatEUR(option.leftAfterCents))"
+}
+
+/// Texto hablado de VoiceOver de una ficha «Desde» en Mover dinero (U20).
+public func payOptionSpokenDetail(_ option: PayOption, hasKnownBalance: Bool, hidden: Bool) -> String {
+    // Stub temporal para prueba roja U20 (comportamiento antiguo).
+    guard hasKnownBalance else { return "sin saldo" }
+    guard option.fits else { return "no llega" }
+    let amount = hidden ? "importe oculto" : formatEUR(option.leftAfterCents).replacingOccurrences(of: "\u{00A0}€", with: " euros")
+    return "te quedarían \(amount)"
 }
 
 private func order(_ bank: BankID) -> Int { BankID.allCases.firstIndex(of: bank) ?? 0 }

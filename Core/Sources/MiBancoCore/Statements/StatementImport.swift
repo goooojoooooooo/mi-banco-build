@@ -46,3 +46,15 @@ public func importSummary(_ report: ReconcileReport) -> String {
     if report.ignoredRows > 0 { parts.append(report.ignoredRows == 1 ? "1 fila ignorada" : "\(report.ignoredRows) filas ignoradas") }
     return parts.joined(separator: ", ")
 }
+
+/// Nota cuando un extracto no trae movimientos nuevos ni enlazados (U47).
+public func statementZeroNewNote(_ report: ReconcileReport) -> String {
+    // Stub temporal para prueba roja U47 (comportamiento antiguo).
+    "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto y el saldo del extracto."
+}
+
+/// Texto del periodo de la vista previa del extracto (U51: incluye el año cuando hace falta).
+public func statementRangeText(first: Date, last: Date, now: Date, calendar: Calendar) -> String {
+    // Stub temporal para prueba roja U51 (comportamiento antiguo: withYear siempre false).
+    "Del \(shortSpanishDate(first, calendar: calendar, withYear: false)) al \(shortSpanishDate(last, calendar: calendar, withYear: false))"
+}

@@ -307,4 +307,29 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         #expect(cards[0].topic == .portfolioMover)
         #expect(render(cards[0].parts, .plain) == nb("Apple hoy: +2,5 %."))
     }
+
+    @Test func almacenLocalDePreferenciasDelAsistente() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("assistant-prefs-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = AssistantPreferencesStore(directory: dir)
+
+        // Sin archivo -> preferencias de fábrica (todos los temas activos).
+        #expect(try store.load() == AssistantPreferences())
+
+        // Actualizar y releer desde disco.
+        try store.update { prefs in
+            prefs.setEnabled(false, for: .spendingPace)
+            prefs.recordFeedback(.interested, cardID: "card-1", topic: .portfolioMover, now: nov(20, 10))
+        }
+        let reloaded = try store.load()
+        #expect(!reloaded.isEnabled(.spendingPace))
+        #expect(reloaded.weight(for: .portfolioMover) == 1)
+        #expect(reloaded.feedback(for: "card-1") == .interested)
+
+        // Archivo corrupto -> `load()` lanza error y `loadRecovering()` devuelve valores de fábrica sin romper la app.
+        let file = dir.appendingPathComponent("assistant-preferences.json")
+        try Data("esto no es json".utf8).write(to: file)
+        #expect(throws: Error.self) { _ = try store.load() }
+        #expect(store.loadRecovering() == AssistantPreferences())
+    }
 }

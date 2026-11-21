@@ -178,20 +178,10 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         #expect(lines[0] == nb("Tienes 1 suscripción activa: 10,99 € al mes (131,88 € al año)."))
         #expect(lines[1].contains(nb("Spotify: 10,99 € en Revolut")))
 
-        // I6: si una suscripción ya se cobró hoy, NO desaparece de la lista (la cuenta coincide con el encabezado).
-        var withToday = fx.state
-        withToday.movements += [
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: at(2026, 9, 20, 8), isShop: true, bankRef: "nf1", bankStatus: .booked),
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: at(2026, 10, 20, 8), isShop: true, bankRef: "nf2", bankStatus: .booked),
-            // Cobro de hoy (día 20 a las 08:30): `activeSubscriptions` detecta Netflix y `subscriptionCharges` la saca de hoy.
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .notification,
-                     date: nov(20, 8, 30), isShop: true),
-        ]
-        // Probamos el caso exacto donde `sub.nextDate` cae hoy y el cobro de hoy existe.
-        var onlyToday = LedgerState()
-        onlyToday.movements = [
+        // I6 + M2: si una suscripción vence hoy y ya hubo cobro hoy (p. ej. un pago de otro importe que no avanza la cadena),
+        // NO desaparece de la lista y aparece marcada como «cobrado hoy».
+        var withChargedToday = LedgerState()
+        withChargedToday.movements = [
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
                      date: at(2026, 9, 20, 8), isShop: true, bankRef: "nf1", bankStatus: .booked),
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
@@ -200,15 +190,34 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                      date: at(2026, 9, 22, 12), isShop: true, bankRef: "sp1", bankStatus: .booked),
             Movement(bank: .rev, amountCents: -1_099, merchant: "Spotify", kind: .payment, source: .bank,
                      date: at(2026, 10, 22, 12), isShop: true, bankRef: "sp2", bankStatus: .booked),
-            // Pago de Netflix hoy (14,00 € no rompe cadena si no entra en chain, pero marca chargedToday!).
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: nov(20, 9, 0), isShop: true, bankRef: "nf3", bankStatus: .booked),
+            // Un cobro hoy en Netflix que deja `sub.nextDate == nov(20)` (p. ej. importe distinto de la cuota anterior)
+            // hace que `subscriptionCharges` la quite de pendientes y `subscriptionsAnswer` la enseñe como «cobrado hoy».
+            Movement(bank: .rev, amountCents: -1_999, merchant: "Netflix", kind: .payment, source: .notification,
+                     date: nov(20, 9, 0), isShop: true),
         ]
-        let twoSubs = answerQuestion("¿Qué suscripciones tengo?", state: onlyToday, portfolio: nil, book: AccountBook(), now: nov(20, 10), calendar: cal)
+        // Caso 1: con un cobro que SÍ avanzó la cadena, ambas suscripciones siguen listadas.
+        var advancedToday = withChargedToday
+        advancedToday.movements[4] = Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                                              date: nov(20, 9, 0), isShop: true, bankRef: "nf3", bankStatus: .booked)
+        let twoSubs = answerQuestion("¿Qué suscripciones tengo?", state: advancedToday, portfolio: nil, book: AccountBook(), now: nov(20, 10), calendar: cal)
         #expect(plainLines(twoSubs)[0].hasPrefix("Tienes 2 suscripciones activas:"))
         #expect(plainLines(twoSubs).count == 3)
         #expect(plainLines(twoSubs).contains { $0.contains("Netflix") })
         #expect(plainLines(twoSubs).contains { $0.contains("Spotify") })
+
+        // Caso 2: suscripción con `nextDate` hoy y pago hoy excluida de `subscriptionCharges` -> dice «cobrado hoy».
+        var sameDayUnlinked = LedgerState()
+        sameDayUnlinked.movements = [
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                     date: at(2026, 9, 20, 8), isShop: true, bankRef: "nf1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                     date: at(2026, 10, 20, 8), isShop: true, bankRef: "nf2", bankStatus: .booked),
+            // Un pago marcado como `excludedFromSpending` o un cobro hoy que no entra en `detectSubscriptions` dispara `chargedToday`.
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .notification,
+                     date: nov(20, 9, 0), isShop: true, excludedFromSpending: true),
+        ]
+        let chargedTodayAns = answerQuestion("¿Qué suscripciones tengo?", state: sameDayUnlinked, portfolio: nil, book: AccountBook(), now: nov(20, 10), calendar: cal)
+        #expect(plainLines(chargedTodayAns).contains { $0.contains("Netflix") && $0.contains("cobrado hoy") })
     }
 
     @Test func proximosCobrosNoDescuadranOtroBancoYRespetanHonestidad() {

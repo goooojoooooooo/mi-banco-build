@@ -217,6 +217,11 @@ private let conditionalAdvicePhrases = [
     "tengo que", "tienes que", "hay que", "crees que", "piensas que", "que me dices de",
 ]
 
+/// Palabras cotidianas que empiezan por «manten» o «acumul» y no piden consejo.
+private let nonAdvicePrefixExceptions: Set<String> = [
+    "mantenimiento", "mantenimientos", "acumulado", "acumulada", "acumulados", "acumuladas",
+]
+
 /// Verbos de acción sobre cartera/posiciones: en contexto de inversión (cartera, acciones, Apple...) son petición de consejo.
 private let portfolioActionWords: Set<String> = [
     "meto", "meter", "mete", "metemos", "meten", "meteria", "metiendo",
@@ -229,13 +234,15 @@ private let portfolioActionWords: Set<String> = [
     "elijo", "elegir", "elige", "elegiria", "escojo", "escoger",
     "liquido", "liquidar", "liquida", "liquidamos", "liquidaria", "liquidando",
     "saco", "sacar", "saca", "sacaria", "sacando",
+    "retiro", "retirar", "retira", "retiramos", "retiraria", "retirando",
+    "cierro", "cerrar", "cierra", "cerramos", "cerraria", "cerrando",
     "toco", "tocar", "toques", "toque",
 ]
 
 /// Frases de rendimiento pasado/actual con «mejor» que son factuales, nunca consejos.
 private let factualMejorPhrases = [
     "mejor ha ido", "mejor han ido", "ha ido mejor", "han ido mejor", "fue mejor", "fueron mejor",
-    "va mejor", "van mejor", "mejor posicion", "mejor valor", "mejor rendimiento",
+    "va mejor", "van mejor",
 ]
 
 /// Frases de predicción de precios (consejo cuando acompañan contexto de inversión).
@@ -298,21 +305,24 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
         // 1. Palabras y prefijos incondicionales (incluye inglés `invest*` de J7).
         for (i, word) in list.enumerated() {
             if unconditionalAdviceWords.contains(word) { return true }
-            if unconditionalAdvicePrefixes.contains(where: { word.hasPrefix($0) }) { return true }
+            if !nonAdvicePrefixExceptions.contains(word),
+               unconditionalAdvicePrefixes.contains(where: { word.hasPrefix($0) }) { return true }
             if word.hasPrefix("invest") && !word.hasPrefix("investig") { return true }
 
-            // Raíces de comprar / vender / invertir (cubren gerundios «comprando/vendiendo/invirtiendo» y clíticos «véndelo»).
+            // «venta»/«ventas» sin determinante ni «venta(s) de/del» al inicio (R1).
+            if word == "venta" || word == "ventas" {
+                if isFactualTradeNoun(word, at: i, in: list) { continue }
+                return true
+            }
+
+            // Raíces de comprar / vender / invertir (cubren gerundios y clíticos sin atrapar «comprobar»/«comprometido»/«comprender»).
             if !pastDescribingTradeWords.contains(word) {
-                if word.hasPrefix("vend") {
-                    if word == "venta" || word == "ventas" {
-                        if isFactualTradeNoun(word, at: i, in: list) { continue }
-                    }
-                    return true
-                }
-                if word.hasPrefix("invert") || word.hasPrefix("inviert") || word.hasPrefix("invirt") {
-                    return true
-                }
-                if word.hasPrefix("compr") {
+                if word.hasPrefix("vend") { return true }
+                if word.hasPrefix("invert") || word.hasPrefix("inviert") || word.hasPrefix("invirt") { return true }
+                let isComprarForm = word == "compro" || word.hasPrefix("compra")
+                    || (word.hasPrefix("compre") && !word.hasPrefix("comprend") && !word.hasPrefix("compresi")
+                        && word != "compresa" && word != "compresas")
+                if isComprarForm {
                     if word == "compra" || word == "compras" {
                         if isFactualTradeNoun(word, at: i, in: list) { continue }
                         return true
@@ -893,7 +903,7 @@ private func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: S
     let rawWords = withoutApostrophes.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
     guard rawWords == valueTokens else { return nil }
 
-    // Extrae palabras originales de la pregunta y busca una secuencia contigua exacta.
+    // Extrae palabras originales de la pregunta y busca un tramo contiguo cuya forma normalizada coincida (también «H&M»/«Basic-Fit»).
     let qRaw = compatNormalized(originalQuestion)
         .replacingOccurrences(of: "¿", with: " ")
         .replacingOccurrences(of: "?", with: " ")
@@ -902,12 +912,14 @@ private func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: S
         .split(whereSeparator: \.isWhitespace)
         .map { $0.trimmingCharacters(in: CharacterSet.punctuationCharacters) }
         .filter { !$0.isEmpty }
-    let qNorm = qRaw.map { normalizeMerchant($0) }
-    guard valueTokens.count <= qNorm.count else { return nil }
-    for start in 0...(qNorm.count - valueTokens.count) {
-        let slice = Array(qNorm[start..<(start + valueTokens.count)])
-        if slice == valueTokens {
-            return qRaw[start..<(start + valueTokens.count)].joined(separator: " ")
+    let maxSpan = min(valueTokens.count, qRaw.count)
+    guard maxSpan >= 1 else { return nil }
+    for spanLen in 1...maxSpan {
+        for start in 0...(qRaw.count - spanLen) {
+            let candidate = qRaw[start..<(start + spanLen)].joined(separator: " ")
+            if normalizeMerchant(candidate) == normValue {
+                return candidate.precomposedStringWithCanonicalMapping
+            }
         }
     }
     return nil

@@ -476,12 +476,10 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
                                 isDismissed: (String) -> Bool) -> InterestCard? {
     guard let summary = portfolioSummary(portfolio, now: now, calendar: calendar),
           let day = summary.changeDay else { return nil }
-    // Una sesión vieja (> 4 días) no genera tarjeta diaria (Minor 8).
-    guard now.timeIntervalSince(day) <= stalePriceAge else { return nil }
     let id = "portfolioMover|\(cardDayKey(day, calendar))"
     guard !isDismissed(id) else { return nil }
 
-    // Con 2+ posiciones con precio de mercado del día del cambio, usa la línea de movers si alguna se movió ≥ 1,0 %.
+    // Con 2+ posiciones con precio de mercado vigente (≤ 4 días) del día del cambio, usa la línea de movers si alguna se movió ≥ 1,0 %.
     var dayMovers: [(name: String, tenths: Int)] = []
     for p in summary.positions {
         guard case .market(let at) = p.origin, calendar.startOfDay(for: at) == day,

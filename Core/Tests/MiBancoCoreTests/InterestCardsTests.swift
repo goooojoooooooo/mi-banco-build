@@ -282,6 +282,15 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         for t in AssistantTopic.allCases where t != .portfolioMover { onlyMover.setEnabled(false, for: t) }
         #expect(interestCards(state: LedgerState(), portfolio: stalePortfolio, book: AccountBook(),
                               now: fx.now, calendar: cal, preferences: onlyMover).isEmpty)
+
+        // M1: una cotización del lunes a las 17:00 vista el viernes a las 08:00 (3 días 15 h <= 4 días) NO es vieja y sí sale.
+        var fridayMorningPortfolio = fx.portfolio
+        fridayMorningPortfolio.quotes["IE00B4L5Y983"] = Quote(priceEUR: Decimal(string: "102.5")!, previousCloseEUR: 100,
+                                                              fetchedAt: nov(16, 17, 5), marketTime: nov(16, 17, 0))
+        fridayMorningPortfolio.quotes["US0378331005"] = Quote(priceEUR: Decimal(string: "197.0")!, previousCloseEUR: 200,
+                                                              fetchedAt: nov(16, 17, 5), marketTime: nov(16, 17, 0))
+        #expect(interestCards(state: LedgerState(), portfolio: fridayMorningPortfolio, book: AccountBook(),
+                              now: nov(20, 8, 0), calendar: cal, preferences: onlyMover).count == 1)
     }
 
     @Test func unaSolaPosicionConMovimientoFuerteTambienGeneraTarjeta() {

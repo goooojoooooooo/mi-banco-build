@@ -103,6 +103,17 @@ private func sampleState() -> LedgerState {
         "ｖｅｎｄｏ Apple",
         "ｃｏｍｐｒａｒ ETF",
         "𝐯𝐞𝐧𝐝𝐨 Apple",
+        // R1 & R3: «venta» sin determinante, «mejor valor/posición/rendimiento» y «retiro/cierro» de bolsa/cartera
+        "Venta Apple",
+        "Venta ahora",
+        "¿Hago venta en bolsa?",
+        "¿Cuál es el mejor valor de bolsa?",
+        "¿Cuál es la mejor posición para mi cartera?",
+        "¿Qué fondo tiene mejor rendimiento?",
+        "¿Retiro mi dinero de bolsa?",
+        "¿Retiro todo de mi cartera?",
+        "¿Cierro mi posición en Apple?",
+        "No compres nada",
         // Tabla completa de J15 / J22
         "mejor esperar", "espera a que baje", "no toques tu cartera", "quédate como estás",
         "sal de esa posición", "entra en el fondo", "refuerza tu posición", "reduce exposición",
@@ -163,6 +174,14 @@ private func sampleState() -> LedgerState {
         "¿Cuánto dinero tengo que meter en imagin?",
         "¿Mi alquiler va a subir?",
         "¿Qué hago con el presupuesto de Comer fuera?",
+        // R2: palabras cotidianas que empiezan por compr-/manten-/acumul- (no son consejos)
+        "¿Puedes comprobar mi saldo?",
+        "Comprueba mis presupuestos",
+        "¿Cuánto dinero tengo comprometido este mes?",
+        "¿Cuánto gasté en mantenimiento este mes?",
+        "¿Cuál es mi gasto acumulado este mes?",
+        "Venta de garaje",
+        "Mi venta en Wallapop",
         // Preguntas bancarias cotidianas
         "¿Cuánto gasté en compras este mes?",
         "¿Cuánto llevo en compras?",
@@ -351,6 +370,13 @@ private func sampleState() -> LedgerState {
         #expect(parseAssistantModelRoute("GASTO comercio=\"McDonald's\"", originalQuestion: "¿Cuánto en McDonald's?",
                                          portfolio: portfolio)
             == .spending(month: .current, category: nil, merchant: "McDonald's", bank: nil))
+        // M3: comercios con guion o «&» y tilde devuelta en NFC.
+        #expect(parseAssistantModelRoute("GASTO comercio=\"Basic-Fit\"", originalQuestion: "¿Cuánto gasté en Basic-Fit?",
+                                         portfolio: portfolio)
+            == .spending(month: .current, category: nil, merchant: "Basic-Fit", bank: nil))
+        #expect(parseAssistantModelRoute("GASTO comercio=\"El Corte Inglés\"", originalQuestion: "¿Cuánto gasté en El Corte Inglés?",
+                                         portfolio: portfolio)
+            == .spending(month: .current, category: nil, merchant: "El Corte Inglés", bank: nil))
         #expect(parseAssistantModelRoute("PRESUPUESTOS categoria=comerFuera", originalQuestion: "Presupuesto de bares",
                                          portfolio: portfolio) == .budgets(category: .comerFuera))
         #expect(parseAssistantModelRoute("INVERSIONES movers=si", originalQuestion: "¿Qué subió más?",

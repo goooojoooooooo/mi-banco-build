@@ -28,7 +28,8 @@ public let assistantUnknownMessage =
 public func answerQuestion(_ question: String, state: LedgerState, portfolio: Portfolio?, book: AccountBook,
                            briefingInput precomputedBriefing: BriefingInput? = nil,
                            modelIntent: AssistantIntent? = nil, now: Date, calendar: Calendar) -> AssistantAnswer {
-    if isAdviceRequest(question, portfolio: portfolio) {
+    let knownMerchants = ledgerMerchantKeys(in: state)
+    if isAdviceRequest(question, portfolio: portfolio, knownMerchants: knownMerchants) {
         let folded = withoutFormatCharacters(question).decomposedStringWithCompatibilityMapping
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
         let tokens = folded.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
@@ -37,8 +38,8 @@ public func answerQuestion(_ question: String, state: LedgerState, portfolio: Po
                             briefingInput: precomputedBriefing, now: now, calendar: calendar)
     }
     let resolved: AssistantIntent
-    if let modelIntent, modelIntent != .unknown,
-       let sanitized = sanitizeModelIntent(modelIntent, originalQuestion: question) {
+    if let modelIntent, modelIntent != .unknown, modelIntent != .unsupportedPeriod,
+       let sanitized = sanitizeModelIntent(modelIntent, originalQuestion: question, knownMerchants: knownMerchants) {
         resolved = sanitized
     } else {
         resolved = routeAssistantQuestion(question, state: state, portfolio: portfolio, now: now, calendar: calendar)
@@ -47,10 +48,10 @@ public func answerQuestion(_ question: String, state: LedgerState, portfolio: Po
                         briefingInput: precomputedBriefing, now: now, calendar: calendar)
 }
 
-/// Revalida en la frontera pública de `answerQuestion` cualquier `merchant` propuesto en `modelIntent` (C2, J21(d)).
-private func sanitizeModelIntent(_ intent: AssistantIntent, originalQuestion: String) -> AssistantIntent? {
+/// Revalida en la frontera pública de `answerQuestion` cualquier `merchant` propuesto en `modelIntent` (C2, J21(d), U2).
+private func sanitizeModelIntent(_ intent: AssistantIntent, originalQuestion: String, knownMerchants: Set<String>) -> AssistantIntent? {
     if case let .spending(month, category, merchant, bank) = intent, let merchant {
-        guard let safe = validatedSpanFromQuestion(merchant, originalQuestion: originalQuestion) else {
+        guard let safe = validatedSpanFromQuestion(merchant, originalQuestion: originalQuestion, knownMerchants: knownMerchants) else {
             return nil
         }
         return .spending(month: month, category: category, merchant: safe, bank: bank)
@@ -64,11 +65,11 @@ public func answerIntent(_ intent: AssistantIntent, state: LedgerState, portfoli
                          now: Date, calendar: Calendar) -> AssistantAnswer {
     switch intent {
     case .balances(let bank):
-        return AssistantAnswer(intent: intent, lines: balancesAnswer(bank: bank, state: state))
+        return AssistantAnswer(intent: intent, lines: balancesAnswer(bank: bank, state: state, portfolio: portfolio))
     case let .spending(month, category, merchant, bank):
-        return AssistantAnswer(intent: intent,
-                               lines: spendingAnswer(month: month, category: category, merchant: merchant, bank: bank,
-                                                     state: state, now: now, calendar: calendar))
+        let res = spendingAnswer(month: month, category: category, merchant: merchant, bank: bank,
+                                 state: state, now: now, calendar: calendar)
+        return AssistantAnswer(intent: intent, lines: res.lines, chips: res.chips)
     case .biggestPayments(let month):
         return AssistantAnswer(intent: intent,
                                lines: biggestPaymentsAnswer(month: month, state: state, now: now, calendar: calendar))
@@ -118,7 +119,16 @@ public func answerIntent(_ intent: AssistantIntent, state: LedgerState, portfoli
         chips.append(AssistantChip(id: "upcoming", label: "¿Qué cobros vienen?"))
         return AssistantAnswer(intent: intent, lines: lines, chips: chips, isAdviceRefusal: true)
     case .unsupportedPeriod:
-        return AssistantAnswer(intent: intent, lines: [])
+        let chips = [
+            AssistantChip(id: "spending-current", label: "¿Cuánto llevo este mes?"),
+            AssistantChip(id: "spending-previous", label: "¿Cuánto gasté el mes pasado?"),
+        ]
+        return AssistantAnswer(
+            intent: intent,
+            lines: [BriefingLine(id: "unsupported-period",
+                                 parts: [.text("Aún no sé contarte el gasto por días, semanas o años; sí por meses.")])],
+            chips: chips
+        )
     case .unknown:
         let chips = suggestedAssistantChips(state: state, portfolio: portfolio, now: now, calendar: calendar)
         return AssistantAnswer(intent: intent,
@@ -235,14 +245,16 @@ func firstChargeBelowFloorDays(_ days: [UpcomingDay]) -> [BankID: Date] {
 
 // MARK: 1. Saldos
 
-private func balancesAnswer(bank: BankID?, state: LedgerState) -> [BriefingLine] {
+private func balancesAnswer(bank: BankID?, state: LedgerState, portfolio: Portfolio?) -> [BriefingLine] {
     let ledger = Ledger(state: state)
     if let bank {
         guard let b = ledger.balance(bank) else {
             return [BriefingLine(id: "bal-\(bank.rawValue)", parts: [.text("Aún no tengo el saldo de \(bank.displayName).")])]
         }
+        let hasOpenPositions = bank == .tr && (portfolio.map { !positions(from: $0.transactions).isEmpty } ?? false)
+        let suffix = hasOpenPositions ? " de efectivo, sin contar tus inversiones." : "."
         return [BriefingLine(id: "bal-\(bank.rawValue)",
-                             parts: [.text("En \(bank.displayName) tienes \(b.estimated ? "unos " : "")"), .amount(b.cents), .text(".")])]
+                             parts: [.text("En \(bank.displayName) tienes \(b.estimated ? "unos " : "")"), .amount(b.cents), .text(suffix)])]
     }
 
     var known: [(bank: BankID, cents: Int, estimated: Bool)] = []
@@ -283,25 +295,27 @@ private func tokenRunContains(_ haystack: [String], _ needle: [String]) -> Bool 
     return false
 }
 
-private func movementMatchesMerchant(_ m: Movement, queryKey: String) -> Bool {
+private func movementMatchesMerchant(_ m: Movement, queryKey: String, queryDomain: String? = nil) -> Bool {
     let qTokens = queryKey.split(separator: " ").map(String.init)
     guard !qTokens.isEmpty else { return false }
+    let targetDomain = queryDomain ?? merchantDomain(for: queryKey)
     for raw in [m.merchant, m.bankMerchant].compactMap({ $0 }) {
         let key = normalizeMerchant(raw)
         if key == queryKey { return true }
         let mTokens = key.split(separator: " ").map(String.init)
         if tokenRunContains(mTokens, qTokens) { return true }
+        if let targetDomain, let mDomain = merchantDomain(for: raw), targetDomain == mDomain { return true }
     }
     return false
 }
 
 private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, merchant: String?, bank: BankID?,
-                            state: LedgerState, now: Date, calendar: Calendar) -> [BriefingLine] {
+                            state: LedgerState, now: Date, calendar: Calendar) -> (lines: [BriefingLine], chips: [AssistantChip]) {
     guard let resolved = resolveMonth(month, now: now, calendar: calendar) else {
-        return [BriefingLine(id: "spend-invalid", parts: [.text("No reconozco ese mes.")])]
+        return ([BriefingLine(id: "spend-invalid", parts: [.text("No reconozco ese mes.")])], [])
     }
     if resolved.isFuture {
-        return [BriefingLine(id: "spend-future", parts: [.text("Aún no ha llegado \(resolved.bareName).")])]
+        return ([BriefingLine(id: "spend-future", parts: [.text("Aún no ha llegado \(resolved.bareName).")])], [])
     }
     // Exclusiones calculadas sobre el libro ENTERO para conservar traspasos entre bancos y capturas dudosas.
     let exclusions = spendingExclusions(in: state, now: now)
@@ -318,8 +332,9 @@ private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, 
     // Subcaso A: por comercio («¿cuánto llevo en Mercadona?»).
     if let merchant {
         let key = normalizeMerchant(merchant)
+        let qDomain = merchantDomain(for: merchant)
         let matched = spendingMovements(in: scopedState.movements, notSpending: exclusions)
-            .filter { resolved.contains($0, calendar: calendar) && movementMatchesMerchant($0, queryKey: key) }
+            .filter { resolved.contains($0, calendar: calendar) && movementMatchesMerchant($0, queryKey: key, queryDomain: qDomain) }
             .sorted { $0.date != $1.date ? $0.date > $1.date : $0.id.uuidString < $1.id.uuidString }
         let distinctNames = Set(matched.compactMap { $0.displayMerchant ?? $0.merchant }.map(normalizeMerchant))
         let rawDisplay: String
@@ -330,10 +345,23 @@ private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, 
         }
         let display = clippedName(rawDisplay)
         guard !matched.isEmpty else {
+            // U2: si el comercio no existe en ningún movimiento del libro entero, no afirmar «no tienes pagos en X».
+            let existsInLedger = state.movements.contains { m in
+                m.kind == .payment && !m.flaggedNotMine && !m.excludedFromSpending
+                    && movementMatchesMerchant(m, queryKey: key, queryDomain: qDomain)
+            }
+            if !existsInLedger {
+                let unknownChips = [
+                    AssistantChip(id: "cat-supermercado", label: "¿Cuánto llevo en Supermercado?"),
+                    AssistantChip(id: "cat-comerFuera", label: "¿Cuánto llevo en Comer fuera?"),
+                ]
+                return ([BriefingLine(id: "spend-merchant-not-found",
+                                      parts: [.text("No encuentro pagos a nombre de «\(display)».")])], unknownChips)
+            }
             let line = resolved.isCurrent
                 ? "Este mes no tienes pagos en \(display)\(bankSuffix)."
                 : "No tienes pagos en \(display)\(bankSuffix) \(resolved.phrase)."
-            return [BriefingLine(id: "spend-merchant-empty", parts: [.text(line)])]
+            return ([BriefingLine(id: "spend-merchant-empty", parts: [.text(line)])], [])
         }
         let total = matched.reduce(0) { $0 + abs($1.amountCents) }
         let countText = "(\(matched.count) \(assistantPlural(matched.count, "pago", "pagos")))"
@@ -354,7 +382,7 @@ private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, 
                                           parts: [.text("Y \(matched.count - 3) \(assistantPlural(matched.count - 3, "pago", "pagos")) más.")]))
             }
         }
-        return lines
+        return (lines, [])
     }
 
     let subKeys = subscriptionKeys(in: state, now: now, calendar: calendar, notSpending: exclusions)
@@ -365,8 +393,8 @@ private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, 
     // Subcaso B: por categoría.
     if let category {
         guard let row = spending.byCategory.first(where: { $0.category == category }), row.cents > 0 else {
-            return [BriefingLine(id: "spend-cat-empty",
-                                 parts: [.text("No tienes gastos en \(category.displayName)\(bankSuffix) \(resolved.phrase).")])]
+            return ([BriefingLine(id: "spend-cat-empty",
+                                  parts: [.text("No tienes gastos en \(category.displayName)\(bankSuffix) \(resolved.phrase).")])], [])
         }
         let countText = "(\(row.count) \(assistantPlural(row.count, "pago", "pagos")))"
         let firstParts: [BriefingPart] = resolved.isCurrent
@@ -378,7 +406,7 @@ private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, 
             lines.append(monthComparisonLine(id: "spend-cat-cmp", diff: row.cents - row.previousCents,
                                              prevName: prevName, samePoint: resolved.isCurrent))
         }
-        return lines
+        return (lines, [])
     }
 
     // Subcaso C: total del mes (todos los bancos o uno en concreto).
@@ -386,7 +414,7 @@ private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, 
         let text = resolved.isCurrent
             ? "Este mes aún no tienes gastos registrados\(bankSuffix)."
             : "No tengo gastos registrados\(bankSuffix) \(resolved.phrase)."
-        return [BriefingLine(id: "spend-empty", parts: [.text(text)])]
+        return ([BriefingLine(id: "spend-empty", parts: [.text(text)])], [])
     }
     var lines: [BriefingLine] = []
     if resolved.isCurrent, bank == nil,
@@ -411,7 +439,7 @@ private func spendingAnswer(month: AssistantMonth, category: SpendingCategory?, 
         lines.append(BriefingLine(id: "spend-top-cat",
                                   parts: [.text("Donde más: \(top.category.displayName) ("), .amount(top.cents), .text(").")]))
     }
-    return lines
+    return (lines, [])
 }
 
 private func monthComparisonLine(id: String, diff: Int, prevName: String, samePoint: Bool) -> BriefingLine {
@@ -569,8 +597,12 @@ private func upcomingChargesAnswer(bank: BankID?, state: LedgerState, book: Acco
     }
     for b in BankID.allCases {
         guard let firstDay = belowFloor[b] else { continue }
+        let hasFloor = (book.floors[b] ?? 0) > 0
+        let msg = hasFloor
+            ? "Ojo: con los próximos cobros, \(b.displayName) quedaría por debajo de su mínimo el \(assistantShortDate(firstDay, calendar))."
+            : "Ojo: con los próximos cobros, \(b.displayName) se quedaría en negativo el \(assistantShortDate(firstDay, calendar))."
         lines.append(BriefingLine(id: "up-below-\(b.rawValue)",
-                                  parts: [.text("Ojo: con los próximos cobros, \(b.displayName) quedaría por debajo de su mínimo el \(assistantShortDate(firstDay, calendar)).")],
+                                  parts: [.text(msg)],
                                   action: .moveMoney(from: nil, to: b, cents: nil)))
     }
     if urgent.isEmpty && belowFloor.isEmpty && !knownChargeBanks.isEmpty && unknownBanks.isEmpty {
@@ -769,19 +801,35 @@ private func ownTransfersAnswer(month: AssistantMonth, state: LedgerState, now: 
             }
         }
     }
+    var unpairedRows: [TransferRow] = []
     for m in manualUnpaired where !matchedManualIDs.contains(m.id) && resolved.contains(m, calendar: calendar) {
         let cents = abs(m.amountCents)
         let line = BriefingLine(id: "tr-\(m.id.uuidString)",
                                 parts: [.amount(cents), .text(" en \(m.bank.displayName) (\(assistantShortDate(m.date, calendar)), marcado como traspaso)")],
                                 action: .openMovement(m.id))
-        rows.append(TransferRow(id: m.id, date: m.date, cents: cents, line: line))
+        unpairedRows.append(TransferRow(id: m.id, date: m.date, cents: cents, line: line))
     }
 
     rows.sort { $0.date != $1.date ? $0.date > $1.date : $0.id.uuidString < $1.id.uuidString }
+    unpairedRows.sort { $0.date != $1.date ? $0.date > $1.date : $0.id.uuidString < $1.id.uuidString }
 
-    guard !rows.isEmpty else {
+    guard !rows.isEmpty || !unpairedRows.isEmpty else {
         return [BriefingLine(id: "tr-empty", parts: [.text("No tienes traspasos entre tus cuentas \(resolved.phrase).")])]
     }
+    // U6: la cabecera suma SOLO los traspasos emparejados; las patas sin pareja van aparte sin entrar en el total.
+    if rows.isEmpty {
+        let countText = "\(unpairedRows.count) \(assistantPlural(unpairedRows.count, "movimiento marcado como traspaso", "movimientos marcados como traspaso")) sin pareja:"
+        let head = resolved.isCurrent
+            ? "Este mes tienes \(countText)"
+            : "\(assistantCapitalized(resolved.phrase)) tuviste \(countText)"
+        var lines = [BriefingLine(id: "tr-unpaired-only", parts: [.text(head)])]
+        lines += unpairedRows.prefix(5).map(\.line)
+        if unpairedRows.count > 5 {
+            lines.append(BriefingLine(id: "tr-unpaired-rest", parts: [.text("Y \(unpairedRows.count - 5) más.")]))
+        }
+        return lines
+    }
+
     let total = rows.reduce(0) { $0 + $1.cents }
     let countText = "(\(rows.count) \(assistantPlural(rows.count, "traspaso", "traspasos")))"
     let headParts: [BriefingPart] = resolved.isCurrent
@@ -791,6 +839,14 @@ private func ownTransfersAnswer(month: AssistantMonth, state: LedgerState, now: 
     lines += rows.prefix(5).map(\.line)
     if rows.count > 5 {
         lines.append(BriefingLine(id: "tr-rest", parts: [.text("Y \(rows.count - 5) más.")]))
+    }
+    if !unpairedRows.isEmpty {
+        let extraHead = "Además, \(unpairedRows.count) \(assistantPlural(unpairedRows.count, "movimiento marcado como traspaso no tiene pareja", "movimientos marcados como traspaso no tienen pareja")):"
+        lines.append(BriefingLine(id: "tr-unpaired-head", parts: [.text(extraHead)]))
+        lines += unpairedRows.prefix(5).map(\.line)
+        if unpairedRows.count > 5 {
+            lines.append(BriefingLine(id: "tr-unpaired-rest", parts: [.text("Y \(unpairedRows.count - 5) más.")]))
+        }
     }
     return lines
 }
@@ -921,7 +977,7 @@ private func portfolioOverviewLines(_ s: PortfolioSummary, now: Date, calendar: 
     }
     var lines: [BriefingLine] = []
     let partial = s.missingPrices > 0
-    var first: [BriefingPart] = [.text(partial ? "Valen al menos " : "Valen "), .amount(value)]
+    var first: [BriefingPart] = [.text(partial ? "Tus inversiones valen al menos " : "Tus inversiones valen "), .amount(value)]
     if partial { first.append(.text(" de las que tienen precio")) }
     if let today = s.todayChangeCents, let day = s.changeDay {
         let when = assistantDayDistance(from: day, to: now, calendar) <= 0
@@ -929,9 +985,8 @@ private func portfolioOverviewLines(_ s: PortfolioSummary, now: Date, calendar: 
             : "en la última sesión (\(assistantWeekday(day, calendar)))"
         first += [.text(": "), .signed(today), .text(" \(when)")]
         if let tenths = s.todayChangeTenths { first += [.text(" ("), .percentTenths(tenths), .text(")")] }
-    } else {
-        first.append(.text("."))
     }
+    first.append(.text("."))
     lines.append(BriefingLine(id: "inv-value", parts: first, action: .openInvestments))
     if let movers = moversLine(s, now: now, calendar: calendar) { lines.append(movers) }
     var second: [BriefingPart] = []

@@ -17,7 +17,7 @@ public enum AssistantTopic: String, Codable, CaseIterable, Hashable, Sendable, I
         case .unusualPayment: "Pagos poco habituales"
         case .subscriptionPriceChange: "Cambios en suscripciones"
         case .budgetClose: "Presupuestos cerca del límite"
-        case .shortfall: "Cobros sin saldo suficiente"
+        case .shortfall: "Cobros que dejan una cuenta justa"
         case .spendingPace: "Ritmo de gasto del mes"
         case .portfolioMover: "Movimientos en inversiones"
         }
@@ -229,10 +229,12 @@ private func cardIsMuted(_ merchant: String?, in state: LedgerState) -> Bool {
 private struct ScoredCard {
     let card: InterestCard
     let basePriority: Int
+    /// U4: las tarjetas GRAVES («Falta saldo para un cobro» y «Presupuesto superado») van SIEMPRE por delante de las normales.
+    let isSevere: Bool
 }
 
 /// Hasta tres tarjetas al día para «Te puede interesar», elegidas por reglas sobre los datos del libro y la cartera,
-/// ordenadas por prioridad más el peso de cada tema y respetando los temas apagados y las tarjetas descartadas.
+/// ordenadas primero por gravedad (U4) y dentro de cada nivel por prioridad más el peso de cada tema, respetando temas apagados y descartes.
 public func interestCards(state: LedgerState, portfolio: Portfolio?, book: AccountBook, now: Date, calendar: Calendar,
                           preferences: AssistantPreferences = AssistantPreferences()) -> [InterestCard] {
     let exclusions = spendingExclusions(in: state, now: now)
@@ -240,15 +242,15 @@ public func interestCards(state: LedgerState, portfolio: Portfolio?, book: Accou
 
     var candidates: [ScoredCard] = []
 
-    // 1. Cobro que deja un banco corto (3 días urgentes, o caída por debajo del mínimo en los próximos 14 días).
+    // 1. Cobro que deja un banco corto (3 días urgentes = GRAVE, o caída por debajo del mínimo en los próximos 14 días = NORMAL).
     if preferences.isEnabled(.shortfall) {
-        if let card = shortfallCard(state: state, book: book, now: now, calendar: calendar,
-                                    exclusions: exclusions, isDismissed: isDismissed) {
-            candidates.append(ScoredCard(card: card, basePriority: 100))
+        if let hit = shortfallCard(state: state, book: book, now: now, calendar: calendar,
+                                   exclusions: exclusions, isDismissed: isDismissed) {
+            candidates.append(hit)
         }
     }
 
-    // 2. Presupuesto superado o cerca del límite (≥ 80 %).
+    // 2. Presupuesto superado (GRAVE) o cerca del límite (≥ 80 %, NORMAL).
     if preferences.isEnabled(.budgetClose) {
         if let hit = budgetCard(state: state, now: now, calendar: calendar,
                                 exclusions: exclusions, isDismissed: isDismissed) {
@@ -260,7 +262,7 @@ public func interestCards(state: LedgerState, portfolio: Portfolio?, book: Accou
     if preferences.isEnabled(.subscriptionPriceChange) {
         if let card = subscriptionChangeCard(state: state, now: now, calendar: calendar,
                                              exclusions: exclusions, isDismissed: isDismissed) {
-            candidates.append(ScoredCard(card: card, basePriority: 65))
+            candidates.append(ScoredCard(card: card, basePriority: 65, isSevere: false))
         }
     }
 
@@ -268,7 +270,7 @@ public func interestCards(state: LedgerState, portfolio: Portfolio?, book: Accou
     if preferences.isEnabled(.unusualPayment) {
         if let card = unusualPaymentCard(state: state, now: now, calendar: calendar,
                                          exclusions: exclusions, isDismissed: isDismissed) {
-            candidates.append(ScoredCard(card: card, basePriority: 60))
+            candidates.append(ScoredCard(card: card, basePriority: 60, isSevere: false))
         }
     }
 
@@ -276,19 +278,20 @@ public func interestCards(state: LedgerState, portfolio: Portfolio?, book: Accou
     if preferences.isEnabled(.spendingPace) {
         if let card = spendingPaceCard(state: state, now: now, calendar: calendar,
                                        exclusions: exclusions, isDismissed: isDismissed) {
-            candidates.append(ScoredCard(card: card, basePriority: 50))
+            candidates.append(ScoredCard(card: card, basePriority: 50, isSevere: false))
         }
     }
 
     // 6. Movimiento destacado en la cartera (hechos, nunca consejo).
     if preferences.isEnabled(.portfolioMover), let portfolio {
         if let card = portfolioMoverCard(portfolio: portfolio, now: now, calendar: calendar, isDismissed: isDismissed) {
-            candidates.append(ScoredCard(card: card, basePriority: 45))
+            candidates.append(ScoredCard(card: card, basePriority: 45, isSevere: false))
         }
     }
 
     let topicOrder = Dictionary(uniqueKeysWithValues: AssistantTopic.allCases.enumerated().map { ($1, $0) })
     let ranked = candidates.sorted { a, b in
+        if a.isSevere != b.isSevere { return a.isSevere }
         let sa = a.basePriority + preferences.weight(for: a.card.topic) * weightStep
         let sb = b.basePriority + preferences.weight(for: b.card.topic) * weightStep
         if sa != sb { return sa > sb }
@@ -303,7 +306,7 @@ public func interestCards(state: LedgerState, portfolio: Portfolio?, book: Accou
 // MARK: Generadores por tema
 
 private func shortfallCard(state: LedgerState, book: AccountBook, now: Date, calendar: Calendar,
-                           exclusions: Set<UUID>, isDismissed: (String) -> Bool) -> InterestCard? {
+                           exclusions: Set<UUID>, isDismissed: (String) -> Bool) -> ScoredCard? {
     let ledger = Ledger(state: state)
     var balances: [BankID: Int] = [:]
     var estimated = Set<BankID>()
@@ -320,11 +323,13 @@ private func shortfallCard(state: LedgerState, book: AccountBook, now: Date, cal
                             estimated: estimated)
     let urgentBanks = Set(urgent.map(\.bank))
     for s in urgent {
-        let id = "shortfall|\(s.bank.rawValue)|\(normalizeMerchant(s.charge.name))|\(cardDayKey(s.charge.date, calendar))"
+        // U4: el id incluye `suggestedCents` para que un caso más grave vuelva a salir aunque se descartara el menor.
+        let id = "shortfall|\(s.bank.rawValue)|\(normalizeMerchant(s.charge.name))|\(cardDayKey(s.charge.date, calendar))|\(s.suggestedCents)"
         guard !isDismissed(id) else { continue }
         let line = shortfallLine(id: id, shortfall: s, now: now, calendar: calendar)
-        return InterestCard(id: id, topic: .shortfall, title: "Falta saldo para un cobro",
-                            parts: line.parts, action: line.action)
+        let card = InterestCard(id: id, topic: .shortfall, title: "Falta saldo para un cobro",
+                                parts: line.parts, action: line.action)
+        return ScoredCard(card: card, basePriority: 100, isSevere: true)
     }
 
     // Solo para bancos que tienen cobros próximos (I5) y que NO estaban ya cubiertos por `urgent` (I4: descartar no resucita).
@@ -334,10 +339,15 @@ private func shortfallCard(state: LedgerState, book: AccountBook, now: Date, cal
         guard let day = firstBelow[b] else { continue }
         let id = "shortfall-cal|\(b.rawValue)|\(cardDayKey(day, calendar))"
         guard !isDismissed(id) else { continue }
-        return InterestCard(
+        let hasFloor = (book.floors[b] ?? 0) > 0
+        let detail = hasFloor
+            ? "Con los próximos cobros, \(b.displayName) quedaría por debajo de su mínimo el \(cardShortDate(day, calendar))."
+            : "Con los próximos cobros, \(b.displayName) se quedaría en negativo el \(cardShortDate(day, calendar))."
+        let card = InterestCard(
             id: id, topic: .shortfall, title: "Saldo justo para un cobro",
-            parts: [.text("Con los próximos cobros, \(b.displayName) quedaría por debajo de su mínimo el \(cardShortDate(day, calendar)).")],
+            parts: [.text(detail)],
             action: .moveMoney(from: nil, to: b, cents: nil))
+        return ScoredCard(card: card, basePriority: 68, isSevere: false)
     }
     return nil
 }
@@ -364,14 +374,14 @@ private func budgetCard(state: LedgerState, now: Date, calendar: Calendar,
                 parts: [.text("Te has pasado en \(label): llevas "), .amount(status.spentCents),
                         .text(" de "), .amount(status.limitCents), .text(".")],
                 action: .openBudgets)
-            return ScoredCard(card: card, basePriority: 80)
+            return ScoredCard(card: card, basePriority: 80, isSevere: true)
         } else {
             let card = InterestCard(
                 id: id, topic: .budgetClose, title: "Presupuesto cerca del límite",
                 parts: [.text("Llevas "), .amount(status.spentCents), .text(" de "), .amount(status.limitCents),
                         .text(" en \(label): te quedan "), .amount(status.remainingCents), .text(".")],
                 action: .openBudgets)
-            return ScoredCard(card: card, basePriority: 70)
+            return ScoredCard(card: card, basePriority: 70, isSevere: false)
         }
     }
     return nil

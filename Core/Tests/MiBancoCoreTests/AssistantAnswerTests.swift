@@ -597,11 +597,14 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         state.movements = [
             Movement(bank: .rev, amountCents: -1_240, merchant: "DIA Alcalá", kind: .payment, source: .bank,
                      date: nov(12, 14), isShop: true, bankRef: "dia1", bankStatus: .booked),
+            // Segundo pago para que la prueba no pueda pasar cayendo al total del mes.
+            Movement(bank: .rev, amountCents: -5_000, merchant: "Mercadona", kind: .payment, source: .bank,
+                     date: nov(14, 14), isShop: true, bankRef: "merc1", bankStatus: .booked),
         ]
         let ans = answerQuestion("¿Cuánto llevo en Dia?", state: state, portfolio: nil, book: AccountBook(),
                                  now: nov(20, 10), calendar: cal)
         let first = try #require(plainLines(ans).first)
-        #expect(first.contains("12,40"), "Esperaba 12,40 en: \(first)")
+        #expect(first.contains("12,40") && first.lowercased().contains("dia"), "Esperaba 12,40 en Dia: \(first)")
     }
 
     @Test func totalEnMercadonaDelModelo() throws {

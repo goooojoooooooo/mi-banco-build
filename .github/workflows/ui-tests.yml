@@ -2,6 +2,11 @@ name: ui-tests
 run-name: ui-tests ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      pequeno:
+        description: "En el iPhone mas pequeno que no es Max ni Plus (iPhone 15/16), como en screenshots.yml"
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -26,6 +31,10 @@ jobs:
           RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
           RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          # Interruptor pequeno: el mismo dispositivo que en screenshots.yml.
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
+          fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
           UDID=$(xcrun simctl create "MiBancoUI" "$DEVICETYPE" "$RUNTIME")
@@ -37,6 +46,7 @@ jobs:
           fi
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
       - name: Pruebas de toques
         run: |
           mkdir -p build

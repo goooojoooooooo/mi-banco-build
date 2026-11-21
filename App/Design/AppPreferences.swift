@@ -41,7 +41,7 @@ final class AppPreferences {
 
     /// Último paso (desde 0) en que se quedó cada guía de Atajos, por `GuideTrack.rawValue`. Vive aquí y no en el libro:
     /// es una preferencia del aparato, y iOS puede cerrar la app mientras él está en Atajos. Se lee con tolerancia.
-    /// Se guarda con el número de pasos que tenía la guía («8/22»): si la guía cambia de largo, no se retoma.
+    /// Se guarda con el número de pasos que tenía la guía («8/22» = paso 9 de 22): si la guía cambia de largo, no se retoma.
     private(set) var guideLastStep: [String: String]
 
     func guideResume(_ track: GuideTrack) -> Int? {

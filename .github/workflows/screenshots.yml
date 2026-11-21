@@ -109,6 +109,12 @@ jobs:
             shot guia-pequeno-lista 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
             shot guia-pequeno-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
             shot guia-pequeno-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 10
+            # Letra un punto y tres puntos mayor (sin ser de accesibilidad), retomando el paso 19.
+            xcrun simctl ui "$UDID" content_size extra-large
+            shot guia-pequeno-campo-xl 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            xcrun simctl ui "$UDID" content_size extra-extra-extra-large
+            shot guia-pequeno-campo-xxxl 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            xcrun simctl ui "$UDID" content_size large
           fi
           ls -l out
       - uses: actions/upload-artifact@v4

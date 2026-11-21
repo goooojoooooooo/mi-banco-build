@@ -131,12 +131,21 @@ private func quoted(_ text: String) -> [String] {
 
 /// Cuántas acciones «en la pantalla» pide un texto: se cuentan por la raíz del verbo, con las formas con pronombre
 /// («tócala», «márcala», «escríbelo», «elígelo»). «Mira» no es una acción en la pantalla; «no lo toques» tampoco pide nada.
+/// Lo que va entre «» es el nombre de algo en la pantalla («Añadir acción»), no un verbo, y «buscador» es un nombre.
 private func actionCount(_ text: String) -> Int {
     let stems = ["toc", "tóc", "marc", "márc", "escrib", "escríb", "elig", "elíg", "elij", "puls", "baj", "desliz",
-                 "abr", "ábr", "vuelv", "quit", "quít", "apag", "apág", "activ", "actív", "desactiv", "desactív"]
-    let words = text.lowercased().replacingOccurrences(of: "no lo toques", with: "")
+                 "abr", "ábr", "vuelv", "quit", "quít", "apag", "apág", "activ", "actív", "desactiv", "desactív",
+                 "busc", "búsc", "selecc", "añad", "añád", "borr", "bórr", "pon", "entr", "éntr", "peg", "pég", "mant",
+                 "arrastr", "arrástr", "desplaz", "despláz"]
+    let nouns = ["buscador"]
+    var unquoted = ""
+    var inside = false
+    for ch in text {
+        if ch == "«" { inside = true } else if ch == "»" { inside = false; unquoted.append(" ") } else if !inside { unquoted.append(ch) }
+    }
+    let words = unquoted.lowercased().replacingOccurrences(of: "no lo toques", with: "")
         .components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
-    return words.filter { word in stems.contains { word.hasPrefix($0) } }.count
+    return words.filter { word in !nouns.contains { word.hasPrefix($0) } && stems.contains { word.hasPrefix($0) } }.count
 }
 
 /// Lo que queda de la instrucción de un paso de datos al quitar su frase permitida (y la explicación del primero).

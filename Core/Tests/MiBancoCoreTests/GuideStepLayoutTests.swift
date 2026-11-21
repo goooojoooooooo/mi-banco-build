@@ -3,36 +3,50 @@ import Testing
 
 /// Cómo se reparte un paso de la guía entre el dibujo y el texto (G21): una sola regla, con la tabla del fallo.
 @Suite struct GuideStepLayoutTests {
+    private struct Row {
+        let h: Double
+        let t: Double
+        let r: Double
+        let order: GuideStepOrder
+        let drawing: Double
+    }
+
     /// (H, T, R) → (orden, alto del dibujo). H: alto visible entre la cabecera y los botones fijos; T: lo imprescindible
     /// (aviso «¡Funciona!» si está, título, instrucción entera y «¿No te sale esto?» cerrado, con la separación al dibujo);
     /// R: «Empezar desde el principio» con su separación, o 0.
     @Test func laTablaDelFallo() {
-        let table: [(Double, Double, Double, GuideStepOrder, Double)] = [
-            (450, 206, 0, .drawingFirst, 244),
-            (450, 206, 64, .drawingFirst, 180),
-            (450, 234, 64, .drawingFirst, 180),
-            (450, 270, 0, .drawingFirst, 180),
-            (450, 270.5, 0, .textFirst, 180),
-            (442, 280, 64, .textFirst, 180),
-            (450, 460, 0, .textFirst, 180),
-            (700, 200, 0, .drawingFirst, 395),
-            (700, 200, 64, .drawingFirst, 395),
-            (552, 300, 64, .drawingFirst, 188),
-            (0, 100, 0, .textFirst, 180),
-            (.nan, 100, 0, .textFirst, 180),
+        let table: [Row] = [
+            Row(h: 450, t: 206, r: 0, order: .drawingFirst, drawing: 244),
+            Row(h: 450, t: 206, r: 64, order: .drawingFirst, drawing: 180),
+            Row(h: 450, t: 234, r: 64, order: .drawingFirst, drawing: 180),
+            Row(h: 450, t: 270, r: 0, order: .drawingFirst, drawing: 180),
+            Row(h: 450, t: 270.5, r: 0, order: .textFirst, drawing: 180),
+            Row(h: 442, t: 280, r: 64, order: .textFirst, drawing: 180),
+            Row(h: 450, t: 460, r: 0, order: .textFirst, drawing: 180),
+            Row(h: 700, t: 200, r: 0, order: .drawingFirst, drawing: 395),
+            Row(h: 700, t: 200, r: 64, order: .drawingFirst, drawing: 395),
+            Row(h: 552, t: 300, r: 64, order: .drawingFirst, drawing: 188),
+            Row(h: 0, t: 100, r: 0, order: .textFirst, drawing: 180),
+            Row(h: .nan, t: 100, r: 0, order: .textFirst, drawing: 180),
         ]
-        for (h, t, r, order, drawing) in table {
-            let got = guideStepArrangement(visible: h, essentials: t, restart: r)
-            #expect(got == GuideStepArrangement(order: order, drawing: drawing), "H \(h), T \(t), R \(r)")
+        for row in table {
+            let got = guideStepArrangement(visible: row.h, essentials: row.t, restart: row.r)
+            #expect(got == GuideStepArrangement(order: row.order, drawing: row.drawing), "H \(row.h), T \(row.t), R \(row.r)")
         }
     }
 
     @Test func loQueNoEsUnNumeroDejaElTextoArriba() {
-        let odd: [(Double, Double, Double)] = [(.infinity, 100, 0), (450, .nan, 0), (450, -.infinity, 0), (450, 100, .nan),
-                                               (450, 100, .infinity), (-10, 100, 0)]
-        for (h, t, r) in odd {
-            #expect(guideStepArrangement(visible: h, essentials: t, restart: r)
-                    == GuideStepArrangement(order: .textFirst, drawing: 180), "H \(h), T \(t), R \(r)")
+        let odd: [Row] = [
+            Row(h: .infinity, t: 100, r: 0, order: .textFirst, drawing: 180),
+            Row(h: 450, t: .nan, r: 0, order: .textFirst, drawing: 180),
+            Row(h: 450, t: -.infinity, r: 0, order: .textFirst, drawing: 180),
+            Row(h: 450, t: 100, r: .nan, order: .textFirst, drawing: 180),
+            Row(h: 450, t: 100, r: .infinity, order: .textFirst, drawing: 180),
+            Row(h: -10, t: 100, r: 0, order: .textFirst, drawing: 180),
+        ]
+        for row in odd {
+            let got = guideStepArrangement(visible: row.h, essentials: row.t, restart: row.r)
+            #expect(got == GuideStepArrangement(order: row.order, drawing: row.drawing), "H \(row.h), T \(row.t), R \(row.r)")
         }
     }
 

@@ -207,7 +207,7 @@ public func guideResumeIndex(saved: GuideSavedStep?, total: Int) -> Int? {
     return saved.step
 }
 
-/// El paso guardado de una guía y cuántos pasos tenía entonces (se guarda así: «9/22»).
+/// El paso guardado de una guía (desde 0) y cuántos pasos tenía entonces (se guarda así: «8/22» = paso 9 de 22).
 public struct GuideSavedStep: Equatable, Sendable {
     public let step: Int
     public let of: Int
@@ -217,7 +217,7 @@ public struct GuideSavedStep: Equatable, Sendable {
         self.of = of
     }
 
-    /// «9/22». La forma antigua (un número suelto) o cualquier otra cosa no es válida: devuelve nil.
+    /// «8/22» = paso 9 de 22. La forma antigua (un número suelto) o cualquier otra cosa no es válida: devuelve nil.
     public init?(stored: Any?) {
         guard let text = stored as? String else { return nil }
         let parts = text.split(separator: "/", omittingEmptySubsequences: false)

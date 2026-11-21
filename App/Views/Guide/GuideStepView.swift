@@ -11,6 +11,10 @@ struct GuideStepView: View {
     @State private var forward = true
     @State private var pendingStep: Int?
     @State private var helpOpen = false
+    /// Se acaba de abrir la ayuda: en cuanto tenga sitio, el contenido se desliza hasta ella.
+    @State private var helpRevealPending = false
+    /// H: el alto visible entre la cabecera y los botones fijos.
+    @State private var visibleHeight: CGFloat = 0
     @State private var firstNoticeSeen = false
     @State private var shortcutsUnavailable = false
     /// Se abrió retomando una guía a medias: se ofrece «Empezar desde el principio».
@@ -53,6 +57,7 @@ struct GuideStepView: View {
                     .transition(slide)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visibleHeight = $0 }
             .clipped()
             .simultaneousGesture(
                 DragGesture(minimumDistance: 30).onEnded { value in
@@ -116,57 +121,41 @@ struct GuideStepView: View {
 
     // MARK: Contenido del paso
 
-    /// Con letra normal el dibujo es el elemento flexible: se encoge (con sus proporciones) hasta el alto que deja el texto,
-    /// y todo cabe sin deslizar. Solo si el dibujo quedaría por debajo de `minDrawing` pt el contenido se desliza.
-    private static let minDrawing: CGFloat = 180
-
-    @ViewBuilder private var page: some View {
-        if bigText {
-            // Con letra de accesibilidad primero lo que hay que hacer y después el dibujo; se desliza.
+    /// Un solo `ScrollView` con un solo árbol de vistas: abrir la ayuda, el aviso «¡Funciona!» o el botón de empezar de
+    /// nuevo nunca cambian ni rehacen el paso (el foco de VoiceOver se queda en «¿No te sale esto?»). El orden y el alto
+    /// del dibujo los decide `guideStepArrangement` (Core) con lo que mide cada pieza: lo imprescindible nunca queda bajo
+    /// los botones fijos cuando cabe.
+    private var page: some View {
+        ScrollViewReader { proxy in
             ScrollView {
-                VStack(spacing: Theme.Space.gutter) {
-                    stepText
-                    GuideIllustrationView(step: step, track: track)
-                }
-                .padding(.horizontal, Theme.Space.gutter)
-                .padding(.bottom, Theme.Space.gutter)
-            }
-            .scrollIndicatorsFlash(onAppear: true)
-        } else {
-            ViewThatFits(in: .vertical) {
-                // El texto toma su alto; el dibujo, lo que queda (entre minDrawing y 395 pt). Sin alto propuesto,
-                // ViewThatFits ve el mínimo (minDrawing + texto) y decide si cabe.
-                VStack(spacing: Theme.Space.gutter) {
+                GuideStepStack(visible: visibleHeight, accessibility: bigText) {
                     GuideIllustrationView(step: step, track: track, fitted: true)
-                        .frame(minHeight: Self.minDrawing, maxHeight: 395)
-                    stepText
-                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutValue(key: GuidePieceKey.self, value: .drawing)
+                    essentials
+                        .layoutValue(key: GuidePieceKey.self, value: .essentials)
+                    if helpOpen {
+                        helpText(proxy)
+                            .layoutValue(key: GuidePieceKey.self, value: .help)
+                    }
+                    // Solo en una guía retomada y nunca en el primer paso: texto dentro del contenido, después de la ayuda.
+                    if resumed && index > 0 {
+                        restartButton
+                            .layoutValue(key: GuidePieceKey.self, value: .restart)
+                    }
                 }
                 .padding(.horizontal, Theme.Space.gutter)
-                .padding(.bottom, Theme.Space.small)
-                ScrollView {
-                    VStack(spacing: Theme.Space.gutter) {
-                        GuideIllustrationView(step: step, track: track, fitted: true)
-                            .frame(height: 240)
-                        stepText
-                    }
-                    .padding(.horizontal, Theme.Space.gutter)
-                    .padding(.bottom, Theme.Space.gutter)
-                }
-                .scrollIndicatorsFlash(onAppear: true)
             }
+            // Los indicadores se ven y destellan si el contenido es más alto que lo visible: al aparecer y al abrir la ayuda.
+            .scrollIndicatorsFlash(onAppear: true)
+            .scrollIndicatorsFlash(trigger: helpOpen)
         }
     }
 
-    private var stepText: some View {
-        VStack(spacing: Theme.Space.row) {
-            if firstNoticeSeen { workingBanner.transition(.opacity.combined(with: .scale(scale: 0.96))) }
-            textBlock
-        }
-    }
-
-    private var textBlock: some View {
+    /// Lo imprescindible para seguir el paso: el aviso «¡Funciona!» si ha llegado, el título, la instrucción entera y
+    /// «¿No te sale esto?» cerrado. Es lo que mide T.
+    private var essentials: some View {
         VStack(alignment: .leading, spacing: Theme.Space.row) {
+            if firstNoticeSeen { workingBanner.transition(.opacity.combined(with: .scale(scale: 0.96))) }
             Text(step.title)
                 .font(.system(.title, weight: .bold))
                 .foregroundStyle(Theme.label)
@@ -175,24 +164,24 @@ struct GuideStepView: View {
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("guide-instruction")
-            helpDisclosure
-            // Solo en una guía retomada y nunca en el primer paso: texto dentro del contenido, después de la ayuda.
-            if resumed && index > 0 {
-                Button {
-                    resumed = false
-                    move(to: 0)
-                } label: {
-                    Text("Empezar desde el principio")
-                        .font(.system(.callout, weight: .semibold))
-                        .foregroundStyle(Theme.label2)
-                        .frame(minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("guide-restart")
-            }
+            helpButton
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var restartButton: some View {
+        Button {
+            resumed = false
+            move(to: 0)
+        } label: {
+            Text("Empezar desde el principio")
+                .font(.system(.callout, weight: .semibold))
+                .foregroundStyle(Theme.label2)
+                .frame(minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("guide-restart")
     }
 
     /// «¡Funciona!»: el ✓ se traza cuando llega el primer aviso real con la guía abierta.
@@ -213,37 +202,52 @@ struct GuideStepView: View {
         .accessibilityIdentifier("guide-working")
     }
 
-    private var helpDisclosure: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.small) {
-            Button {
-                withAnimation(reduceMotion ? .easeOut(duration: 0.15) : Theme.Motion.reveal) { helpOpen.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Text("¿No te sale esto?")
-                        .font(.system(.callout, weight: .semibold))
-                    Image(systemName: "chevron.down")
-                        .font(.system(.caption, weight: .bold))
-                        .rotationEffect(.degrees(helpOpen ? 180 : 0))
-                }
-                .foregroundStyle(Theme.label)
-                .frame(minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
+    private var helpButton: some View {
+        Button {
+            helpRevealPending = !helpOpen
+            withAnimation(reduceMotion ? .easeOut(duration: 0.15) : Theme.Motion.reveal) { helpOpen.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text("¿No te sale esto?")
+                    .font(.system(.callout, weight: .semibold))
+                Image(systemName: "chevron.down")
+                    .font(.system(.caption, weight: .bold))
+                    .rotationEffect(.degrees(helpOpen ? 180 : 0))
             }
-            .buttonStyle(.pressable)
-            .accessibilityIdentifier("guide-help")
-            .accessibilityValue(helpOpen ? "Abierto" : "Cerrado")
-            if helpOpen {
-                Text(step.help)
-                    .font(.callout)
-                    .foregroundStyle(Theme.label2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(Theme.Space.row)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous))
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-                    .accessibilityIdentifier("guide-help-text")
-            }
+            .foregroundStyle(Theme.label)
+            .frame(minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("guide-help")
+        .accessibilityValue(helpOpen ? "Abierto" : "Cerrado")
+    }
+
+    private static let helpAnchor = "guide-help-text"
+
+    private func helpText(_ proxy: ScrollViewProxy) -> some View {
+        Text(step.help)
+            .font(.callout)
+            .foregroundStyle(Theme.label2)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(Theme.Space.row)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous))
+            // Al abrirla, el contenido se desliza hasta que se ve: entera si cabe; si no, desde su primera línea.
+            // Se mide el alto (no la posición, que la transición desplaza) en cuanto la ayuda tiene sitio.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                guard helpRevealPending else { return }
+                helpRevealPending = false
+                let anchor: UnitPoint = height <= visibleHeight ? .bottom : .top
+                if reduceMotion {
+                    proxy.scrollTo(Self.helpAnchor, anchor: anchor)
+                } else {
+                    withAnimation(Theme.Motion.reveal) { proxy.scrollTo(Self.helpAnchor, anchor: anchor) }
+                }
+            }
+            .id(Self.helpAnchor)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+            .accessibilityIdentifier("guide-help-text")
     }
 
     // MARK: Botones fijos: Abrir Atajos, Atrás, Siguiente
@@ -342,6 +346,7 @@ struct GuideStepView: View {
         withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.45, bounce: 0.18)) {
             index = target
             helpOpen = false
+            helpRevealPending = false
             shortcutsUnavailable = false
         }
     }
@@ -374,5 +379,80 @@ struct GuideStepView: View {
         }
         flush()
         return out
+    }
+}
+
+// MARK: Reparto del paso entre el dibujo y el texto
+
+/// Qué pieza del paso es cada vista de `GuideStepStack`.
+private enum GuidePiece {
+    case drawing, essentials, help, restart
+}
+
+private struct GuidePieceKey: LayoutValueKey {
+    static let defaultValue = GuidePiece.essentials
+}
+
+/// Coloca las piezas de un paso en una columna, en el orden y con el alto de dibujo que decide `guideStepArrangement`.
+/// Mide T (lo imprescindible + la separación al dibujo) y R (empezar de nuevo + su separación) en cada pasada, así que
+/// el tamaño de letra, la letra en negrita o el aviso «¡Funciona!» entran solos en la cuenta. Las vistas son siempre las
+/// mismas: solo cambia dónde van.
+private struct GuideStepStack: Layout {
+    /// H: el alto visible entre la cabecera y los botones fijos.
+    var visible: CGFloat
+    /// Con letra de accesibilidad se queda lo aprobado: el texto arriba y el dibujo debajo a su tamaño natural.
+    var accessibility: Bool
+
+    private struct Plan {
+        var order: [Int]
+        var heights: [CGFloat]
+        var total: CGFloat
+    }
+
+    private func spacing(_ a: GuidePiece, _ b: GuidePiece) -> CGFloat {
+        if a == .drawing || b == .drawing { return Theme.Space.gutter }
+        if a == .essentials && b == .help { return Theme.Space.small }
+        return Theme.Space.row
+    }
+
+    private func plan(width: CGFloat, subviews: Subviews) -> Plan {
+        let pieces = subviews.map { $0[GuidePieceKey.self] }
+        var heights = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)).height }
+        let essentials = pieces.firstIndex(of: .essentials).map { heights[$0] } ?? 0
+        let restart = pieces.firstIndex(of: .restart).map { heights[$0] + spacing(.essentials, .restart) } ?? 0
+        let arrangement = accessibility
+            ? GuideStepArrangement(order: .textFirst, drawing: GuideStepArrangement.maxDrawing)
+            : guideStepArrangement(visible: Double(visible), essentials: Double(essentials + Theme.Space.gutter),
+                                   restart: Double(restart))
+        let sequence: [GuidePiece] = arrangement.order == .drawingFirst
+            ? [.drawing, .essentials, .help, .restart]
+            : [.essentials, .help, .restart, .drawing]
+        var order: [Int] = []
+        for piece in sequence {
+            order += pieces.indices.filter { pieces[$0] == piece }
+        }
+        for i in pieces.indices where pieces[i] == .drawing { heights[i] = CGFloat(arrangement.drawing) }
+        var total: CGFloat = 0
+        for (n, i) in order.enumerated() {
+            if n > 0 { total += spacing(pieces[order[n - 1]], pieces[i]) }
+            total += heights[i]
+        }
+        return Plan(order: order, heights: heights, total: total)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 320
+        return CGSize(width: width, height: plan(width: width, subviews: subviews).total)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let plan = plan(width: bounds.width, subviews: subviews)
+        var y = bounds.minY
+        for (n, i) in plan.order.enumerated() {
+            if n > 0 { y += spacing(subviews[plan.order[n - 1]][GuidePieceKey.self], subviews[i][GuidePieceKey.self]) }
+            subviews[i].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading,
+                              proposal: ProposedViewSize(width: bounds.width, height: plan.heights[i]))
+            y += plan.heights[i]
+        }
     }
 }

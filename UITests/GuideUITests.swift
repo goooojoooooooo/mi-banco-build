@@ -178,6 +178,61 @@ final class GuideUITests: XCTestCase {
         XCTAssertFalse(app.buttons["guide-restart"].exists, "«Empezar desde el principio» sigue en el paso 1")
     }
 
+    /// Espera (sin deslizar nada) a que se cumpla algo que lee posiciones: el contenido puede estar aún deslizándose.
+    private func eventually(_ timeout: TimeInterval = 4, _ condition: @escaping () -> Bool) -> Bool {
+        let met = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
+        return XCTWaiter().wait(for: [met], timeout: timeout) == .completed
+    }
+
+    /// Abre un paso por el camino de retomar (con un paso guardado), con más argumentos si hacen falta.
+    private func launchResumed(_ track: String, _ step: Int, extra: [String] = []) {
+        app.terminate()
+        app.launchArguments = base + extra + ["-MiBancoDemoGuideSeed", track, String(step)]
+        app.launch()
+    }
+
+    /// Abrir «¿No te sale esto?» siempre la enseña: sin deslizar, su primera línea queda por encima de «Abrir Atajos».
+    /// En el paso con la ayuda más larga (Apple Pay de imagin, paso 6), deslizando se llega a su final.
+    func testOpeningHelpShowsIt() throws {
+        let cases: [(track: String, step: Int, total: Int, ends: [Int])] = [("rev", 19, 22, [8, 11, 16]),
+                                                                            ("wallet", 6, 20, [7, 10, 15])]
+        for c in cases {
+            launchResumed(c.track, c.step)
+            waitForStep(c.step, "No retomó \(c.track) en el paso \(c.step)", total: c.total, partEnds: c.ends)
+            let help = app.buttons["guide-help"]
+            XCTAssertTrue(help.waitForExistence(timeout: 5), "Falta «¿No te sale esto?» (\(c.track) \(c.step))")
+            help.tap()
+            let text = app.staticTexts["guide-help-text"]
+            XCTAssertTrue(text.waitForExistence(timeout: 5), "La ayuda no se abrió (\(c.track) \(c.step))")
+            let open = app.buttons["guide-open-shortcuts"]
+            XCTAssertTrue(eventually { text.isHittable && text.frame.minY < open.frame.minY },
+                          "La ayuda abierta no se ve sin deslizar (\(c.track) \(c.step)): ayuda \(text.frame), botón \(open.frame)")
+            if c.track == "wallet" {
+                app.swipeUp()
+                XCTAssertTrue(eventually { text.frame.maxY <= open.frame.minY },
+                              "El final de la ayuda no se alcanza deslizando: ayuda \(text.frame), botón \(open.frame)")
+            }
+        }
+    }
+
+    /// Con letra más grande (sin ser de accesibilidad), retomando el paso 19: la instrucción entera y «¿No te sale
+    /// esto?» siguen por encima de «Abrir Atajos» sin deslizar.
+    func testResumedStepFitsAtLargerText() throws {
+        for size in ["UICTContentSizeCategoryXL", "UICTContentSizeCategoryXXXL"] {
+            launchResumed("rev", 19, extra: ["-UIPreferredContentSizeCategoryName", size])
+            waitForStep(19, "No retomó en el paso 19 (\(size))")
+            let help = app.buttons["guide-help"]
+            XCTAssertTrue(help.waitForExistence(timeout: 5), "Falta «¿No te sale esto?» (\(size))")
+            XCTAssertTrue(help.isHittable, "«¿No te sale esto?» no se ve sin deslizar (\(size))")
+            let instruction = app.staticTexts["guide-instruction"]
+            XCTAssertTrue(instruction.exists, "Falta la instrucción (\(size))")
+            let open = app.buttons["guide-open-shortcuts"]
+            XCTAssertTrue(open.exists)
+            XCTAssertLessThanOrEqual(instruction.frame.maxY, open.frame.minY, "La instrucción queda bajo «Abrir Atajos» (\(size))")
+            XCTAssertLessThanOrEqual(help.frame.maxY, open.frame.minY, "La ayuda queda bajo «Abrir Atajos» (\(size))")
+        }
+    }
+
     func testLastStepIsDone() throws {
         openRevolutGuide()
         let next = app.buttons["guide-next"]

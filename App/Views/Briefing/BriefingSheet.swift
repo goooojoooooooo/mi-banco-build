@@ -18,10 +18,13 @@ struct BriefingSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(AppPreferences.self) private var preferences
 
     @State private var revealedStage = 0
     @State private var entranceCompleted = false
+    /// true solo si el dueño tocó durante la entrada para terminarla al instante (corta también la cuenta de 0,9 s).
+    @State private var userSkippedEntrance = false
     @State private var entranceTask: Task<Void, Never>?
     @State private var questionDraft = ""
     @State private var askTask: Task<Void, Never>?
@@ -83,13 +86,24 @@ struct BriefingSheet: View {
                         .padding(.top, 20)
                         .padding(.bottom, 32)
                     }
+                    .accessibilityIdentifier("briefing-scroll")
                     .scrollIndicators(.hidden)
                     .scrollDismissesKeyboard(.interactively)
                     .simultaneousGesture(
                         TapGesture().onEnded {
                             completeEntrance()
-                        }
+                        },
+                        including: entranceCompleted ? .subviews : .all
                     )
+                    .onChange(of: questionFocused) { _, focused in
+                        guard focused else { return }
+                        Task {
+                            try? await Task.sleep(for: .milliseconds(180))
+                            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                                proxy.scrollTo("assistant-input-anchor", anchor: .center)
+                            }
+                        }
+                    }
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     if !questionFocused {
@@ -212,7 +226,7 @@ struct BriefingSheet: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(section.lines.enumerated()), id: \.element.id) { index, line in
-                    briefingRow(line)
+                    briefingRow(line, idPrefix: "briefing-line")
                     if index < section.lines.count - 1 {
                         Rectangle()
                             .fill(Theme.separator)
@@ -227,15 +241,15 @@ struct BriefingSheet: View {
     }
 
     @ViewBuilder
-    private func briefingRow(_ line: BriefingLine) -> some View {
-        let isHeroTotal = line.id == "money-total"
+    private func briefingRow(_ line: BriefingLine, idPrefix: String) -> some View {
+        let isHeroTotal = idPrefix == "briefing-line" && line.id == "money-total"
         let content = HStack(alignment: .center, spacing: 10) {
             BriefingLineView(
                 parts: line.parts,
                 role: .row,
                 color: Theme.label,
                 countsFirstAmount: isHeroTotal,
-                forceCompleted: entranceCompleted
+                snapCountImmediately: userSkippedEntrance
             )
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -258,7 +272,7 @@ struct BriefingSheet: View {
                 content
             }
             .buttonStyle(RowPressStyle(background: Theme.raised))
-            .accessibilityIdentifier("briefing-line-\(line.id)")
+            .accessibilityIdentifier("\(idPrefix)-\(line.id)")
         } else {
             content
         }
@@ -346,6 +360,10 @@ struct BriefingSheet: View {
 
     private func interestCardView(_ card: InterestCard) -> some View {
         let liked = briefingModel.feedback(for: card.id) == .interested
+        let actionsLayout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+
         return VStack(alignment: .leading, spacing: 10) {
             if let action = card.action {
                 Button {
@@ -358,14 +376,14 @@ struct BriefingSheet: View {
                 interestCardHeaderAndBody(card, hasChevron: false)
             }
 
-            HStack(spacing: 8) {
+            actionsLayout {
                 Button {
                     feedbackTick += 1
                     briefingModel.recordCardFeedback(
                         .interested,
                         for: card,
                         state: model.state,
-                        portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+                        portfolio: portfolio.portfolioForBackup,
                         book: accountBook.book
                     )
                 } label: {
@@ -392,7 +410,7 @@ struct BriefingSheet: View {
                             .notInterested,
                             for: card,
                             state: model.state,
-                            portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+                            portfolio: portfolio.portfolioForBackup,
                             book: accountBook.book
                         )
                     }
@@ -478,6 +496,7 @@ struct BriefingSheet: View {
                 .accessibilityIdentifier("assistant-send")
             }
             .background(Theme.raised, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .id("assistant-input-anchor")
 
             if !briefingModel.chips.isEmpty {
                 ScrollView(.horizontal) {
@@ -501,6 +520,7 @@ struct BriefingSheet: View {
                     .padding(.vertical, 2)
                 }
                 .scrollIndicators(.hidden)
+                .accessibilityIdentifier("assistant-chips-scroll")
             }
 
             if briefingModel.isAnswering {
@@ -554,7 +574,7 @@ struct BriefingSheet: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(answer.lines.enumerated()), id: \.element.id) { index, line in
-                    briefingRow(line)
+                    briefingRow(line, idPrefix: "answer-line")
                     if index < answer.lines.count - 1 {
                         Rectangle()
                             .fill(Theme.separator)
@@ -613,6 +633,7 @@ struct BriefingSheet: View {
     }
 
     private func startEntrance() {
+        userSkippedEntrance = false
         if reduceMotion {
             withAnimation(.easeOut(duration: 0.22)) {
                 revealedStage = 8
@@ -640,6 +661,7 @@ struct BriefingSheet: View {
     private func completeEntrance() {
         guard !entranceCompleted else { return }
         entranceTask?.cancel()
+        userSkippedEntrance = true
         withAnimation(.easeOut(duration: 0.16)) {
             revealedStage = 8
             entranceCompleted = true
@@ -672,7 +694,7 @@ struct BriefingSheet: View {
             await briefingModel.ask(
                 question,
                 state: model.state,
-                portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+                portfolio: portfolio.portfolioForBackup,
                 book: accountBook.book
             )
             guard !Task.isCancelled else { return }

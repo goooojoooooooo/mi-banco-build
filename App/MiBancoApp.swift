@@ -97,6 +97,12 @@ struct MiBancoApp: App {
                 }
                 #endif
                 await AlertPoster.setup()
+                briefing.prefetchOpeningIfNeeded(
+                    state: model.state,
+                    portfolio: portfolio.portfolioForBackup,
+                    book: accountBook.book,
+                    privateMode: preferences.privateMode
+                )
                 // Con el permiso ya pedido: resumen semanal, recordatorios de suscripciones y aviso matinal al día.
                 await AlertScheduler.reschedule(for: model.state)
                 await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday)
@@ -127,7 +133,7 @@ struct MiBancoApp: App {
                     briefing.reloadPreferences()
                     briefing.prefetchOpeningIfNeeded(
                         state: model.state,
-                        portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+                        portfolio: portfolio.portfolioForBackup,
                         book: accountBook.book,
                         privateMode: preferences.privateMode
                     )

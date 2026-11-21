@@ -37,6 +37,7 @@ final class BriefingUITests: XCTestCase {
         return XCTWaiter().wait(for: [exp], timeout: timeout) == .completed
     }
 
+    /// Desplaza hacia abajo dentro de una pantalla estándar (Ajustes / Avisos) sin salir de rango.
     private func scrollTo(_ el: XCUIElement, swipes: Int = 8) {
         if el.waitForExistence(timeout: 2), el.isHittable { return }
         for _ in 0..<swipes {
@@ -46,6 +47,22 @@ final class BriefingUITests: XCTestCase {
         for _ in 0..<swipes {
             if el.exists && el.isHittable { return }
             app.swipeDown()
+        }
+    }
+
+    /// Desplaza dentro del `ScrollView` de la hoja del resumen sin tirar desde el borde superior (evita cerrar la hoja).
+    private func scrollInBriefingSheet(to el: XCUIElement, maxSwipes: Int = 8) {
+        if el.waitForExistence(timeout: 2), el.isHittable { return }
+        let scroller = app.scrollViews["briefing-scroll"].exists ? app.scrollViews["briefing-scroll"] : app.scrollViews.firstMatch
+        for _ in 0..<maxSwipes {
+            if el.exists && el.isHittable { return }
+            scroller.swipeUp()
+        }
+        for _ in 0..<3 {
+            if el.exists && el.isHittable { return }
+            let start = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+            let end = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
     }
 
@@ -69,18 +86,39 @@ final class BriefingUITests: XCTestCase {
         XCTAssertTrue(doneButton.waitForExistence(timeout: 8), "El resumen no se volvió a abrir desde «Tu resumen»")
     }
 
-    /// Review Focus 3: con el modo privado activo, ningún elemento del resumen expone «€» ni «%».
+    /// Review Focus 3: con el modo privado activo, el contenido tapado («•••») aparece y ningún elemento expone «€» ni «%»,
+    /// tampoco tras hacer una pregunta en «Pregúntame».
     func testBriefingPrivateHidesAmounts() throws {
-        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrivate"])
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoShortfall", "-MiBancoDemoPrivate"])
 
         let doneButton = app.buttons["Vale"]
         XCTAssertTrue(doneButton.waitForExistence(timeout: 12), "El resumen en modo privado no apareció")
+
+        let masked = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '•••'")).firstMatch
+        XCTAssertTrue(masked.waitForExistence(timeout: 8), "Las líneas tapadas («•••») del resumen no aparecieron")
 
         let euroElements = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
         XCTAssertEqual(euroElements.count, 0, "El resumen expuso '€' en modo privado")
 
         let percentElements = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%'"))
         XCTAssertEqual(percentElements.count, 0, "El resumen expuso '%' en modo privado")
+
+        let tipButton = element("briefing-tip-action")
+        scrollInBriefingSheet(to: tipButton)
+        XCTAssertTrue(tipButton.waitForExistence(timeout: 6), "Falta el botón de consejo en modo privado")
+        XCTAssertEqual(tipButton.label, "Preparar traspaso", "El botón del consejo expuso importe en modo privado")
+
+        let balancesChip = element("assistant-chip-balances")
+        scrollInBriefingSheet(to: balancesChip)
+        XCTAssertTrue(balancesChip.waitForExistence(timeout: 6), "Falta la ficha «¿Cuánto tengo?» en modo privado")
+        balancesChip.tap()
+
+        let listenAnswer = element("assistant-listen-answer")
+        scrollInBriefingSheet(to: listenAnswer)
+        XCTAssertTrue(listenAnswer.waitForExistence(timeout: 8), "No apareció la respuesta del asistente en modo privado")
+
+        XCTAssertEqual(euroElements.count, 0, "La respuesta del asistente expuso '€' en modo privado")
+        XCTAssertEqual(percentElements.count, 0, "La respuesta del asistente expuso '%' en modo privado")
     }
 
     /// Tocar la acción del consejo de falta de saldo abre «Mover dinero» con el importe ya rellenado.
@@ -91,7 +129,7 @@ final class BriefingUITests: XCTestCase {
         XCTAssertTrue(doneButton.waitForExistence(timeout: 12), "El resumen con falta de saldo no apareció")
 
         let tipAction = app.buttons["Pasar 10,00\(nbsp)€"]
-        scrollTo(tipAction)
+        scrollInBriefingSheet(to: tipAction)
         XCTAssertTrue(tipAction.waitForExistence(timeout: 8), "Falta el botón «Pasar 10,00 €» en el consejo")
         tipAction.tap()
 
@@ -120,68 +158,92 @@ final class BriefingUITests: XCTestCase {
         XCTAssertTrue(listen.waitForExistence(timeout: 6), "El botón no volvió a «Escuchar» al parar")
     }
 
-    /// A1–A4: «Te puede interesar» descarta una tarjeta y «Pregúntame» rechaza consejos de inversión literalmente y contesta hechos.
+    /// A1–A4: «Te puede interesar» descarta una tarjeta concreta y «Pregúntame» rechaza consejos de inversión literalmente y contesta hechos.
     func testAssistantAskAndInterestCards() throws {
         launch(["-MiBancoDemoBriefing", "busy"])
 
         let doneButton = app.buttons["Vale"]
         XCTAssertTrue(doneButton.waitForExistence(timeout: 12), "El resumen no apareció")
 
-        let dislikeButton = app.buttons["No me interesa"].firstMatch
-        scrollTo(dislikeButton)
-        if dislikeButton.waitForExistence(timeout: 5) {
-            let beforeCount = app.buttons.matching(identifier: "No me interesa").count
-            dislikeButton.tap()
-            let afterMatches = app.buttons.matching(NSPredicate(format: "label == 'No me interesa'"))
-            _ = waitFor(NSPredicate(format: "count < %d", max(1, beforeCount)), afterMatches, timeout: 4)
-        }
+        // La subida de Spotify en la demo garantiza siempre la tarjeta de cambio de suscripción.
+        let subDislike = element("card-dislike-subscriptionPriceChange")
+        scrollInBriefingSheet(to: subDislike)
+        XCTAssertTrue(subDislike.waitForExistence(timeout: 8), "Falta la tarjeta de cambio de suscripción en «Te puede interesar»")
+        subDislike.tap()
+        XCTAssertTrue(
+            waitFor(NSPredicate(format: "exists == false"), subDislike, timeout: 6),
+            "La tarjeta descartada no desapareció al pulsar «No me interesa»"
+        )
 
         let questionField = element("assistant-question-field")
-        scrollTo(questionField)
+        scrollInBriefingSheet(to: questionField)
         XCTAssertTrue(questionField.waitForExistence(timeout: 8), "Falta el campo «Pregúntame algo de tu dinero…»")
         questionField.tap()
-        questionField.typeText("¿Debo comprar Apple?")
-
+        questionField.typeText("¿Debo comprar Apple?\n")
         let sendButton = element("assistant-send")
-        XCTAssertTrue(sendButton.waitForExistence(timeout: 5), "Falta el botón de enviar pregunta")
-        sendButton.tap()
+        if sendButton.exists && sendButton.isEnabled && sendButton.isHittable {
+            sendButton.tap()
+        }
 
         let refusal = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS 'asesor financiero autorizado'")
         ).firstMatch
-        scrollTo(refusal)
+        scrollInBriefingSheet(to: refusal)
         XCTAssertTrue(refusal.waitForExistence(timeout: 8), "No apareció la negativa de consejo financiero")
 
+        // Tras responder, el chip «¿Cuánto tengo?» puede estar en el carrusel horizontal encima de la respuesta.
         let balancesChip = element("assistant-chip-balances")
-        scrollTo(balancesChip)
+        let chipsScroll = app.scrollViews["assistant-chips-scroll"]
+        scrollInBriefingSheet(to: chipsScroll)
+        if !balancesChip.isHittable && chipsScroll.exists {
+            chipsScroll.swipeLeft()
+        }
         XCTAssertTrue(balancesChip.waitForExistence(timeout: 6), "Falta la ficha sugerida «¿Cuánto tengo?»")
         balancesChip.tap()
 
         let totalAnswer = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS 'En total tienes'")
         ).firstMatch
-        scrollTo(totalAnswer)
+        scrollInBriefingSheet(to: totalAnswer)
         XCTAssertTrue(totalAnswer.waitForExistence(timeout: 8), "No apareció la respuesta factual de saldos")
     }
 
-    /// A4 + Tarea 10: Ajustes › Asistente muestra los 6 temas y Avisos muestra la regla «Resumen cada mañana» con selector de hora.
+    /// A4 + Tarea 10: Ajustes › Asistente muestra y cambia los interruptores de temas; Avisos muestra y cambia «Resumen cada mañana».
     func testAssistantSettingsAndMorningRule() throws {
         launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAssistantSettings"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 15), "Ajustes no apareció")
 
         let firstTopic = element("assistant-topic-unusualPayment")
         scrollTo(firstTopic)
         XCTAssertTrue(firstTopic.waitForExistence(timeout: 10), "Falta el interruptor de tema en Ajustes › Asistente")
+        XCTAssertEqual(firstTopic.value as? String, "1", "El tema debería empezar activo")
+        firstTopic.tap()
+        XCTAssertTrue(
+            waitFor(NSPredicate(format: "value == '0'"), firstTopic, timeout: 6),
+            "El interruptor del tema no se apagó al tocarlo"
+        )
+
         let lastTopic = element("assistant-topic-portfolioMover")
         scrollTo(lastTopic)
         XCTAssertTrue(lastTopic.waitForExistence(timeout: 8), "Falta el sexto tema en Ajustes › Asistente")
 
         launch(["-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules"])
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 15), "Avisos no apareció")
+
         let morningRule = element("alert-rule-morningBriefing")
         scrollTo(morningRule)
         XCTAssertTrue(morningRule.waitForExistence(timeout: 10), "Falta la regla «Resumen cada mañana» en Avisos")
         let morningTime = element("morning-briefing-time")
         scrollTo(morningTime)
         XCTAssertTrue(morningTime.waitForExistence(timeout: 6), "Falta el selector de hora de «Resumen cada mañana»")
+
+        morningRule.tap()
+        XCTAssertTrue(
+            waitFor(NSPredicate(format: "exists == false"), morningTime, timeout: 6),
+            "El selector de hora no se ocultó al apagar «Resumen cada mañana»"
+        )
+        morningRule.tap()
+        XCTAssertTrue(morningTime.waitForExistence(timeout: 6), "El selector de hora no volvió al encender la regla")
     }
 
     /// Al salir a segundo plano, la hoja del resumen abierta a mano se cierra sola y nunca queda abierta al volver.

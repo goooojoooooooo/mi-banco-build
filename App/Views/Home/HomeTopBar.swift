@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Barra fija de Inicio: "Tu dinero" y dos controles de cristal (ojo y lupa) en un mismo `GlassEffectContainer`.
+/// Barra fija de Inicio: "Tu dinero" y tres controles de cristal (resumen, ojo y lupa) en un mismo `GlassEffectContainer`.
 /// La lupa se transforma en el campo de búsqueda (en iOS 26, el cristal se funde de una forma a otra con
 /// `glassEffectID`; antes, un fundido con escala). El título se compacta un poco al bajar la lista.
 struct HomeTopBar: View {

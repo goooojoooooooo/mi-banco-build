@@ -91,6 +91,8 @@ final class BriefingModel {
         if !visible {
             askGeneration += 1
             isAnswering = false
+            lastAnswer = nil
+            lastQuestion = ""
         }
     }
 
@@ -139,6 +141,7 @@ final class BriefingModel {
             computedInput = DemoMode.briefingInput(
                 mode: mode,
                 shortfall: DemoMode.briefingShortfall,
+                state: state,
                 now: now
             )
         } else {
@@ -155,8 +158,11 @@ final class BriefingModel {
         #endif
 
         let built = makeBriefing(computedInput, calendar: cal)
+        let candidateCount = openingCandidateCount(for: built.situation)
         let validModelChoice: Int?
-        if !privateMode, let pre = prefetchedChoice, pre.situation == built.situation {
+        if !privateMode, let pre = prefetchedChoice,
+           pre.situation == built.situation,
+           candidateCount > 0, (1...candidateCount).contains(pre.choice) {
             validModelChoice = pre.choice
         } else {
             validModelChoice = nil

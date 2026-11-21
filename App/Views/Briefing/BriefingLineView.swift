@@ -12,7 +12,7 @@ struct BriefingLineView: View {
     var role: TitanFont = .row
     var color: Color = Theme.label
     var countsFirstAmount: Bool = false
-    var forceCompleted: Bool = false
+    var snapCountImmediately: Bool = false
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -28,22 +28,15 @@ struct BriefingLineView: View {
                 Text(label)
                     .foregroundStyle(color)
                     .privacySensitive()
-            } else if countsFirstAmount, let firstCents = firstAmountCents {
+            } else if countsFirstAmount, !reduceMotion, !snapCountImmediately, let firstCents = firstAmountCents {
                 AnimatedBriefingSentence(
                     parts: parts,
-                    animatedValue: shownAmount ?? ((reduceMotion || forceCompleted) ? Double(firstCents) : 0),
+                    animatedValue: shownAmount ?? 0,
                     baseColor: color
                 )
                 .onAppear { startCount(to: firstCents) }
-                .onChange(of: forceCompleted) { _, done in
-                    if done { shownAmount = Double(firstCents) }
-                }
                 .onChange(of: firstCents) { _, newValue in
-                    if reduceMotion || forceCompleted {
-                        shownAmount = Double(newValue)
-                    } else {
-                        withAnimation(Theme.Motion.roll) { shownAmount = Double(newValue) }
-                    }
+                    withAnimation(Theme.Motion.roll) { shownAmount = Double(newValue) }
                 }
             } else {
                 Text(Self.attributed(parts: parts, overrideFirstAmount: nil, baseColor: color))
@@ -63,10 +56,6 @@ struct BriefingLineView: View {
 
     private func startCount(to target: Int) {
         guard shownAmount == nil else { return }
-        if reduceMotion || forceCompleted {
-            shownAmount = Double(target)
-            return
-        }
         shownAmount = 0
         withAnimation(Self.countUpAnimation.delay(0.08)) {
             shownAmount = Double(target)

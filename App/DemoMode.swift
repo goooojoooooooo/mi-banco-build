@@ -75,7 +75,7 @@ enum DemoMode {
     }
 
     /// Entradas del resumen de demo (`-MiBancoDemoBriefing busy|quiet`, con `-MiBancoDemoShortfall` opcional).
-    static func briefingInput(mode: BriefingMode, shortfall: Bool, now: Date = Date()) -> BriefingInput {
+    static func briefingInput(mode: BriefingMode, shortfall: Bool, state: LedgerState? = nil, now: Date = Date()) -> BriefingInput {
         let cal = DateText.madridCalendar
         let today = cal.startOfDay(for: now)
         let morning = cal.date(bySettingHour: 9, minute: 0, second: 0, of: today) ?? now
@@ -116,12 +116,18 @@ enum DemoMode {
             ),
         ] : []
 
+        func movementID(merchant: String, cents: Int) -> UUID {
+            state?.movements.first {
+                $0.merchant == merchant && abs($0.amountCents) == cents
+            }?.id ?? UUID()
+        }
+
         let income = [
-            MovementDigest(id: UUID(), bank: .ima, name: "Bizum de Laura", cents: 2_000, date: morning.addingTimeInterval(-3 * 3600)),
+            MovementDigest(id: movementID(merchant: "Bizum de Laura", cents: 2_000), bank: .ima, name: "Bizum de Laura", cents: 2_000, date: morning.addingTimeInterval(-3 * 3600)),
         ]
         let payments = [
-            MovementDigest(id: UUID(), bank: .rev, name: "Mercadona", cents: 1_250, date: morning.addingTimeInterval(-2 * 3600)),
-            MovementDigest(id: UUID(), bank: .rev, name: "Spotify", cents: 1_099, date: morning.addingTimeInterval(-6 * 3600)),
+            MovementDigest(id: movementID(merchant: "Mercadona", cents: 1_250), bank: .rev, name: "Mercadona", cents: 1_250, date: morning.addingTimeInterval(-2 * 3600)),
+            MovementDigest(id: movementID(merchant: "Spotify", cents: 1_099), bank: .rev, name: "Spotify", cents: 1_099, date: morning.addingTimeInterval(-6 * 3600)),
         ]
 
         return BriefingInput(

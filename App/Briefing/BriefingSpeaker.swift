@@ -40,7 +40,7 @@ final class BriefingSpeaker {
             stop()
             return
         }
-        stop()
+        stop(deactivateSession: false)
         generation += 1
         let token = generation
         activeTarget = target
@@ -65,7 +65,7 @@ final class BriefingSpeaker {
         utterance.voice = Self.preferredVoice()
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
 
-        delegateProxy.onComplete = { [weak self] in
+        delegateProxy.setHandler(for: utterance) { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self, self.generation == token else { return }
                 self.activeTarget = nil
@@ -75,20 +75,21 @@ final class BriefingSpeaker {
         synthesizer.speak(utterance)
     }
 
-    func stop() {
+    func stop(deactivateSession: Bool = true) {
         generation += 1
         demoTimer?.cancel()
         demoTimer = nil
-        let wasSpeaking = activeTarget != nil || synthesizer.isSpeaking
+        let wasActive = activeTarget != nil || synthesizer.isSpeaking || synthesizer.isPaused
         activeTarget = nil
-        delegateProxy.onComplete = nil
-        if synthesizer.isSpeaking {
+        delegateProxy.clear()
+        // Llamamos siempre que hubiera una lectura solicitada o en curso: evita la ventana de arranque antes de `isSpeaking`.
+        if wasActive {
             synthesizer.stopSpeaking(at: .immediate)
         }
         #if DEBUG
         if DemoMode.isActive { return }
         #endif
-        if wasSpeaking {
+        if deactivateSession && wasActive {
             deactivateAudioSession()
         }
     }
@@ -109,20 +110,36 @@ final class BriefingSpeaker {
 }
 
 /// Puente no aislado para los callbacks de `AVSpeechSynthesizerDelegate` en Swift 6.
+/// Comprueba la identidad exacta de la `AVSpeechUtterance` para que un `didCancel` rezagado de una lectura anterior
+/// jamás apague una lectura nueva.
 private final class DelegateProxy: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
     private let lock = NSLock()
-    private var handler: (@Sendable () -> Void)?
+    private var entry: (utteranceID: ObjectIdentifier, handler: @Sendable () -> Void)?
 
-    var onComplete: (@Sendable () -> Void)? {
-        get { lock.withLock { handler } }
-        set { lock.withLock { handler = newValue } }
+    func setHandler(for utterance: AVSpeechUtterance, handler: @escaping @Sendable () -> Void) {
+        let id = ObjectIdentifier(utterance)
+        lock.withLock { entry = (id, handler) }
+    }
+
+    func clear() {
+        lock.withLock { entry = nil }
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        onComplete?()
+        invokeIfMatching(utterance)
     }
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        onComplete?()
+        invokeIfMatching(utterance)
+    }
+
+    private func invokeIfMatching(_ utterance: AVSpeechUtterance) {
+        let id = ObjectIdentifier(utterance)
+        let matched: (@Sendable () -> Void)? = lock.withLock {
+            guard let current = entry, current.utteranceID == id else { return nil }
+            entry = nil
+            return current.handler
+        }
+        matched?()
     }
 }

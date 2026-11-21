@@ -11,23 +11,33 @@ struct AssistantSettingsSection: View {
     var body: some View {
         Section {
             ForEach(AssistantTopic.allCases) { topic in
-                Toggle(isOn: binding(for: topic)) {
-                    OptionLabel(
-                        title: topic.displayName,
-                        detail: topic.settingsDetail,
-                        systemImage: topic.symbol
-                    )
-                }
-                .toggleStyle(TitanToggleStyle())
-                .accessibilityIdentifier("assistant-topic-\(topic.rawValue)")
-                .listRowBackground(Theme.grouped)
-                .listRowSeparatorTint(Theme.separator)
+                row(for: topic)
             }
         } header: {
             SettingsHeader("Asistente")
-                .id(Self.scrollID)
         } footer: {
             SettingsFooter("Elige qué temas puede enseñarte Onyx en «Te puede interesar». Todo se calcula en tu iPhone; tus preguntas no se guardan.")
+        }
+    }
+
+    @ViewBuilder
+    private func row(for topic: AssistantTopic) -> some View {
+        let base = Toggle(isOn: binding(for: topic)) {
+            OptionLabel(
+                title: topic.displayName,
+                detail: topic.settingsDetail,
+                systemImage: topic.symbol
+            )
+        }
+        .toggleStyle(TitanToggleStyle())
+        .accessibilityIdentifier("assistant-topic-\(topic.rawValue)")
+        .listRowBackground(Theme.grouped)
+        .listRowSeparatorTint(Theme.separator)
+
+        if topic == AssistantTopic.allCases.first {
+            base.id(Self.scrollID)
+        } else {
+            base
         }
     }
 

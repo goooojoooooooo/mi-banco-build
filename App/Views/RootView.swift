@@ -37,6 +37,8 @@ struct RootView: View {
     @State private var briefingTask: Task<Void, Never>?
     /// Transición diferida (350 ms) desde una acción del resumen hacia otra hoja (`moveMoney` / `movement`).
     @State private var briefingActionTask: Task<Void, Never>?
+    /// Si se entró tocando un aviso de movimiento o de Avisos, el aviso gana y el resumen espera a la siguiente activación.
+    @State private var suppressBriefingForActivation = false
     /// Hoja de un movimiento abierta desde Avisos o desde un aviso tocado.
     private var detail: DetailRoute? {
         get { if case .movement(let route) = sheet { route } else { nil } }
@@ -243,6 +245,7 @@ struct RootView: View {
         briefingTask = nil
         briefingActionTask?.cancel()
         briefingActionTask = nil
+        suppressBriefingForActivation = false
         speaker.stop()
         sheet = nil
         importing = false
@@ -332,6 +335,7 @@ struct RootView: View {
     private func finishRestore() {
         sheet = nil
         restoreToken += 1
+        rescheduleMorningReminder()
     }
 
     private func openSettings(_ bank: BankID?) {
@@ -374,12 +378,17 @@ struct RootView: View {
         router.pending = nil
         switch route.destination {
         case .home:
+            suppressBriefingForActivation = true
             briefingTask?.cancel()
+            briefingTask = nil
             tab = .home
         case .alerts:
+            suppressBriefingForActivation = true
             briefingTask?.cancel()
+            briefingTask = nil
             tab = .alerts
         case .briefing:
+            suppressBriefingForActivation = false
             tab = .home
             scheduleBriefingCheck(delay: .milliseconds(350))
         }
@@ -387,6 +396,7 @@ struct RootView: View {
             // Tras el cambio de pestaña, para que la hoja suba sobre la pantalla buena.
             routeTask?.cancel()
             routeTask = Task {
+                defer { routeTask = nil }
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled else { return }
                 openDetail(id)
@@ -397,6 +407,7 @@ struct RootView: View {
     // MARK: - Resumen diario y asistente Onyx
 
     private func scheduleBriefingCheck(delay: Duration) {
+        guard !suppressBriefingForActivation, routeTask == nil, router.pending == nil else { return }
         briefingTask?.cancel()
         let gen = gate.generation
         briefingTask = Task {
@@ -407,7 +418,8 @@ struct RootView: View {
     }
 
     private func considerBriefing() {
-        guard gate.canPresent, !isLocked, isForeground, sheet == nil, !importing, router.pending == nil else { return }
+        guard gate.canPresent, !isLocked, isForeground, sheet == nil, !importing,
+              router.pending == nil, routeTask == nil, !suppressBriefingForActivation else { return }
         let now = Date()
         guard let due = briefing.dueRecord(now: now) else { return }
         let isFirst = briefing.record == nil
@@ -415,7 +427,7 @@ struct RootView: View {
             record: due,
             isFirst: isFirst,
             state: model.state,
-            portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+            portfolio: portfolio.portfolioForBackup,
             book: accountBook.book,
             privateMode: preferences.privateMode,
             now: now
@@ -427,7 +439,7 @@ struct RootView: View {
     }
 
     private func openManualBriefing() {
-        guard gate.canPresent, !isLocked, isForeground, !importing else { return }
+        guard gate.canPresent, !isLocked, isForeground, !importing, sheet == nil else { return }
         let now = Date()
         let rec = briefing.manualRecord(now: now)
         let isFirst = briefing.record == nil
@@ -435,7 +447,7 @@ struct RootView: View {
             record: rec,
             isFirst: isFirst,
             state: model.state,
-            portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+            portfolio: portfolio.portfolioForBackup,
             book: accountBook.book,
             privateMode: preferences.privateMode,
             now: now

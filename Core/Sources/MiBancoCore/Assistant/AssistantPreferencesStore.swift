@@ -46,7 +46,13 @@ public final class AssistantPreferencesStore: Sendable {
     }
 
     private func apply<T>(_ body: (inout AssistantPreferences) -> T) throws -> T {
-        var preferences = try load()
+        var preferences: AssistantPreferences
+        do {
+            preferences = try load()
+        } catch is DecodingError {
+            // Un archivo corrupto o truncado no puede bloquear para siempre «Me interesa» / Ajustes; los errores reales de E/S sí suben.
+            preferences = AssistantPreferences()
+        }
         let value = body(&preferences)
         try save(preferences)
         return value

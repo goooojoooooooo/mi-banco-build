@@ -326,10 +326,27 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         #expect(reloaded.weight(for: .portfolioMover) == 1)
         #expect(reloaded.feedback(for: "card-1") == .interested)
 
-        // Archivo corrupto -> `load()` lanza error y `loadRecovering()` devuelve valores de fábrica sin romper la app.
+        // Archivo corrupto (texto roto, vacío o JSON no-objeto): `load()` lanza error, `loadRecovering()` devuelve valores de
+        // fábrica y `update` se autorrepara sobrescribiendo atómicamente el archivo dañado.
         let file = dir.appendingPathComponent("assistant-preferences.json")
-        try Data("esto no es json".utf8).write(to: file)
-        #expect(throws: Error.self) { _ = try store.load() }
-        #expect(store.loadRecovering() == AssistantPreferences())
+        for corruptPayload in ["esto no es json", "", "[]"] {
+            try Data(corruptPayload.utf8).write(to: file)
+            #expect(throws: Error.self) { _ = try store.load() }
+            #expect(store.loadRecovering() == AssistantPreferences())
+            try store.update { prefs in
+                prefs.setEnabled(false, for: .shortfall)
+            }
+            let healed = try store.load()
+            #expect(!healed.isEnabled(.shortfall), "\(corruptPayload)")
+        }
+
+        // Error real de E/S (la ruta de carpeta es un archivo regular) sí se propaga en `update` y `save`.
+        let blockerFile = FileManager.default.temporaryDirectory.appendingPathComponent("assistant-blocker-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: blockerFile) }
+        try Data("x".utf8).write(to: blockerFile)
+        let brokenStore = AssistantPreferencesStore(directory: blockerFile)
+        #expect(throws: Error.self) {
+            try brokenStore.update { $0.setEnabled(false, for: .budgetClose) }
+        }
     }
 }

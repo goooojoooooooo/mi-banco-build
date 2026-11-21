@@ -15,13 +15,19 @@ public struct AlertSettings: Codable, Equatable, Sendable {
     /// Aviso diario por la mañana para abrir el resumen (sin cifras).
     public var morningBriefing: Bool
     /// Minutos desde medianoche para el aviso de la mañana (por defecto 510 = 08:30; válido 0..<1440).
-    public var morningBriefingMinutes: Int
+    public var morningBriefingMinutes: Int {
+        didSet {
+            if !(0..<1_440).contains(morningBriefingMinutes) {
+                morningBriefingMinutes = defaultMorningBriefingMinutes
+            }
+        }
+    }
 
     public init(everyMovement: Bool = true, lowBalance: Bool = true, lowBalanceThresholdCents: Int = 10_000,
                 largePayment: Bool = true, largePaymentThresholdCents: Int = 15_000, income: Bool = true,
                 subscriptions: Bool = true, duplicateCharge: Bool = true, weeklyDigest: Bool = true,
                 spendingPace: Bool = true, budgets: Bool = true,
-                morningBriefing: Bool = true, morningBriefingMinutes: Int = 510) {
+                morningBriefing: Bool = true, morningBriefingMinutes: Int = defaultMorningBriefingMinutes) {
         self.everyMovement = everyMovement
         self.lowBalance = lowBalance
         self.lowBalanceThresholdCents = lowBalanceThresholdCents
@@ -34,7 +40,8 @@ public struct AlertSettings: Codable, Equatable, Sendable {
         self.spendingPace = spendingPace
         self.budgets = budgets
         self.morningBriefing = morningBriefing
-        self.morningBriefingMinutes = (0..<1_440).contains(morningBriefingMinutes) ? morningBriefingMinutes : 510
+        self.morningBriefingMinutes = (0..<1_440).contains(morningBriefingMinutes)
+            ? morningBriefingMinutes : defaultMorningBriefingMinutes
     }
 
     private enum CodingKeys: String, CodingKey {

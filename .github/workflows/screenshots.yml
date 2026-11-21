@@ -2,11 +2,16 @@ name: screenshots
 run-name: screenshots ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner macOS (por defecto: macos-15-intel)"
+        required: false
+        default: "macos-15-intel"
 permissions:
   contents: read
 jobs:
   capturas:
-    runs-on: macos-15-intel
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -14,7 +19,7 @@ jobs:
         run: |
           ls -d /Applications/Xcode*.app
           CHOSEN=""
-          for app in "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)" /Applications/Xcode_16.4.app; do
+          for app in /Applications/Xcode_26.2.app $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
             [ -d "$app" ] || continue
             echo "Probando $app"
             if DEVELOPER_DIR="$app/Contents/Developer" xcrun simctl list runtimes available | grep -E "^iOS " ; then

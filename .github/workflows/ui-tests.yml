@@ -7,11 +7,15 @@ on:
         description: "Clase de pruebas a ejecutar sola (vacio = todas)"
         required: false
         default: ""
+      runner:
+        description: "Runner macOS (por defecto: macos-15-intel)"
+        required: false
+        default: "macos-15-intel"
 permissions:
   contents: read
 jobs:
   ui:
-    runs-on: macos-15-intel
+    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +23,7 @@ jobs:
         run: |
           ls -d /Applications/Xcode*.app
           XCODE=/Applications/Xcode_26.2.app
-          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"; fi
           echo "Usando $XCODE"
           sudo xcode-select -s "$XCODE"
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"

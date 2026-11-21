@@ -342,12 +342,13 @@ private func portfolioWithFixture() throws -> Portfolio {
         // Domingo 22 nov 2026 12:00 Madrid; Apple con cotización del viernes (-6,00 €), Ethereum de hoy (+1,00 €).
         let friday = at(2026, 11, 20, 17, 30)
         let sunday = at(2026, 11, 22, 12, 0)
-        var p = Portfolio(transactions: [
+        var p = Portfolio()
+        p.transactions = [
             InvestmentTransaction(id: "a1", date: at(2026, 6, 1, 10, 0), instrument: apple, name: "Apple",
                                   assetClass: "STOCK", shares: 3, cashCents: -54_000, priceEUR: 180),
             InvestmentTransaction(id: "e1", date: at(2026, 6, 1, 10, 0), instrument: "ETH", name: "Ethereum",
                                   assetClass: "CRYPTO", shares: 1, cashCents: -200_000, priceEUR: 2000),
-        ])
+        ]
         p.quotes[apple] = Quote(priceEUR: 198, previousCloseEUR: 200, fetchedAt: sunday, marketTime: friday)
         p.quotes["ETH"] = Quote(priceEUR: 2001, previousCloseEUR: 2000, fetchedAt: sunday, marketTime: sunday)
         let s = try #require(portfolioSummary(p, now: sunday, calendar: madrid))

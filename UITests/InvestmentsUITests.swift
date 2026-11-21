@@ -177,16 +177,30 @@ final class InvestmentsUITests: XCTestCase {
         let appleRow = app.buttons["Apple"]
         scrollTo(appleRow)
         XCTAssertTrue(appleRow.waitForExistence(timeout: 10), "No se ve la fila de Apple en privado")
-        XCTAssertFalse(appleRow.label.contains("€"), "La fila de posición filtró € en modo privado: \(appleRow.label)")
-        XCTAssertFalse(appleRow.label.contains("%"), "La fila de posición filtró % en modo privado: \(appleRow.label)")
+        let euroPred = NSPredicate(format: "label CONTAINS '€' OR value CONTAINS '€'")
+        let pctPred = NSPredicate(format: "label CONTAINS '%' OR value CONTAINS '%'")
+        let appleEuro = appleRow.descendants(matching: .any).matching(euroPred)
+        let applePct = appleRow.descendants(matching: .any).matching(pctPred)
+        XCTAssertEqual(appleEuro.count, 0, "La fila de Apple filtró € en privado: \(appleEuro.allElementsBoundByIndex.map(\.label))")
+        XCTAssertEqual(applePct.count, 0, "La fila de Apple filtró % en privado: \(applePct.allElementsBoundByIndex.map(\.label))")
+        XCTAssertEqual(appleRow.label, "Apple, importe oculto", "La etiqueta de Apple en privado no coincide: \(appleRow.label)")
 
         appleRow.tap()
         let close = app.buttons["Cerrar"]
         XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja de posición en privado")
-        let euroTexts = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '€'"))
-        XCTAssertEqual(euroTexts.count, 0, "La hoja de posición expuso € a VoiceOver en modo privado")
-        let pctTexts = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '%'"))
-        XCTAssertEqual(pctTexts.count, 0, "La hoja de posición expuso % a VoiceOver en modo privado")
+        let scroll = app.scrollViews["position-scroll"]
+        XCTAssertTrue(scroll.waitForExistence(timeout: 8), "Falta position-scroll en la hoja de posición")
+        let euroInside = scroll.descendants(matching: .any).matching(euroPred)
+        let pctInside = scroll.descendants(matching: .any).matching(pctPred)
+        let allAppEuro = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '€'"))
+        XCTAssertEqual(
+            euroInside.count, 0,
+            "U8 diag position-scroll €=\(euroInside.count): \(euroInside.allElementsBoundByIndex.map { "\($0.identifier)|\($0.label)" }) | app.staticTexts €=\(allAppEuro.count): \(allAppEuro.allElementsBoundByIndex.map { "\($0.identifier)|\($0.label)" })"
+        )
+        XCTAssertEqual(
+            pctInside.count, 0,
+            "U8 diag position-scroll %=\(pctInside.count): \(pctInside.allElementsBoundByIndex.map { "\($0.identifier)|\($0.label)" })"
+        )
 
         let manualButton = app.buttons["Poner precio a mano"]
         scrollTo(manualButton)

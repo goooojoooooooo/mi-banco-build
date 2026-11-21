@@ -288,4 +288,33 @@ final class BriefingUITests: XCTestCase {
             "La hoja del resumen siguió abierta tras volver de segundo plano"
         )
     }
+
+    /// U33: el selector de hora de «Resumen cada mañana» nunca puede quedar encima del bloqueo al volver de segundo plano.
+    func testMorningTimePickerNeverAboveLock() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules"])
+
+        // Esperar a que el bloqueo de demo se quite solo (~4 s) y aparezca Avisos.
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 18), "Avisos no apareció tras el bloqueo")
+
+        let morningTime = element("morning-briefing-time")
+        scrollTo(morningTime)
+        XCTAssertTrue(morningTime.waitForExistence(timeout: 8), "Falta morning-briefing-time")
+        morningTime.tap()
+
+        XCTAssertTrue(app.pickerWheels.firstMatch.waitForExistence(timeout: 6), "No apareció ninguna rueda de hora al tocar morning-briefing-time")
+        XCTAssertGreaterThan(app.pickerWheels.count, 0, "Debe haber ruedas de hora visibles")
+
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+
+        // Mientras se ve el bloqueo (primeros ~4 s), no debe haber ruedas ni selectores tocables por encima.
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 5), "No se mostró el bloqueo al volver de segundo plano")
+        XCTAssertEqual(app.pickerWheels.count, 0, "U33: quedaron ruedas de hora encima del bloqueo (\(app.pickerWheels.count))")
+        let hittablePickers = app.datePickers.allElementsBoundByIndex.filter(\.isHittable)
+            + app.pickerWheels.allElementsBoundByIndex.filter(\.isHittable)
+        XCTAssertEqual(hittablePickers.count, 0, "U33: quedó un selector de hora tocable encima del bloqueo")
+    }
 }

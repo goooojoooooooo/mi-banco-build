@@ -57,4 +57,51 @@ final class OnboardingUITests: XCTestCase {
             "No debe aparecer un resumen vacío tras terminar la bienvenida"
         )
     }
+
+    /// U62: arrancar directamente en el paso 2 (`-MiBancoDemoOnboarding 2`) muestra «Avisos al instante» y «Empezar la guía».
+    func testOnboardingStartsOnStep2() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoOnboarding", "2", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for name in ["Permitir", "Allow"] {
+            let b = springboard.alerts.buttons[name]
+            if b.waitForExistence(timeout: 2) { b.tap(); break }
+        }
+
+        XCTAssertTrue(
+            app.staticTexts["Avisos al instante"].waitForExistence(timeout: 15),
+            "U62: el paso 2 directo debe mostrar «Avisos al instante»"
+        )
+        XCTAssertTrue(
+            app.buttons["Empezar la guía"].waitForExistence(timeout: 5),
+            "U62: el paso 2 directo debe mostrar «Empezar la guía»"
+        )
+    }
+
+    /// U62: llegar al paso 2 desde el paso 1 tocando «Seguir».
+    func testOnboardingStep1ToStep2() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoOnboarding", "1", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for name in ["Permitir", "Allow"] {
+            let b = springboard.alerts.buttons[name]
+            if b.waitForExistence(timeout: 2) { b.tap(); break }
+        }
+
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 15))
+        let nextButton = app.buttons["onboarding-next-1"]
+        XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
+        nextButton.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Avisos al instante"].waitForExistence(timeout: 5),
+            "U62: tras Seguir debe aparecer «Avisos al instante»"
+        )
+        XCTAssertTrue(
+            app.buttons["Empezar la guía"].waitForExistence(timeout: 5),
+            "U62: tras Seguir debe aparecer «Empezar la guía»"
+        )
+    }
 }

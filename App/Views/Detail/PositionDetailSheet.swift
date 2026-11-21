@@ -230,6 +230,7 @@ private struct PositionDetailContent: View {
         }
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
+        .accessibilityIdentifier("position-scroll")
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
                 Spacer()

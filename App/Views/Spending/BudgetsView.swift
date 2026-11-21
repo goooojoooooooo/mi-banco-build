@@ -188,9 +188,7 @@ struct BudgetsView: View {
         for (scope, text) in model.budgetDrafts {
             texts[scope] = text
             dirty.insert(scope)
-            let trimmed = text.trimmingCharacters(in: .whitespaces)
-            let valid = trimmed.isEmpty || (parseBalanceInput(trimmed).map { $0 >= 0 } ?? false)
-            errors[scope] = valid ? Self.saveFailedText : Self.invalidText
+            errors[scope] = parseBudgetInput(text) == .invalid ? Self.invalidText : Self.saveFailedText
         }
     }
 
@@ -201,13 +199,14 @@ struct BudgetsView: View {
     private func commit(_ scope: BudgetScope) {
         guard dirty.contains(scope) else { return refresh(scope) }
         let text = (texts[scope] ?? "").trimmingCharacters(in: .whitespaces)
-        // Vacío o 0 quita el presupuesto.
+        // Vacío, 0 o un texto sin cifras («€», « €», «,») quita el presupuesto (R32).
         let cents: Int?
-        if text.isEmpty {
+        switch parseBudgetInput(text) {
+        case .remove:
             cents = nil
-        } else if let parsed = parseBalanceInput(text), parsed >= 0 {
-            cents = parsed > 0 ? parsed : nil
-        } else {
+        case .set(let value):
+            cents = value
+        case .invalid:
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[scope] = Self.invalidText }
             errorTick += 1
             model.budgetDrafts[scope] = text

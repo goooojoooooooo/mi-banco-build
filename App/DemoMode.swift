@@ -23,6 +23,23 @@ enum DemoMode {
 
     static var isActive: Bool { arguments.contains("-MiBancoDemo") }
 
+    /// `-MiBancoDemoToday <aaaa-mm-dd>` (solo con `-MiBancoDemo`): fija el «hoy» de la demo a las 12:00 de ese día, para probar
+    /// que el libro de la demo da lo mismo cualquier día del año. Un texto que no sea una fecha válida se ignora.
+    static var fixedNow: Date? {
+        guard isActive, let text = value(after: "-MiBancoDemoToday") else { return nil }
+        let parts = text.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        let calendar = Calendar.current
+        let components = DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12)
+        guard let date = calendar.date(from: components),
+              calendar.dateComponents([.year, .month, .day], from: date) == DateComponents(year: parts[0], month: parts[1], day: parts[2])
+        else { return nil }
+        return date
+    }
+
+    /// El «ahora» de la demo: el reloj, salvo que `-MiBancoDemoToday` lo fije.
+    static var now: Date { fixedNow ?? Date() }
+
     static var screen: Screen {
         switch value(after: "-MiBancoDemoScreen") ?? "" {
         case "gasto": .spending
@@ -75,7 +92,7 @@ enum DemoMode {
     /// movimientos, todos anteriores, no los alteran (el pago de Mercadona de hoy ya está dentro de los 340,20 €).
     /// Hay historia para que salgan los avisos: Spotify sube de 9,99 a 10,99, Netflix se cobra en 3 días, una nómina,
     /// gasto repartido por el mes pasado (frase del ritmo) y compras previas en Mercadona (historial del comercio).
-    static func state(now: Date = Date()) -> LedgerState {
+    static func state(now: Date = DemoMode.now) -> LedgerState {
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: now)
 

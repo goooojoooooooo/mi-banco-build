@@ -67,6 +67,15 @@ jobs:
           echo "== Resultado por prueba =="
           grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # R31: lo que dejó la prueba de un solo toque por pestaña (rojo o verde): del log y, si no, del xcresult.
+          echo "== R24: Cambio de pestaña con un solo toque =="
+          grep -h "Cambio de pestaña con un solo toque" build/ui.log | sort -u > build/r24.txt || true
+          if [ ! -s build/r24.txt ] && [ -d build/ui.xcresult ]; then
+            python3 .github/scripts/r24_tab_times.py build/ui.xcresult > build/r24.txt || true
+          fi
+          if [ ! -s build/r24.txt ]; then echo "R24: la prueba no se ejecutó en esta tanda (o no dejó mensaje)" > build/r24.txt; fi
+          cat build/r24.txt
+          { echo "### R24: un solo toque por pestaña"; echo '```'; cat build/r24.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "xcodebuild exit: $(cat build/status.txt)"
           if [ "$(cat build/status.txt)" != "0" ]; then
             echo "== Lineas con error: de build/ui.log =="

@@ -10,7 +10,9 @@ struct RestoreConfirmView: View {
     let restore: () throws -> Void
     let finished: () -> Void
 
-    private enum Phase: Equatable { case asking, restored, failed(String) }
+    /// `stuck`: los datos YA cambiaron en el disco y no se pudo terminar (R35): solo texto y la salida, sin volver a ofrecer deslizar
+    /// (un segundo deslizamiento copiaría lo restaurado encima de la copia de seguridad).
+    private enum Phase: Equatable { case asking, restored, failed(String), stuck(String) }
 
     @State private var phase: Phase = .asking
     @State private var attempt = 0
@@ -40,7 +42,7 @@ struct RestoreConfirmView: View {
                     .foregroundStyle(Theme.label)
                     .frame(maxWidth: .infinity)
                     .transition(.opacity)
-            case .failed(let message):
+            case .failed(let message), .stuck(let message):
                 Text(message)
                     .titan(.meta)
                     .foregroundStyle(Theme.warning)
@@ -48,11 +50,13 @@ struct RestoreConfirmView: View {
             case .asking:
                 EmptyView()
             }
-            SlideToConfirm(title: preview.isPrevious ? "Desliza para volver" : "Desliza para restaurar", systemImage: "arrow.counterclockwise", tint: Theme.label,
-                           action: run)
-                .id(attempt)
-                .accessibilityIdentifier("restore-slide")
-                .allowsHitTesting(phase != .restored)
+            if !isStuck {
+                SlideToConfirm(title: preview.isPrevious ? "Desliza para volver" : "Desliza para restaurar", systemImage: "arrow.counterclockwise", tint: Theme.label,
+                               action: run)
+                    .id(attempt)
+                    .accessibilityIdentifier("restore-slide")
+                    .allowsHitTesting(phase != .restored)
+            }
             if phase != .restored {
                 Button { dismiss() } label: {
                     Text("Cancelar")
@@ -82,6 +86,11 @@ struct RestoreConfirmView: View {
         }
     }
 
+    private var isStuck: Bool {
+        if case .stuck = phase { return true }
+        return false
+    }
+
     /// "Esto cambia todo lo que hay ahora (182 movimientos) por la copia del 19 nov 2026 (175 movimientos)."
     private var summary: String {
         let date = BackupSection.dayText(preview.file.exportedAt)
@@ -105,8 +114,8 @@ struct RestoreConfirmView: View {
         } catch RestoreError.safetyCopyFailed {
             fail("No se pudo guardar la copia de lo que hay ahora, así que no se ha restaurado nada.")
         } catch RestoreError.reloadFailed {
-            // Lo escrito ya está en el disco: no se puede decir que los datos no cambiaron.
-            fail("No se pudo terminar. Cierra la app y vuelve a abrirla.")
+            // Lo escrito ya está en el disco: no se puede decir que los datos no cambiaron, y no se vuelve a ofrecer deslizar.
+            phase = .stuck("No se pudo terminar. Cierra la app y vuelve a abrirla.")
         } catch {
             fail("No se pudo restaurar. Tus datos no han cambiado.")
         }

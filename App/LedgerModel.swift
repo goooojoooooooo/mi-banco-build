@@ -44,7 +44,7 @@ final class LedgerModel {
         #if DEBUG
         if DemoMode.isActive {
             state = DemoMode.state()
-            snapshot = LedgerSnapshot(state: state)
+            snapshot = LedgerSnapshot(state: state, now: clock)
         }
         #endif
         reload()
@@ -56,10 +56,18 @@ final class LedgerModel {
         }
     }
 
+    /// El «ahora» del libro: el reloj (en la demo, `-MiBancoDemoToday` puede fijarlo para probar otros días).
+    private var clock: Date {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.now }
+        #endif
+        return Date()
+    }
+
     /// Si falla la lectura se conserva lo que ya se mostraba.
     func reload() {
         guard let loaded = loadNext() else { return }
-        if loaded != state || !Calendar.current.isDateInToday(snapshot.day) {
+        if loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock) {
             publish(loaded)
         }
     }
@@ -80,7 +88,7 @@ final class LedgerModel {
         staged?.cancel()
         staged = nil
         state = next
-        snapshot = LedgerSnapshot(state: next)
+        snapshot = LedgerSnapshot(state: next, now: clock)
         reschedule(next)
     }
 
@@ -114,7 +122,7 @@ final class LedgerModel {
             let animation: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.roll
             withAnimation(animation) {
                 self.state = next
-                self.snapshot = LedgerSnapshot(state: next)
+                self.snapshot = LedgerSnapshot(state: next, now: self.clock)
             }
             self.staged = nil
             self.reschedule(next)

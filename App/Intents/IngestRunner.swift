@@ -48,7 +48,7 @@ enum IngestRunner {
                 await AlertPoster.post(movement: m, balance: snap.after, estimated: snap.afterEstimated,
                                        balances: snap.balances, previousBalance: snap.before,
                                        merchantMonth: m.kind == .payment ? month : nil,
-                                       todaySpentCents: spentToday(snap.state.movements, now: now, calendar: calendar, notSpending: transfers))
+                                       todaySpentCents: spentToday(in: snap.state.movements, now: now, calendar: calendar, notSpending: transfers))
                 _ = await LiveActivityController.show(movement: m, balance: snap.after, estimated: snap.afterEstimated,
                                                       total: snap.total)
             }
@@ -64,14 +64,6 @@ enum IngestRunner {
             }
         case .ignored:
             break
-        }
-    }
-
-    /// Pagos tuyos de hoy (ni los "no es mío" ni los traspasos entre tus cuentas cuentan).
-    private static func spentToday(_ movements: [Movement], now: Date, calendar: Calendar, notSpending: Set<UUID>) -> Int {
-        let start = calendar.startOfDay(for: now)
-        return spendingMovements(in: movements, notSpending: notSpending).reduce(0) { sum, m in
-            m.date >= start && m.date <= now ? sum + abs(m.amountCents) : sum
         }
     }
 }

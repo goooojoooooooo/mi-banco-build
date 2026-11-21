@@ -76,3 +76,22 @@ public func budgetStatuses(in state: LedgerState, month: Date, now: Date, calend
     }
     return out
 }
+
+/// Lo que significa el texto de un campo de presupuesto.
+public enum BudgetInput: Equatable, Sendable {
+    /// Quitar el límite.
+    case remove
+    /// Un límite de tantos céntimos (siempre mayor que 0).
+    case set(Int)
+    /// Un texto que no se entiende como importe.
+    case invalid
+}
+
+/// Decide qué hace un texto de presupuesto. Un texto sin ninguna cifra y sin más que espacios (también el de no separación),
+/// «€», «,» y «.» quiere decir «quitar el límite», igual que el campo vacío: quien borra los números y deja « €» ha
+/// vaciado el campo. «0» y «0,00 €» también lo quitan; «120» y «120,00 €» son 120 €. Otra cosa («abc», «-», «-5») es inválida.
+public func parseBudgetInput(_ text: String) -> BudgetInput {
+    if text.allSatisfy({ $0.isWhitespace || $0 == "€" || $0 == "," || $0 == "." }) { return .remove }
+    guard let cents = parseBalanceInput(text), cents >= 0 else { return .invalid }
+    return cents > 0 ? .set(cents) : .remove
+}

@@ -228,6 +228,28 @@ private func tempDirectory() -> URL {
         #expect(try JSONDecoder().decode(LedgerState.self, from: saved) == a)
     }
 
+    /// R35: documenta el peligro que la hoja evita (tras «No se pudo terminar…» no ofrece deslizar otra vez): restaurar B por
+    /// segunda vez copia lo que hay en el disco, que ya es B, y la copia de A se pierde.
+    @Test func restaurarDosVecesLaMismaCopiaDejaBEnLaCopiaDeSeguridad() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        let afterFirst = try store.load()
+        let firstCopy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
+        #expect(firstCopy == a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        let secondCopy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
+        #expect(secondCopy == afterFirst)
+        #expect(secondCopy != a)
+        #expect(secondCopy.movements == b.movements)
+    }
+
     @Test func siFallaLaCopiaPreviaNoSeRestauraNada() throws {
         struct Boom: Error {}
         let dir = tempDirectory()

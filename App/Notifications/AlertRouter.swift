@@ -1,9 +1,10 @@
 import Foundation
+import MiBancoCore
 import Observation
 
 /// Adónde lleva un aviso tocado. Se lee del `userInfo` (claves `route` y `movementID`, que pone la app al publicarlo).
 struct AlertRoute: Equatable, Sendable {
-    enum Destination: Equatable, Sendable { case home, alerts, briefing }
+    enum Destination: Equatable, Sendable { case home, alerts, briefing, bank(BankID) }
     let destination: Destination
     /// Si el aviso habla de un movimiento, se abre su hoja.
     let movementID: UUID?
@@ -18,7 +19,8 @@ struct AlertRoute: Equatable, Sendable {
     }
 
     /// Avisos de movimiento (`MOVEMENT`): Inicio con su hoja. Aviso de la mañana (`BRIEFING`): Inicio (y regla normal del
-    /// resumen). Avisos de ideas y programados (`INSIGHT`): la pestaña Avisos.
+    /// resumen). Avisos de consentimiento (`BANK_CONSENT`): Ajustes › Bancos › ese banco. Avisos de ideas y programados
+    /// (`INSIGHT`): la pestaña Avisos.
     init(userInfo: [AnyHashable: Any]) {
         let id = (userInfo[Keys.movementID] as? String).flatMap(UUID.init(uuidString:))
         let route = userInfo[Keys.route] as? String
@@ -26,6 +28,12 @@ struct AlertRoute: Equatable, Sendable {
         switch route {
         case Keys.movementRoute: destination = .home
         case Keys.briefingRoute: destination = .briefing
+        case Keys.bankRoute:
+            if let raw = userInfo[Keys.bank] as? String, let bank = BankID(rawValue: raw) {
+                destination = .bank(bank)
+            } else {
+                destination = .alerts
+            }
         default: destination = .alerts
         }
         self.init(destination: destination, movementID: id)
@@ -35,9 +43,11 @@ struct AlertRoute: Equatable, Sendable {
         static let route = "route"
         static let movementID = "movementID"
         static let insightID = "insightID"
+        static let bank = "bank"
         static let movementRoute = "movement"
         static let insightRoute = "insight"
         static let briefingRoute = "briefing"
+        static let bankRoute = "bank"
     }
 }
 

@@ -1,0 +1,170 @@
+import MiBancoCore
+import SwiftUI
+
+/// Vista previa e importación de un extracto CSV (Plan 2, tarea 12).
+/// Muestra el resumen de movimientos nuevos / ya existentes / ignorados, el periodo, el último saldo (tapado en modo
+/// privado) y las operaciones de inversión separadas del gasto (R12).
+struct ImportStatementView: View {
+    let model: LedgerModel
+    var portfolio: PortfolioModel? = nil
+    let bank: BankID
+    let preview: ImportPreview
+    var onFinished: () -> Void = {}
+
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppPreferences.self) private var preferences
+
+    @State private var applied = false
+    @State private var errorText: String?
+    @State private var successTick = 0
+    @State private var errorTick = 0
+
+    private var hasNewOrLinked: Bool {
+        preview.report.added + preview.report.linked > 0
+    }
+
+    private var tradesCount: Int {
+        preview.statement.records.filter(\.excludedFromSpending).count
+    }
+
+    private var dateRangeText: String? {
+        guard let first = preview.statement.firstDate, let last = preview.statement.lastDate else { return nil }
+        let cal = DateText.madridCalendar
+        return "Del \(shortSpanishDate(first, calendar: cal, withYear: false)) al \(shortSpanishDate(last, calendar: cal, withYear: false))"
+    }
+
+    var body: some View {
+        let hidden = preferences.privateMode
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(spacing: 12) {
+                        BankLogo(bank: bank, size: 32)
+                        Text(bank.displayName)
+                            .titan(.option)
+                            .foregroundStyle(Theme.label2)
+                    }
+
+                    Text(importSummary(preview.report))
+                        .titan(.cardTitle)
+                        .foregroundStyle(Theme.label)
+                        .contentTransition(.numericText())
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("import-summary")
+
+                    if tradesCount > 0 {
+                        Text(tradesCount == 1 ? "1 operación de inversión" : "\(tradesCount) operaciones de inversión")
+                            .titan(.subtitle)
+                            .foregroundStyle(Theme.label2)
+                    }
+
+                    if let range = dateRangeText {
+                        Text(range)
+                            .titan(.subtitle)
+                            .foregroundStyle(Theme.label2)
+                            .accessibilityIdentifier("import-date-range")
+                    }
+
+                    if let latest = preview.statement.latestBalance {
+                        HStack(spacing: 6) {
+                            Text("Saldo del extracto:")
+                                .titan(.subtitle)
+                                .foregroundStyle(Theme.label2)
+                            Text(formatEUR(latest.cents))
+                                .titan(.subtitle)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(Theme.label)
+                                .privateAmount()
+                                .accessibilityLabel(hidden ? "importe oculto" : formatEUR(latest.cents))
+                        }
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("Saldo del extracto: \(spokenAmount(latest.cents, hidden: hidden))")
+                        .accessibilityIdentifier("import-latest-balance")
+                    }
+                }
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+
+                if let errorText {
+                    Text(errorText)
+                        .titan(.meta)
+                        .foregroundStyle(Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(spacing: 12) {
+                    Button(action: apply) {
+                        HStack(spacing: 8) {
+                            if applied {
+                                DrawnCheck(lineWidth: 2.5, color: Theme.canvas)
+                                    .frame(width: 18, height: 18)
+                            }
+                            Text(hasNewOrLinked ? "Importar" : "Nada nuevo que importar")
+                                .titan(.option)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundStyle(hasNewOrLinked ? Theme.canvas : Theme.label3)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(hasNewOrLinked ? Theme.label : Theme.grouped, in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.pressable)
+                    .disabled(!hasNewOrLinked || applied)
+                    .accessibilityIdentifier("import-confirm")
+
+                    Button {
+                        onFinished()
+                        dismiss()
+                    } label: {
+                        Text("Cancelar")
+                            .titan(.option)
+                            .foregroundStyle(Theme.label2)
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(Theme.grouped, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.pressable)
+                    .disabled(applied)
+                    .accessibilityIdentifier("import-cancel")
+                }
+            }
+            .padding(.horizontal, Theme.Space.gutter)
+            .padding(.top, 16)
+            .padding(.bottom, 32)
+        }
+        .scrollIndicators(.hidden)
+        .accessibilityIdentifier("import-statement-scroll")
+        .background(Theme.canvas.ignoresSafeArea())
+        .navigationTitle("Importar extracto de \(bank.displayName)")
+        .navigationBarTitleDisplayMode(.inline)
+        .sensoryFeedback(Haptics.success, trigger: successTick)
+        .sensoryFeedback(Haptics.error, trigger: errorTick)
+    }
+
+    private func apply() {
+        guard hasNewOrLinked, !applied else { return }
+        do {
+            _ = try model.applyImport(preview)
+            if bank == .tr, !preview.tradeRepublicRows.isEmpty, let portfolio {
+                _ = try? portfolio.mergeRows(preview.tradeRepublicRows)
+                if preferences.pricesEnabled {
+                    Task { await portfolio.refreshPrices(force: true) }
+                }
+            }
+            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                applied = true
+            }
+            successTick += 1
+            Task {
+                try? await Task.sleep(for: .milliseconds(320))
+                onFinished()
+                dismiss()
+            }
+        } catch {
+            errorText = "No se pudo guardar el extracto. Inténtalo de nuevo."
+            errorTick += 1
+        }
+    }
+}

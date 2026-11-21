@@ -148,6 +148,7 @@ extension Ledger {
                 } else {
                     state.movements[i].bankRef = nil
                     state.movements[i].bankStatus = nil
+                    state.movements[i].linkedAt = nil
                     state.movements[i].bookedDay = nil
                     // Si el mismo pago ya llegó apuntado como fila propia del banco, se funden en UN movimiento.
                     if let j = foldCandidate(for: state.movements[i], excluding: toDelete, batchRefs: batchRefs, calendar: calendar) {

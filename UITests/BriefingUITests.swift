@@ -50,16 +50,33 @@ final class BriefingUITests: XCTestCase {
         }
     }
 
-    /// Desplaza dentro del `ScrollView` de la hoja del resumen sin tirar desde el borde superior (evita cerrar la hoja).
-    private func scrollInBriefingSheet(to el: XCUIElement, maxSwipes: Int = 8) {
-        if el.waitForExistence(timeout: 2), el.isHittable { return }
+    private func isClearOfBottomBar(_ el: XCUIElement) -> Bool {
+        guard el.exists && el.isHittable else { return false }
+        let frame = el.frame
+        let screenH = app.windows.firstMatch.frame.height
+        guard screenH > 0, !frame.isEmpty else { return true }
+        return frame.minY >= 80 && frame.maxY <= screenH - 125
+    }
+
+    /// Desplaza dentro del `ScrollView` de la hoja del resumen sin tirar desde el borde superior (evita cerrar la hoja)
+    /// y dejando el elemento libre de la barra inferior («Vale»).
+    private func scrollInBriefingSheet(to el: XCUIElement, maxSwipes: Int = 10) {
+        if el.waitForExistence(timeout: 2), isClearOfBottomBar(el) { return }
         let scroller = app.scrollViews["briefing-scroll"].exists ? app.scrollViews["briefing-scroll"] : app.scrollViews.firstMatch
         for _ in 0..<maxSwipes {
-            if el.exists && el.isHittable { return }
-            scroller.swipeUp()
+            if isClearOfBottomBar(el) { return }
+            if el.exists && el.isHittable {
+                // Está visible pero cerca de la barra inferior («Vale»): un arrastre corto lo sube al centro.
+                let start = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.68))
+                let end = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.38))
+                start.press(forDuration: 0.05, thenDragTo: end)
+                if isClearOfBottomBar(el) { return }
+            } else {
+                scroller.swipeUp()
+            }
         }
         for _ in 0..<3 {
-            if el.exists && el.isHittable { return }
+            if isClearOfBottomBar(el) || (el.exists && el.isHittable) { return }
             let start = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
             let end = scroller.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.8))
             start.press(forDuration: 0.05, thenDragTo: end)

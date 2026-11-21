@@ -18,6 +18,7 @@ struct RootView: View {
     @State private var settingsFocus: BankID?
     @State private var settingsScroll: String?
     @State private var openAccountsRequest = false
+    @State private var openBankRequest: BankID?
     @State private var openBudgetsRequest = false
     @State private var selectHomeCard: AccountCard?
     /// La única hoja de la app: un movimiento, una posición, mover dinero, el resumen/asistente, compartir o restaurar.
@@ -28,6 +29,8 @@ struct RootView: View {
     @State private var importNotice: String?
     /// Sube al restaurar: Inicio se vuelve a montar con lo restaurado.
     @State private var restoreToken = 0
+    /// Sube al terminar la bienvenida: Inicio se monta por capas (Tarea 12).
+    @State private var onboardingRevealToken = 0
     /// Bloqueo y primer plano en vivo, para los cierres que llevan una copia de esta vista (ver `PresentationGate`).
     @State private var gate = PresentationGate()
     @State private var noticeTask: Task<Void, Never>?
@@ -60,49 +63,60 @@ struct RootView: View {
 
     var body: some View {
         let warnings = model.snapshot.warningInsightIDs
-        TabView(selection: $tab) {
-            Tab("Inicio", systemImage: "house", value: AppTab.home) {
-                HomeView(model: model, portfolio: portfolio, accountBook: accountBook,
-                         isVisible: tab == .home && !isLocked,
-                         revealToken: revealToken, zoom: zoom,
-                         detailOpen: sheet != nil,
-                         openDetail: { openDetail($0, zooms: true) },
-                         openPosition: openPosition,
-                         openMoveMoney: openMoveMoney,
-                         openBriefing: openManualBriefing,
-                         shareText: shareText,
-                         openSettings: openSettings,
-                         openInvestmentsSettings: openInvestmentsSettings,
-                         openAccounts: openAccounts,
-                         selectCardRequest: $selectHomeCard)
-                    .id(restoreToken)
-            }
-            Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
-                SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
-                             openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
-                             openBudgetsRequest: $openBudgetsRequest)
-            }
-            Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
-                AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
-                           onMorningRuleChanged: rescheduleMorningReminder)
-            }
-            .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
-            Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
-                SettingsScrollHost(scrollRequest: $settingsScroll) {
-                    SettingsView(model: model, portfolio: portfolio, accountBook: accountBook, briefing: briefing,
-                                 focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
-                                 present: present,
-                                 importBackup: { startImport(.backup) },
-                                 importTradeRepublic: { startImport(.tradeRepublic) })
+        let activeRevealToken = revealToken + onboardingRevealToken
+        ZStack {
+            if model.needsOnboarding {
+                OnboardingView(model: model, onFinish: completeOnboarding)
+                    .transition(.opacity)
+            } else {
+                TabView(selection: $tab) {
+                    Tab("Inicio", systemImage: "house", value: AppTab.home) {
+                        HomeView(model: model, portfolio: portfolio, accountBook: accountBook,
+                                 isVisible: tab == .home && !isLocked,
+                                 revealToken: activeRevealToken, zoom: zoom,
+                                 detailOpen: sheet != nil,
+                                 openDetail: { openDetail($0, zooms: true) },
+                                 openPosition: openPosition,
+                                 openMoveMoney: openMoveMoney,
+                                 openBriefing: openManualBriefing,
+                                 shareText: shareText,
+                                 openSettings: openSettings,
+                                 openBankSettings: openBankSettings,
+                                 openInvestmentsSettings: openInvestmentsSettings,
+                                 openAccounts: openAccounts,
+                                 selectCardRequest: $selectHomeCard)
+                            .id(restoreToken)
+                    }
+                    Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
+                        SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
+                                     openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
+                                     openBudgetsRequest: $openBudgetsRequest)
+                    }
+                    Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
+                        AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
+                                   onMorningRuleChanged: rescheduleMorningReminder)
+                    }
+                    .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
+                    Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
+                        SettingsScrollHost(scrollRequest: $settingsScroll) {
+                            SettingsView(model: model, portfolio: portfolio, accountBook: accountBook, briefing: briefing,
+                                         focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
+                                         openBankRequest: $openBankRequest,
+                                         present: present,
+                                         importBackup: { startImport(.backup) },
+                                         importTradeRepublic: { startImport(.tradeRepublic) })
+                        }
+                    }
                 }
+                .modifier(MinimizesTabBarOnScroll())
+                .overlay(alignment: .bottom) {
+                    TabBarCurtain(token: activeRevealToken)
+                }
+                .transition(.opacity)
             }
         }
         .tint(Theme.label)
         .environment(\.presentationGate, gate)
-        .modifier(MinimizesTabBarOnScroll())
-        .overlay(alignment: .bottom) {
-            TabBarCurtain(token: revealToken)
-        }
         // La única hoja de la app. Se cierra al bloquear y en cuanto la app deja de estar activa (selector de apps,
         // segundo plano): nunca queda encima del bloqueo ni en la captura del selector, y no se vuelve a abrir sola.
         .sheet(item: $sheet, onDismiss: deletePending) { item in
@@ -343,6 +357,11 @@ struct RootView: View {
         tab = .settings
     }
 
+    private func openBankSettings(_ bank: BankID) {
+        openBankRequest = bank
+        tab = .settings
+    }
+
     private func openInvestmentsSettings() {
         settingsScroll = InvestmentsSection.scrollID
         tab = .settings
@@ -391,6 +410,11 @@ struct RootView: View {
             suppressBriefingForActivation = false
             tab = .home
             scheduleBriefingCheck(delay: .milliseconds(350))
+        case .bank(let bank):
+            suppressBriefingForActivation = true
+            briefingTask?.cancel()
+            briefingTask = nil
+            openBankSettings(bank)
         }
         if let id = route.movementID {
             // Tras el cambio de pestaña, para que la hoja suba sobre la pantalla buena.
@@ -417,8 +441,20 @@ struct RootView: View {
         }
     }
 
+    private func completeOnboarding(openBanksSettings: Bool) {
+        briefing.markOnboardingCompleted()
+        if openBanksSettings {
+            tab = .settings
+        }
+        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.unlock) {
+            model.finishOnboarding()
+            onboardingRevealToken += 1
+        }
+        rescheduleMorningReminder()
+    }
+
     private func considerBriefing() {
-        guard gate.canPresent, !isLocked, isForeground, sheet == nil, !importing,
+        guard gate.canPresent, !isLocked, isForeground, !model.needsOnboarding, sheet == nil, !importing,
               router.pending == nil, routeTask == nil, !suppressBriefingForActivation else { return }
         let now = Date()
         guard let due = briefing.dueRecord(now: now) else { return }
@@ -470,7 +506,7 @@ struct RootView: View {
                 openMoveMoney(MoveRequest(from: from, target: .own(to), amountCents: cents))
             }
         case .openBankSettings(let bank):
-            openSettings(bank)
+            openBankSettings(bank)
         case .openBudgets:
             openBudgetsRequest = true
             tab = .spending

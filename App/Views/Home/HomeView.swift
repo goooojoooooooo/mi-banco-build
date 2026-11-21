@@ -22,6 +22,7 @@ struct HomeView: View {
     let openBriefing: () -> Void
     let shareText: (String) -> Void
     let openSettings: (BankID?) -> Void
+    var openBankSettings: (BankID) -> Void = { _ in }
     let openInvestmentsSettings: () -> Void
     let openAccounts: () -> Void
     @Binding var selectCardRequest: AccountCard?
@@ -62,11 +63,12 @@ struct HomeView: View {
                     SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains,
                                   ownTransfers: snapshot.ownTransfers, query: query, zoom: zoom, onOpen: open)
                 } else if snapshot.total != nil || portfolio.hasPositions {
-                    CardCarousel(snapshot: snapshot, cards: cards,
+                    CardCarousel(snapshot: snapshot, links: model.state.links, cards: cards,
                                  portfolioSummary: portfolio.summary,
                                  portfolioLastImport: portfolio.portfolio.lastImport,
                                  selection: $selection, flipped: $flipped, motion: motion,
                                  onEdit: openSettings,
+                                 onOpenBank: openBankSettings,
                                  onImportInvestments: openInvestmentsSettings)
                         .modifier(CarouselParallax(motion: motion, enabled: !reduceMotion))
                         .staggeredEntrance(1, rise: 36, scale: 0.97)
@@ -354,6 +356,9 @@ struct HomeView: View {
             selection = card
             listCard = card
             quietSelection = false
+        }
+        if DemoMode.startsFlipped {
+            flipped = selection ?? .all
         }
         // `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente por el mismo camino que un toque en el segmentado.
         if DemoMode.switchesCard {

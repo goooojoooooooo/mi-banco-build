@@ -86,6 +86,11 @@ final class BriefingModel {
         }
     }
 
+    /// Al terminar la bienvenida se guarda el registro de hoy para que no salga un resumen vacío justo detrás (Tarea 12).
+    func markOnboardingCompleted(now: Date = Date()) {
+        markShown(BriefingRecord(shownAt: now, since: now))
+    }
+
     func setSheetVisible(_ visible: Bool) {
         isSheetVisible = visible
         if !visible {

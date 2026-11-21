@@ -73,6 +73,9 @@ enum BankingCredentials {
     }
 
     static func client() throws -> EnableBankingClient {
+        #if DEBUG
+        if DemoMode.isActive { throw BankingCredentialsError.unreadable }
+        #endif
         guard let idData = try KeychainVault.data(for: .appID), let appID = String(data: idData, encoding: .utf8),
               let der = try KeychainVault.data(for: .privateKey) else {
             throw BankingCredentialsError.invalidKey
@@ -85,6 +88,9 @@ enum BankingCredentials {
     /// Mejor esfuerzo: cierra las sesiones en el banco, borra todo el Llavero y deja los saldos del banco como
     /// manuales con el mismo valor. Los fallos no se propagan: desconectar nunca debe quedarse a medias.
     static func forgetEverything() async {
+        await MainActor.run {
+            BankConnector.shared.cancelWebSession()
+        }
         if let client = try? client() {
             for bank in BankID.allCases {
                 if let session = try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)) {
@@ -101,5 +107,7 @@ enum BankingCredentials {
                 }
             }
         }
+        await BankReminders.reschedule(links: [:])
+        NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
     }
 }

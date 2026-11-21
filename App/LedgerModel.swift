@@ -21,6 +21,18 @@ struct Arrival: Equatable, Sendable {
     let amountCents: Int
 }
 
+/// Vista previa de un extracto CSV antes de aplicarlo al libro (Plan 2, tarea 12).
+struct ImportPreview: Equatable, Sendable, Identifiable {
+    let id = UUID()
+    let statement: ParsedStatement
+    let report: ReconcileReport
+    var tradeRepublicRows: [TradeRepublicRow] = []
+
+    static func == (a: ImportPreview, b: ImportPreview) -> Bool {
+        a.statement == b.statement && a.report == b.report && a.tradeRepublicRows == b.tradeRepublicRows
+    }
+}
+
 @MainActor @Observable
 final class LedgerModel {
     private(set) var state = LedgerState()
@@ -41,10 +53,40 @@ final class LedgerModel {
     /// Presupuestos escritos que no se entienden («abc»): se quedan (solo en memoria) para enseñarlos con su error al
     /// volver a la pantalla, en vez de perderse sin decir nada.
     @ObservationIgnored var budgetDrafts: [BudgetScope: String] = [:]
+    private static let onboardingDoneKey = "onboardingDone"
+    /// Una vez arrancada la bienvenida de primera ejecución, sigue activa durante los 3 pasos aunque el paso 1 guarde saldos.
+    private(set) var onboardingSessionActive = false
+    private(set) var demoOnboardingFinished = false
     #if DEBUG
     /// Demo: lo que "escribiría el intent en el almacén"; `reload` lo recoge como si lo leyera de disco.
     @ObservationIgnored private var demoIncoming: LedgerState?
     #endif
+
+    var needsOnboarding: Bool {
+        #if DEBUG
+        if DemoMode.isActive {
+            return DemoMode.onboardingStep != nil && !demoOnboardingFinished
+        }
+        #endif
+        return onboardingSessionActive || (
+            !UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+                && state.balances.isEmpty
+                && state.movements.isEmpty
+        )
+    }
+
+    func finishOnboarding() {
+        onboardingSessionActive = false
+        #if DEBUG
+        if DemoMode.isActive {
+            demoOnboardingFinished = true
+            publish(state)
+            return
+        }
+        #endif
+        UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+        publish(state)
+    }
 
     init() {
         store = SharedStore.make()
@@ -55,6 +97,19 @@ final class LedgerModel {
         }
         #endif
         reload()
+        #if DEBUG
+        if DemoMode.isActive {
+            onboardingSessionActive = DemoMode.onboardingStep != nil
+        } else {
+            onboardingSessionActive = !UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+                && state.balances.isEmpty
+                && state.movements.isEmpty
+        }
+        #else
+        onboardingSessionActive = !UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+            && state.balances.isEmpty
+            && state.movements.isEmpty
+        #endif
         observer = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .ledgerDidChange) {
                 guard let model = self else { break }
@@ -297,6 +352,37 @@ final class LedgerModel {
 
     func setBudget(_ cents: Int?, for category: SpendingCategory) throws {
         try mutate { $0.setBudget(cents, for: category) }
+    }
+
+    func previewImport(_ data: Data, bank: BankID, now: Date = Date()) throws -> ImportPreview {
+        let cal = DateText.madridCalendar
+        let statement = try parseStatement(data, expected: bank, now: now, calendar: cal)
+        let report = Ledger(state: state).previewImport(statement, now: now, calendar: cal)
+        let trRows: [TradeRepublicRow]
+        if bank == .tr, let table = try? CSVTable.parse(data), let rows = try? parseTradeRepublicExport(table, calendar: cal) {
+            trRows = rows
+        } else {
+            trRows = []
+        }
+        return ImportPreview(statement: statement, report: report, tradeRepublicRows: trRows)
+    }
+
+    @discardableResult
+    func applyImport(_ preview: ImportPreview, now: Date = Date()) throws -> ReconcileReport {
+        let cal = DateText.madridCalendar
+        #if DEBUG
+        if DemoMode.isActive {
+            var ledger = Ledger(state: state)
+            let report = ledger.importStatement(preview.statement, now: now, calendar: cal)
+            publish(ledger.state)
+            return report
+        }
+        #endif
+        let report = try store.update { ledger -> ReconcileReport in
+            ledger.importStatement(preview.statement, now: now, calendar: cal)
+        }
+        reload()
+        return report
     }
 
     /// Restaura una copia: antes guarda lo actual como `ledger-antes-de-restaurar.json`, las dos cosas dentro de una sola

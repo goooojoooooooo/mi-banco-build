@@ -6,6 +6,8 @@ import MiBancoCore
 struct AccountCardView: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
+    var links: [BankID: BankLinkInfo] = [:]
+    var bankLines: [BankID: BankStatusLines] = [:]
     let total: Int?
     let monthSpent: Int
     var portfolioSummary: PortfolioSummary? = nil
@@ -15,12 +17,13 @@ struct AccountCardView: View {
     let revealed: Bool
     let onFlip: () -> Void
     let onEdit: () -> Void
+    var onOpenBank: (BankID) -> Void = { _ in }
     var onImportInvestments: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        // La cara delantera es un botón (se hunde al tocar); la trasera lleva su propio botón "Editar saldo",
+        // La cara delantera es un botón (se hunde al tocar); la trasera lleva su propio botón de acción,
         // así que se voltea de vuelta con un toque en cualquier otro sitio.
         ZStack {
             Button(action: onFlip) {
@@ -38,11 +41,14 @@ struct AccountCardView: View {
             CardBack(
                 card: card,
                 balances: balances,
+                links: links,
+                bankLines: bankLines,
                 monthSpent: monthSpent,
                 portfolioSummary: portfolioSummary,
                 portfolioLastImport: portfolioLastImport,
                 flipped: flipped,
                 onEdit: onEdit,
+                onOpenBank: onOpenBank,
                 onImportInvestments: onImportInvestments
             )
                 .contentShape(.rect(cornerRadius: Theme.Radius.card))
@@ -275,14 +281,21 @@ private struct CardFront: View {
 private struct CardBack: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
+    let links: [BankID: BankLinkInfo]
+    let bankLines: [BankID: BankStatusLines]
     let monthSpent: Int
     let portfolioSummary: PortfolioSummary?
     let portfolioLastImport: Date?
     let flipped: Bool
     let onEdit: () -> Void
+    let onOpenBank: (BankID) -> Void
     let onImportInvestments: () -> Void
 
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var refreshing = false
+    @State private var refreshedCheck = false
+
     private var secondary: Color { contrast == .increased ? Theme.card2High : Theme.card2 }
 
     var body: some View {
@@ -313,8 +326,17 @@ private struct CardBack: View {
                 Text(explanation)
                     .titan(.subtitle)
                     .foregroundStyle(secondary)
+                    .contentTransition(.numericText())
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 4)
+
+                if let secondaryExplanation {
+                    Text(secondaryExplanation)
+                        .titan(.meta)
+                        .foregroundStyle(secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
 
                 Spacer(minLength: 16)
 
@@ -326,16 +348,7 @@ private struct CardBack: View {
                             .privateAmount()
                     }
                     Spacer(minLength: 0)
-                    Button(action: onEdit) {
-                        Text(card == .all ? "Editar saldos" : "Editar saldo")
-                            .titan(.option)
-                            .foregroundStyle(.black)
-                            .padding(.horizontal, 16)
-                            .frame(minHeight: 44)
-                            .background(.white, in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.pressable)
+                    trailingActionButton
                 }
             }
         }
@@ -344,6 +357,94 @@ private struct CardBack: View {
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity, minHeight: CarouselMetrics.minHeight, maxHeight: .infinity, alignment: .topLeading)
         .background(CardSurface(material: card.material, moves: false))
+    }
+
+    @ViewBuilder
+    private var trailingActionButton: some View {
+        if let bank = card.bank, links[bank] != nil {
+            let action = bankLines[bank]?.action
+            let isSyncing = refreshing || BankSyncStatus.shared.running.contains(bank)
+            switch action {
+            case .refresh:
+                Button {
+                    refreshConnectedBank(bank)
+                } label: {
+                    HStack(spacing: 8) {
+                        if isSyncing {
+                            ProgressView()
+                                .tint(.black)
+                                .controlSize(.small)
+                        } else if refreshedCheck {
+                            DrawnCheck(lineWidth: 2, color: .black)
+                                .frame(width: 14, height: 14)
+                                .transition(.opacity)
+                        }
+                        Text("Actualizar")
+                            .titan(.option)
+                            .foregroundStyle(.black)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 44)
+                    .background(.white, in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .disabled(isSyncing)
+
+            case .renew:
+                capsuleAction("Renovar") { onOpenBank(bank) }
+
+            case .connect:
+                capsuleAction("Conectar") { onOpenBank(bank) }
+
+            case .importStatement:
+                capsuleAction("Importar") { onOpenBank(bank) }
+
+            case .editBalance, nil:
+                if isSyncing {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .tint(.black)
+                            .controlSize(.small)
+                        Text("Actualizar")
+                            .titan(.option)
+                            .foregroundStyle(.black)
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 44)
+                    .background(.white, in: Capsule())
+                } else {
+                    capsuleAction("Editar saldo", action: onEdit)
+                }
+            }
+        } else {
+            capsuleAction(card == .all ? "Editar saldos" : "Editar saldo", action: onEdit)
+        }
+    }
+
+    private func capsuleAction(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .titan(.option)
+                .foregroundStyle(.black)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .background(.white, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+    }
+
+    private func refreshConnectedBank(_ bank: BankID) {
+        guard !refreshing, !BankSyncStatus.shared.running.contains(bank) else { return }
+        refreshing = true
+        Task {
+            _ = await BankSync.shared.refresh(trigger: .manual, only: bank)
+            refreshing = false
+            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { refreshedCheck = true }
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation(.easeOut(duration: 0.25)) { refreshedCheck = false }
+        }
     }
 
     @ViewBuilder
@@ -396,16 +497,48 @@ private struct CardBack: View {
 
     private var explanation: String {
         guard let bank = card.bank else {
+            let fromBank = BankID.allCases.filter { balances[$0]?.origin == .bank }.map(\.displayName)
+            if !fromBank.isEmpty {
+                let bankVerb = fromBank.count == 1 ? "viene del banco" : "vienen del banco"
+                let bankPart = "\(spanishJoin(fromBank)) \(bankVerb)"
+                let restEstimated = BankID.allCases
+                    .filter { balances[$0]?.origin != .bank && (balances[$0]?.estimated ?? false) }
+                    .map(\.displayName)
+                if restEstimated.isEmpty {
+                    return "\(bankPart)."
+                }
+                let estVerb = restEstimated.count == 1 ? "es estimado" : "son estimados"
+                return "\(bankPart); \(spanishJoin(restEstimated)) \(estVerb)."
+            }
             let estimated = BankID.allCases.filter { balances[$0]?.estimated ?? false }.map(\.displayName)
             switch estimated.count {
             case 0: return "Los tres saldos son exactos: vienen del último aviso de cada banco."
             case 1: return "\(estimated[0]) es estimado: su aviso no trae el saldo, así que lo calculamos."
             default:
-                let list = estimated.dropLast().joined(separator: ", ") + " y " + (estimated.last ?? "")
+                let list = spanishJoin(estimated)
                 return "\(list) son estimados: sus avisos no traen el saldo, así que los calculamos."
             }
         }
+        if links[bank] != nil {
+            if refreshing || BankSyncStatus.shared.running.contains(bank) {
+                return "Conectado · actualizando…"
+            }
+            if let primary = bankLines[bank]?.primary {
+                return primary
+            }
+        }
         return DateText.balanceExplanation(balances[bank], bank: bank)
+    }
+
+    private var secondaryExplanation: String? {
+        guard let bank = card.bank, links[bank] != nil else { return nil }
+        return bankLines[bank]?.secondary
+    }
+
+    private func spanishJoin(_ names: [String]) -> String {
+        guard names.count > 1, let last = names.last else { return names.first ?? "" }
+        let conj = last.lowercased().hasPrefix("i") ? " e " : " y "
+        return names.dropLast().joined(separator: ", ") + conj + last
     }
 }
 

@@ -66,18 +66,31 @@ struct MovementRowView: View {
                             .titan(.row)
                             .foregroundStyle(Theme.label)
                             .lineLimit(stacked ? nil : 1)
-                        HStack(spacing: 4) {
-                            if movement.flaggedNotMine {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(Theme.warning)
-                                    .transition(.scale.combined(with: .opacity))
+                        if !row.subtitle.isEmpty || row.unconfirmed || movement.flaggedNotMine {
+                            HStack(spacing: 4) {
+                                if movement.flaggedNotMine {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundStyle(Theme.warning)
+                                        .transition(.scale.combined(with: .opacity))
+                                }
+                                if row.unconfirmed {
+                                    if row.subtitle.isEmpty {
+                                        Text("Sin confirmar por el banco")
+                                            .foregroundStyle(Theme.warning)
+                                            .lineLimit(1)
+                                    } else {
+                                        Text("\(row.subtitle)\(Text(" · Sin confirmar por el banco").foregroundStyle(Theme.warning))")
+                                            .lineLimit(1)
+                                    }
+                                } else if !row.subtitle.isEmpty {
+                                    Text(row.subtitle)
+                                        .lineLimit(1)
+                                }
                             }
-                            Text(row.subtitle)
-                                .lineLimit(1)
+                            .titan(.subtitle)
+                            .foregroundStyle(Theme.label3)
                         }
-                        .titan(.subtitle)
-                        .foregroundStyle(Theme.label3)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -138,8 +151,10 @@ struct MovementRowView: View {
     private var spoken: String {
         let what = movement.amountCents < 0 ? "pago de" : "ingreso de"
         var text = "\(row.title), \(what) \(spokenAmount(abs(movement.amountCents), hidden: preferences.privateMode)). "
-        text += "\(movement.bank.displayName), \(DateText.moment(movement.date))"
+        text += "\(movement.bank.displayName), \(DateText.moment(movement.date, dayOnly: movement.dayOnly))"
         if let note = movement.note { text += ". Nota: \(note)" }
+        if movement.bankStatus == .pending { text += ". Pendiente" }
+        if row.unconfirmed { text += ". Sin confirmar por el banco" }
         if movement.flaggedNotMine { text += ". Marcado como no es mío" }
         return text
     }

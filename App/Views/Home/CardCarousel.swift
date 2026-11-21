@@ -7,6 +7,7 @@ import MiBancoCore
 /// nunca del `body`. Para VoiceOver es un solo elemento ajustable: "Cuenta, Revolut, 340,20 euros, 2 de 4".
 struct CardCarousel: View {
     let snapshot: LedgerSnapshot
+    var links: [BankID: BankLinkInfo] = [:]
     let cards: [AccountCard]
     var portfolioSummary: PortfolioSummary? = nil
     var portfolioLastImport: Date? = nil
@@ -14,6 +15,7 @@ struct CardCarousel: View {
     @Binding var flipped: AccountCard?
     let motion: HomeMotion
     let onEdit: (BankID?) -> Void
+    var onOpenBank: (BankID) -> Void = { _ in }
     var onImportInvestments: () -> Void = {}
 
     /// Tarjetas que ya se han visto: su cifra contó desde 0 la primera vez.
@@ -41,13 +43,16 @@ struct CardCarousel: View {
             HStack(spacing: CarouselMetrics.spacing) {
                 ForEach(cards, id: \.self) { card in
                     AccountCardView(
-                        card: card, balances: snapshot.balances, total: snapshot.total,
+                        card: card, balances: snapshot.balances,
+                        links: links, bankLines: snapshot.bankLines,
+                        total: snapshot.total,
                         monthSpent: snapshot.monthSpent[card] ?? 0,
                         portfolioSummary: portfolioSummary,
                         portfolioLastImport: portfolioLastImport,
                         flipped: flipped == card,
                         revealed: seen.contains(card),
                         onFlip: { tap(card) }, onEdit: { onEdit(card.bank) },
+                        onOpenBank: onOpenBank,
                         onImportInvestments: onImportInvestments)
                         .containerRelativeFrame(.horizontal)
                         .frame(maxHeight: .infinity)
@@ -137,6 +142,15 @@ struct CardCarousel: View {
         .accessibilityAction(named: primaryAccessibilityActionTitle) {
             if current == .investments {
                 onImportInvestments()
+            } else if let bank = current.bank, links[bank] != nil {
+                switch snapshot.bankLines[bank]?.action {
+                case .refresh:
+                    Task { _ = await BankSync.shared.refresh(trigger: .manual, only: bank) }
+                case .renew, .connect, .importStatement:
+                    onOpenBank(bank)
+                case .editBalance, nil:
+                    onEdit(bank)
+                }
             } else {
                 onEdit(current.bank)
             }
@@ -145,9 +159,21 @@ struct CardCarousel: View {
 
     private var primaryAccessibilityActionTitle: String {
         switch current {
-        case .all: "Editar saldos"
-        case .investments: "Importar de nuevo"
-        case .rev, .ima, .tr: "Editar saldo"
+        case .all:
+            return "Editar saldos"
+        case .investments:
+            return "Importar de nuevo"
+        case .rev, .ima, .tr:
+            if let bank = current.bank, links[bank] != nil {
+                switch snapshot.bankLines[bank]?.action {
+                case .refresh: return "Actualizar"
+                case .renew: return "Renovar"
+                case .connect: return "Conectar"
+                case .importStatement: return "Importar"
+                case .editBalance, nil: return "Editar saldo"
+                }
+            }
+            return "Editar saldo"
         }
     }
 

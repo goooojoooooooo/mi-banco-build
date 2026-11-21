@@ -101,6 +101,13 @@ jobs:
           shot resumen 12 -MiBancoDemoBriefing busy
           shot resumen-tranquilo 12 -MiBancoDemoBriefing quiet
           shot resumen-privado 12 -MiBancoDemoBriefing busy -MiBancoDemoPrivate
+          shot bancos 10 -MiBancoDemoScreen ajustes -MiBancoDemoBanks
+          shot guia 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuide
+          shot importar 10 -MiBancoDemoScreen ajustes -MiBancoDemoImport
+          shot reverso-revolut 10 -MiBancoDemoCard rev -MiBancoDemoFlip -MiBancoDemoBanks
+          shot bienvenida-1 10 -MiBancoDemoOnboarding 1
+          shot bienvenida-2 10 -MiBancoDemoOnboarding 2
+          shot bienvenida-3 10 -MiBancoDemoOnboarding 3
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.

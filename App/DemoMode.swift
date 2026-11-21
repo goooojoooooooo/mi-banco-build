@@ -54,6 +54,36 @@ enum DemoMode {
     static var opensUpcoming: Bool { arguments.contains("-MiBancoDemoUpcoming") }
     static var briefingMode: BriefingMode? { value(after: "-MiBancoDemoBriefing").flatMap(BriefingMode.init(rawValue:)) }
     static var briefingShortfall: Bool { arguments.contains("-MiBancoDemoShortfall") }
+    static var banksConnected: Bool { arguments.contains("-MiBancoDemoBanks") }
+    static var opensConnectionGuide: Bool { arguments.contains("-MiBancoDemoGuide") }
+    static var opensStatementImport: Bool { arguments.contains("-MiBancoDemoImport") }
+    static var startsFlipped: Bool { arguments.contains("-MiBancoDemoFlip") }
+    static var onboardingStep: Int? { value(after: "-MiBancoDemoOnboarding").flatMap(Int.init) }
+
+    /// Extracto sintético de Revolut (muestra de la Tarea 6 con fechas desplazadas ~40 días atrás para que nada enlace
+    /// y el resumen sea exactamente «3 movimientos nuevos, 3 filas ignoradas», con saldo 327,70 €).
+    static func sampleRevolutStatementData(now: Date = Date()) -> Data {
+        let cal = DateText.madridCalendar
+        let today = cal.startOfDay(for: now)
+        func fmt(_ daysAgo: Int, _ time: String) -> String {
+            let d = cal.date(byAdding: .day, value: -daysAgo, to: today) ?? today
+            let c = cal.dateComponents([.year, .month, .day], from: d)
+            let y = String(format: "%04d", c.year ?? 2026)
+            let m = String(format: "%02d", c.month ?? 10)
+            let day = String(format: "%02d", c.day ?? 10)
+            return "\(y)-\(m)-\(day) \(time)"
+        }
+        let header = "Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance"
+        let rows = [
+            "Transfer,Current,\(fmt(42, "10:00:00")),\(fmt(42, "10:00:01")),To USD,-20.00,0.50,EUR,COMPLETED,240.20",
+            "Topup,Current,\(fmt(41, "08:00:00")),\(fmt(41, "08:00:01")),Apple Pay Top-Up,100.00,0.00,EUR,COMPLETED,340.20",
+            "Card Payment,Current,\(fmt(40, "13:05:11")),\(fmt(39, "09:00:00")),Mercadona,-12.50,0.00,EUR,COMPLETED,327.70",
+            "Card Payment,Current,\(fmt(40, "20:00:00")),,Bolt,-7.30,0.00,EUR,PENDING,",
+            "Card Payment,Savings,\(fmt(48, "10:00:00")),\(fmt(48, "10:00:00")),Vault,-5.00,0.00,EUR,COMPLETED,10.00",
+            "Card Payment,Current,\(fmt(43, "10:00:00")),\(fmt(43, "10:00:00")),Shop US,-3.00,0.00,USD,COMPLETED,1.00",
+        ]
+        return Data((([header] + rows).joined(separator: "\n") + "\n").utf8)
+    }
 
     /// Cuaderno de cuentas de demo: solo IBANs de ejemplo publicados (ES91, DE89, GB82) y un contacto inventado.
     static func accountBook() -> AccountBook {
@@ -244,6 +274,9 @@ enum DemoMode {
     /// Hay historia para que salgan los avisos: Spotify sube de 9,99 a 10,99, Netflix se cobra en 3 días, una nómina,
     /// gasto repartido por el mes pasado (frase del ritmo) y compras previas en Mercadona (historial del comercio).
     static func state(now: Date = Date()) -> LedgerState {
+        if onboardingStep != nil {
+            return LedgerState()
+        }
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: now)
 
@@ -263,12 +296,20 @@ enum DemoMode {
             calendar.date(byAdding: .month, value: -months, to: date) ?? date
         }
 
-        let balances: [BankID: ManualBalance] = [
-            // Revolut dio el saldo en el propio aviso de Mercadona (mismo instante): su "Te quedaban" se conoce.
-            .rev: ManualBalance(cents: 34_020, setAt: day(0), fromBank: true),
-            .ima: ManualBalance(cents: 128_455, setAt: now, fromBank: false),
-            .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
-        ]
+        let balances: [BankID: ManualBalance] = if banksConnected {
+            [
+                .rev: ManualBalance(cents: 34_020, setAt: now, fromBank: true, origin: .bank, fetchedAt: now),
+                .ima: ManualBalance(cents: 128_455, setAt: now, fromBank: true, origin: .bank, fetchedAt: now),
+                .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
+            ]
+        } else {
+            [
+                // Revolut dio el saldo en el propio aviso de Mercadona (mismo instante): su "Te quedaban" se conoce.
+                .rev: ManualBalance(cents: 34_020, setAt: day(0), fromBank: true),
+                .ima: ManualBalance(cents: 128_455, setAt: now, fromBank: false),
+                .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
+            ]
+        }
 
         // Gasto: lo de este mes se fecha siempre dentro del mes en curso y nunca en el futuro, sea el día que sea.
         // Hora fija (R19): el día sale de la fracción del mes transcurrido y la hora es siempre las 9:00 (hoy, las 0:30),
@@ -362,8 +403,51 @@ enum DemoMode {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.
             movements.append(movement(.ima, -3_900, "Tesla", day(0).addingTimeInterval(-120)))
         }
+
+        var links: [BankID: BankLinkInfo] = [:]
+        if banksConnected {
+            let madrid = DateText.madridCalendar
+            let revValid = madrid.date(from: DateComponents(year: 2027, month: 5, day: 19, hour: 10))
+                ?? now.addingTimeInterval(180 * 86_400)
+            let imaValid = madrid.date(byAdding: .day, value: 9, to: madrid.startOfDay(for: now))?.addingTimeInterval(12 * 3600)
+                ?? now.addingTimeInterval(9 * 86_400)
+            links[.rev] = BankLinkInfo(
+                connectedAt: now.addingTimeInterval(-30 * 86_400),
+                consentValidUntil: revValid,
+                lastAttemptAt: now.addingTimeInterval(-5 * 60),
+                lastSuccessAt: now.addingTimeInterval(-5 * 60),
+                historyLoaded: true
+            )
+            links[.ima] = BankLinkInfo(
+                connectedAt: now.addingTimeInterval(-81 * 86_400),
+                consentValidUntil: imaValid,
+                lastAttemptAt: now.addingTimeInterval(-15 * 60),
+                lastSuccessAt: now.addingTimeInterval(-15 * 60),
+                historyLoaded: true
+            )
+            // En modo conectado, el pago más reciente de Revolut aparece como «Pendiente» y todos los antiguos de Revolut e
+            // imagin salvo uno (-14,35 € en Mercadona hace 12 días) están confirmados por el banco.
+            for i in movements.indices {
+                let m = movements[i]
+                guard m.bank == .rev || m.bank == .ima else { continue }
+                if i == 0 {
+                    movements[i].bankRef = "demo-rev-pending-0"
+                    movements[i].bankStatus = .pending
+                    movements[i].linkedAt = m.date
+                } else if m.bank == .rev && m.amountCents == -1_435 && m.merchant == "Mercadona" {
+                    // Se deja sin bankRef para que unconfirmedCaptures lo marque «Sin confirmar por el banco».
+                    continue
+                } else {
+                    movements[i].bankRef = "demo-\(m.bank.rawValue)-\(i)"
+                    movements[i].bankStatus = .booked
+                    movements[i].linkedAt = m.date
+                }
+            }
+        }
+
         return LedgerState(balances: balances, movements: movements, unread: [],
-                           budgets: Budgets(monthlyCents: 70_000, byCategory: [.comerFuera: 9_000]))
+                           budgets: Budgets(monthlyCents: 70_000, byCategory: [.comerFuera: 9_000]),
+                           links: links)
     }
 }
 #endif

@@ -12,6 +12,8 @@ struct SettingsView: View {
     @Binding var focusRequest: BankID?
     /// Pedido desde Inicio ("Añadir IBAN") o demo: abre «Cuentas y contactos».
     @Binding var openAccountsRequest: Bool
+    /// Pedido desde un aviso de consentimiento, el resumen o el reverso de una tarjeta: abre ese banco en «Bancos».
+    @Binding var openBankRequest: BankID?
     /// Copia de seguridad e importación: abren la hoja raíz y el selector de archivos único.
     var present: (RootSheet) -> Void = { _ in }
     var importBackup: () -> Void = {}
@@ -32,16 +34,88 @@ struct SettingsView: View {
     /// Solo los campos que el usuario ha editado se guardan; el resto sigue al modelo.
     @State private var dirty: Set<BankID> = []
     @State private var showAccounts = false
+    @State private var pushedBank: BankID?
+    @State private var showConnectionGuide = false
     @FocusState private var focused: BankID?
+
+    private var showsPrepareConnectionRow: Bool {
+        #if DEBUG
+        if DemoMode.isActive {
+            return !DemoMode.banksConnected
+        }
+        #endif
+        return !BankingCredentials.isReady
+    }
+
+    private func bankPrimaryStatus(for bank: BankID) -> String {
+        if BankSyncStatus.shared.running.contains(bank) {
+            return "Conectado · actualizando…"
+        }
+        return model.snapshot.bankLines[bank]?.primary ?? "Sin conectar"
+    }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
                     ForEach(BankID.allCases, id: \.self) { bank in
-                        BalanceRow(bank: bank, info: model.snapshot.balances[bank], text: binding(bank),
-                                   error: errors[bank], saved: savedFlash.contains(bank), focused: $focused,
-                                   onSubmit: { commit(bank) })
+                        Button {
+                            pushedBank = bank
+                        } label: {
+                            HStack(spacing: 14) {
+                                BankLogo(bank: bank, size: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(bank.displayName)
+                                        .titan(.option)
+                                        .foregroundStyle(Theme.label)
+                                    Text(bankPrimaryStatus(for: bank))
+                                        .titan(.meta)
+                                        .foregroundStyle(Theme.label3)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.passive)
+                                    .accessibilityHidden(true)
+                            }
+                            .padding(.vertical, 4)
+                            .frame(minHeight: 52)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings-bank-\(bank.rawValue)")
+                        .listRowBackground(Theme.grouped)
+                        .listRowSeparatorTint(Theme.separator)
+                    }
+                    if showsPrepareConnectionRow {
+                        Button {
+                            showConnectionGuide = true
+                        } label: {
+                            HStack(spacing: Theme.Space.row) {
+                                OptionLabel(title: "Preparar conexión", detail: "Una vez, unos 15 minutos", systemImage: "key")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.passive)
+                                    .accessibilityHidden(true)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("settings-prepare-connection")
+                        .listRowBackground(Theme.grouped)
+                    }
+                } header: {
+                    SettingsHeader("Bancos")
+                } footer: {
+                    SettingsFooter("Mi Banco habla con tu banco a través de Enable Banking, desde este iPhone. Tu clave no sale de aquí.")
+                }
+
+                Section {
+                    ForEach(BankID.allCases, id: \.self) { bank in
+                        BalanceRow(bank: bank, info: model.snapshot.balances[bank], link: model.state.links[bank],
+                                   text: binding(bank), error: errors[bank], saved: savedFlash.contains(bank),
+                                   focused: $focused, onSubmit: { commit(bank) })
                     }
                     Button {
                         showAccounts = true
@@ -62,7 +136,9 @@ struct SettingsView: View {
                 } header: {
                     SettingsHeader("Saldos")
                 } footer: {
-                    SettingsFooter("Toca un saldo para corregirlo. imagin y Trade Republic no envían el saldo en sus avisos, así que lo estimamos.")
+                    SettingsFooter(model.state.links.isEmpty
+                        ? "Toca un saldo para corregirlo. imagin y Trade Republic no envían el saldo en sus avisos, así que lo estimamos."
+                        : "Los bancos conectados ponen su saldo solos. Trade Republic y los que no conectes se corrigen aquí.")
                 }
 
                 Section {
@@ -124,19 +200,33 @@ struct SettingsView: View {
             .navigationDestination(isPresented: $showAccounts) {
                 AccountsView(accountBook: accountBook)
             }
+            .navigationDestination(item: $pushedBank) { bank in
+                BankLinkView(model: model, portfolio: portfolio, bank: bank)
+            }
+            .navigationDestination(isPresented: $showConnectionGuide) {
+                ConnectionGuideView(model: model)
+            }
         }
         .onAppear {
             refreshUntouched()
             applyFocusRequest()
             applyAccountsRequest()
+            applyBankRequest()
             #if DEBUG
-            if DemoMode.isActive && DemoMode.opensAccounts {
-                showAccounts = true
+            if DemoMode.isActive {
+                if DemoMode.opensAccounts {
+                    showAccounts = true
+                } else if DemoMode.opensConnectionGuide {
+                    showConnectionGuide = true
+                } else if DemoMode.opensStatementImport {
+                    pushedBank = .rev
+                }
             }
             #endif
         }
         .onChange(of: focusRequest) { _, _ in applyFocusRequest() }
         .onChange(of: openAccountsRequest) { _, _ in applyAccountsRequest() }
+        .onChange(of: openBankRequest) { _, _ in applyBankRequest() }
         // Un intent puede cambiar un saldo con Ajustes abierto: los campos sin tocar lo reflejan.
         .onChange(of: model.snapshot.balances) { _, _ in refreshUntouched() }
         .onChange(of: focused) { old, _ in
@@ -174,9 +264,19 @@ struct SettingsView: View {
         showAccounts = true
     }
 
+    private func applyBankRequest() {
+        guard let bank = openBankRequest else { return }
+        openBankRequest = nil
+        pushedBank = bank
+    }
+
     private func applyFocusRequest() {
         guard let bank = focusRequest else { return }
         focusRequest = nil
+        if model.state.links[bank] != nil {
+            pushedBank = bank
+            return
+        }
         Task {
             try? await Task.sleep(for: .milliseconds(350))
             focused = bank
@@ -251,11 +351,12 @@ struct SettingsView: View {
     }
 }
 
-/// Fila de saldo: logo, nombre, "Exacto · del aviso de las 18:47" / "Estimado · corregido el 10 nov", y el campo.
-/// Para VoiceOver, el campo es "Saldo de Revolut".
+/// Fila de saldo: logo, nombre, estado según origen real (banco conectado, extracto, aviso o a mano; R25) y el campo
+/// (solo lectura si el banco está conectado). Para VoiceOver, el campo editable es "Saldo de Revolut".
 private struct BalanceRow: View {
     let bank: BankID
     let info: BalanceInfo?
+    var link: BankLinkInfo? = nil
     @Binding var text: String
     let error: String?
     let saved: Bool
@@ -263,6 +364,8 @@ private struct BalanceRow: View {
     let onSubmit: () -> Void
 
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var isConnected: Bool { link != nil }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
@@ -280,31 +383,41 @@ private struct BalanceRow: View {
                 }
                 .accessibilityElement(children: .combine)
                 if !stacked { Spacer(minLength: Theme.Space.small) }
-                HStack(spacing: 8) {
-                    if saved {
-                        DrawnCheck(lineWidth: 2, color: Theme.label)
-                            .frame(width: 16, height: 16)
-                            .transition(.opacity)
-                            .accessibilityLabel("Guardado")
-                    }
-                    TextField("0,00 €", text: $text)
+                if isConnected {
+                    Text(info.map { formatEUR($0.cents) } ?? "—")
                         .titan(.option)
                         .fontWeight(.semibold)
                         .foregroundStyle(Theme.label)
-                        .multilineTextAlignment(stacked ? .leading : .trailing)
-                        .keyboardType(.numbersAndPunctuation)
-                        .submitLabel(.done)
-                        .focused(focused, equals: bank)
-                        .onSubmit(onSubmit)
                         .padding(.horizontal, 10)
-                        .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
-                        .background(Theme.fieldFill.opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                        .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
-                        .privateField(editing: focused.wrappedValue == bank)
-                        .accessibilityLabel("Saldo de \(bank.displayName)")
+                        .frame(minHeight: 40)
+                        .privateAmount()
+                } else {
+                    HStack(spacing: 8) {
+                        if saved {
+                            DrawnCheck(lineWidth: 2, color: Theme.label)
+                                .frame(width: 16, height: 16)
+                                .transition(.opacity)
+                                .accessibilityLabel("Guardado")
+                        }
+                        TextField("0,00 €", text: $text)
+                            .titan(.option)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Theme.label)
+                            .multilineTextAlignment(stacked ? .leading : .trailing)
+                            .keyboardType(.numbersAndPunctuation)
+                            .submitLabel(.done)
+                            .focused(focused, equals: bank)
+                            .onSubmit(onSubmit)
+                            .padding(.horizontal, 10)
+                            .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
+                            .background(Theme.fieldFill.opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                            .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
+                            .privateField(editing: focused.wrappedValue == bank)
+                            .accessibilityLabel("Saldo de \(bank.displayName)")
+                    }
                 }
             }
-            if let error {
+            if !isConnected, let error {
                 Text(error)
                     .titan(.meta)
                     .foregroundStyle(Theme.warning)
@@ -314,20 +427,38 @@ private struct BalanceRow: View {
         .padding(.vertical, 4)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
-        .onTapGesture { focused.wrappedValue = bank }
+        .onTapGesture {
+            if !isConnected { focused.wrappedValue = bank }
+        }
         .listRowBackground(Theme.grouped)
         .listRowSeparatorTint(Theme.separator)
     }
 
     private var status: String {
+        if let link {
+            let kind = (info?.estimated ?? false) ? "estimado" : "exacto"
+            let date = link.lastSuccessAt ?? info?.setAt ?? link.connectedAt
+            let rel = relativeUpdated(date, now: Date(), calendar: DateText.madridCalendar)
+            return "\(kind) · \(rel)"
+        }
         guard let info else { return "Sin saldo todavía" }
         let calendar = Calendar.current
-        if !info.estimated {
-            let when = calendar.isDateInToday(info.setAt) ? "de las \(DateText.time(info.setAt))" : "del \(DateText.day(info.setAt))"
-            return "Exacto · del aviso \(when)"
+        let isToday = calendar.isDateInToday(info.setAt)
+        let whenExact = isToday ? "de las \(DateText.time(info.setAt))" : "del \(DateText.day(info.setAt))"
+        let when = isToday ? "hoy" : "el \(DateText.day(info.setAt))"
+        switch info.origin {
+        case .bank:
+            return !info.estimated ? "Exacto · del banco \(whenExact)" : "Estimado · desde el banco de \(when)"
+        case .statement:
+            return !info.estimated ? "Exacto · del extracto \(whenExact)" : "Estimado · desde el extracto de \(when)"
+        case .notification:
+            return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso de \(when)"
+        case .manual:
+            if info.fromBank {
+                return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso de \(when)"
+            }
+            return "Estimado · corregido \(when)"
         }
-        let when = calendar.isDateInToday(info.setAt) ? "hoy" : "el \(DateText.day(info.setAt))"
-        return info.fromBank ? "Estimado · desde el aviso de \(when)" : "Estimado · corregido \(when)"
     }
 }
 
@@ -393,5 +524,6 @@ struct AlertsGuideView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Avisos al instante")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
     }
 }

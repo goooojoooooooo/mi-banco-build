@@ -88,7 +88,7 @@ private struct DetailContent: View {
                         .multilineTextAlignment(.center)
                         .padding(.top, 12)
                         .staggeredEntrance(5, rise: 8)
-                    Text("\(DateText.moment(movement.date)) · \(movement.bank.displayName)")
+                    Text("\(DateText.moment(movement.date, dayOnly: movement.dayOnly)) · \(movement.bank.displayName)")
                         .titan(.subtitle)
                         .foregroundStyle(Theme.label2)
                         .padding(.top, 3)
@@ -209,9 +209,10 @@ private struct DetailContent: View {
     }
 
     private var kindText: String {
-        if movement.source == .wallet { return "Apple Pay" }
         if movement.source == .bank { return "Tu banco" }
         if movement.source == .statement { return "Extracto importado" }
+        if movement.bankRef != nil { return "Aviso · confirmado por tu banco" }
+        if movement.source == .wallet { return "Apple Pay" }
         if movement.kind == .income { return "Ingreso" }
         return movement.isShop ? "Compra con tarjeta" : "Pago"
     }

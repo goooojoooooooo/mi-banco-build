@@ -84,11 +84,16 @@ struct BriefingSheet: View {
                         }
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.top, 20)
-                        .padding(.bottom, 32)
+                        .padding(.bottom, 110)
                     }
                     .accessibilityIdentifier("briefing-scroll")
                     .scrollIndicators(.hidden)
                     .scrollDismissesKeyboard(.interactively)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                        if !questionFocused {
+                            bottomDoneBar
+                        }
+                    }
                     .simultaneousGesture(
                         TapGesture().onEnded {
                             completeEntrance()
@@ -103,11 +108,6 @@ struct BriefingSheet: View {
                                 proxy.scrollTo("assistant-input-anchor", anchor: .center)
                             }
                         }
-                    }
-                }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if !questionFocused {
-                        bottomDoneBar
                     }
                 }
             }

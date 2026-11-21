@@ -364,4 +364,19 @@ private func flow(in phase: ConnectPhase) -> ConnectFlow {
         #expect(staleRemoteSessionID(previous: old, new: old) == nil)
         #expect(staleRemoteSessionID(previous: nil, new: new) == nil)
     }
+
+    @Test func r43UnverifiedCallbackFromWebSessionFailsWhileOnOpenURLStaysIgnored() {
+        for bad in [AuthCallbackResult.stateMismatch, .malformed] {
+            var viaOpenURL = flow(in: .waitingForBank(.rev))
+            #expect(viaOpenURL.handle(.callbackReceived(.valid(.rev), bad, fromWebSession: false)) == [])
+            #expect(viaOpenURL.phase == .waitingForBank(.rev))
+
+            var viaSheet = flow(in: .waitingForBank(.rev))
+            #expect(viaSheet.handle(.callbackReceived(.valid(.rev), bad, fromWebSession: true)) == [.deletePending])
+            #expect(viaSheet.phase == .failed(.rev, ConnectMessage.foreignLink))
+        }
+        var noPendingViaSheet = flow(in: .waitingForBank(.ima))
+        #expect(noPendingViaSheet.handle(.callbackReceived(.none, .code("c"), fromWebSession: true)) == [.deletePending])
+        #expect(noPendingViaSheet.phase == .failed(.ima, ConnectMessage.foreignLink))
+    }
 }

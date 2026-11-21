@@ -35,9 +35,10 @@ public enum ConnectEvent: Equatable, Sendable {
     case webDismissedByUser
     case callback(PendingCheck)
     /// La vuelta ya comprobada contra el `state` guardado. Una vuelta que no se puede verificar (`state` falso o ausente,
-    /// forma rara) o sin intento en el Llavero se ignora sin tocar nada: la puede mandar cualquier app. Solo `.code` y
-    /// `.denied` llegan a la máquina como `callback`.
-    case callbackReceived(PendingCheck, AuthCallbackResult)
+    /// forma rara) o sin intento en el Llavero que llega por `onOpenURL` se ignora sin tocar nada (la puede mandar cualquier
+    /// app); si llega por el propio cierre de la hoja web (`fromWebSession: true`), la hoja ya se ha cerrado y el flujo
+    /// termina en `.failed(bank, foreignLink)` para no dejar `.waitingForBank` colgado (R43).
+    case callbackReceived(PendingCheck, AuthCallbackResult, fromWebSession: Bool = false)
     /// La persona desconecta ese banco: el trámite de ese banco, esté donde esté (también terminando), se abandona.
     case disconnected(BankID)
     case succeeded(BankID)
@@ -98,10 +99,28 @@ public struct ConnectFlow: Equatable, Sendable {
                 return []
             }
 
-        case .callbackReceived(let check, let result):
+        case let .callbackReceived(check, result, fromWebSession):
             switch result {
-            case .code, .denied: return handle(.callback(check))
-            case .stateMismatch, .malformed: return []
+            case .code, .denied:
+                if check == .none, fromWebSession {
+                    switch phase {
+                    case .opening(let bank), .waitingForBank(let bank):
+                        phase = .failed(bank, ConnectMessage.foreignLink)
+                        return [.deletePending]
+                    default:
+                        return []
+                    }
+                }
+                return handle(.callback(check))
+            case .stateMismatch, .malformed:
+                guard fromWebSession else { return [] }
+                switch phase {
+                case .opening(let bank), .waitingForBank(let bank):
+                    phase = .failed(bank, ConnectMessage.foreignLink)
+                    return [.deletePending]
+                default:
+                    return []
+                }
             }
 
         case .disconnected(let bank):

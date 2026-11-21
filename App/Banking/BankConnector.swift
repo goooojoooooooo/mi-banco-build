@@ -55,6 +55,9 @@ final class BankConnector {
     // MARK: - Conectar
 
     func connect(_ bank: BankID, aspsp: EBASPSP? = nil) async {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         guard !isActive else { return }
         // Un intento anterior (de este banco u otro) ya no puede contestar a este: se borra ANTES del primer `await`.
         deletePending()
@@ -156,14 +159,15 @@ final class BankConnector {
 
     // MARK: - La vuelta del banco
 
-    func handle(url: URL) async {
+    func handle(url: URL, fromWebSession: Bool = false) async {
         // Solo `mibanco://cb`: lo demás se ignora sin ruido.
         guard isBankCallbackURL(url) else { return }
 
         // Todo lo siguiente, hasta el primer `await`, es síncrono: la primera llamada consume el intento
         // (lo borra del Llavero) y una segunda no encuentra nada.
         // La vuelta se VERIFICA primero contra el `state` guardado: cualquier app puede abrir `mibanco://cb?...`, y una
-        // vuelta falsa no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora).
+        // vuelta falsa por `onOpenURL` no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora);
+        // si vino del propio cierre de la hoja web (`fromWebSession: true`), falla con `foreignLink` (R43).
         let pending = loadPending()
         let check: PendingCheck
         if let pending {
@@ -172,7 +176,7 @@ final class BankConnector {
             check = .none
         }
         let result: AuthCallbackResult = pending.map { parseAuthCallback(url, expectedState: $0.state) } ?? .malformed
-        let actions = flow.handle(.callbackReceived(check, result))
+        let actions = flow.handle(.callbackReceived(check, result, fromWebSession: fromWebSession))
 
         var bankToProcess: BankID?
         for action in actions {
@@ -214,6 +218,7 @@ final class BankConnector {
         let accounts = selectAccounts(session.accounts)
         guard !accounts.isEmpty else {
             try? await client.deleteSession(id: session.sessionID)
+            guard attempt == mine else { return }
             fail(bank, ConnectMessage.noEuroAccount(bank))
             return
         }
@@ -234,11 +239,19 @@ final class BankConnector {
                 ledger.setLink(bank, info)
             }
         } catch {
+            var canDeleteNewRemote = true
             switch rollbackAfterLedgerFailure(previous: previous) {
-            case .restore(let old): try? KeychainVault.setCodable(old, for: item)
-            case .deleteNew: try? KeychainVault.delete(item)
+            case .restore(let old):
+                if (try? KeychainVault.setCodable(old, for: item)) == nil {
+                    canDeleteNewRemote = false
+                }
+            case .deleteNew:
+                try? KeychainVault.delete(item)
             }
-            try? await client.deleteSession(id: session.sessionID)
+            if canDeleteNewRemote {
+                try? await client.deleteSession(id: session.sessionID)
+            }
+            guard attempt == mine else { return }
             fail(bank, ConnectMessage.storeFailed)
             return
         }
@@ -275,15 +288,6 @@ final class BankConnector {
     }
 
     // MARK: - Interno
-
-    private var phaseBank: BankID? {
-        switch flow.phase {
-        case .idle: nil
-        case .opening(let b), .waitingForBank(let b), .finishing(let b), .connected(let b), .needsResume(let b),
-             .failed(let b, _), .chooseASPSP(let b, _):
-            b
-        }
-    }
 
     private func fail(_ bank: BankID, _ message: String) {
         run(flow.handle(.failed(bank, message)))
@@ -329,7 +333,7 @@ final class BankConnector {
             Task { @MainActor in
                 guard let self else { return }
                 if let callbackURL {
-                    await self.handle(url: callbackURL)
+                    await self.handle(url: callbackURL, fromWebSession: true)
                 } else if self.webToken == token {
                     // Cerrada por la persona (la app, al cerrarla, anula antes el `webToken`).
                     self.webToken = nil

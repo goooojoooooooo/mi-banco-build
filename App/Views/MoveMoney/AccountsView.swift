@@ -9,6 +9,7 @@ struct AccountsView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
     @Environment(\.dynamicTypeSize) private var typeSize
 
     @State private var editingIBANBank: BankID?
@@ -25,7 +26,7 @@ struct AccountsView: View {
     @State private var payeeError: String?
     @State private var saveTick = 0
     @State private var errorTick = 0
-    @GestureState private var revealedBank: BankID? = nil
+    @State private var revealedBank: BankID? = nil
     @FocusState private var focusedField: Field?
 
     private enum Field: Hashable {
@@ -45,7 +46,7 @@ struct AccountsView: View {
             } header: {
                 SettingsHeader("Tus cuentas")
             } footer: {
-                SettingsFooter("Te avisaré antes de un cobro si esta cuenta baja de aquí. Los IBAN y contactos se guardan solo en el Llavero de este iPhone.")
+                SettingsFooter("Te avisaré antes de un cobro si esta cuenta baja de aquí.")
             }
 
             Section {
@@ -89,10 +90,12 @@ struct AccountsView: View {
         .onAppear(perform: loadFloorTexts)
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
-                focusedField = nil
-                editingIBANBank = nil
-                ibanDraft = ""
-                ibanError = nil
+                clearSensitiveState()
+            }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true {
+                clearSensitiveState()
             }
         }
         .onChange(of: focusedField) { old, _ in
@@ -110,7 +113,7 @@ struct AccountsView: View {
     @ViewBuilder
     private func bankSectionRow(_ bank: BankID) -> some View {
         let iban = accountBook.book.ibans[bank]
-        let isRevealed = revealedBank == bank && scenePhase == .active
+        let isRevealed = revealedBank == bank && scenePhase == .active && gate?.isLocked != true
         let stacked = typeSize.isAccessibilitySize
 
         VStack(alignment: .leading, spacing: 12) {
@@ -139,22 +142,31 @@ struct AccountsView: View {
                         .lineLimit(isRevealed ? 2 : 1)
                         .privacySensitive()
                     Spacer(minLength: 8)
-                    Text("Ver")
-                        .titan(.meta)
-                        .fontWeight(.medium)
-                        .foregroundStyle(Theme.label)
-                        .padding(.horizontal, 14)
-                        .frame(minHeight: 44)
-                        .background(Theme.raised, in: Capsule())
-                        .contentShape(Capsule())
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 0)
-                                .updating($revealedBank) { _, state, _ in
-                                    state = bank
-                                }
-                        )
-                        .accessibilityAddTraits(.isButton)
-                        .accessibilityLabel("Mantén pulsado para ver el IBAN de \(bank.displayName)")
+                    Button {
+                        // La pulsación se sigue en `HoldRevealButtonStyle`; el toque simple solo sirve para VoiceOver.
+                    } label: {
+                        Text("Ver")
+                            .titan(.meta)
+                            .fontWeight(.medium)
+                            .foregroundStyle(Theme.label)
+                            .padding(.horizontal, 14)
+                            .frame(minHeight: 44)
+                            .background(Theme.raised, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(HoldRevealButtonStyle { pressed in
+                        if pressed {
+                            guard scenePhase == .active, gate?.isLocked != true else { return }
+                            revealedBank = bank
+                        } else if revealedBank == bank {
+                            revealedBank = nil
+                        }
+                    })
+                    .accessibilityLabel("Mantén pulsado para ver el IBAN de \(bank.displayName)")
+                    .accessibilityAction(named: isRevealed ? "Ocultar IBAN" : "Ver IBAN") {
+                        guard scenePhase == .active, gate?.isLocked != true else { return }
+                        revealedBank = isRevealed ? nil : bank
+                    }
                 }
             } else {
                 Text("Sin IBAN guardado")
@@ -275,11 +287,13 @@ struct AccountsView: View {
                     Text(maskedIBAN(iban))
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
+                        .privacySensitive()
                 }
                 if let phone = payee.phone {
                     Text(phone)
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
+                        .privacySensitive()
                 }
             }
             Spacer(minLength: 0)
@@ -505,6 +519,19 @@ struct AccountsView: View {
         }
     }
 
+    private func clearSensitiveState() {
+        revealedBank = nil
+        focusedField = nil
+        editingIBANBank = nil
+        ibanDraft = ""
+        ibanError = nil
+        addingPayee = false
+        payeeName = ""
+        payeeIBAN = ""
+        payeePhone = ""
+        payeeError = nil
+    }
+
     private func deletePayees(at offsets: IndexSet) {
         let targets = offsets.compactMap { idx in
             idx < accountBook.book.payees.count ? accountBook.book.payees[idx].id : nil
@@ -512,5 +539,22 @@ struct AccountsView: View {
         for id in targets {
             try? accountBook.deletePayee(id: id)
         }
+    }
+}
+
+/// Estilo de botón para «Ver»: revela el IBAN solo mientras el dedo sigue pulsando, sin robar el desplazamiento vertical
+/// del `Form`, y oculta al soltar o al cancelarse el gesto.
+private struct HoldRevealButtonStyle: ButtonStyle {
+    let onPressedChange: (Bool) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed && reduceMotion ? 0.7 : 1)
+            .animation(configuration.isPressed ? Theme.Motion.pressIn : Theme.Motion.pressOut, value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                onPressedChange(pressed)
+            }
     }
 }

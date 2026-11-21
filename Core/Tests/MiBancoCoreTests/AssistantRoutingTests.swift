@@ -424,4 +424,66 @@ private func sampleState() -> LedgerState {
         #expect(full.contains { $0.id == "investments" })
         #expect(full.contains { $0.id == "budgets" })
     }
+
+    @Test func auditoriaC1C2I4BloqueaBypassesYValidaTramoOriginal() {
+        let state = sampleState()
+        let portfolio = samplePortfolio()
+
+        // C1: ISINs, SP500, consejo/advice, determinantes en bolsa, verbos de cartera, plurales y confusables extendidos.
+        for advice in [
+            "¿Meto 500 € en SP500?",
+            "¿Meto 500 € en US0378331005?",
+            "¿Debería entrar en IE00B4L5Y983?",
+            "Dame un consejo sobre Apple",
+            "¿Qué consejo me das sobre mis inversiones?",
+            "Any advice on Apple?",
+            "¿Hago una venta en bolsa?",
+            "¿Hago una compra de Apple?",
+            "¿Programo una compra de MSCI World?",
+            "¿Aumento mi posición en Apple?",
+            "¿Amplío mi posición en MSCI World?",
+            "¿Apuesto por Apple?",
+            "¿Qué piensas de Apple?",
+            "¿Va a caer Apple?",
+            "¿Qué acciones merecen la pena?",
+            "¿Valen la pena mis ETFs?",
+            "¿Meto 500 € en Tesla?",
+            "¿Pongo 1.000 euros en Nvidia?",
+            "Will Apple go up?",
+            "Dump Apple",
+            "vɇndo Apple",
+            "ħold Apple",
+            "v е\u{0301} n d o Apple",
+            "Ayer compré Apple, ¿que compre más?",
+        ] {
+            #expect(isAdviceRequest(advice, portfolio: portfolio), "Debió rechazar como consejo: \(advice)")
+        }
+
+        // C2: el tramo devuelto de `originalQuestion` tampoco puede contener €/%/$/cirílico, categorías ni interrogativos.
+        #expect(parseAssistantModelRoute("GASTO comercio=\"Tienda 50\"", originalQuestion: "¿Cuánto gasté en Tienda €50?",
+                                         portfolio: portfolio) == nil)
+        #expect(parseAssistantModelRoute("GASTO comercio=\"Tienda 50\"", originalQuestion: "¿Cuánto gasté en Tienda Ж50?",
+                                         portfolio: portfolio) == nil)
+        #expect(parseAssistantModelRoute("GASTO comercio=\"cuanto gaste\"", originalQuestion: "¿Cuánto gasté en comida este mes?",
+                                         portfolio: portfolio) == nil)
+        #expect(parseAssistantModelRoute("GASTO comercio=\"Supermercado\"", originalQuestion: "¿Cuánto gasté en Supermercado?",
+                                         portfolio: portfolio) == nil)
+
+        // I4: «¿Cuánto llevo gastado en Apple?» sin pagos previos en tienda sigue siendo gasto, no cartera.
+        var emptyShopState = state
+        emptyShopState.movements.removeAll { ($0.merchant ?? "").lowercased().contains("apple") }
+        let appleSpend = routeAssistantQuestion("¿Cuánto llevo gastado en Apple?", state: emptyShopState, portfolio: portfolio,
+                                                now: nov(20), calendar: cal)
+        #expect(appleSpend == .spending(month: .current, category: nil, merchant: "Apple", bank: nil))
+
+        // Minor 7: «¿Qué me han cobrado este mes?» es gasto, no ingreso.
+        let charged = routeAssistantQuestion("¿Qué me han cobrado este mes?", state: state, portfolio: portfolio,
+                                             now: nov(20), calendar: cal)
+        #expect(charged == .spending(month: .current, category: nil, merchant: nil, bank: nil))
+
+        // Minor 11: un año fuera de rango no cae al año actual.
+        let oldYear = routeAssistantQuestion("¿Cuánto gasté en octubre de 1999?", state: state, portfolio: portfolio,
+                                             now: nov(20), calendar: cal)
+        #expect(oldYear == .spending(month: .specific(year: 1999, month: 10), category: nil, merchant: nil, bank: nil))
+    }
 }

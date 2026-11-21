@@ -172,7 +172,7 @@ struct LedgerSnapshot: Sendable {
 
     init() {}
 
-    init(state: LedgerState, now: Date = Date(), calendar: Calendar = .current) {
+    init(state: LedgerState, now: Date = Date(), calendar: Calendar = .current, cachedASPSPs: [EBASPSP]? = nil) {
         day = calendar.startOfDay(for: now)
         let ledger = Ledger(state: state)
         for bank in BankID.allCases {
@@ -184,7 +184,7 @@ struct LedgerSnapshot: Sendable {
                 bank: bank,
                 link: state.links[bank],
                 estimated: balances[bank]?.estimated,
-                canConnect: canConnectBank(bank, cachedList: nil),
+                canConnect: canConnectBank(bank, cachedList: cachedASPSPs),
                 now: now,
                 calendar: DateText.madridCalendar
             )

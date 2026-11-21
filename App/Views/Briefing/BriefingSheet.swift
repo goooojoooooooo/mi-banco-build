@@ -114,7 +114,9 @@ struct BriefingSheet: View {
 
             // Segunda línea de defensa frente a capturas en segundo plano.
             if scenePhase != .active && !demoKeepsVisible {
-                Theme.canvas.ignoresSafeArea()
+                Theme.canvas
+                    .ignoresSafeArea()
+                    .accessibilityHidden(true)
             }
         }
         .presentationDetents([.large])
@@ -200,18 +202,10 @@ struct BriefingSheet: View {
     }
 
     private var openingBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(briefingModel.openingText)
-                .titan(.body)
-                .foregroundStyle(Theme.label2)
-                .fixedSize(horizontal: false, vertical: true)
-
-            if briefingModel.openingChosenByModel && !preferences.privateMode {
-                Text("Escrito por Apple Intelligence en tu iPhone")
-                    .titan(.caption)
-                    .foregroundStyle(Theme.label3)
-            }
-        }
+        Text(briefingModel.openingText)
+            .titan(.body)
+            .foregroundStyle(Theme.label2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - Secciones del resumen
@@ -391,7 +385,7 @@ struct BriefingSheet: View {
                         Image(systemName: liked ? "hand.thumbsup.fill" : "hand.thumbsup")
                             .font(.system(size: 13, weight: .medium))
                             .accessibilityHidden(true)
-                        Text(liked ? "Te interesa" : "Me interesa")
+                        Text("Me interesa")
                             .titan(.captionStrong)
                     }
                     .foregroundStyle(liked ? Theme.canvas : Theme.label)
@@ -401,6 +395,7 @@ struct BriefingSheet: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
+                .accessibilityAddTraits(liked ? [.isSelected] : [])
                 .accessibilityIdentifier("card-like-\(card.topic.rawValue)")
 
                 Button {
@@ -463,12 +458,6 @@ struct BriefingSheet: View {
 
     private func askBlock(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Pregúntame")
-                .titan(.header)
-                .foregroundStyle(Theme.label3)
-                .padding(.horizontal, 6)
-                .accessibilityAddTraits(.isHeader)
-
             HStack(spacing: 8) {
                 TextField("Pregúntame algo de tu dinero…", text: $questionDraft)
                     .titan(.body)
@@ -495,7 +484,7 @@ struct BriefingSheet: View {
                 .accessibilityLabel("Preguntar")
                 .accessibilityIdentifier("assistant-send")
             }
-            .background(Theme.raised, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(Theme.raised, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
             .id("assistant-input-anchor")
 
             if !briefingModel.chips.isEmpty {
@@ -543,51 +532,20 @@ struct BriefingSheet: View {
     }
 
     private func answerCard(_ answer: AssistantAnswer) -> some View {
-        let speakingAnswer = speaker.activeTarget == .answer
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                AppMark(size: 20)
-                Text("Onyx")
-                    .titan(.captionStrong)
-                    .foregroundStyle(Theme.label2)
-                Spacer(minLength: 8)
-                Button {
-                    let spoken = spokenAssistantAnswer(answer, privateMode: preferences.privateMode)
-                    speaker.toggle(spoken, target: .answer)
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: speakingAnswer ? "stop.fill" : "speaker.wave.2")
-                            .font(.system(size: 12, weight: .semibold))
-                            .accessibilityHidden(true)
-                        Text(speakingAnswer ? "Parar" : "Escuchar respuesta")
-                            .titan(.captionStrong)
-                    }
-                    .foregroundStyle(Theme.label)
-                    .padding(.horizontal, 12)
-                    .frame(minHeight: 44)
-                    .background(Theme.raised, in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("assistant-listen-answer")
-            }
-
-            VStack(spacing: 0) {
-                ForEach(Array(answer.lines.enumerated()), id: \.element.id) { index, line in
-                    briefingRow(line, idPrefix: "answer-line")
-                    if index < answer.lines.count - 1 {
-                        Rectangle()
-                            .fill(Theme.separator)
-                            .frame(height: 0.5)
-                            .padding(.leading, 16)
-                    }
+        VStack(spacing: 0) {
+            ForEach(Array(answer.lines.enumerated()), id: \.element.id) { index, line in
+                briefingRow(line, idPrefix: "answer-line")
+                if index < answer.lines.count - 1 {
+                    Rectangle()
+                        .fill(Theme.separator)
+                        .frame(height: 0.5)
+                        .padding(.leading, 16)
                 }
             }
-            .background(Theme.raised.opacity(0.55), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
-        .padding(16)
         .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        .accessibilityIdentifier("assistant-answer-card")
     }
 
     // MARK: - Botón inferior «Vale»
@@ -635,7 +593,7 @@ struct BriefingSheet: View {
     private func startEntrance() {
         userSkippedEntrance = false
         if reduceMotion {
-            withAnimation(.easeOut(duration: 0.22)) {
+            withAnimation(.easeOut(duration: 0.2)) {
                 revealedStage = 8
                 entranceCompleted = true
             }
@@ -662,7 +620,7 @@ struct BriefingSheet: View {
         guard !entranceCompleted else { return }
         entranceTask?.cancel()
         userSkippedEntrance = true
-        withAnimation(.easeOut(duration: 0.16)) {
+        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.quick) {
             revealedStage = 8
             entranceCompleted = true
         }

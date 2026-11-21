@@ -76,6 +76,8 @@ struct KeypadAmount: Equatable, Sendable {
 struct AmountKeypad: View {
     @Binding var amount: KeypadAmount
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .title2) private var digitSize: CGFloat = 24
+    @ScaledMetric(relativeTo: .title2) private var iconSize: CGFloat = 20
     @State private var tapTick = 0
 
     private let rows: [[Key]] = [
@@ -118,17 +120,17 @@ struct AmountKeypad: View {
                             Group {
                                 if key == .backspace {
                                     Image(systemName: "delete.left")
-                                        .font(.system(size: 20, weight: .medium))
+                                        .font(.system(size: iconSize, weight: .medium))
                                 } else {
                                     Text(key.label)
-                                        .font(.system(size: 24, weight: .medium))
+                                        .font(.system(size: digitSize, weight: .medium))
                                         .monospacedDigit()
                                 }
                             }
                             .foregroundStyle(Theme.label)
                             .frame(maxWidth: .infinity, minHeight: 52)
-                            .background(Theme.grouped, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.logoLarge, style: .continuous))
+                            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.logoLarge, style: .continuous))
                         }
                         .buttonStyle(PressableButtonStyle(scale: 0.96))
                         .accessibilityLabel(key.spokenLabel)
@@ -142,7 +144,7 @@ struct AmountKeypad: View {
 
     private func handle(_ key: Key) {
         tapTick += 1
-        withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+        withAnimation(reduceMotion ? nil : Theme.Motion.morph) {
             switch key {
             case .digit(let n): amount.tapDigit(n)
             case .comma: amount.tapComma()

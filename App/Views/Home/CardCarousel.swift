@@ -146,9 +146,9 @@ struct CardCarousel: View {
                 switch snapshot.bankLines[bank]?.action {
                 case .refresh:
                     Task { _ = await BankSync.shared.refresh(trigger: .manual, only: bank) }
-                case .renew, .connect, .importStatement:
+                case .renew:
                     onOpenBank(bank)
-                case .editBalance, nil:
+                case .connect, .importStatement, .editBalance, nil:
                     onEdit(bank)
                 }
             } else {
@@ -168,9 +168,7 @@ struct CardCarousel: View {
                 switch snapshot.bankLines[bank]?.action {
                 case .refresh: return "Actualizar"
                 case .renew: return "Renovar"
-                case .connect: return "Conectar"
-                case .importStatement: return "Importar"
-                case .editBalance, nil: return "Editar saldo"
+                case .connect, .importStatement, .editBalance, nil: return "Editar saldo"
                 }
             }
             return "Editar saldo"

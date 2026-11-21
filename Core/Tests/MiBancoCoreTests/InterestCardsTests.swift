@@ -349,4 +349,29 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
             try brokenStore.update { $0.setEnabled(false, for: .budgetClose) }
         }
     }
+
+    @Test func descartarAviso80PorCientoNoSilenciaEl100PorCiento() {
+        var state = LedgerState()
+        state.budgets.monthlyCents = 10_000
+        state.movements = [
+            Movement(bank: .rev, amountCents: -8_500, merchant: "Mercadona", kind: .payment, source: .notification,
+                     date: nov(10, 12), isShop: true),
+        ]
+        var prefs = AssistantPreferences()
+        let warnCards = interestCards(state: state, portfolio: nil, book: AccountBook(), now: nov(10, 18),
+                                      calendar: cal, preferences: prefs)
+        let warnCard = warnCards.first { $0.topic == .budgetClose }
+        #expect(warnCard != nil)
+        if let warnCard {
+            prefs.recordFeedback(.disliked, for: warnCard, now: nov(10, 18))
+        }
+        state.movements.append(
+            Movement(bank: .rev, amountCents: -3_000, merchant: "Zara", kind: .payment, source: .notification,
+                     date: nov(15, 12), isShop: true)
+        )
+        let exceededCards = interestCards(state: state, portfolio: nil, book: AccountBook(), now: nov(15, 18),
+                                          calendar: cal, preferences: prefs)
+        let exceeded = exceededCards.first { $0.topic == .budgetClose }
+        #expect(exceeded?.title == "Presupuesto superado")
+    }
 }

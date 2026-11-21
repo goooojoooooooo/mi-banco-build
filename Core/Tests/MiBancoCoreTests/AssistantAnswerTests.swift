@@ -503,4 +503,46 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         #expect(refusalSpoken.contains("modo privado"))
         #expect(!refusalSpoken.contains("600"))
     }
+
+    @Test func auditoriaC3I1I3PrivacidadDayOnlyYTraspasos() {
+        // C3: render(.masked) y spokenAssistantAnswer tapan %, €, U+2212, U+202F y decimales con punto.
+        for raw in ["Dia %", "Gym +24 %", "€\u{2212}13,99", "20\u{202F}€", "Tienda 12.50", "Tienda €"] {
+            let masked = render([.text("Este mes en \(raw)")], .masked)
+            #expect(!masked.contains("€") && !masked.contains("%") && !masked.contains("12.50"), "\(raw) -> \(masked)")
+            let ans = AssistantAnswer(intent: .unknown, lines: [BriefingLine(id: "t", parts: [.text("En \(raw)")])])
+            let spoken = spokenAssistantAnswer(ans, privateMode: true)
+            #expect(!spoken.contains("€") && !spoken.contains("%") && !spoken.contains("12.50"), "\(raw) -> \(spoken)")
+        }
+
+        // I1: filas `dayOnly` del banco de hoy (guardadas a las 12:00) cuentan también a las 08:30 de la mañana.
+        var morningState = LedgerState()
+        morningState.movements = [
+            Movement(bank: .rev, amountCents: -8_000, merchant: "Mercadona", kind: .payment, source: .bank,
+                     date: nov(20, 12, 0), isShop: true, bankRef: "m-dayonly", bankStatus: .booked, dayOnly: true),
+            Movement(bank: .ima, amountCents: 185_000, merchant: "Nómina", kind: .income, source: .bank,
+                     date: nov(20, 12, 0), isShop: false, bankRef: "n-dayonly", bankStatus: .booked, dayOnly: true),
+        ]
+        let morningNow = nov(20, 8, 30)
+        let merchAns = answerQuestion("¿Cuánto llevo en Mercadona?", state: morningState, portfolio: nil,
+                                      book: AccountBook(), now: morningNow, calendar: cal)
+        #expect(render(merchAns.lines[0].parts, .plain).contains("80,00"))
+        let bigAns = answerQuestion("¿Cuáles son mis mayores pagos este mes?", state: morningState, portfolio: nil,
+                                    book: AccountBook(), now: morningNow, calendar: cal)
+        #expect(render(bigAns.lines[1].parts, .plain).contains("80,00"))
+        let incAns = answerQuestion("¿Qué ingresos han entrado este mes?", state: morningState, portfolio: nil,
+                                    book: AccountBook(), now: morningNow, calendar: cal)
+        #expect(render(incAns.lines[0].parts, .plain).contains("1.850,00"))
+
+        // C2: `answerQuestion` rechaza un `modelIntent` con `merchant` no presente en la pregunta original.
+        let injectedAns = answerQuestion(
+            "¿Cuánto gasté en comida este mes?",
+            state: morningState,
+            portfolio: nil,
+            book: AccountBook(),
+            modelIntent: .spending(month: .current, category: nil, merchant: "Supermercado", bank: nil),
+            now: morningNow,
+            calendar: cal
+        )
+        #expect(injectedAns.intent != .spending(month: .current, category: nil, merchant: "Supermercado", bank: nil))
+    }
 }

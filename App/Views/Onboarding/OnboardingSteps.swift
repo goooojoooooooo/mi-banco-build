@@ -6,8 +6,11 @@ struct OnboardingBalancesStep: View {
     let model: LedgerModel
     let onNext: () -> Void
 
+    @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
     @State private var texts: [BankID: String] = [:]
     @State private var errors: [BankID: String] = [:]
     @FocusState private var focused: BankID?
@@ -18,7 +21,7 @@ struct OnboardingBalancesStep: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Tus saldos")
-                            .titan(.sheetTitle)
+                            .titan(.homeTitle)
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
 
@@ -51,9 +54,9 @@ struct OnboardingBalancesStep: View {
                 Text("Seguir")
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Theme.onTileSelected)
                     .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(.white, in: Capsule())
+                    .background(Theme.tileSelected, in: Capsule())
                     .contentShape(Capsule())
             }
             .buttonStyle(.pressable)
@@ -61,10 +64,18 @@ struct OnboardingBalancesStep: View {
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, Theme.Space.gutter)
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { focused = nil }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { focused = nil }
+        }
     }
 
     private func balanceRow(for bank: BankID) -> some View {
         let stacked = typeSize.isAccessibilitySize
+        let isEditing = focused == bank
+        let currentText = texts[bank] ?? ""
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.small))
             : AnyLayout(HStackLayout(spacing: Theme.Space.row))
@@ -88,11 +99,12 @@ struct OnboardingBalancesStep: View {
                     .padding(.horizontal, 10)
                     .frame(minWidth: 108, maxWidth: stacked ? .infinity : 140, minHeight: 40)
                     .background(
-                        Theme.fieldFill.opacity(focused == bank ? 1 : 0),
+                        Theme.fieldFill.opacity(isEditing ? 1 : 0),
                         in: .rect(cornerRadius: Theme.Radius.field)
                     )
-                    .privateField(editing: focused == bank)
+                    .privateField(editing: isEditing)
                     .accessibilityLabel("Saldo de \(bank.displayName)")
+                    .accessibilityValue(preferences.privateMode && !isEditing && !currentText.isEmpty ? "importe oculto" : currentText)
             }
             if let error = errors[bank] {
                 Text(error)
@@ -132,7 +144,14 @@ struct OnboardingBalancesStep: View {
                 hasError = true
                 continue
             }
-            try? model.setBalance(bank, cents: cents)
+            do {
+                try model.setBalance(bank, cents: cents)
+            } catch {
+                withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                    errors[bank] = "No se pudo guardar. Inténtalo de nuevo."
+                }
+                hasError = true
+            }
         }
         if !hasError {
             onNext()
@@ -151,11 +170,11 @@ struct OnboardingAlertsStep: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Avisos al instante")
-                            .titan(.sheetTitle)
+                            .titan(.homeTitle)
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
 
-                        Text("Para enterarte de cada pago, enseña a tu iPhone a pasarle los avisos a Mi Banco. Son 11 toques por banco y te guiamos.")
+                        Text("Para enterarte de cada pago, enseña a tu iPhone a pasarle los avisos a Mi Banco. Te guiamos paso a paso para cada banco.")
                             .titan(.callout)
                             .foregroundStyle(Theme.label2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -172,9 +191,9 @@ struct OnboardingAlertsStep: View {
                     Text("Empezar la guía")
                         .titan(.option)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.black)
+                        .foregroundStyle(Theme.onTileSelected)
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(.white, in: Capsule())
+                        .background(Theme.tileSelected, in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
@@ -185,7 +204,7 @@ struct OnboardingAlertsStep: View {
                         .titan(.option)
                         .foregroundStyle(Theme.label)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.grouped, in: Capsule())
+                        .background(Theme.raised, in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
@@ -210,7 +229,7 @@ struct OnboardingBanksStep: View {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Tus bancos, al día")
-                            .titan(.sheetTitle)
+                            .titan(.homeTitle)
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
 
@@ -246,7 +265,7 @@ struct OnboardingBanksStep: View {
                         .titan(.option)
                         .foregroundStyle(Theme.label)
                         .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.grouped, in: Capsule())
+                        .background(Theme.raised, in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
@@ -256,9 +275,9 @@ struct OnboardingBanksStep: View {
                     Text("Empezar")
                         .titan(.option)
                         .fontWeight(.semibold)
-                        .foregroundStyle(.black)
+                        .foregroundStyle(Theme.onTileSelected)
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(.white, in: Capsule())
+                        .background(Theme.tileSelected, in: Capsule())
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)

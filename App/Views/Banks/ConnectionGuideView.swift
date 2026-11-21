@@ -12,6 +12,7 @@ struct ConnectionGuideView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var step = 1
+    @State private var movingForward = true
     @State private var urlCopied = false
     @State private var choosingPEM = false
     @State private var pickedDER: Data?
@@ -21,6 +22,8 @@ struct ConnectionGuideView: View {
     @State private var saveTick = 0
     @State private var errorTick = 0
     @FocusState private var idFocused: Bool
+
+    private var connector: BankConnector { BankConnector.shared }
 
     var body: some View {
         ScrollView {
@@ -41,8 +44,8 @@ struct ConnectionGuideView: View {
                 }
                 .id(step)
                 .transition(reduceMotion ? .opacity : .asymmetric(
-                    insertion: .move(edge: .trailing).combined(with: .opacity),
-                    removal: .move(edge: .leading).combined(with: .opacity)
+                    insertion: .move(edge: movingForward ? .trailing : .leading).combined(with: .opacity),
+                    removal: .move(edge: movingForward ? .leading : .trailing).combined(with: .opacity)
                 ))
 
                 if step > 1 {
@@ -75,15 +78,16 @@ struct ConnectionGuideView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
-                choosingPEM = false
-                idFocused = false
+                clearSensitiveState()
             }
         }
         .onChange(of: gate?.isLocked) { _, locked in
             if locked == true {
-                choosingPEM = false
-                idFocused = false
+                clearSensitiveState()
             }
+        }
+        .onChange(of: choosingPEM) { _, on in
+            if on && (gate?.canPresent != true || scenePhase != .active) { choosingPEM = false }
         }
         .sensoryFeedback(Haptics.success, trigger: saveTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
@@ -142,7 +146,7 @@ struct ConnectionGuideView: View {
             bodyText: "En «API applications», elige Production, ponle de nombre Mi Banco y pega esta dirección en «Redirect URLs». Luego, Register: se descargará un archivo .pem."
         ) {
             Text(BankingConstants.redirectURL.absoluteString)
-                .font(.system(.footnote, design: .monospaced))
+                .titan(.meta)
                 .foregroundStyle(Theme.label2)
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -207,11 +211,15 @@ struct ConnectionGuideView: View {
             bodyText: "Elige el archivo .pem que se descargó."
         ) {
             Button {
-                guard gate?.canPresent != false, scenePhase == .active else { return }
+                guard gate?.canPresent == true, scenePhase == .active else { return }
                 errorText = nil
                 choosingPEM = true
             } label: {
-                primaryButtonLabel("Elegir clave")
+                if keySaved {
+                    secondaryButtonLabel("Elegir otra clave")
+                } else {
+                    primaryButtonLabel("Elegir clave")
+                }
             }
             .buttonStyle(.pressable)
 
@@ -221,7 +229,7 @@ struct ConnectionGuideView: View {
                         .titan(.meta)
                         .foregroundStyle(Theme.label2)
                     TextField("00000000-0000-4000-8000-000000000000", text: $appIDText)
-                        .font(.system(.footnote, design: .monospaced))
+                        .titan(.meta)
                         .foregroundStyle(Theme.label)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -231,6 +239,7 @@ struct ConnectionGuideView: View {
                         .padding(.horizontal, 12)
                         .frame(minHeight: 44)
                         .background(Theme.fieldFill, in: RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous))
+                        .privacySensitive()
                         .accessibilityLabel("ID de la app")
 
                     Button(action: saveKey) {
@@ -249,24 +258,118 @@ struct ConnectionGuideView: View {
             }
 
             if keySaved {
-                VStack(spacing: 10) {
-                    Button {
-                        Task { await BankConnector.shared.connect(.rev) }
-                    } label: {
-                        primaryButtonLabel("Conectar Revolut")
-                    }
-                    .buttonStyle(.pressable)
-
-                    Button {
-                        Task { await BankConnector.shared.connect(.ima) }
-                    } label: {
-                        secondaryButtonLabel("Conectar imagin")
-                    }
-                    .buttonStyle(.pressable)
-                }
-                .padding(.top, 4)
+                stepFourConnectSection
             }
         }
+    }
+
+    @ViewBuilder
+    private var stepFourConnectSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch connector.phase {
+            case .opening(let bank), .waitingForBank(let bank):
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .tint(Theme.label)
+                    Text("Esperando a \(bank.displayName)…")
+                        .titan(.option)
+                        .foregroundStyle(Theme.label)
+                }
+                Button {
+                    connector.cancelWebSession()
+                } label: {
+                    secondaryButtonLabel("Cancelar")
+                }
+                .buttonStyle(.pressable)
+
+            case .finishing(let bank):
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .tint(Theme.label)
+                    Text("Terminando con \(bank.displayName)…")
+                        .titan(.option)
+                        .foregroundStyle(Theme.label)
+                }
+
+            case .needsResume(let bank):
+                Text("¿Ya lo has aprobado en la app de \(bank.displayName)?")
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    Task { await connector.resume() }
+                } label: {
+                    primaryButtonLabel("Seguir")
+                }
+                .buttonStyle(.pressable)
+                Button {
+                    Task { await connector.connect(bank) }
+                } label: {
+                    secondaryButtonLabel("Empezar de nuevo")
+                }
+                .buttonStyle(.pressable)
+
+            case let .failed(bank, message):
+                Text(message)
+                    .titan(.subtitle)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    Task { await connector.connect(bank) }
+                } label: {
+                    primaryButtonLabel("Empezar de nuevo")
+                }
+                .buttonStyle(.pressable)
+
+            case let .chooseASPSP(bank, list):
+                NavigationLink {
+                    ASPSPPickerView(bank: bank, list: list) { chosen in
+                        Task { await connector.connect(bank, aspsp: chosen) }
+                    }
+                } label: {
+                    primaryButtonLabel("Elegir \(bank.displayName) en la lista")
+                }
+                .buttonStyle(.pressable)
+
+            case .connected(let connectedBank):
+                HStack(spacing: 8) {
+                    DrawnCheck(lineWidth: 2.2, color: Theme.income)
+                        .frame(width: 16, height: 16)
+                    Text("\(connectedBank.displayName) conectado")
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.income)
+                }
+                Button {
+                    Task { await connector.connect(.rev) }
+                } label: {
+                    primaryButtonLabel("Conectar Revolut")
+                }
+                .buttonStyle(.pressable)
+
+                Button {
+                    Task { await connector.connect(.ima) }
+                } label: {
+                    secondaryButtonLabel("Conectar imagin")
+                }
+                .buttonStyle(.pressable)
+
+            case .idle:
+                Button {
+                    Task { await connector.connect(.rev) }
+                } label: {
+                    primaryButtonLabel("Conectar Revolut")
+                }
+                .buttonStyle(.pressable)
+
+                Button {
+                    Task { await connector.connect(.ima) }
+                } label: {
+                    secondaryButtonLabel("Conectar imagin")
+                }
+                .buttonStyle(.pressable)
+            }
+        }
+        .padding(.top, 4)
     }
 
     // MARK: - Componentes y acciones
@@ -317,25 +420,42 @@ struct ConnectionGuideView: View {
     }
 
     private func go(to target: Int) {
+        let clamped = min(max(target, 1), 4)
         idFocused = false
+        movingForward = clamped >= step
         withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.cardSettle) {
-            step = min(max(target, 1), 4)
+            step = clamped
         }
     }
 
+    private func clearSensitiveState() {
+        choosingPEM = false
+        idFocused = false
+        pickedDER = nil
+        appIDText = ""
+    }
+
     private func handleKeyImport(_ result: Result<URL, Error>) {
-        guard gate?.canPresent != false, scenePhase == .active, case .success(let url) = result else { return }
-        do {
-            let parsed = try BankingCredentials.readKeyFile(url)
-            pickedDER = parsed.pkcs1DER
-            appIDText = parsed.suggestedAppID ?? ""
-            errorText = nil
-        } catch let error as BankingCredentialsError {
-            errorText = error.message
-            errorTick += 1
-        } catch {
-            errorText = BankingCredentialsError.invalidKey.message
-            errorTick += 1
+        guard gate?.canPresent == true, scenePhase == .active, case .success(let url) = result else { return }
+        let generation = gate?.generation ?? 0
+        Task {
+            do {
+                let parsed = try await Task.detached(priority: .userInitiated) {
+                    try BankingCredentials.readKeyFile(url)
+                }.value
+                guard (gate?.generation ?? 0) == generation, gate?.canPresent == true, scenePhase == .active else { return }
+                pickedDER = parsed.pkcs1DER
+                appIDText = parsed.suggestedAppID ?? ""
+                errorText = nil
+            } catch let error as BankingCredentialsError {
+                guard (gate?.generation ?? 0) == generation else { return }
+                errorText = error.message
+                errorTick += 1
+            } catch {
+                guard (gate?.generation ?? 0) == generation else { return }
+                errorText = BankingCredentialsError.invalidKey.message
+                errorTick += 1
+            }
         }
     }
 
@@ -350,6 +470,8 @@ struct ConnectionGuideView: View {
         }
         do {
             try BankingCredentials.save(appID: trimmed, pkcs1DER: der)
+            pickedDER = nil
+            appIDText = ""
             errorText = nil
             keySaved = true
             saveTick += 1

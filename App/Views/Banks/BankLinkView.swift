@@ -60,6 +60,19 @@ struct BankLinkView: View {
         }
     }
 
+    private var canCancelWaiting: Bool {
+        switch connector.phase {
+        case .opening(let b), .waitingForBank(let b):
+            b == bank
+        default:
+            false
+        }
+    }
+
+    private var showsForgetEverything: Bool {
+        BankingCredentials.isReady || !model.state.links.isEmpty
+    }
+
     private var needsResumeForThisBank: Bool {
         if case .needsResume(let b) = connector.phase { return b == bank }
         return false
@@ -125,43 +138,51 @@ struct BankLinkView: View {
                 }
             }
 
-            Section {
-                Text("Primera actualización: últimos 12 meses (lo que dé el banco)")
-                    .titan(.subtitle)
-                    .foregroundStyle(Theme.label2)
-                    .listRowBackground(Theme.grouped)
-            } header: {
-                SettingsHeader("Historial")
+            if canConnect || link != nil {
+                Section {
+                    Text("Primera actualización: últimos 12 meses (lo que dé el banco)")
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label2)
+                        .listRowBackground(Theme.grouped)
+                } header: {
+                    SettingsHeader("Historial")
+                }
             }
 
-            Section {
-                if link != nil {
-                    Button(role: .destructive) {
-                        guard gate?.canPresent != false, scenePhase == .active else { return }
-                        confirmingDisconnect = true
-                    } label: {
-                        Text("Desconectar")
-                            .titan(.option)
-                            .foregroundStyle(Theme.warning)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+            if link != nil || showsForgetEverything {
+                Section {
+                    if link != nil {
+                        Button(role: .destructive) {
+                            guard gate?.canPresent == true, scenePhase == .active else { return }
+                            confirmingDisconnect = true
+                        } label: {
+                            Text("Desconectar")
+                                .titan(.option)
+                                .foregroundStyle(Theme.warning)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Theme.grouped)
+                        .listRowSeparatorTint(Theme.separator)
                     }
-                    .buttonStyle(.plain)
-                    .listRowBackground(Theme.grouped)
-                }
 
-                Button(role: .destructive) {
-                    guard gate?.canPresent != false, scenePhase == .active else { return }
-                    confirmingForgetAll = true
-                } label: {
-                    Text("Olvidar clave y conexiones")
-                        .titan(.option)
-                        .foregroundStyle(Theme.warning)
-                        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        .contentShape(Rectangle())
+                    if showsForgetEverything {
+                        Button(role: .destructive) {
+                            guard gate?.canPresent == true, scenePhase == .active else { return }
+                            confirmingForgetAll = true
+                        } label: {
+                            Text("Olvidar clave y conexiones")
+                                .titan(.option)
+                                .foregroundStyle(Theme.warning)
+                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .listRowBackground(Theme.grouped)
+                        .listRowSeparatorTint(Theme.separator)
+                    }
                 }
-                .buttonStyle(.plain)
-                .listRowBackground(Theme.grouped)
             }
         }
         .scrollContentBackground(.hidden)
@@ -220,6 +241,15 @@ struct BankLinkView: View {
                 confirmingForgetAll = false
             }
         }
+        .onChange(of: importingStatement) { _, on in
+            if on && (gate?.canPresent != true || scenePhase != .active) { importingStatement = false }
+        }
+        .onChange(of: confirmingDisconnect) { _, on in
+            if on && (gate?.canPresent != true || scenePhase != .active) { confirmingDisconnect = false }
+        }
+        .onChange(of: confirmingForgetAll) { _, on in
+            if on && (gate?.canPresent != true || scenePhase != .active) { confirmingForgetAll = false }
+        }
         .sensoryFeedback(Haptics.error, trigger: errorTick)
         #if DEBUG
         .onAppear {
@@ -241,18 +271,20 @@ struct BankLinkView: View {
                         .titan(.option)
                         .foregroundStyle(Theme.label)
                 }
-                Button {
-                    connector.cancelWebSession()
-                } label: {
-                    Text("Cancelar")
-                        .titan(.option)
-                        .foregroundStyle(Theme.label2)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Theme.raised, in: Capsule())
-                        .contentShape(Capsule())
+                if canCancelWaiting {
+                    Button {
+                        connector.cancelWebSession()
+                    } label: {
+                        Text("Cancelar")
+                            .titan(.option)
+                            .foregroundStyle(Theme.label2)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Theme.raised, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.pressable)
+                    .accessibilityIdentifier("bank-cancel-wait")
                 }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("bank-cancel-wait")
             }
             .padding(.vertical, 6)
             .listRowBackground(Theme.grouped)
@@ -330,7 +362,7 @@ struct BankLinkView: View {
 
     @ViewBuilder
     private var actionRows: some View {
-        if !isWaitingOnThisBank && !needsResumeForThisBank {
+        if !isWaitingOnThisBank && !needsResumeForThisBank && failedMessageForThisBank == nil {
             switch statusLines.action {
             case .connect:
                 Button {
@@ -366,7 +398,7 @@ struct BankLinkView: View {
         }
 
         Button {
-            guard gate?.canPresent != false, scenePhase == .active else { return }
+            guard gate?.canPresent == true, scenePhase == .active else { return }
             importError = nil
             importingStatement = true
         } label: {
@@ -381,15 +413,15 @@ struct BankLinkView: View {
         Text(title)
             .titan(.option)
             .fontWeight(prominent ? .semibold : .medium)
-            .foregroundStyle(prominent ? Theme.canvas : Theme.label)
+            .foregroundStyle(prominent ? Theme.onTileSelected : Theme.label)
             .frame(maxWidth: .infinity, minHeight: 48)
-            .background(prominent ? Theme.label : Theme.raised, in: Capsule())
+            .background(prominent ? Theme.tileSelected : Theme.raised, in: Capsule())
             .contentShape(Capsule())
             .padding(.vertical, 2)
     }
 
     private func handleStatementFile(_ result: Result<URL, Error>) {
-        guard gate?.canPresent != false, scenePhase == .active, case .success(let url) = result else { return }
+        guard gate?.canPresent == true, scenePhase == .active, case .success(let url) = result else { return }
         let targetBank = bank
         let generation = gate?.generation ?? 0
         Task {
@@ -397,7 +429,7 @@ struct BankLinkView: View {
                 let data = try await Task.detached(priority: .userInitiated) {
                     try Self.readStatementData(from: url)
                 }.value
-                guard (gate?.generation ?? 0) == generation, gate?.canPresent != false, scenePhase == .active else { return }
+                guard (gate?.generation ?? 0) == generation, gate?.canPresent == true, scenePhase == .active else { return }
                 let preview = try model.previewImport(data, bank: targetBank)
                 importError = nil
                 importPreview = preview
@@ -434,7 +466,10 @@ struct BankLinkView: View {
     nonisolated private static func readStatementData(from url: URL) throws -> Data {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxStatementBytes {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw StatementFileError.unreadable
+        }
+        guard size <= maxStatementBytes else {
             throw StatementFileError.tooLarge
         }
         guard let data = try? Data(contentsOf: url) else { throw StatementFileError.unreadable }

@@ -5,10 +5,20 @@ final class ImportUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testImportPreviewCounts() {
+    private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport"]
+        app.launchArguments = ["-MiBancoDemo"] + extra + ["-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
         app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for name in ["Permitir", "Allow"] {
+            let b = springboard.alerts.buttons[name]
+            if b.waitForExistence(timeout: 2) { b.tap(); break }
+        }
+        return app
+    }
+
+    func testImportPreviewCounts() {
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport"])
 
         let summary = app.staticTexts["import-summary"]
         XCTAssertTrue(summary.waitForExistence(timeout: 15), "Debe abrirse la vista previa del extracto")
@@ -27,14 +37,11 @@ final class ImportUITests: XCTestCase {
     }
 
     func testImportHidesAmountsInPrivateMode() {
-        let app = XCUIApplication()
-        app.launchArguments = [
-            "-MiBancoDemo",
+        let app = launch([
             "-MiBancoDemoScreen", "ajustes",
             "-MiBancoDemoImport",
             "-MiBancoDemoPrivate",
-        ]
-        app.launch()
+        ])
 
         let scroll = app.scrollViews["import-statement-scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 15), "Debe abrirse la vista previa del extracto")

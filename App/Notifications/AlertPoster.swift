@@ -14,6 +14,7 @@ enum AlertPoster {
             UNNotificationCategory(identifier: category, actions: [], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: InsightNotifier.category, actions: [], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: MorningBriefingNotifier.category, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: BankReminders.category, actions: [], intentIdentifiers: [], options: []),
         ])
     }
 

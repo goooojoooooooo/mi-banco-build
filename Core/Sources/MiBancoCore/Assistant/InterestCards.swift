@@ -351,7 +351,7 @@ private func budgetCard(state: LedgerState, now: Date, calendar: Calendar,
             return a.id < b.id
         }
     for status in statuses {
-        let id = "budgetClose|\(status.id)|\(cardMonthKey(now, calendar))"
+        let id = "budgetClose|\(status.id)|\(status.level.rawValue)|\(cardMonthKey(now, calendar))"
         guard !isDismissed(id) else { continue }
         let label: String
         switch status.scope {
@@ -389,11 +389,14 @@ private func subscriptionChangeCard(state: LedgerState, now: Date, calendar: Cal
     let subs = activeSubscriptions(in: state, now: now, calendar: calendar, notSpending: exclusions)
         .filter { sub in
             guard sub.previousAmountCents != nil,
-                  sub.lastDate <= now,
-                  now.timeIntervalSince(sub.lastDate) < cardRecentWindow,
                   !cardIsMuted(sub.merchant, in: state) else { return false }
-            if let matching = matchingMovement(for: sub), matching.isHistorical { return false }
-            return true
+            if let matching = matchingMovement(for: sub) {
+                guard !matching.isHistorical,
+                      movementCounts(matching, upTo: now, calendar: calendar) else { return false }
+                let effective = matching.dayOnly ? calendar.startOfDay(for: matching.date) : matching.date
+                return now.timeIntervalSince(effective) < cardRecentWindow
+            }
+            return sub.lastDate <= now && now.timeIntervalSince(sub.lastDate) < cardRecentWindow
         }
         .sorted { a, b in
             let da = abs(a.amountCents - (a.previousAmountCents ?? a.amountCents))
@@ -423,7 +426,9 @@ private func unusualPaymentCard(state: LedgerState, now: Date, calendar: Calenda
     let index = MerchantIndex(state.movements, notSpending: exclusions)
     var hits: [(movement: Movement, usual: Int)] = []
     for m in spendingMovements(in: state.movements, notSpending: exclusions) {
-        guard !m.isHistorical, m.date <= now, now.timeIntervalSince(m.date) < cardRecentWindow,
+        let effective = m.dayOnly ? calendar.startOfDay(for: m.date) : m.date
+        guard !m.isHistorical, movementCounts(m, upTo: now, calendar: calendar),
+              now.timeIntervalSince(effective) < cardRecentWindow,
               !cardIsMuted(m.merchant, in: state) else { continue }
         let key = normalizeMerchant(m.merchant ?? "")
         guard !key.isEmpty else { continue }
@@ -490,9 +495,28 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
     }
     guard let maxMove = dayMovers.map({ abs($0.tenths) }).max() else { return nil }
 
-    if let movers = moversLine(summary, now: now, calendar: calendar), maxMove >= 10 {
-        return InterestCard(id: id, topic: .portfolioMover, title: "Movimiento en inversiones",
-                            parts: movers.parts, action: .openInvestments)
+    if dayMovers.count >= 2, maxMove >= 10 {
+        var best = 0, worst = 0
+        for i in dayMovers.indices {
+            if dayMovers[i].tenths > dayMovers[best].tenths { best = i }
+            if dayMovers[i].tenths < dayMovers[worst].tenths { worst = i }
+        }
+        let up = dayMovers[best].tenths > 0, down = dayMovers[worst].tenths < 0
+        if best != worst, dayMovers[best].tenths != dayMovers[worst].tenths, up || down {
+            let isToday = (calendar.dateComponents([.day], from: calendar.startOfDay(for: day),
+                                                   to: calendar.startOfDay(for: now)).day ?? 0) <= 0
+            var prefix = isToday ? "" : "En la última sesión (\(cardWeekdayNames[((calendar.component(.weekday, from: day) - 1) % 7 + 7) % 7])), "
+            var parts: [BriefingPart] = []
+            func phrase(_ label: String, _ mover: (name: String, tenths: Int)) {
+                let head = prefix.isEmpty ? (label.prefix(1).uppercased() + label.dropFirst()) : prefix + label
+                prefix = ""
+                parts += [.text((parts.isEmpty ? "" : " ") + "\(head): \(clippedName(mover.name)) ("), .percentTenths(mover.tenths), .text(").")]
+            }
+            if up { phrase("lo que más subió", dayMovers[best]) }
+            if down { phrase("lo que más bajó", dayMovers[worst]) }
+            return InterestCard(id: id, topic: .portfolioMover, title: "Movimiento en inversiones",
+                                parts: parts, action: .openInvestments)
+        }
     }
 
     // Con una sola posición con precio de mercado del día que se haya movido al menos un 2,0 %, la enseña sin verbos de acción.

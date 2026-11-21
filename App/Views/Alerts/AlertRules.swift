@@ -239,8 +239,10 @@ private struct ThresholdRow: View {
     @State private var saveTick = 0
     @State private var errorTick = 0
     @FocusState private var focused: Bool
+    @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.tight) {
@@ -266,10 +268,11 @@ private struct ThresholdRow: View {
                     .onSubmit(commit)
                     .padding(.horizontal, 10)
                     .frame(minWidth: 96, maxWidth: 128, minHeight: 40)
-                    .background(Color(hex: "#2A2A2D").opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                    .background(Theme.fieldFill.opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                     .animation(Theme.Motion.quick, value: focused)
                     .privateField(editing: focused)
                     .accessibilityLabel(title)
+                    .accessibilityValue(preferences.privateMode && !focused && !text.isEmpty ? "importe oculto" : text)
             }
             if let problem {
                 Text(problem)
@@ -291,9 +294,12 @@ private struct ThresholdRow: View {
             if !isFocused { commit() }
         }
         .onDisappear { if dirty { commit() } }
-        // Fuera de primer plano el teclado se va (y lo escrito se guarda): nunca queda encima del bloqueo.
+        // Fuera de primer plano o al bloquear el teclado se va (y lo escrito se guarda): nunca queda encima del bloqueo.
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = false }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { focused = false }
         }
         .sensoryFeedback(.success, trigger: saveTick)
         .sensoryFeedback(.error, trigger: errorTick)

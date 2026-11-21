@@ -5,10 +5,20 @@ final class BanksUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    func testBanksScreenShowsStatus() {
+    private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"]
+        app.launchArguments = ["-MiBancoDemo"] + extra + ["-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
         app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for name in ["Permitir", "Allow"] {
+            let b = springboard.alerts.buttons[name]
+            if b.waitForExistence(timeout: 2) { b.tap(); break }
+        }
+        return app
+    }
+
+    func testBanksScreenShowsStatus() {
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
 
         let revRow = app.buttons["settings-bank-rev"]
         XCTAssertTrue(revRow.waitForExistence(timeout: 15), "Debe existir la fila de Revolut en Ajustes › Bancos")
@@ -40,9 +50,7 @@ final class BanksUITests: XCTestCase {
     }
 
     func testConnectionGuideSteps() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoGuide"]
-        app.launch()
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoGuide"])
 
         XCTAssertTrue(
             app.staticTexts["Paso 1 de 4"].waitForExistence(timeout: 15),

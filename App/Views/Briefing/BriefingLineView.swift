@@ -27,7 +27,6 @@ struct BriefingLineView: View {
             if hidden {
                 Text(label)
                     .foregroundStyle(color)
-                    .privacySensitive()
             } else if countsFirstAmount, !reduceMotion, !snapCountImmediately, let firstCents = firstAmountCents {
                 AnimatedBriefingSentence(
                     parts: parts,
@@ -44,6 +43,7 @@ struct BriefingLineView: View {
         }
         .titan(role)
         .fixedSize(horizontal: false, vertical: true)
+        .privacySensitive()
         .accessibilityLabel(label)
     }
 

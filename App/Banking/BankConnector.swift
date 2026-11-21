@@ -20,7 +20,7 @@ final class BankConnector {
 
     private var flow = ConnectFlow()
     /// Lista de bancos de Enable Banking, solo en memoria.
-    private var cachedASPSPs: [EBASPSP]?
+    private(set) var cachedASPSPs: [EBASPSP]?
 
     // La dirección del banco y la hoja web viven solo en memoria.
     @ObservationIgnored private var authURL: URL?
@@ -50,6 +50,7 @@ final class BankConnector {
         guard let client = try? BankingCredentials.client(),
               let list = try? await client.aspsps(country: BankingConstants.country) else { return }
         cachedASPSPs = list
+        NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
     }
 
     // MARK: - Conectar
@@ -146,6 +147,17 @@ final class BankConnector {
     /// Cancelación explícita: cierra la hoja web y deja el trámite en `needsResume`.
     func cancelWebSession() {
         run(flow.handle(.cancel))
+    }
+
+    /// Abandona cualquier trámite en curso y vuelve a `.idle` (para «Olvidar clave y conexiones»).
+    func resetForForgetEverything() {
+        attempt = UUID()
+        authURL = nil
+        requestedUntil = nil
+        closeWebSession()
+        deletePending()
+        cachedASPSPs = nil
+        run(flow.handle(.reset))
     }
 
     /// Cambios de escena. El bloqueo no se mira: solo cuánto tiempo se ha estado fuera.
@@ -269,6 +281,9 @@ final class BankConnector {
     // MARK: - Desconectar
 
     func disconnect(_ bank: BankID) async {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         // Un trámite de este banco (también uno que está terminando) se abandona: `attempt` cambia y `finish` se retira.
         attempt = UUID()
         run(flow.handle(.disconnected(bank)))

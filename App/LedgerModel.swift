@@ -97,7 +97,7 @@ final class LedgerModel {
         #if DEBUG
         if DemoMode.isActive {
             state = DemoMode.state()
-            snapshot = LedgerSnapshot(state: state)
+            snapshot = LedgerSnapshot(state: state, cachedASPSPs: BankConnector.shared.cachedASPSPs)
         }
         #endif
         reload()
@@ -138,9 +138,14 @@ final class LedgerModel {
         }
     }
 
-    /// Tras una consulta a un banco: el estado nuevo se publica tal cual, sin `arrival`.
+    /// Tras una consulta a un banco o cambio de lista ASPSP: rehace el snapshot sin `arrival`.
     private func reloadAfterSync() {
-        reload()
+        if let loaded = loadNext(), (loaded != state || !Calendar.current.isDateInToday(snapshot.day)) {
+            publish(loaded)
+        } else {
+            snapshot = LedgerSnapshot(state: state, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            resolvePendingMoves()
+        }
     }
 
     /// Lo siguiente que hay en el almacén (en la demo, lo que dejó la llegada simulada; si no, nada nuevo).
@@ -159,7 +164,7 @@ final class LedgerModel {
         staged?.cancel()
         staged = nil
         state = next
-        snapshot = LedgerSnapshot(state: next)
+        snapshot = LedgerSnapshot(state: next, cachedASPSPs: BankConnector.shared.cachedASPSPs)
         reschedule(next)
         resolvePendingMoves()
     }
@@ -267,7 +272,7 @@ final class LedgerModel {
             let animation: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.roll
             withAnimation(animation) {
                 self.state = next
-                self.snapshot = LedgerSnapshot(state: next)
+                self.snapshot = LedgerSnapshot(state: next, cachedASPSPs: BankConnector.shared.cachedASPSPs)
             }
             self.staged = nil
             self.reschedule(next)

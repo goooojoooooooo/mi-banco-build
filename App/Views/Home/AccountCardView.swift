@@ -178,11 +178,17 @@ private struct CardFront: View {
                     let missingText = summary.missingPrices == 1
                         ? "Falta el precio de 1 posición"
                         : "Falta el precio de \(summary.missingPrices) posiciones"
-                    let staleSuffix: String = {
-                        guard summary.hasStalePrice, let oldest = summary.oldestPriceAt else { return "" }
-                        return " · precio antiguo del \(DateText.madridDay(oldest))"
+                    let suffix: String = {
+                        if summary.hasStalePrice, let oldest = summary.oldestPriceAt {
+                            return " · precio antiguo del \(DateText.madridDay(oldest))"
+                        }
+                        if let pricedAt = summary.pricedAt {
+                            let pricedCount = max(0, summary.positions.count - summary.missingPrices)
+                            return " · \(PositionFormatting.priceTimestamp(pricedAt, plural: pricedCount != 1))"
+                        }
+                        return ""
                     }()
-                    Text(missingText + staleSuffix)
+                    Text(missingText + suffix)
                         .titan(.caption)
                         .foregroundStyle(Theme.warning)
                         .lineLimit(1)
@@ -372,20 +378,20 @@ private struct CardBack: View {
                     HStack(spacing: 8) {
                         if isSyncing {
                             ProgressView()
-                                .tint(.black)
+                                .tint(Theme.onTileSelected)
                                 .controlSize(.small)
                         } else if refreshedCheck {
-                            DrawnCheck(lineWidth: 2, color: .black)
+                            DrawnCheck(lineWidth: 2, color: Theme.onTileSelected)
                                 .frame(width: 14, height: 14)
                                 .transition(.opacity)
                         }
                         Text("Actualizar")
                             .titan(.option)
-                            .foregroundStyle(.black)
+                            .foregroundStyle(Theme.onTileSelected)
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 44)
-                    .background(.white, in: Capsule())
+                    .background(Theme.tileSelected, in: Capsule())
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
@@ -394,25 +400,19 @@ private struct CardBack: View {
             case .renew:
                 capsuleAction("Renovar") { onOpenBank(bank) }
 
-            case .connect:
-                capsuleAction("Conectar") { onOpenBank(bank) }
-
-            case .importStatement:
-                capsuleAction("Importar") { onOpenBank(bank) }
-
-            case .editBalance, nil:
+            case .connect, .importStatement, .editBalance, nil:
                 if isSyncing {
                     HStack(spacing: 8) {
                         ProgressView()
-                            .tint(.black)
+                            .tint(Theme.onTileSelected)
                             .controlSize(.small)
                         Text("Actualizar")
                             .titan(.option)
-                            .foregroundStyle(.black)
+                            .foregroundStyle(Theme.onTileSelected)
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 44)
-                    .background(.white, in: Capsule())
+                    .background(Theme.tileSelected, in: Capsule())
                 } else {
                     capsuleAction("Editar saldo", action: onEdit)
                 }
@@ -426,10 +426,10 @@ private struct CardBack: View {
         Button(action: action) {
             Text(title)
                 .titan(.option)
-                .foregroundStyle(.black)
+                .foregroundStyle(Theme.onTileSelected)
                 .padding(.horizontal, 16)
                 .frame(minHeight: 44)
-                .background(.white, in: Capsule())
+                .background(Theme.tileSelected, in: Capsule())
                 .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
@@ -479,10 +479,10 @@ private struct CardBack: View {
             Button(action: onImportInvestments) {
                 Text("Importar de nuevo")
                     .titan(.option)
-                    .foregroundStyle(.black)
+                    .foregroundStyle(Theme.onTileSelected)
                     .padding(.horizontal, 16)
                     .frame(minHeight: 44)
-                    .background(.white, in: Capsule())
+                    .background(Theme.tileSelected, in: Capsule())
                     .contentShape(Capsule())
             }
             .buttonStyle(.pressable)
@@ -497,25 +497,43 @@ private struct CardBack: View {
 
     private var explanation: String {
         guard let bank = card.bank else {
-            let fromBank = BankID.allCases.filter { balances[$0]?.origin == .bank }.map(\.displayName)
-            if !fromBank.isEmpty {
-                let bankVerb = fromBank.count == 1 ? "viene del banco" : "vienen del banco"
-                let bankPart = "\(spanishJoin(fromBank)) \(bankVerb)"
-                let restEstimated = BankID.allCases
-                    .filter { balances[$0]?.origin != .bank && (balances[$0]?.estimated ?? false) }
-                    .map(\.displayName)
-                if restEstimated.isEmpty {
-                    return "\(bankPart)."
-                }
-                let estVerb = restEstimated.count == 1 ? "es estimado" : "son estimados"
-                return "\(bankPart); \(spanishJoin(restEstimated)) \(estVerb)."
+            let known = BankID.allCases.filter { balances[$0] != nil }
+            guard !known.isEmpty else {
+                return "Aún no tienes saldos guardados. Escríbelos en Ajustes o conecta tus bancos."
             }
-            let estimated = BankID.allCases.filter { balances[$0]?.estimated ?? false }.map(\.displayName)
-            switch estimated.count {
+            let missing = BankID.allCases.filter { balances[$0] == nil }.map(\.displayName)
+            let fromBank = known.filter { balances[$0]?.origin == .bank }.map(\.displayName)
+            let fromStatement = known.filter { balances[$0]?.origin == .statement && balances[$0]?.estimated == false }.map(\.displayName)
+            let estimated = known.filter { balances[$0]?.estimated == true && balances[$0]?.origin != .bank }.map(\.displayName)
+
+            if !fromBank.isEmpty || !fromStatement.isEmpty || !missing.isEmpty {
+                var clauses: [String] = []
+                if !fromBank.isEmpty {
+                    let verb = fromBank.count == 1 ? "viene del banco" : "vienen del banco"
+                    clauses.append("\(spanishJoin(fromBank)) \(verb)")
+                }
+                if !fromStatement.isEmpty {
+                    let verb = fromStatement.count == 1 ? "viene del extracto" : "vienen del extracto"
+                    clauses.append("\(spanishJoin(fromStatement)) \(verb)")
+                }
+                if !estimated.isEmpty {
+                    let verb = estimated.count == 1 ? "es estimado" : "son estimados"
+                    clauses.append("\(spanishJoin(estimated)) \(verb)")
+                }
+                if !missing.isEmpty {
+                    let verb = missing.count == 1 ? "no tiene saldo" : "no tienen saldo"
+                    clauses.append("\(spanishJoin(missing)) \(verb)")
+                }
+                if !clauses.isEmpty {
+                    return clauses.joined(separator: "; ") + "."
+                }
+            }
+            let allEstimated = known.filter { balances[$0]?.estimated == true }.map(\.displayName)
+            switch allEstimated.count {
             case 0: return "Los tres saldos son exactos: vienen del último aviso de cada banco."
-            case 1: return "\(estimated[0]) es estimado: su aviso no trae el saldo, así que lo calculamos."
+            case 1: return "\(allEstimated[0]) es estimado: su aviso no trae el saldo, así que lo calculamos."
             default:
-                let list = spanishJoin(estimated)
+                let list = spanishJoin(allEstimated)
                 return "\(list) son estimados: sus avisos no traen el saldo, así que los calculamos."
             }
         }

@@ -83,11 +83,6 @@ private struct PositionDetailContent: View {
         return UIApplication.shared.canOpenURL(url)
     }
 
-    private var hasManualPrice: Bool {
-        if case .manual = value.origin { return true }
-        return false
-    }
-
     private var positionChangeDay: Date? {
         guard case .market(let at) = value.origin else { return nil }
         return DateText.madridCalendar.startOfDay(for: at)
@@ -217,14 +212,6 @@ private struct PositionDetailContent: View {
                         divided: false,
                         action: startEditingPrice
                     )
-                    if hasManualPrice {
-                        PositionSheetAction(
-                            title: "Quitar precio a mano",
-                            systemImage: "arrow.uturn.backward",
-                            divided: true,
-                            action: clearManualPrice
-                        )
-                    }
                     if canOpenTradeRepublic, let url = Self.tradeRepublicURL {
                         PositionSheetAction(
                             title: "Abrir Trade Republic",

@@ -13,7 +13,7 @@ struct InvestmentsSection: View {
         "Para saber cuánto valen tus inversiones, Mi Banco pregunta a Yahoo Finance el precio de cada valor usando solo su código (ISIN). No envía cuántas acciones tienes, ni importes, ni tu nombre. Si lo apagas, puedes poner los precios a mano."
 
     private static let exportHint =
-        "Cómo exportar: en Trade Republic, Perfil → Extractos → Exportar transacciones → Guardar en Archivos. Si ya importaste el extracto en Bancos, tus inversiones ya están."
+        "Cómo exportar: en Trade Republic, Perfil › Extractos › Exportar transacciones › Guardar en Archivos. Si ya importaste el extracto en Bancos, tus inversiones ya están."
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -72,7 +72,7 @@ struct InvestmentsSection: View {
             Toggle(isOn: pricesBinding) {
                 OptionLabel(
                     title: "Precios de tus inversiones",
-                    detail: portfolio.isRefreshingPrices ? "Actualizando precios…" : "Consulta diaria por ISIN",
+                    detail: portfolio.isRefreshingPrices ? "Actualizando precios…" : "Solo envía el código (ISIN) a Yahoo Finance",
                     systemImage: "chart.line.uptrend.xyaxis"
                 )
             }

@@ -218,7 +218,7 @@ enum PositionFormatting {
         }
         if let yesterday = DateText.madridCalendar.date(byAdding: .day, value: -1, to: now),
            DateText.madridCalendar.isDate(date, inSameDayAs: yesterday) {
-            return "precio de ayer, \(time)"
+            return plural ? "precios de ayer, \(time)" : "precio de ayer, \(time)"
         }
         let day = DateText.madridDay(date)
         return plural ? "precios del \(day)" : "precio del \(day)"

@@ -25,6 +25,7 @@ struct SettingsView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
     /// Bancos recién guardados: un ✓ que se traza junto al campo.
     @State private var savedFlash: Set<BankID> = []
     @State private var saveCount = 0
@@ -104,6 +105,7 @@ struct SettingsView: View {
                         .buttonStyle(.plain)
                         .accessibilityIdentifier("settings-prepare-connection")
                         .listRowBackground(Theme.grouped)
+                        .listRowSeparatorTint(Theme.separator)
                     }
                 } header: {
                     SettingsHeader("Bancos")
@@ -133,6 +135,7 @@ struct SettingsView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("settings-accounts")
                     .listRowBackground(Theme.grouped)
+                    .listRowSeparatorTint(Theme.separator)
                 } header: {
                     SettingsHeader("Saldos")
                 } footer: {
@@ -232,9 +235,12 @@ struct SettingsView: View {
         .onChange(of: focused) { old, _ in
             if let old { commit(old) }
         }
-        // Al salir de la app se suelta el foco: guarda lo editado y quita el teclado de encima del bloqueo.
+        // Al salir de la app o bloquear se suelta el foco: guarda lo editado y quita el teclado de encima del bloqueo.
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { focused = nil }
         }
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
@@ -277,8 +283,12 @@ struct SettingsView: View {
             pushedBank = bank
             return
         }
+        let generation = gate?.generation
         Task {
             try? await Task.sleep(for: .milliseconds(350))
+            guard scenePhase == .active,
+                  gate?.canPresent != false,
+                  gate == nil || gate?.generation == generation else { return }
             focused = bank
         }
     }
@@ -363,12 +373,14 @@ private struct BalanceRow: View {
     var focused: FocusState<BankID?>.Binding
     let onSubmit: () -> Void
 
+    @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var typeSize
 
     private var isConnected: Bool { link != nil }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
+        let hidden = preferences.privateMode
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.small))
             : AnyLayout(HStackLayout(spacing: Theme.Space.row))
@@ -384,14 +396,20 @@ private struct BalanceRow: View {
                 .accessibilityElement(children: .combine)
                 if !stacked { Spacer(minLength: Theme.Space.small) }
                 if isConnected {
-                    Text(info.map { formatEUR($0.cents) } ?? "—")
+                    let formatted = info.map { formatEUR($0.cents).replacingOccurrences(of: "-", with: "\u{2212}") } ?? "—"
+                    let spoken = info.map { spokenAmount($0.cents, hidden: hidden) } ?? "sin saldo"
+                    Text(formatted)
                         .titan(.option)
                         .fontWeight(.semibold)
                         .foregroundStyle(Theme.label)
                         .padding(.horizontal, 10)
                         .frame(minHeight: 40)
-                        .privateAmount()
+                        .blur(radius: hidden && info != nil ? 9 : 0, opaque: false)
+                        .opacity(hidden && info != nil ? 0.75 : 1)
+                        .privacySensitive()
+                        .accessibilityLabel("Saldo de \(bank.displayName): \(spoken)")
                 } else {
+                    let isEditing = focused.wrappedValue == bank
                     HStack(spacing: 8) {
                         if saved {
                             DrawnCheck(lineWidth: 2, color: Theme.label)
@@ -410,10 +428,11 @@ private struct BalanceRow: View {
                             .onSubmit(onSubmit)
                             .padding(.horizontal, 10)
                             .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
-                            .background(Theme.fieldFill.opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                            .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
-                            .privateField(editing: focused.wrappedValue == bank)
+                            .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                            .animation(Theme.Motion.quick, value: isEditing)
+                            .privateField(editing: isEditing)
                             .accessibilityLabel("Saldo de \(bank.displayName)")
+                            .accessibilityValue(hidden && !isEditing && !text.isEmpty ? "importe oculto" : text)
                     }
                 }
             }
@@ -436,8 +455,9 @@ private struct BalanceRow: View {
 
     private var status: String {
         if let link {
-            let kind = (info?.estimated ?? false) ? "estimado" : "exacto"
-            let date = link.lastSuccessAt ?? info?.setAt ?? link.connectedAt
+            guard let info else { return "Sin saldo todavía" }
+            let kind = info.estimated ? "estimado" : "exacto"
+            let date = link.lastSuccessAt ?? info.setAt
             let rel = relativeUpdated(date, now: Date(), calendar: DateText.madridCalendar)
             return "\(kind) · \(rel)"
         }
@@ -445,19 +465,20 @@ private struct BalanceRow: View {
         let calendar = Calendar.current
         let isToday = calendar.isDateInToday(info.setAt)
         let whenExact = isToday ? "de las \(DateText.time(info.setAt))" : "del \(DateText.day(info.setAt))"
-        let when = isToday ? "hoy" : "el \(DateText.day(info.setAt))"
+        let whenFrom = isToday ? "de hoy" : "del \(DateText.day(info.setAt))"
+        let whenCorrected = isToday ? "hoy" : "el \(DateText.day(info.setAt))"
         switch info.origin {
         case .bank:
-            return !info.estimated ? "Exacto · del banco \(whenExact)" : "Estimado · desde el banco de \(when)"
+            return !info.estimated ? "Exacto · del banco \(whenExact)" : "Estimado · desde el banco \(whenFrom)"
         case .statement:
-            return !info.estimated ? "Exacto · del extracto \(whenExact)" : "Estimado · desde el extracto de \(when)"
+            return !info.estimated ? "Exacto · del extracto \(whenExact)" : "Estimado · desde el extracto \(whenFrom)"
         case .notice:
-            return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso de \(when)"
+            return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso \(whenFrom)"
         case .manual:
             if info.fromBank {
-                return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso de \(when)"
+                return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso \(whenFrom)"
             }
-            return "Estimado · corregido \(when)"
+            return "Estimado · corregido \(whenCorrected)"
         }
     }
 }

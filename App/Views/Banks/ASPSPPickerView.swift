@@ -7,6 +7,9 @@ struct ASPSPPickerView: View {
     let list: [EBASPSP]
     var onSelect: (EBASPSP) -> Void
 
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
     @State private var query = ""
 
     private var filtered: [EBASPSP] {
@@ -21,6 +24,7 @@ struct ASPSPPickerView: View {
                 ForEach(Array(filtered.enumerated()), id: \.offset) { _, item in
                     Button {
                         onSelect(item)
+                        dismiss()
                     } label: {
                         HStack(spacing: Theme.Space.row) {
                             Text(item.name)
@@ -37,15 +41,23 @@ struct ASPSPPickerView: View {
                     }
                     .buttonStyle(.plain)
                     .listRowBackground(Theme.grouped)
+                    .listRowSeparatorTint(Theme.separator)
                 }
             } header: {
                 SettingsHeader("Elige tu banco en la lista")
             }
         }
         .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.canvas.ignoresSafeArea())
         .searchable(text: $query, prompt: "Buscar \(bank.displayName)")
         .navigationTitle("Elegir \(bank.displayName)")
         .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { query = "" }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { query = "" }
+        }
     }
 }

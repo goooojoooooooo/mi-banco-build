@@ -67,7 +67,7 @@ struct BackupSection: View {
         } header: {
             SettingsHeader("Copia de seguridad")
         } footer: {
-            SettingsFooter("La copia lleva todos tus movimientos, saldos y notas. Guárdala en un sitio tuyo: quien la tenga puede leerla.")
+            SettingsFooter("La copia lleva todos tus movimientos, saldos, notas e inversiones. Guárdala en un sitio tuyo: quien la tenga puede leerla.")
         }
         .task(id: model.restoreCount) { previous = model.previousPreview(portfolioSafetyCopy: portfolio.loadSafetyCopy()) }
         .animation(reduceMotion ? nil : Theme.Motion.quick, value: failed)

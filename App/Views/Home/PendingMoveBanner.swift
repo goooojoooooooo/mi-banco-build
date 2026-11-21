@@ -67,6 +67,6 @@ struct PendingMoveBanner: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .background(Theme.grouped, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.logoLarge, style: .continuous))
     }
 }

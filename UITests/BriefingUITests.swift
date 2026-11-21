@@ -133,9 +133,9 @@ final class BriefingUITests: XCTestCase {
         XCTAssertTrue(balancesChip.waitForExistence(timeout: 6), "Falta la ficha «¿Cuánto tengo?» en modo privado")
         balancesChip.tap()
 
-        let listenAnswer = element("assistant-listen-answer")
-        scrollInBriefingSheet(to: listenAnswer)
-        XCTAssertTrue(listenAnswer.waitForExistence(timeout: 8), "No apareció la respuesta del asistente en modo privado")
+        let answerCard = element("assistant-answer-card")
+        scrollInBriefingSheet(to: answerCard)
+        XCTAssertTrue(answerCard.waitForExistence(timeout: 8), "No apareció la respuesta del asistente en modo privado")
 
         XCTAssertEqual(euroElements.count, 0, "La respuesta del asistente expuso '€' en modo privado")
         XCTAssertEqual(percentElements.count, 0, "La respuesta del asistente expuso '%' en modo privado")

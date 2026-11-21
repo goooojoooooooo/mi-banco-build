@@ -92,22 +92,42 @@ private func foldedQuery(_ text: String) -> String {
         .lowercased()
 }
 
-/// Cambia letras parecidas de otros alfabetos o latín extendido (cirílico «е»/«а», griego «υ», «đ», «ø», «ł»...) por su letra
-/// ASCII para detectar trucos de escritura en peticiones de consejo (J22).
-private let confusableMap: [Character: String] = [
+/// Cambia letras parecidas de otros alfabetos o latín extendido (cirílico «е»/«а», griego «υ», «đ», «ø», «ł», «ɇ», «ħ»...)
+/// por su letra ASCII para detectar trucos de escritura en peticiones de consejo (J22).
+private let confusableScalarMap: [UnicodeScalar: String] = [
     "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x", "у": "y", "і": "i", "ї": "i", "ј": "j", "ѕ": "s", "ԁ": "d",
     "к": "k", "м": "m", "т": "t", "н": "h", "в": "b",
     "α": "a", "ε": "e", "ο": "o", "ρ": "p", "ν": "v", "υ": "u", "ι": "i", "κ": "k", "τ": "t", "χ": "x",
-    "đ": "d", "ð": "d", "ø": "o", "ł": "l", "ı": "i", "ß": "ss", "þ": "p",
+    "đ": "d", "ð": "d", "ø": "o", "ł": "l", "ı": "i", "ȷ": "j", "ß": "ss", "þ": "p", "ſ": "s",
+    "ɇ": "e", "ħ": "h", "ɑ": "a", "ɡ": "g", "ɩ": "i", "ʋ": "v", "ɒ": "a", "ə": "e", "ɛ": "e", "ɪ": "i",
+    "ɔ": "o", "ʊ": "u", "ʌ": "a", "ɓ": "b", "ɗ": "d", "ƒ": "f", "ɠ": "g", "ƙ": "k", "ɱ": "m", "ɲ": "n",
+    "ƥ": "p", "ɾ": "r", "ƭ": "t", "ƴ": "y", "ʐ": "z",
+]
+
+/// Letras latinas extendidas legítimas en nombres europeos (español, nórdicos, alemán, polaco, croata).
+private let allowedNonASCIILatinBases: Set<UInt32> = [
+    0x00DF, // ß
+    0x00E6, // æ
+    0x00F0, // ð
+    0x00F8, // ø
+    0x00FE, // þ
+    0x0111, // đ
+    0x0131, // ı
+    0x0142, // ł
+    0x0153, // œ
 ]
 
 private func foldConfusables(_ text: String) -> String {
     var out = ""
-    for ch in compatNormalized(text).lowercased() {
-        if let mapped = confusableMap[ch] {
+    // Descompone primero en NFD para quitar diacríticos combinantes (p. ej. cirílico «е\u{0301}») antes de mapear escalares.
+    let decomposed = compatNormalized(text).lowercased().decomposedStringWithCanonicalMapping
+    for scalar in decomposed.unicodeScalars {
+        let cat = scalar.properties.generalCategory
+        if cat == .nonspacingMark || cat == .spacingMark || cat == .enclosingMark { continue }
+        if let mapped = confusableScalarMap[scalar] {
             out += mapped
         } else {
-            out.append(ch)
+            out.unicodeScalars.append(scalar)
         }
     }
     return out
@@ -136,16 +156,33 @@ private func isLatinScriptLetter(_ scalar: UnicodeScalar) -> Bool {
     return v <= 0x024F || (0x1E00...0x1EFF).contains(v)
 }
 
-/// true si una misma palabra mezcla letras latinas con letras de otra escritura (p. ej. «vеndo» con cirílico o «bυy» con griego).
+/// true si una letra base (tras NFD y sin marcas) es una letra latina extendida inusual usada como confusable (p. ej. «ɇ», «ħ»).
+private func isSuspiciousConfusableLetter(_ scalar: UnicodeScalar) -> Bool {
+    guard isLetterScalar(scalar) else { return false }
+    if scalar.value <= 0x007A { return false }
+    if allowedNonASCIILatinBases.contains(scalar.value) { return false }
+    return true
+}
+
+/// true si una misma palabra mezcla letras latinas con letras de otra escritura o confusables exóticos (p. ej. «vеndo», «vɇndo», «ħold»).
 private func hasCrossScriptConfusableWord(_ text: String) -> Bool {
-    let tokens = compatNormalized(text).components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+    let decomposed = compatNormalized(text).lowercased().decomposedStringWithCanonicalMapping
+    let stripped = String(decomposed.unicodeScalars.filter {
+        let cat = $0.properties.generalCategory
+        return cat != .nonspacingMark && cat != .spacingMark && cat != .enclosingMark
+    })
+    let tokens = stripped.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
     for token in tokens {
         var hasLatin = false
-        var hasNonLatin = false
+        var hasSuspicious = false
         for scalar in token.unicodeScalars where isLetterScalar(scalar) {
-            if isLatinScriptLetter(scalar) { hasLatin = true } else { hasNonLatin = true }
+            if isSuspiciousConfusableLetter(scalar) {
+                hasSuspicious = true
+            } else if isLatinScriptLetter(scalar) {
+                hasLatin = true
+            }
         }
-        if hasLatin && hasNonLatin { return true }
+        if hasLatin && hasSuspicious { return true }
     }
     return false
 }
@@ -165,15 +202,17 @@ private let unconditionalAdviceWords: Set<String> = [
 
 /// Prefijos que siempre marcan una petición de consejo (incluye inglés `invest*` de J7, gerundios y clíticos).
 private let unconditionalAdvicePrefixes = [
-    "recomiend", "recomend", "aconsej", "suger", "sugier", "asesor", "aprovech",
+    "recomiend", "recomend", "aconsej", "consej", "suger", "sugier", "asesor", "aprovech",
     "diversific", "reequilibr", "rebalanc", "promedi", "deshaz", "deshag", "deshac",
     "convendr", "acumul", "refuerz", "reforz", "aguant", "manten", "mantien",
-    "recommend", "purchase",
+    "recommend", "advice", "advis", "purchase",
 ]
 
 /// Frases que siempre marcan una petición de consejo.
 private let unconditionalAdvicePhrases = [
-    "buen momento", "es momento de", "el momento de", "es hora de", "buena idea", "vale la pena", "merece la pena",
+    "buen momento", "es momento de", "el momento de", "es hora de", "buena idea",
+    "vale la pena", "valen la pena", "valdra la pena", "valdran la pena",
+    "merece la pena", "merecen la pena", "merecera la pena", "mereceran la pena",
     "yo que tu", "yo de ti", "habria que", "tendrias que",
     "toma beneficios", "tomo beneficios", "tomar beneficios", "tomamos beneficios",
     "recoge beneficios", "recojo beneficios", "recoger beneficios",
@@ -186,6 +225,7 @@ private let unconditionalAdvicePhrases = [
     "sacar rentabilidad",
     "take profit", "take profits", "get out", "stay put", "should i", "good time to",
     "worth buying", "worth selling", "worth investing", "how much to invest", "what to invest",
+    "where to put my money", "where should i put",
     "mejor esperar", "espera a que", "esperar a que",
 ]
 
@@ -206,6 +246,12 @@ private let factualNounPredecessors: Set<String> = [
     "hice", "hechas",
 ]
 
+/// Verbos de planificación/acción que anulan el pase de sustantivo en «una compra»/«una venta» cuando hay contexto de inversión.
+private let tradeActionLeadWords: Set<String> = [
+    "hago", "hacer", "hagamos", "haria", "programo", "programar", "lanzo", "lanzar",
+    "pongo", "poner", "meto", "meter", "debo", "deberia", "quiero", "voy", "toca",
+]
+
 /// Marcadores condicionales: piden consejo si acompañan contexto de inversión o verbo de espera/estrategia.
 private let conditionalAdviceWords: Set<String> = [
     "deberia", "deberias", "deberiamos", "debo", "debes", "debemos", "debiera", "tendria", "podria", "podrias",
@@ -214,7 +260,8 @@ private let conditionalAdviceWords: Set<String> = [
 ]
 
 private let conditionalAdvicePhrases = [
-    "tengo que", "tienes que", "hay que", "crees que", "piensas que", "que me dices de",
+    "tengo que", "tienes que", "hay que", "crees que", "piensas que", "piensas de", "opinas de",
+    "que te parece", "que me dices de",
 ]
 
 /// Palabras cotidianas que empiezan por «manten» o «acumul» y no piden consejo.
@@ -237,6 +284,14 @@ private let portfolioActionWords: Set<String> = [
     "retiro", "retirar", "retira", "retiramos", "retiraria", "retirando",
     "cierro", "cerrar", "cierra", "cerramos", "cerraria", "cerrando",
     "toco", "tocar", "toques", "toque",
+    "aumento", "aumentar", "aumenta", "aumentamos", "aumentaria", "aumentando",
+    "amplio", "ampliar", "amplia", "ampliamos", "ampliaria", "ampliando",
+    "adquiero", "adquirir", "adquiere", "adquirimos", "adquiriria", "adquiriendo",
+    "muevo", "mover", "mueve", "movemos", "moveria", "moviendo",
+    "paso", "pasar", "pasa", "pasamos", "pasaria", "pasando",
+    "apuesto", "apostar", "apuesta", "apostamos", "apostaria", "apostando",
+    "sigo", "seguir", "sigue", "seguimos", "seguiria", "siguiendo",
+    "dump", "exit", "trim", "reallocate",
 ]
 
 /// Frases de rendimiento pasado/actual con «mejor» que son factuales, nunca consejos.
@@ -247,11 +302,14 @@ private let factualMejorPhrases = [
 
 /// Frases de predicción de precios (consejo cuando acompañan contexto de inversión).
 private let futurePricePhrases = [
-    "va a subir", "va a bajar", "van a subir", "van a bajar", "seguira subiendo", "seguira bajando",
+    "va a subir", "va a bajar", "va a caer", "van a subir", "van a bajar", "van a caer",
+    "seguira subiendo", "seguira bajando", "seguira cayendo", "se va a desplomar",
+    "go up", "go down", "going to drop", "going to rise", "going to fall", "going to crash",
 ]
 
 private let futurePriceWords: Set<String> = [
-    "subira", "subiran", "bajara", "bajaran", "subiria", "bajaria",
+    "subira", "subiran", "bajara", "bajaran", "subiria", "bajaria", "subirian", "bajarian",
+    "caera", "caeran", "caeria", "caerian", "desplomara", "desplomaran", "desplomaria",
 ]
 
 /// Vocabulario de inversión para evaluar marcadores condicionales (sin bloquear por sí solo preguntas factuales).
@@ -270,14 +328,21 @@ private let billOrPaymentWords: Set<String> = [
     "dividendo", "dividendos",
 ]
 
-private func hasInvestmentContext(_ list: [String], portfolio: Portfolio?) -> Bool {
+private func hasInvestmentContext(_ list: [String], alphanumericTokens: [String], portfolio: Portfolio?) -> Bool {
     if list.contains(where: { word in
         investmentContextWords.contains(word) || investmentContextPrefixes.contains(where: { word.hasPrefix($0) })
     }) { return true }
+    if alphanumericTokens.contains(where: { word in
+        investmentContextWords.contains(word) || investmentContextPrefixes.contains(where: { word.hasPrefix($0) })
+    }) { return true }
     if let portfolio {
-        let joined = " " + list.joined(separator: " ") + " "
+        let joinedLetters = " " + list.joined(separator: " ") + " "
+        let joinedAlnum = " " + alphanumericTokens.joined(separator: " ") + " "
         for pos in positions(from: portfolio.transactions) {
-            if positionMatchesInFolded(pos, foldedJoined: joined, tokens: list) { return true }
+            if positionMatchesInFolded(pos, foldedJoined: joinedAlnum, tokens: alphanumericTokens)
+                || positionMatchesInFolded(pos, foldedJoined: joinedLetters, tokens: list) {
+                return true
+            }
         }
     }
     return false
@@ -296,11 +361,23 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
         withoutFormatCharacters(question).precomposedStringWithCanonicalMapping.lowercased()
             .components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
     )
-    let hasPastCompre = rawAccentedTokens.contains("compré")
+    let hasPastCompreOnly = rawAccentedTokens.contains("compré") && !rawAccentedTokens.contains("compre")
+
+    // Tokens alfanuméricos para conservar ISINs (`US0378331005`), `sp500`, `IBEX 35`, `3M`.
+    let alnumTokens = foldedQuery(foldConfusables(trimmed))
+        .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    let hasMoneyCue = trimmed.contains("€") || trimmed.contains("$")
+        || alnumTokens.contains("euros") || alnumTokens.contains("euro") || alnumTokens.contains("eur")
+        || alnumTokens.contains("dinero")
+    let hasOwnBankMention = alnumTokens.contains("revolut") || alnumTokens.contains("imagin")
+        || alnumTokens.contains("caixabank") || alnumTokens.contains("caixa")
+        || alnumTokens.contains("traderepublic")
+        || (" " + alnumTokens.joined(separator: " ") + " ").contains(" trade republic ")
 
     for list in allQuestionReadings(trimmed) {
         let joined = " " + list.joined(separator: " ") + " "
-        let invContext = hasInvestmentContext(list, portfolio: portfolio)
+        let invContext = hasInvestmentContext(list, alphanumericTokens: alnumTokens, portfolio: portfolio)
+        let hasTradeActionLead = list.contains { tradeActionLeadWords.contains($0) }
 
         // 1. Palabras y prefijos incondicionales (incluye inglés `invest*` de J7).
         for (i, word) in list.enumerated() {
@@ -309,9 +386,9 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
                unconditionalAdvicePrefixes.contains(where: { word.hasPrefix($0) }) { return true }
             if word.hasPrefix("invest") && !word.hasPrefix("investig") { return true }
 
-            // «venta»/«ventas» sin determinante ni «venta(s) de/del» al inicio (R1).
+            // «venta»/«ventas» sin determinante ni «venta(s) de/del» al inicio (R1); si hay contexto de inversión + verbo de acción («hago una venta»), sí es consejo.
             if word == "venta" || word == "ventas" {
-                if isFactualTradeNoun(word, at: i, in: list) { continue }
+                if isFactualTradeNoun(word, at: i, in: list) && !(invContext && hasTradeActionLead) { continue }
                 return true
             }
 
@@ -324,12 +401,12 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
                         && word != "compresa" && word != "compresas")
                 if isComprarForm {
                     if word == "compra" || word == "compras" {
-                        if isFactualTradeNoun(word, at: i, in: list) { continue }
+                        if isFactualTradeNoun(word, at: i, in: list) && !(invContext && hasTradeActionLead) { continue }
                         return true
                     }
                     if word == "compre" {
-                        // «¿Qué compré en Mercadona?» / «¿Cuánto compré en Apple Store?» lleva tilde en el original.
-                        if hasPastCompre { continue }
+                        // «¿Qué compré en Mercadona?» lleva tilde y NO trae otro «compre» sin tilde en la misma frase.
+                        if hasPastCompreOnly { continue }
                         let pastShop = list.contains("cuanto") && list.contains("en") && !invContext
                         if pastShop { continue }
                         return true
@@ -344,6 +421,14 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
 
         // 2. Frases incondicionales.
         if unconditionalAdvicePhrases.contains(where: { joined.contains(" " + $0 + " ") }) { return true }
+
+        // 2b. «¿Meto 500 € en Tesla?» / «¿Pongo 1.000 euros en Nvidia?» (importe entre meto/pongo y «en», sin banco propio ni verbo de gasto).
+        if hasMoneyCue && !hasOwnBankMention,
+           list.contains(where: { ["meto", "meter", "mete", "pongo", "poner", "pon"].contains($0) }),
+           list.contains("en"),
+           !list.contains(where: { ["gaste", "gasto", "gastado", "pague", "pagado", "traspaso", "transferencia"].contains($0) }) {
+            return true
+        }
 
         // 3. Predicciones de mercado y «qué hago con …» solo en contexto de inversión o dinero/ahorros.
         if invContext {
@@ -412,7 +497,7 @@ private func extractMonth(tokens: [String], joined: String, rawFolded: String, n
     let currentYear = calendar.component(.year, from: now)
     let currentMonth = calendar.component(.month, from: now)
     let digits = rawFolded.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { $0.count == 4 }
-    let explicitYear = digits.compactMap(Int.init).first { (2000...2100).contains($0) }
+    let explicitYear = digits.compactMap(Int.init).first { (1000...9999).contains($0) }
     for entry in spanishMonthNames where tokens.contains(entry.name) {
         let year = explicitYear ?? (entry.month > currentMonth ? currentYear - 1 : currentYear)
         return .specific(year: year, month: entry.month)
@@ -508,6 +593,7 @@ private let nonMerchantTargets: Set<String> = [
     "inversiones", "inversion", "cartera", "bolsa", "acciones", "fondos", "cripto", "presupuesto", "presupuestos",
     "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "setiembre",
     "octubre", "noviembre", "diciembre",
+    "pago", "pagos", "recibo", "recibos", "gasto", "gastos", "cargo", "cargos", "compra", "compras",
 ]
 
 private let trailingTimePhrases = [
@@ -797,8 +883,13 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
         return .subscriptions
     }
 
-    // 8. Ingresos.
-    if tokens.contains(where: { incomeCues.contains($0) }) || incomePhrases.contains(where: { joined.contains(" " + $0 + " ") }) {
+    // 8. Ingresos («me han cobrado» / «han cobrado» son pagos, nunca ingresos).
+    let passiveCharged = joined.contains(" han cobrado ") || joined.contains(" me cobraron ")
+    let hasIncomeCue = tokens.contains { cue in
+        if cue == "cobrado" && passiveCharged { return false }
+        return incomeCues.contains(cue)
+    }
+    if hasIncomeCue || incomePhrases.contains(where: { joined.contains(" " + $0 + " ") }) {
         return .income(month: month)
     }
 
@@ -824,7 +915,7 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
         let isShopSpending = hasStrongShopCue && !isGainQuery
             && (matchedPositionName.map { hasKnownShopMerchant($0, in: state) } ?? false)
         if !isShopSpending {
-            let isOnlyLlevoWithoutShop = tokens.contains("llevo")
+            let isOnlyLlevoWithoutShop = tokens.contains("llevo") && !hasStrongShopCue
                 && !(matchedPositionName.map { hasKnownShopMerchant($0, in: state) } ?? false)
             if isGainQuery || !hasSpendingCue || isOnlyLlevoWithoutShop {
                 return .investments(positionQuery: positionQuery, moversOnly: false)
@@ -837,10 +928,10 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
                                    category: category, bank: bank)
     if hasSpendingCue {
         return .spending(month: month, category: merchant == nil ? category : nil, merchant: merchant,
-                         bank: merchant == nil ? bank : nil)
+                         bank: bank)
     }
     if let merchant, joined.contains(" cuanto ") || joined.contains(" pagos ") {
-        return .spending(month: month, category: nil, merchant: merchant, bank: nil)
+        return .spending(month: month, category: nil, merchant: merchant, bank: bank)
     }
     if let category, joined.contains(" cuanto ") || month != .current {
         return .spending(month: month, category: category, merchant: nil, bank: bank)
@@ -879,18 +970,31 @@ public func assistantRoutingPrompt(question: String, now: Date, calendar: Calend
     return "Mes actual: \(year)-\(mm)\nPregunta: \(clean)\nIntención:"
 }
 
+/// Palabras interrogativas o verbos de consulta que nunca pueden elegirse como nombre de comercio desde el modelo (C2).
+private let modelMerchantStopWords: Set<String> = [
+    "cuanto", "cuanta", "cuantos", "cuantas", "gaste", "gastado", "gastar", "gasto", "gastos",
+    "llevo", "pague", "pagado", "pagar", "pago", "pagos", "dinero", "saldo", "saldos",
+    "donde", "cuando", "como", "quien", "cual", "cuales", "que",
+]
+
 /// Comprueba que el valor propuesto por el modelo aparece como una secuencia de palabras enteras dentro de `originalQuestion`,
-/// sin caracteres añadidos ni símbolos prohibidos, y devuelve el trozo original de la pregunta (nunca el texto crudo del modelo).
-private func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: String) -> String? {
-    guard !hasNonLatinScriptLetter(modelValue),
-          !modelValue.contains("€"), !modelValue.contains("%"), !modelValue.contains("$"),
-          !modelValue.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
-        return nil
+/// sin caracteres añadidos ni símbolos prohibidos (ni en el valor ni en el tramo devuelto), no secuestra categorías ni palabras
+/// interrogativas, y devuelve el trozo original de la pregunta (nunca el texto crudo del modelo) (C2, J21(d)).
+func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: String, rejectCategories: Bool = true) -> String? {
+    func isSafeSpanText(_ s: String) -> Bool {
+        !hasNonLatinScriptLetter(s)
+            && !s.contains("€") && !s.contains("%") && !s.contains("$")
+            && !s.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     }
+    guard isSafeSpanText(modelValue) else { return nil }
     let normValue = normalizeMerchant(modelValue)
     let valueTokens = normValue.split(separator: " ").map(String.init)
     guard normValue.count >= 2, !valueTokens.isEmpty,
-          !valueTokens.allSatisfy({ nonMerchantTargets.contains($0) || merchantFillerWords.contains($0) }) else {
+          !valueTokens.allSatisfy({ nonMerchantTargets.contains($0) || merchantFillerWords.contains($0) || modelMerchantStopWords.contains($0) }),
+          !valueTokens.contains(where: { modelMerchantStopWords.contains($0) }) else {
+        return nil
+    }
+    if rejectCategories && extractCategory(joined: " " + normValue + " ") != nil {
         return nil
     }
     // Comprueba que `modelValue` no trae palabras extra eliminadas por `normalizeMerchant` (como sufijos o basura),
@@ -916,9 +1020,9 @@ private func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: S
     guard maxSpan >= 1 else { return nil }
     for spanLen in 1...maxSpan {
         for start in 0...(qRaw.count - spanLen) {
-            let candidate = qRaw[start..<(start + spanLen)].joined(separator: " ")
-            if normalizeMerchant(candidate) == normValue {
-                return candidate.precomposedStringWithCanonicalMapping
+            let candidate = qRaw[start..<(start + spanLen)].joined(separator: " ").precomposedStringWithCanonicalMapping
+            if normalizeMerchant(candidate) == normValue && isSafeSpanText(candidate) {
+                return candidate
             }
         }
     }
@@ -1002,7 +1106,7 @@ public func parseAssistantModelRoute(_ response: String, originalQuestion: Strin
                 }?.instrument
             }) {
                 position = matched
-            } else if let safeSpan = validatedSpanFromQuestion(value, originalQuestion: originalQuestion) {
+            } else if let safeSpan = validatedSpanFromQuestion(value, originalQuestion: originalQuestion, rejectCategories: false) {
                 position = safeSpan
             } else {
                 return nil
@@ -1021,7 +1125,7 @@ public func parseAssistantModelRoute(_ response: String, originalQuestion: Strin
         return .balances(bank: bank)
     case "GASTO":
         return .spending(month: month, category: merchant == nil ? category : nil, merchant: merchant,
-                         bank: merchant == nil ? bank : nil)
+                         bank: bank)
     case "MAYORES_PAGOS":
         return .biggestPayments(month: month)
     case "SUSCRIPCIONES":

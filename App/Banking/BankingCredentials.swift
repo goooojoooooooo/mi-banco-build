@@ -9,6 +9,7 @@ enum BankingCredentialsError: Error, Equatable {
     case tooLarge
     case unreadable
     case invalidAppID
+    case demo
     case keychain(KeychainError)
 
     var message: String {
@@ -17,6 +18,8 @@ enum BankingCredentialsError: Error, Equatable {
             "Este archivo es la clave pública. Elige el .pem que se descargó al registrar la app."
         case .encrypted:
             "Esta clave está protegida con contraseña. Vuelve a crear la app en Enable Banking con «generar en el navegador»."
+        case .demo:
+            "En modo de prueba no se conecta con bancos reales."
         default:
             "No es una clave válida. Elige el archivo .pem de Enable Banking."
         }
@@ -34,7 +37,10 @@ enum BankingCredentials {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
-        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxKeyFileBytes {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
+            throw BankingCredentialsError.unreadable
+        }
+        guard size <= maxKeyFileBytes else {
             throw BankingCredentialsError.tooLarge
         }
         guard let data = try? Data(contentsOf: url) else { throw BankingCredentialsError.unreadable }
@@ -57,6 +63,9 @@ enum BankingCredentials {
     }
 
     static func save(appID: String, pkcs1DER: Data) throws {
+        #if DEBUG
+        if DemoMode.isActive { throw BankingCredentialsError.demo }
+        #endif
         guard isValidApplicationID(appID) else { throw BankingCredentialsError.invalidAppID }
         do {
             try KeychainVault.set(pkcs1DER, for: .privateKey)
@@ -74,7 +83,7 @@ enum BankingCredentials {
 
     static func client() throws -> EnableBankingClient {
         #if DEBUG
-        if DemoMode.isActive { throw BankingCredentialsError.unreadable }
+        if DemoMode.isActive { throw BankingCredentialsError.demo }
         #endif
         guard let idData = try KeychainVault.data(for: .appID), let appID = String(data: idData, encoding: .utf8),
               let der = try KeychainVault.data(for: .privateKey) else {
@@ -88,8 +97,11 @@ enum BankingCredentials {
     /// Mejor esfuerzo: cierra las sesiones en el banco, borra todo el Llavero y deja los saldos del banco como
     /// manuales con el mismo valor. Los fallos no se propagan: desconectar nunca debe quedarse a medias.
     static func forgetEverything() async {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         await MainActor.run {
-            BankConnector.shared.cancelWebSession()
+            BankConnector.shared.resetForForgetEverything()
         }
         if let client = try? client() {
             for bank in BankID.allCases {

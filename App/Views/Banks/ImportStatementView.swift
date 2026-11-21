@@ -17,6 +17,7 @@ struct ImportStatementView: View {
 
     @State private var applied = false
     @State private var errorText: String?
+    @State private var countRevealed = false
     @State private var successTick = 0
     @State private var errorTick = 0
 
@@ -55,11 +56,15 @@ struct ImportStatementView: View {
                             .foregroundStyle(Theme.label2)
                     }
 
-                    Text(importSummary(preview.report))
+                    let displayedReport = (countRevealed || reduceMotion)
+                        ? preview.report
+                        : ReconcileReport()
+                    Text(importSummary(displayedReport))
                         .titan(.cardTitle)
                         .foregroundStyle(Theme.label)
                         .contentTransition(.numericText())
                         .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(importSummary(preview.report))
                         .accessibilityIdentifier("import-summary")
 
                     if tradesCount > 0 {
@@ -76,23 +81,26 @@ struct ImportStatementView: View {
                     }
 
                     if let latest = preview.statement.latestBalance {
+                        let formattedBalance = formatEUR(latest.cents).replacingOccurrences(of: "-", with: "\u{2212}")
                         HStack(spacing: 6) {
                             Text("Saldo del extracto:")
                                 .titan(.subtitle)
                                 .foregroundStyle(Theme.label2)
-                            Text(formatEUR(latest.cents))
+                            Text(formattedBalance)
                                 .titan(.subtitle)
                                 .fontWeight(.semibold)
                                 .foregroundStyle(Theme.label)
                                 .privateAmount()
-                                .accessibilityLabel(hidden ? "importe oculto" : formatEUR(latest.cents))
+                                .accessibilityLabel(hidden ? "importe oculto" : formattedBalance)
                         }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Saldo del extracto: \(spokenAmount(latest.cents, hidden: hidden))")
                         .accessibilityIdentifier("import-latest-balance")
                     }
                     if !hasNewOrLinked && canApply {
-                        Text("Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto y el saldo del extracto.")
+                        Text(preview.statement.latestBalance != nil
+                             ? "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto y el saldo del extracto."
+                             : "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto.")
                             .titan(.meta)
                             .foregroundStyle(Theme.label2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -113,16 +121,16 @@ struct ImportStatementView: View {
                     Button(action: apply) {
                         HStack(spacing: 8) {
                             if applied {
-                                DrawnCheck(lineWidth: 2.5, color: Theme.canvas)
+                                DrawnCheck(lineWidth: 2.5, color: Theme.onTileSelected)
                                     .frame(width: 18, height: 18)
                             }
                             Text(canApply ? "Importar" : "Nada nuevo que importar")
                                 .titan(.option)
                                 .fontWeight(.semibold)
                         }
-                        .foregroundStyle(canApply ? Theme.canvas : Theme.label3)
+                        .foregroundStyle(canApply ? Theme.onTileSelected : Theme.label3)
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(canApply ? Theme.label : Theme.grouped, in: Capsule())
+                        .background(canApply ? Theme.tileSelected : Theme.raised, in: Capsule())
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.pressable)
@@ -137,7 +145,7 @@ struct ImportStatementView: View {
                             .titan(.option)
                             .foregroundStyle(Theme.label2)
                             .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(Theme.grouped, in: Capsule())
+                            .background(Theme.raised, in: Capsule())
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.pressable)
@@ -154,6 +162,12 @@ struct ImportStatementView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Importar extracto de \(bank.displayName)")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            guard !countRevealed else { return }
+            withAnimation(reduceMotion ? nil : Theme.Motion.countUp) {
+                countRevealed = true
+            }
+        }
         .sensoryFeedback(Haptics.success, trigger: successTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
@@ -163,7 +177,7 @@ struct ImportStatementView: View {
         do {
             _ = try model.applyImport(preview)
             if bank == .tr, !preview.tradeRepublicRows.isEmpty, let portfolio {
-                _ = try? portfolio.mergeRows(preview.tradeRepublicRows)
+                try portfolio.mergeRows(preview.tradeRepublicRows)
                 if preferences.pricesEnabled {
                     Task { await portfolio.refreshPrices(force: true) }
                 }

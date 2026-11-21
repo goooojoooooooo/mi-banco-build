@@ -10,18 +10,14 @@ struct UpcomingCalendarView: View {
     let onMoveMoney: (MoveRequest) -> Void
 
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
-    @State private var showQuietDays = false
 
     var body: some View {
         let now = Date()
         let cal = DateText.madridCalendar
         let days = upcomingCalendar(state: model.state, book: accountBook.book, now: now, calendar: cal)
         let firstBelow = firstBelowFloorDays(days)
-        let firstBelowDays = Set(firstBelow.values)
-        let activeDays = days.filter { !$0.isEmpty || firstBelowDays.contains($0.day) }
-        let displayedDays = showQuietDays ? days : activeDays
+        let hasAnyActivity = days.contains { !$0.isEmpty || !($0.belowFloor.isEmpty) }
 
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -31,7 +27,7 @@ struct UpcomingCalendarView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
 
-                if displayedDays.isEmpty {
+                if !hasAnyActivity {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Sin cobros previstos en los próximos 14 días.")
                             .titan(.option)
@@ -45,26 +41,9 @@ struct UpcomingCalendarView: View {
                     .padding(18)
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
                 } else {
-                    ForEach(displayedDays, id: \.day) { day in
-                        dayCard(day, allDays: days, firstBelow: firstBelow, now: now, calendar: cal)
+                    ForEach(days, id: \.day) { day in
+                        daySection(day, allDays: days, firstBelow: firstBelow, now: now, calendar: cal)
                     }
-                }
-
-                if activeDays.count < days.count {
-                    Button {
-                        withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
-                            showQuietDays.toggle()
-                        }
-                    } label: {
-                        Text(showQuietDays ? "Mostrar solo los días con movimientos" : "Ver los 14 días completos")
-                            .titan(.subtitle)
-                            .fontWeight(.medium)
-                            .foregroundStyle(Theme.label2)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Theme.grouped, in: Capsule())
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.pressable)
                 }
             }
             .padding(.horizontal, Theme.Space.gutter)
@@ -77,7 +56,7 @@ struct UpcomingCalendarView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func dayCard(
+    private func daySection(
         _ day: UpcomingDay,
         allDays: [UpcomingDay],
         firstBelow: [BankID: Date],
@@ -92,8 +71,8 @@ struct UpcomingCalendarView: View {
         }
         let hasWarning = !day.belowFloor.isEmpty
 
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
                 Text(title)
                     .titan(.header)
                     .foregroundStyle(hasWarning ? Theme.warning : Theme.label3)
@@ -106,13 +85,17 @@ struct UpcomingCalendarView: View {
                         .accessibilityLabel("Saldo por debajo del mínimo")
                 }
             }
+            .padding(.horizontal, 6)
 
-            if day.isEmpty {
-                Text("Sin cobros ni ingresos previstos")
-                    .titan(.meta)
-                    .foregroundStyle(Theme.label3)
-            } else {
-                VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                if day.isEmpty {
+                    Text("Sin cobros ni ingresos previstos")
+                        .titan(.meta)
+                        .foregroundStyle(Theme.label3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                } else {
                     ForEach(Array(day.expectedIncome.enumerated()), id: \.offset) { idx, income in
                         incomeRow(income, divided: idx > 0, hidden: hidden)
                     }
@@ -120,27 +103,21 @@ struct UpcomingCalendarView: View {
                         chargeRow(charge, calendar: calendar, divided: idx > 0 || !day.expectedIncome.isEmpty, hidden: hidden)
                     }
                 }
-                .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
-            }
 
-            ForEach(warningBanks, id: \.self) { bank in
-                shortfallActionButton(bank: bank, day: day, allDays: allDays, hidden: hidden)
-            }
+                ForEach(warningBanks, id: \.self) { bank in
+                    Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 16)
+                    shortfallActionButton(bank: bank, day: day, allDays: allDays, hidden: hidden)
+                }
 
-            if !day.balanceAfter.isEmpty {
-                balancesFooter(day: day, hidden: hidden)
+                if !day.balanceAfter.isEmpty && (!day.isEmpty || hasWarning) {
+                    Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 16)
+                    balancesFooter(day: day, hidden: hidden)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 12)
+                }
             }
-        }
-        .padding(16)
-        .background(
-            Theme.grouped.opacity(0.65),
-            in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
-        )
-        .overlay {
-            if hasWarning {
-                RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous)
-                    .strokeBorder(Theme.warning.opacity(0.45), lineWidth: 1)
-            }
+            .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
         }
     }
 
@@ -246,18 +223,19 @@ struct UpcomingCalendarView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.warning)
                     .lineLimit(2)
+                    .privacySensitive()
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Theme.warning)
                     .accessibilityHidden(true)
             }
-            .padding(.horizontal, 14)
-            .frame(minHeight: 44)
-            .background(Theme.warning.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(minHeight: 48)
+            .contentShape(Rectangle())
         }
-        .buttonStyle(.pressable)
+        .buttonStyle(RowPressStyle(background: Theme.raised))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenTitle)
         .accessibilityAddTraits(.isButton)

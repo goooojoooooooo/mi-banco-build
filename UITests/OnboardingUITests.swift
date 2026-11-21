@@ -7,8 +7,13 @@ final class OnboardingUITests: XCTestCase {
 
     func testWelcomeToHome() {
         let app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoOnboarding", "1"]
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoOnboarding", "1", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
         app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for name in ["Permitir", "Allow"] {
+            let b = springboard.alerts.buttons[name]
+            if b.waitForExistence(timeout: 2) { b.tap(); break }
+        }
 
         XCTAssertTrue(
             app.staticTexts["Tus saldos"].waitForExistence(timeout: 15),

@@ -112,7 +112,15 @@ struct MoveMoneySheet: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { fieldFocused = false }
+            if phase != .active {
+                fieldFocused = false
+                inlineIBAN = ""
+                inlineIBANError = nil
+                newPayeeName = ""
+                newPayeeIBAN = ""
+                newPayeePhone = ""
+                newPayeeError = nil
+            }
         }
         .onAppear {
             configureInitialState()
@@ -150,6 +158,7 @@ struct MoveMoneySheet: View {
                                     Text(iban.map(maskedIBAN) ?? "Falta el IBAN")
                                         .titan(.meta)
                                         .foregroundStyle(iban == nil ? Theme.warning : Theme.label3)
+                                        .privacySensitive()
                                 }
                                 Spacer(minLength: 0)
                                 Image(systemName: "chevron.right")
@@ -199,6 +208,7 @@ struct MoveMoneySheet: View {
                                         Text(payeeSubtitle(payee))
                                             .titan(.meta)
                                             .foregroundStyle(Theme.label3)
+                                            .privacySensitive()
                                     }
                                     Spacer(minLength: 0)
                                     Image(systemName: "chevron.right")
@@ -394,6 +404,7 @@ struct MoveMoneySheet: View {
                     .monospacedDigit()
                     .foregroundStyle(amount.cents > 0 ? Theme.label : Theme.label3)
                     .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : Theme.Motion.morph, value: amount.cents)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                     .frame(maxWidth: .infinity)
@@ -486,15 +497,20 @@ struct MoveMoneySheet: View {
                     Group {
                         if !choice.hasKnownBalance {
                             Text(detail)
-                                .foregroundStyle(selected ? Color.black.opacity(0.65) : Theme.label3)
+                                .foregroundStyle(selected ? Theme.onTileSelected.opacity(0.65) : Theme.label3)
                         } else if option.fits {
                             Text(detail)
-                                .foregroundStyle(selected ? Color.black.opacity(0.7) : Theme.label2)
+                                .foregroundStyle(selected ? Theme.onTileSelected.opacity(0.7) : Theme.label2)
                                 .privateAmount()
                                 .accessibilityLabel(hidden ? "importe oculto" : detail)
                         } else {
-                            Text(detail)
-                                .foregroundStyle(selected ? Color.black.opacity(0.75) : Theme.warning)
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .accessibilityHidden(true)
+                                Text(detail)
+                            }
+                            .foregroundStyle(selected ? Theme.onTileSelected : Theme.warning)
                         }
                     }
                     .titan(.caption)
@@ -506,9 +522,9 @@ struct MoveMoneySheet: View {
             .frame(minHeight: 52)
             .background(
                 selected ? Theme.tileSelected : Theme.grouped,
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                in: RoundedRectangle(cornerRadius: Theme.Radius.logoLarge, style: .continuous)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.logoLarge, style: .continuous))
         }
         .buttonStyle(.pressable)
         .accessibilityElement(children: .ignore)
@@ -555,6 +571,7 @@ struct MoveMoneySheet: View {
                         .titan(.body)
                         .foregroundStyle(Theme.label)
                         .fixedSize(horizontal: false, vertical: true)
+                        .privacySensitive()
                         .accessibilityLabel(spokenHint)
                     if supportedPair && !canOpenBank {
                         Text(kind == .iban
@@ -583,19 +600,6 @@ struct MoveMoneySheet: View {
                     }
                     .buttonStyle(.pressable)
                 }
-
-                Button {
-                    dismiss()
-                } label: {
-                    Text("Listo")
-                        .titan(.option)
-                        .fontWeight(.medium)
-                        .foregroundStyle(canOpenBank ? Theme.label : Theme.onTileSelected)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(canOpenBank ? Theme.raised : Theme.tileSelected, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
             }
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, 32)

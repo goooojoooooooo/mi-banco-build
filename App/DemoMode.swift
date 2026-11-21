@@ -411,20 +411,23 @@ enum DemoMode {
                 ?? now.addingTimeInterval(180 * 86_400)
             let imaValid = madrid.date(byAdding: .day, value: 9, to: madrid.startOfDay(for: now))?.addingTimeInterval(12 * 3600)
                 ?? now.addingTimeInterval(9 * 86_400)
-            links[.rev] = BankLinkInfo(
+            var revLink = BankLinkInfo(
                 connectedAt: now.addingTimeInterval(-30 * 86_400),
-                consentValidUntil: revValid,
-                lastAttemptAt: now.addingTimeInterval(-5 * 60),
-                lastSuccessAt: now.addingTimeInterval(-5 * 60),
-                historyLoaded: true
+                consentValidUntil: revValid
             )
-            links[.ima] = BankLinkInfo(
+            revLink.lastAttemptAt = now.addingTimeInterval(-5 * 60)
+            revLink.lastSuccessAt = now.addingTimeInterval(-5 * 60)
+            revLink.historyLoaded = true
+            links[.rev] = revLink
+
+            var imaLink = BankLinkInfo(
                 connectedAt: now.addingTimeInterval(-81 * 86_400),
-                consentValidUntil: imaValid,
-                lastAttemptAt: now.addingTimeInterval(-15 * 60),
-                lastSuccessAt: now.addingTimeInterval(-15 * 60),
-                historyLoaded: true
+                consentValidUntil: imaValid
             )
+            imaLink.lastAttemptAt = now.addingTimeInterval(-15 * 60)
+            imaLink.lastSuccessAt = now.addingTimeInterval(-15 * 60)
+            imaLink.historyLoaded = true
+            links[.ima] = imaLink
             // En modo conectado, el pago más reciente de Revolut aparece como «Pendiente» y todos los antiguos de Revolut e
             // imagin salvo uno (-14,35 € en Mercadona hace 12 días) están confirmados por el banco.
             for i in movements.indices {

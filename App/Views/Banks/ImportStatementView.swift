@@ -24,6 +24,15 @@ struct ImportStatementView: View {
         preview.report.added + preview.report.linked > 0
     }
 
+    /// Aunque haya 0 filas nuevas, `importStatement` guarda el periodo de cobertura (R33/R38), el último saldo si es
+    /// más reciente y, en Trade Republic, las operaciones de cartera (Plan 4b tarea 6).
+    private var canApply: Bool {
+        hasNewOrLinked
+            || !preview.statement.records.isEmpty
+            || preview.statement.latestBalance != nil
+            || (bank == .tr && !preview.tradeRepublicRows.isEmpty)
+    }
+
     private var tradesCount: Int {
         preview.statement.records.filter(\.excludedFromSpending).count
     }
@@ -82,6 +91,12 @@ struct ImportStatementView: View {
                         .accessibilityLabel("Saldo del extracto: \(spokenAmount(latest.cents, hidden: hidden))")
                         .accessibilityIdentifier("import-latest-balance")
                     }
+                    if !hasNewOrLinked && canApply {
+                        Text("Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto y el saldo del extracto.")
+                            .titan(.meta)
+                            .foregroundStyle(Theme.label2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,17 +116,17 @@ struct ImportStatementView: View {
                                 DrawnCheck(lineWidth: 2.5, color: Theme.canvas)
                                     .frame(width: 18, height: 18)
                             }
-                            Text(hasNewOrLinked ? "Importar" : "Nada nuevo que importar")
+                            Text(canApply ? "Importar" : "Nada nuevo que importar")
                                 .titan(.option)
                                 .fontWeight(.semibold)
                         }
-                        .foregroundStyle(hasNewOrLinked ? Theme.canvas : Theme.label3)
+                        .foregroundStyle(canApply ? Theme.canvas : Theme.label3)
                         .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(hasNewOrLinked ? Theme.label : Theme.grouped, in: Capsule())
+                        .background(canApply ? Theme.label : Theme.grouped, in: Capsule())
                         .contentShape(Capsule())
                     }
                     .buttonStyle(.pressable)
-                    .disabled(!hasNewOrLinked || applied)
+                    .disabled(!canApply || applied)
                     .accessibilityIdentifier("import-confirm")
 
                     Button {
@@ -144,7 +159,7 @@ struct ImportStatementView: View {
     }
 
     private func apply() {
-        guard hasNewOrLinked, !applied else { return }
+        guard canApply, !applied else { return }
         do {
             _ = try model.applyImport(preview)
             if bank == .tr, !preview.tradeRepublicRows.isEmpty, let portfolio {

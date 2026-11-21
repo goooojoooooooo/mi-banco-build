@@ -159,7 +159,10 @@ private let unconditionalAdvicePrefixes = [
 /// Frases que marcan siempre petición de consejo.
 private let unconditionalAdvicePhrases = [
     "buen momento", "es momento de", "el momento de", "es hora de", "buena idea", "vale la pena", "merece la pena",
-    "yo que tu", "yo de ti", "habria que", "tendrias que", "toma beneficios", "tomar beneficios", "recoger beneficios",
+    "yo que tu", "yo de ti", "habria que", "tendrias que",
+    "toma beneficios", "tomo beneficios", "tomar beneficios", "tomamos beneficios",
+    "recoge beneficios", "recojo beneficios", "recoger beneficios",
+    "toma ganancias", "tomo ganancias", "tomar ganancias", "recojo ganancias", "recoger ganancias",
     "sal de", "salir de bolsa", "entrar en bolsa", "meter dinero en", "mete dinero en", "meto dinero en",
     "pon dinero en", "pongo dinero en", "poner dinero en", "donde meto", "donde meter", "donde pongo mi dinero",
     "donde poner mi dinero", "en que pongo", "en que poner", "donde invierto", "en que invierto", "donde invertir",

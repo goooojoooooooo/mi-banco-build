@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="robots" content="noindex">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-8xY/lRjFsbcbog8KS80N98wZ0Mnzgn2Kiuz0GFb90FA='; style-src 'sha256-Ax4zFUGVH/iI5rVCe2rz9UgWIvt2HZ/fk68oecipMLg='; base-uri 'none'; form-action 'none'">
+<title>Mi Banco</title>
+<style>
+html, body { margin: 0; height: 100%; background: #000; color: #fff; }
+body { display: flex; align-items: center; justify-content: center; text-align: center; font: 17px/1.4 -apple-system, system-ui, sans-serif; }
+main { padding: 24px; max-width: 420px; }
+h1 { font-size: 22px; font-weight: 600; margin: 0 0 12px; }
+p { margin: 0 0 24px; color: #ebebf5; opacity: 0.7; }
+a { display: inline-block; min-height: 44px; line-height: 44px; padding: 0 28px; border-radius: 22px; background: #fff; color: #000; font-weight: 600; text-decoration: none; }
+[hidden] { display: none; }
+</style>
+</head>
+<body>
+<main>
+<section id="ok">
+<h1>Volviendo a Mi Banco…</h1>
+<p>Si no se abre sola, toca el botón.</p>
+<a id="open" href="#">Abrir Mi Banco</a>
+</section>
+<section id="bad" hidden>
+<p>Este enlace no es válido. Vuelve a Mi Banco y empieza de nuevo.</p>
+</section>
+</main>
+<script>
+(function () {
+  var params = new URLSearchParams(location.search);
+  var code = params.get("code");
+  var state = params.get("state");
+  var error = params.get("error");
+  var token = /^[A-Za-z0-9._~-]{1,512}$/;
+  var errorName = /^[a-z_]{1,64}$/;
+  var target = null;
+  if (state !== null && token.test(state)) {
+    if (code !== null && token.test(code)) {
+      target = "mibanco://cb?code=" + encodeURIComponent(code) + "&state=" + encodeURIComponent(state);
+    } else if (error !== null && errorName.test(error)) {
+      target = "mibanco://cb?error=" + encodeURIComponent(error) + "&state=" + encodeURIComponent(state);
+    }
+  }
+  if (target === null) {
+    document.getElementById("ok").hidden = true;
+    document.getElementById("bad").hidden = false;
+    return;
+  }
+  document.getElementById("open").setAttribute("href", target);
+  history.replaceState(null, "", location.pathname);
+  location.replace(target);
+})();
+</script>
+</body>
+</html>

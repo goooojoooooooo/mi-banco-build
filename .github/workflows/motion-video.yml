@@ -1,0 +1,87 @@
+name: motion-video
+run-name: motion-video ${{ github.ref_name }}
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  video:
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
+        run: |
+          ls -d /Applications/Xcode*.app
+          XCODE=/Applications/Xcode_26.2.app
+          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          echo "Usando $XCODE"
+          sudo xcode-select -s "$XCODE"
+          echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
+          xcodebuild -version
+      - run: brew install xcodegen && xcodegen
+      - name: Crear y arrancar el simulador (maximo 10 min)
+        timeout-minutes: 14
+        run: |
+          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
+          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
+          DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          echo "Runtime: $RUNTIME_LINE"
+          echo "Dispositivo: $DEVICETYPE"
+          UDID=$(xcrun simctl create "MiBancoUI" "$DEVICETYPE" "$RUNTIME")
+          echo "UDID=$UDID" >> "$GITHUB_ENV"
+          xcrun simctl boot "$UDID"
+          if ! perl -e 'alarm 600; exec @ARGV' xcrun simctl bootstatus "$UDID" -b; then
+            echo "El simulador no arranco en 10 minutos"
+            exit 1
+          fi
+      - name: Compilar para pruebas
+        run: |
+          mkdir -p build
+          xcodebuild build-for-testing -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO > build/compile.log 2>&1 \
+            || { grep -E "error:" build/compile.log | sort -u | head -n 40; tail -n 40 build/compile.log; exit 1; }
+          tail -n 5 build/compile.log
+      - name: Grabar el recorrido
+        run: |
+          set +e
+          xcrun simctl io booted recordVideo --codec h264 --force build/tour.mp4 > build/record.log 2>&1 &
+          REC=$!
+          sleep 4
+          xcodebuild test-without-building -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/tour.xcresult \
+            -only-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/tour.log 2>&1
+          echo "$?" > build/status.txt
+          # Arranque en frio real (sin la espera de reposo de las pruebas): se ve el telon y el montaje por capas.
+          sleep 2
+          xcrun simctl terminate booted com.mibanco.app || true
+          sleep 1
+          xcrun simctl launch booted com.mibanco.app -MiBancoDemo -AppleLanguages "(es)" -AppleLocale es_ES || true
+          sleep 6
+          # Parar la grabacion limpiamente (SIGINT) y esperar a que el fichero quede cerrado.
+          kill -INT "$REC"
+          for i in $(seq 1 60); do
+            kill -0 "$REC" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$REC" 2>/dev/null; then echo "La grabacion no paro en 60 s"; kill -TERM "$REC"; fi
+          wait "$REC" 2>/dev/null
+          ls -l build/tour.mp4
+          cat build/record.log
+          tail -n 40 build/tour.log
+          exit 0
+      - name: Resultado
+        run: |
+          echo "xcodebuild exit: $(cat build/status.txt)"
+          grep -E "^Test Case .* (passed|failed)" build/tour.log || true
+          if [ "$(cat build/status.txt)" != "0" ]; then
+            grep -E "error:" build/tour.log | sort -u | head -n 40 || true
+          fi
+          test -s build/tour.mp4
+          test "$(cat build/status.txt)" = "0"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: motion-tour
+          path: build/tour.mp4
+          if-no-files-found: warn

@@ -1,0 +1,354 @@
+import Foundation
+import Testing
+@testable import MiBancoCore
+
+private let cal: Calendar = {
+    var c = Calendar(identifier: .gregorian)
+    c.timeZone = TimeZone(identifier: "Europe/Madrid")!
+    c.locale = Locale(identifier: "es_ES")
+    return c
+}()
+
+private func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 10, _ minute: Int = 0) -> Date {
+    cal.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+}
+
+private func nov(_ day: Int, _ hour: Int = 10, _ minute: Int = 0) -> Date {
+    at(2026, 11, day, hour, minute)
+}
+
+private func nb(_ s: String) -> String {
+    s.replacingOccurrences(of: " €", with: "\u{00A0}€").replacingOccurrences(of: " %", with: "\u{00A0}%")
+}
+
+private func richFixture() -> (state: LedgerState, portfolio: Portfolio, book: AccountBook, now: Date) {
+    let now = nov(20, 10, 0)
+    var state = LedgerState()
+    state.balances[.rev] = ManualBalance(cents: 34_020, setAt: nov(20, 8), origin: .bank)
+    state.balances[.ima] = ManualBalance(cents: 128_455, setAt: nov(20, 8), origin: .manual)
+    state.balances[.tr] = ManualBalance(cents: 215_000, setAt: nov(20, 8), origin: .manual)
+    state.budgets = Budgets(monthlyCents: 30_000, byCategory: [.comerFuera: 4_000, .supermercado: 20_000])
+
+    state.movements = [
+        // Octubre (mes anterior)
+        Movement(bank: .rev, amountCents: -1_099, merchant: "Spotify", kind: .payment, source: .bank,
+                 date: at(2026, 9, 22, 12), isShop: true, bankRef: "s1", bankStatus: .booked),
+        Movement(bank: .rev, amountCents: -1_099, merchant: "Spotify", kind: .payment, source: .bank,
+                 date: at(2026, 10, 22, 12), isShop: true, bankRef: "s2", bankStatus: .booked),
+        Movement(bank: .rev, amountCents: -5_000, merchant: "Mercadona", kind: .payment, source: .bank,
+                 date: at(2026, 10, 10, 12), isShop: true, bankRef: "o1", bankStatus: .booked),
+        Movement(bank: .ima, amountCents: 180_000, merchant: "Nómina ACME", kind: .income, source: .bank,
+                 date: at(2026, 9, 28, 9), bankRef: "n1", bankStatus: .booked),
+        Movement(bank: .ima, amountCents: 180_000, merchant: "Nómina ACME", kind: .income, source: .bank,
+                 date: at(2026, 10, 28, 9), bankRef: "n2", bankStatus: .booked),
+        // Noviembre (mes en curso)
+        Movement(bank: .rev, amountCents: -4_250, merchant: "Mercadona Torrejón", kind: .payment, source: .bank,
+                 date: nov(5, 18), isShop: true, bankRef: "m1", bankStatus: .booked),
+        Movement(bank: .rev, amountCents: -3_100, merchant: "Mercadona", kind: .payment, source: .bank,
+                 date: nov(15, 19), isShop: true, bankRef: "m2", bankStatus: .booked),
+        Movement(bank: .rev, amountCents: -4_995, merchant: "Zara", kind: .payment, source: .bank,
+                 date: nov(19, 23, 5), isShop: true, bankRef: "m3", bankStatus: .booked),
+        Movement(bank: .rev, amountCents: -4_500, merchant: "Restaurante Sol", kind: .payment, source: .bank,
+                 date: nov(12, 21), isShop: true, bankRef: "m4", bankStatus: .booked),
+        Movement(bank: .ima, amountCents: 185_000, merchant: "Nómina ACME", kind: .income, source: .bank,
+                 date: nov(20, 6, 5), bankRef: "n3", bankStatus: .booked),
+        // Traspaso propio (no debe contar ni como gasto ni como ingreso)
+        Movement(bank: .ima, amountCents: -20_000, merchant: "Transferencia a Revolut", kind: .payment, source: .bank,
+                 date: nov(20, 7, 49), isShop: false, bankRef: "t1", bankStatus: .booked),
+        Movement(bank: .rev, amountCents: 20_000, merchant: "Transferencia de imagin", kind: .income, source: .bank,
+                 date: nov(20, 7, 50), bankRef: "t2", bankStatus: .booked),
+        // Excluidos (no es mío + compra de valores + 0 €)
+        Movement(bank: .rev, amountCents: -9_999, merchant: "Mercadona", kind: .payment, source: .notification,
+                 date: nov(16, 12), isShop: true, flaggedNotMine: true),
+        Movement(bank: .tr, amountCents: -50_000, merchant: "Compra Apple", kind: .payment, source: .statement,
+                 date: nov(14, 10), excludedFromSpending: true),
+        Movement(bank: .rev, amountCents: 0, merchant: "Mercadona", kind: .payment, source: .notification,
+                 date: nov(17, 10), isShop: true),
+    ]
+
+    var portfolio = Portfolio()
+    portfolio.transactions = [
+        InvestmentTransaction(id: "tx-1", date: at(2026, 3, 2, 9), instrument: "IE00B4L5Y983",
+                              name: "iShares Core MSCI World", assetClass: "FUND",
+                              shares: 8, cashCents: -77_067, priceEUR: 96),
+        InvestmentTransaction(id: "tx-2", date: at(2026, 6, 15, 13), instrument: "US0378331005",
+                              name: "Apple", assetClass: "STOCK",
+                              shares: 3, cashCents: -54_100, priceEUR: 180),
+        InvestmentTransaction(id: "tx-3", date: at(2026, 7, 1, 10), instrument: "ETH",
+                              name: "Ethereum", assetClass: "CRYPTO",
+                              shares: Decimal(string: "0.01")!, cashCents: 0, priceEUR: nil, acquired: true),
+    ]
+    portfolio.quotes["IE00B4L5Y983"] = Quote(priceEUR: 110, previousCloseEUR: Decimal(string: "108.5")!,
+                                             fetchedAt: nov(20, 9, 30), marketTime: nov(20, 9, 25))
+    portfolio.quotes["US0378331005"] = Quote(priceEUR: 200, previousCloseEUR: 202,
+                                             fetchedAt: nov(20, 9, 30), marketTime: nov(20, 9, 25))
+    portfolio.manualPrices["ETH"] = ManualPrice(priceEUR: 3_000, setAt: nov(19, 9))
+
+    var book = AccountBook()
+    book.floors[.rev] = 5_000
+
+    return (state, portfolio, book, now)
+}
+
+private func plainLines(_ answer: AssistantAnswer) -> [String] {
+    answer.lines.map { render($0.parts, .plain) }
+}
+
+@Suite struct AssistantAnswerTests {
+    @Test func saldosTotalesYPorBanco() {
+        let fx = richFixture()
+        let all = answerQuestion("¿Cuánto tengo?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(all) == [
+            nb("En total tienes unos 3.774,75 €."),
+            nb("Revolut: 340,20 €"),
+            nb("imagin: unos 1.284,55 €"),
+            nb("Trade Republic: unos 2.150,00 €"),
+        ])
+
+        let one = answerQuestion("¿Cuánto tengo en Revolut?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(one) == [nb("En Revolut tienes 340,20 €.")])
+
+        // Si falta un banco conectado, el total lo dice honestamente.
+        var partial = fx.state
+        partial.balances[.ima] = nil
+        partial.links[.ima] = BankLinkInfo(connectedAt: at(2026, 10, 1), consentValidUntil: at(2026, 12, 31))
+        let partialAns = answerQuestion("¿Cuánto tengo?", state: partial, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(partialAns)[0] == nb("En total tienes unos 2.490,20 €, sin contar imagin."))
+        #expect(plainLines(partialAns).contains("imagin: aún sin saldo"))
+
+        let missingOne = answerQuestion("¿Cuánto tengo en imagin?", state: partial, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(missingOne) == ["Aún no tengo el saldo de imagin."])
+    }
+
+    @Test func gastosMesCategoriaYComercioRespetanExclusiones() {
+        let fx = richFixture()
+        // Mercadona: 42,50 + 31,00 = 73,50 (excluye flaggedNotMine 99,99 € y el pago de 0 €).
+        let mercadona = answerQuestion("¿Cuánto llevo en Mercadona?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(mercadona)[0] == nb("Este mes llevas 73,50 € en Mercadona (2 pagos)."))
+        #expect(mercadona.lines[1].action != nil)
+
+        // Comercio sin pagos -> respuesta honesta.
+        let emptyMerchant = answerQuestion("¿Cuánto llevo en Lidl?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(emptyMerchant) == ["Este mes no tienes pagos en Lidl."])
+
+        // Categoría Comer fuera: 45,00 €
+        let cat = answerQuestion("¿Cuánto llevo en Comer fuera?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(cat)[0] == nb("Este mes llevas 45,00 € en Comer fuera (1 pago)."))
+
+        // Total del mes: 42,50 + 31,00 + 49,95 + 45,00 = 168,45 € (traspaso 200 €, valores 500 € y no es mío 99,99 € fuera).
+        let total = answerQuestion("¿Cuánto llevo gastado este mes?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(total)[0].hasPrefix(nb("Este mes llevas 168,45 € gastados")))
+        #expect(plainLines(total).contains(nb("Donde más: Supermercado (73,50 €).")))
+
+        // Mes pasado (octubre): 50,00 Mercadona + 10,99 Spotify = 60,99 €
+        let last = answerQuestion("¿Cuánto gasté el mes pasado?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(last)[0] == nb("El mes pasado gastaste 60,99 €."))
+
+        // Mes futuro: honesto.
+        let future = answerIntent(.spending(month: .specific(year: 2027, month: 1), category: nil, merchant: nil),
+                                  state: fx.state, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(future) == ["Aún no ha llegado enero de 2027."])
+    }
+
+    @Test func mayoresPagosOrdenadosYConAccion() {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Cuáles son mis mayores pagos este mes?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let lines = plainLines(ans)
+        #expect(lines[0] == "Tus mayores pagos este mes:")
+        #expect(lines[1].hasPrefix(nb("Zara: 49,95 €")))
+        #expect(lines[2].hasPrefix(nb("Restaurante Sol: 45,00 €")))
+        #expect(lines[3].hasPrefix(nb("Mercadona Torrejón: 42,50 €")))
+        #expect(ans.lines[1].action != nil)
+    }
+
+    @Test func suscripcionesYTotales() {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Qué suscripciones tengo?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let lines = plainLines(ans)
+        #expect(lines[0] == nb("Tienes 1 suscripción activa: 10,99 € al mes (131,88 € al año)."))
+        #expect(lines[1].contains(nb("Spotify: 10,99 € en Revolut")))
+    }
+
+    @Test func proximosCobrosYFaltaDeSaldo() {
+        let fx = richFixture()
+        // Con 340,20 € y mínimo 50 € llega para Spotify (10,99 € el día 22).
+        let ok = answerQuestion("¿Qué cobros vienen?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(ok).contains { $0.contains("Spotify") && $0.contains(nb("10,99 €")) })
+        #expect(plainLines(ok).contains("Con el saldo actual, llega para estos cobros (sin contar otros gastos)."))
+
+        // Si bajamos el saldo de Revolut a 55 € (mínimo 50 €), el cobro de 10,99 € deja corto a Revolut.
+        var tight = fx.state
+        tight.balances[.rev] = ManualBalance(cents: 5_500, setAt: nov(20, 8), origin: .bank)
+        let short = answerQuestion("¿Me quedo corto en algún banco?", state: tight, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(short).contains { $0.contains("Pasa") && $0.contains("desde imagin") })
+        #expect(short.lines.contains {
+            if case .moveMoney(from: .ima, to: .rev, cents: _) = $0.action { return true }
+            return false
+        })
+
+        // Si el banco del cobro no tiene saldo, lo avisa honestamente.
+        var noBal = fx.state
+        noBal.balances[.rev] = nil
+        let unknown = answerQuestion("¿Qué cobros vienen?", state: noBal, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(unknown).contains("No tengo el saldo de Revolut, así que no puedo comprobar si llega."))
+    }
+
+    @Test func presupuestosConAccionYSinCifrasSueltas() {
+        let fx = richFixture()
+        let all = answerQuestion("¿Cómo van mis presupuestos?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let lines = plainLines(all)
+        #expect(lines[0] == nb("Presupuesto del mes: llevas 168,45 € de 300,00 € (te quedan 131,55 €)."))
+        #expect(lines.contains(nb("Comer fuera: te has pasado, llevas 45,00 € de 40,00 €.")))
+        #expect(all.lines.allSatisfy { $0.action == .openBudgets })
+
+        let one = answerQuestion("¿Cómo va mi presupuesto de Comer fuera?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(one) == [nb("Comer fuera: te has pasado, llevas 45,00 € de 40,00 €.")])
+    }
+
+    @Test func ingresosYTraspasosPropiosNoSeMezclan() {
+        let fx = richFixture()
+        let inc = answerQuestion("¿Qué ingresos han entrado este mes?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(inc)[0] == nb("Este mes han entrado 1.850,00 € en 1 ingreso."))
+        #expect(plainLines(inc)[1].hasPrefix(nb("Nómina ACME: 1.850,00 € en imagin")))
+
+        let tr = answerQuestion("¿Qué traspasos hice entre mis cuentas este mes?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(tr)[0] == nb("Este mes has movido 200,00 € entre tus cuentas (1 traspaso)."))
+        #expect(plainLines(tr)[1].hasPrefix(nb("200,00 € de imagin a Revolut")))
+    }
+
+    @Test func dineroLibreHonestoYNuncaCeroAlDia() {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Cuánto dinero libre tengo?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let lines = plainLines(ans)
+        #expect(lines[0].hasPrefix(nb("Hasta fin de mes te quedan unos 1.564 € libres: unos 142 € al día, sin contar el gasto del día a día.")))
+        #expect(lines.contains("No incluye Trade Republic."))
+
+        // Si el margen diario no llega a 0,50 €, nunca escribe «unos 0 € al día».
+        var tiny = LedgerState()
+        tiny.balances[.rev] = ManualBalance(cents: 5_200, setAt: nov(20, 8), origin: .bank)
+        let tinyAns = answerQuestion("¿Cuánto dinero libre tengo?", state: tiny, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(tinyAns)[0] == nb("Hasta fin de mes te quedan unos 2 € libres, sin contar el gasto del día a día."))
+        #expect(!plainLines(tinyAns).joined().contains("unos 0"))
+        #expect(plainLines(tinyAns).contains("Sin contar imagin: no tengo su saldo."))
+    }
+
+    @Test func inversionesResumenMoversYPosicionConcreta() {
+        let fx = richFixture()
+        let overview = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let lines = plainLines(overview)
+        #expect(lines[0] == nb("Valen 1.510,00 €: +6,00 € hoy (+0,4 %)"))
+        #expect(lines[1] == nb("Lo que más subió: iShares Core MSCI World (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."))
+        #expect(overview.lines.allSatisfy { $0.action == .openInvestments })
+
+        // Posición concreta: Apple (con cambio negativo usando U+2212).
+        let apple = answerQuestion("¿Cómo va Apple?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(apple)[0] == nb("Apple: 600,00 € (\u{2212}6,00 € hoy, \u{2212}1,0 %)."))
+        #expect(plainLines(apple)[1].hasPrefix(nb("Desde la compra: +59,00 € (+10,9 %)")))
+
+        // Posición con coste incompleto (ETH adquirido a coste 0): NO inventa ganancia (J1).
+        let eth = answerQuestion("¿Cómo va Ethereum?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(eth)[0] == nb("Ethereum: 30,00 €."))
+        #expect(!plainLines(eth).joined().contains("Desde la compra"))
+
+        // Solo movers.
+        let movers = answerQuestion("¿Qué es lo que más ha subido hoy?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(movers) == [nb("Lo que más subió: iShares Core MSCI World (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %).")])
+
+        // Sin cartera.
+        let empty = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(empty) == ["Aún no tienes inversiones importadas."])
+    }
+
+    @Test func queHaPasadoDesdeAyerReutilizaElResumen() {
+        let fx = richFixture()
+        let recap = answerQuestion("¿Qué ha pasado desde ayer?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(recap)[0].contains(nb("1.850,00 €")))
+        #expect(plainLines(recap)[0].contains(nb("49,95 €")))
+    }
+
+    @Test func consejoDeInversionDevuelveNegativaLiteralYDatosNeutros() {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Debería vender Apple?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(ans.isAdviceRefusal)
+        #expect(plainLines(ans)[0] == investmentAdviceRefusal)
+        // Acompaña con los datos neutros de Apple, sin ningún verbo de consejo.
+        #expect(plainLines(ans).count >= 2)
+        #expect(plainLines(ans)[1].hasPrefix("Apple: "))
+        for extra in plainLines(ans).dropFirst() {
+            #expect(!hasAdviceMarker(extra), "\(extra)")
+            #expect(!hasTradeVerb(extra), "\(extra)")
+        }
+
+        // Sin cartera, solo la negativa literal.
+        let noPortfolio = answerQuestion("¿Qué acciones compro?", state: fx.state, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
+        #expect(noPortfolio.isAdviceRefusal)
+        #expect(plainLines(noPortfolio) == [investmentAdviceRefusal])
+    }
+
+    @Test func preguntaDesconocidaDevuelveTextoFijoYFichas() {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Quién ganó ayer el partido?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(ans.intent == .unknown)
+        #expect(plainLines(ans) == [assistantUnknownMessage])
+        #expect(ans.chips.count >= 4)
+    }
+
+    @Test func modoPrivadoTapaCadaCifraEnTodasLasIntenciones() {
+        let fx = richFixture()
+        let questions = [
+            "¿Cuánto tengo?",
+            "¿Cuánto tengo en Revolut?",
+            "¿Cuánto llevo gastado este mes?",
+            "¿Cuánto llevo en Mercadona?",
+            "¿Cuánto llevo en Comer fuera?",
+            "¿Cuáles son mis mayores pagos este mes?",
+            "¿Qué suscripciones tengo?",
+            "¿Qué cobros vienen?",
+            "¿Cómo van mis presupuestos?",
+            "¿Qué ingresos han entrado este mes?",
+            "¿Qué traspasos hice entre mis cuentas?",
+            "¿Cuánto dinero libre tengo?",
+            "¿Cómo van mis inversiones?",
+            "¿Cómo va Apple?",
+            "¿Qué es lo que más ha subido hoy?",
+            "¿Qué ha pasado desde ayer?",
+            "¿Vendo Apple?",
+        ]
+        for q in questions {
+            let ans = answerQuestion(q, state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+            for line in ans.lines {
+                let masked = render(line.parts, .masked)
+                #expect(!masked.contains("€"), "\(q) -> \(masked)")
+                #expect(!masked.contains("%"), "\(q) -> \(masked)")
+                #expect(masked.range(of: "[0-9],[0-9]{2}", options: .regularExpression) == nil, "\(q) -> \(masked)")
+                #expect(masked.range(of: "[0-9]\\.[0-9]{3}", options: .regularExpression) == nil, "\(q) -> \(masked)")
+            }
+            // Voz privada: nunca dice ni euros ni por ciento ni cifras decimales.
+            let privateSpoken = spokenAssistantAnswer(ans, privateMode: true)
+            #expect(!privateSpoken.contains("€") && !privateSpoken.contains("euros"), "\(q) -> \(privateSpoken)")
+            #expect(!privateSpoken.contains("%") && !privateSpoken.contains("por ciento"), "\(q) -> \(privateSpoken)")
+            #expect(privateSpoken.range(of: "[0-9],[0-9]{2}", options: .regularExpression) == nil, "\(q) -> \(privateSpoken)")
+        }
+    }
+
+    @Test func laVozNormalProtegeLosNombresDeComercioYUsaUnSoloMenos() {
+        var state = LedgerState()
+        state.movements = [
+            Movement(bank: .rev, amountCents: -3_000, merchant: "Gym +24 % -5€", kind: .payment, source: .bank,
+                     date: nov(18, 10), isShop: true, bankRef: "g1", bankStatus: .booked),
+        ]
+        let ans = answerQuestion("¿Cuáles son mis mayores pagos este mes?", state: state, portfolio: nil, book: AccountBook(),
+                                 now: nov(20, 10), calendar: cal)
+        let spoken = spokenAssistantAnswer(ans, privateMode: false)
+        #expect(spoken.contains("Gym +24 % -5€: 30,00 euros"))
+        #expect(!spoken.contains("más 24"))
+
+        // En modo privado, una negativa de consejo conserva el texto legal y oculta los números de la cartera.
+        let fx = richFixture()
+        let refusal = answerQuestion("¿Vendo Apple?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let refusalSpoken = spokenAssistantAnswer(refusal, privateMode: true)
+        #expect(refusalSpoken.hasPrefix(investmentAdviceRefusal))
+        #expect(refusalSpoken.contains("modo privado"))
+        #expect(!refusalSpoken.contains("600"))
+    }
+}

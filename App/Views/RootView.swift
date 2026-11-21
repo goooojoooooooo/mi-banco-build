@@ -30,9 +30,6 @@ struct RootView: View {
                 HomeView(model: model, isVisible: tab == .home && !isLocked, revealToken: revealToken, zoom: zoom,
                          detailOpen: detail != nil, openDetail: { openDetail($0, zooms: true) }, openSettings: openSettings)
             }
-            Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
-                SpendingView(model: model, isVisible: tab == .spending && !isLocked, openDetail: { openDetail($0) })
-            }
             Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                 AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) })
             }
@@ -145,7 +142,6 @@ struct RootView: View {
         guard DemoMode.isActive else { return }
         switch DemoMode.screen {
         case .home: tab = .home
-        case .spending: tab = .spending
         case .alerts: tab = .alerts
         case .settings: tab = .settings
         }

@@ -132,22 +132,6 @@ struct LedgerSnapshot: Sendable {
     var recentPayments: [String: [Movement]] = [:]
     var mutedMerchants: Set<String> = []
     var hasItems = false
-    /// Pestaña Gasto: inicio de cada mes (del más antiguo al actual, máx. 13) y su página.
-    var spendingMonths: [Date] = []
-    var spendingPages: [Date: SpendingPage] = [:]
-    /// Presupuestos del mes en curso, medias de 3 meses (clave "month" o "cat-<raw>"), movimientos por categoría y mes
-    /// (clave "<año>-<mes>|<raw>"), traspasos y las filas finales de Gasto.
-    var budgets: [BudgetStatus] = []
-    var budgetSuggestions: [String: Int] = [:]
-    var categoryEntries: [String: [ListEntry]] = [:]
-    var categoryHeaders: [String: CategoryHeader] = [:]
-    var transferEntries: [ListEntry] = []
-    var spendingLinks = SpendingLinkTexts()
-    /// Suscripciones activas y ocultas, y lo que cuestan al mes y al año.
-    var subscriptions: [SubscriptionRow] = []
-    var hiddenSubscriptions: [SubscriptionRow] = []
-    var subscriptionsMonthlyCents = 0
-    var subscriptionsYearlyCents = 0
     /// Día en que se calculó; al cambiar de día hay que recalcular aunque el estado no cambie.
     var day = Date.distantPast
 
@@ -162,8 +146,9 @@ struct LedgerSnapshot: Sendable {
             }
         }
         total = ledger.total()
-        // El emparejado de traspasos se calcula una sola vez por reconstrucción y se pasa a todas las sumas.
-        let transfers = ownTransferIDs(in: state.movements)
+        // Lo que no suma como gasto (traspasos entre tus cuentas, capturados sin confirmar y capturados con pareja probable
+        // en una fila del banco) se calcula una sola vez por reconstrucción y se pasa a todas las sumas.
+        let notSpending = spendingExclusions(in: state, now: now)
         mutedMerchants = state.mutedMerchants
 
         let byDate = state.movements.sorted { $0.date > $1.date }
@@ -180,13 +165,13 @@ struct LedgerSnapshot: Sendable {
             let mine = card.bank.map { bank in items.filter { $0.bank == bank } } ?? items
             let grouped = Self.sections(for: Array(mine.prefix(Self.maxRows)), showsBank: card == .all, now: now, calendar: calendar)
             entries[card] = ListEntry.flatten(grouped, prefix: card.rawValue)
-            weeks[card] = WeekSpend(movements: state.movements, bank: card.bank, now: now, calendar: calendar, ownTransferIDs: transfers)
+            weeks[card] = WeekSpend(movements: state.movements, bank: card.bank, now: now, calendar: calendar, notSpending: notSpending)
         }
 
         // Gasto del mes por tarjeta.
         let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
         var spent: [AccountCard: Int] = [:]
-        for m in spendingMovements(in: state.movements, excluding: transfers) where m.date >= monthStart && m.date <= now {
+        for m in spendingMovements(in: state.movements, notSpending: notSpending) where m.date >= monthStart && m.date <= now {
             spent[.all, default: 0] += abs(m.amountCents)
             spent[AccountCard(bank: m.bank), default: 0] += abs(m.amountCents)
         }
@@ -194,8 +179,7 @@ struct LedgerSnapshot: Sendable {
 
         let previousMonth = calendar.date(byAdding: .day, value: -1, to: monthStart) ?? monthStart
         let monthName = previousMonth.formatted(Date.FormatStyle(locale: Locale(identifier: "es_ES")).month(.wide))
-        let corePace = spendingPace(movements: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
-        if let p = corePace {
+        if let p = spendingPace(movements: state.movements, now: now, calendar: calendar, notSpending: notSpending) {
             pace = PaceLine(thisMonthCents: p.thisMonthCents, differenceCents: p.differenceCents, previousMonthName: monthName)
         } else if let month = spent[.all] {
             pace = PaceLine(thisMonthCents: month, differenceCents: nil, previousMonthName: monthName)
@@ -206,10 +190,15 @@ struct LedgerSnapshot: Sendable {
         // y el saldo del banco ya lo incluye), que son los que `Ledger.balance` tiene en cuenta;
         // de los anteriores no se sabe y no se enseña nada.
         for bank in BankID.allCases {
-            guard let current = balances[bank]?.cents, let base = balances[bank]?.setAt else { continue }
+            guard let current = balances[bank]?.cents, let reading = state.balances[bank] else { continue }
             var later = 0
             for m in byDate where m.bank == bank {
-                guard m.date >= base else { break }
+                guard m.date >= reading.setAt else { break }
+                // Mismo criterio que `Ledger.balance`: lo que el saldo no suma (registros del banco, ya enlazados,
+                // extractos sobre un saldo del banco) no cambia la cuenta ni enseña "Te quedaban".
+                // El movimiento que cae justo en la base ya está dentro de la lectura.
+                let counts = Ledger.countsTowardBalance(m, base: reading)
+                guard counts || (m.date == reading.setAt && Ledger.isBalanceEligible(m, origin: reading.origin)) else { continue }
                 balanceAfter[m.id] = current - later
                 later += m.amountCents
             }
@@ -230,7 +219,7 @@ struct LedgerSnapshot: Sendable {
         recentPayments = payments
         merchantNames = names
         // Una sola pasada para todos los comercios (antes: una pasada completa por comercio).
-        let all = merchantHistories(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
+        let all = merchantHistories(in: state.movements, now: now, calendar: calendar, notSpending: notSpending)
         let empty = MerchantHistory(countThisMonth: 0, totalThisMonthCents: 0, countAllTime: 0, firstDate: nil)
         for key in names.keys {
             histories[key] = all[key] ?? empty
@@ -240,35 +229,8 @@ struct LedgerSnapshot: Sendable {
             .map { MutedMerchant(key: $0, name: names[$0] ?? $0.capitalized, raw: names[$0] ?? $0) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
 
-        insights = MiBancoCore.insights(for: state, now: now, calendar: calendar)
+        insights = MiBancoCore.insights(for: state, now: now, calendar: calendar, notSpending: notSpending)
         warningInsightIDs = insights.filter { $0.severity == .warning }.map(\.id)
-
-        // Pestaña Gasto: todas las páginas aquí, nunca en un `body`.
-        // Las suscripciones activas se detectan una sola vez y sirven a todas las pantallas de Gasto.
-        // Las ocultas salen de la misma detección: no se repite.
-        let detected = detectSubscriptions(in: state.movements, now: now, calendar: calendar, ownTransferIDs: transfers)
-        let dismissed = state.dismissedSubscriptions
-        let subscriptions = detected.filter { !dismissed.contains("\($0.bank.rawValue)|\($0.id)") }
-        let hiddenDetected = detected.filter { dismissed.contains("\($0.bank.rawValue)|\($0.id)") }
-        let built = Self.spendingPages(state: state, now: now, calendar: calendar, transfers: transfers,
-                                       subscriptions: subscriptions, pace: corePace)
-        spendingMonths = built.months
-        spendingPages = built.pages
-        let extras = Self.budgetExtras(state: state, now: now, calendar: calendar, transfers: transfers,
-                                       subscriptions: subscriptions, months: built.months, pages: built.pages)
-        budgets = extras.budgets
-        budgetSuggestions = extras.suggestions
-        categoryEntries = extras.categoryEntries
-        categoryHeaders = extras.categoryHeaders
-        transferEntries = extras.transferEntries
-        spendingLinks = extras.links
-        let subs = Self.subscriptionExtras(state: state, now: now, calendar: calendar, transfers: transfers,
-                                           subscriptions: subscriptions, hidden: hiddenDetected)
-        self.subscriptions = subs.subscriptions
-        hiddenSubscriptions = subs.hidden
-        subscriptionsMonthlyCents = subs.monthlyCents
-        subscriptionsYearlyCents = subs.yearlyCents
-        spendingLinks.subscriptions = subs.summary
     }
 
     func list(for card: AccountCard) -> [ListEntry] { entries[card] ?? [] }

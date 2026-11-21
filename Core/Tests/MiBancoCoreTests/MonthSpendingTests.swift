@@ -173,11 +173,12 @@ private func ledger(_ movements: [Movement]) -> LedgerState { LedgerState(moveme
 
     @Test func reutilizaLoPrecalculado() {
         let book = novemberBook().state
-        let transfers = ownTransferIDs(in: book.movements)
-        let keys = subscriptionKeys(in: book, now: nov(19, 13), calendar: cal, ownTransferIDs: transfers)
+        // El conjunto completo (traspasos, sin confirmar, pareja probable), como lo pasa quien reconstruye (R37/R40).
+        let transfers = spendingExclusions(in: book, now: nov(19, 13))
+        let keys = subscriptionKeys(in: book, now: nov(19, 13), calendar: cal, notSpending: transfers)
         let direct = monthSpending(in: book, month: nov(19), now: nov(19, 13), calendar: cal)
         let shared = monthSpending(in: book, month: nov(19), now: nov(19, 13), calendar: cal,
-                                   ownTransferIDs: transfers, subscriptionKeys: keys)
+                                   notSpending: transfers, subscriptionKeys: keys)
         #expect(direct == shared)
     }
 }

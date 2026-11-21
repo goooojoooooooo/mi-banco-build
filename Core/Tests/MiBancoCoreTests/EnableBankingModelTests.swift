@@ -29,15 +29,6 @@ import Testing
         #expect(try decodeTx(negative).signedCents == -1250)
     }
 
-    @Test func signedCentsIgnoresNonEuro() throws {
-        let usd = #"{"transaction_amount":{"currency":"USD","amount":"12.50"},"credit_debit_indicator":"DBIT","status":"BOOK"}"#
-        #expect(try decodeTx(usd).signedCents == nil)
-        let lower = usd.replacingOccurrences(of: "USD", with: "eur")
-        #expect(try decodeTx(lower).signedCents == -1250)
-        #expect(EBAmount(currency: "GBP", amount: "1.00").euroCents == nil)
-        #expect(EBAmount(currency: "EUR", amount: "1.00").euroCents == 100)
-    }
-
     @Test func decodesTolerantly() throws {
         let json = #"{"transaction_amount":{"currency":"EUR","amount":"1.00"},"credit_debit_indicator":"CRDT","status":"ZZZZ","algo_nuevo":{"x":1},"otro":[1,2]}"#
         let tx = try decodeTx(json)
@@ -135,10 +126,6 @@ import Testing
     }
 
     @Test func classifiesSessionErrors() {
-        #expect(classify(401, #"{"error":"EXPIRED_SESSION"}"#) == .consentExpired)
-        #expect(classify(403, #"{"error":"REVOKED_SESSION"}"#) == .consentExpired)
-        #expect(classify(403, #"{"error":"CLOSED_SESSION"}"#) == .consentExpired)
-        #expect(classify(404, #"{"error":"SESSION_DOES_NOT_EXIST"}"#) == .consentExpired)
         #expect(classify(429, "{}") == .rateLimited)
         #expect(classify(422, #"{"error":"ASPSP_RATE_LIMIT_EXCEEDED"}"#) == .rateLimited)
         #expect(classify(500, "<html>") == .bankUnavailable)

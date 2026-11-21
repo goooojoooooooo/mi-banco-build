@@ -77,20 +77,13 @@ final class TapSmokeTests: XCTestCase {
     }
 
     func testTabsAndRowOpenDetail() throws {
-        // Con cuatro pestañas, la barra de cristal del simulador de CI a veces no toma el toque sintético: toque, pulsación
-        // corta y otro toque (la comprobación es la misma).
         let tabs = app.tabBars.buttons
-        func open(_ name: String, until target: XCUIElement) -> Bool {
-            tabs[name].tap()
-            if target.waitForExistence(timeout: 8) { return true }
-            tabs[name].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
-            if target.waitForExistence(timeout: 8) { return true }
-            tabs[name].tap()
-            return target.waitForExistence(timeout: 10)
-        }
-        XCTAssertTrue(open("Avisos", until: app.navigationBars["Avisos"]), "No se ve Avisos")
-        XCTAssertTrue(open("Ajustes", until: app.navigationBars["Ajustes"]), "No se ve Ajustes")
-        XCTAssertTrue(open("Inicio", until: app.staticTexts["Tu dinero"]), "No se ve Inicio")
+        tabs["Avisos"].tap()
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 5), "No se ve Avisos")
+        tabs["Ajustes"].tap()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 5), "No se ve Ajustes")
+        tabs["Inicio"].tap()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 5), "No se ve Inicio")
 
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 5), "No hay filas de movimientos")
@@ -99,9 +92,6 @@ final class TapSmokeTests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 5), "No se abrió la hoja de detalle")
         close.tap()
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 5))
-        // La hoja se va con una animación: se espera a que «Cerrar» desaparezca en vez de mirarlo en el mismo instante.
-        let gone = NSPredicate(format: "exists == false")
-        let exp = XCTNSPredicateExpectation(predicate: gone, object: button("Cerrar"))
-        XCTAssertEqual(XCTWaiter().wait(for: [exp], timeout: 8), .completed, "La hoja de detalle no se cerró")
+        XCTAssertFalse(button("Cerrar").exists)
     }
 }

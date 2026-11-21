@@ -37,15 +37,3 @@ public struct PendingAuth: Codable, Equatable, Sendable {
         now.timeIntervalSince(startedAt) >= 15 * 60
     }
 }
-
-/// Sin id de sesión ni cuentas.
-extension StoredSession: CustomStringConvertible, CustomDebugStringConvertible {
-    public var description: String { "StoredSession(\(aspspName), \(aspspCountry), redacted)" }
-    public var debugDescription: String { description }
-}
-
-/// Sin `state`.
-extension PendingAuth: CustomStringConvertible, CustomDebugStringConvertible {
-    public var description: String { "PendingAuth(\(bank), \(aspspName), \(aspspCountry), redacted)" }
-    public var debugDescription: String { description }
-}

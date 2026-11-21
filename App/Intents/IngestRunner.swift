@@ -34,26 +34,23 @@ enum IngestRunner {
         // Si la app está abierta, Home se recarga con esto.
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         switch snap.outcome {
-        case .stored(let m), .merged(let m):
-            // Un registro del banco que se fusiona con su aviso no avisó antes: se trata como uno nuevo.
+        case .stored(let m):
             let now = Date()
             let calendar = Calendar.current
             let ledger = Ledger(state: snap.state)
-            // Traspasos y capturados sin confirmar: no son gasto de hoy ni del comercio (calculado una vez).
-            let transfers = spendingExclusions(in: snap.state, now: now)
             // "Cada movimiento" apagado o comercio silenciado: el movimiento queda guardado (e Inicio se actualiza),
             // pero ni aviso básico ni Live Activity.
             if snap.state.alertSettings.everyMovement && !ledger.isMuted(merchant: m.merchant) {
-                let month = m.merchant.map { merchantHistory(for: $0, in: snap.state.movements, now: now, calendar: calendar, notSpending: transfers) }
+                let month = m.merchant.map { merchantHistory(for: $0, in: snap.state.movements, now: now, calendar: calendar) }
                 await AlertPoster.post(movement: m, balance: snap.after, estimated: snap.afterEstimated,
                                        balances: snap.balances, previousBalance: snap.before,
                                        merchantMonth: m.kind == .payment ? month : nil,
-                                       todaySpentCents: spentToday(in: snap.state.movements, now: now, calendar: calendar, notSpending: transfers))
+                                       todaySpentCents: spentToday(snap.state.movements, now: now, calendar: calendar))
                 _ = await LiveActivityController.show(movement: m, balance: snap.after, estimated: snap.afterEstimated,
                                                       total: snap.total)
             }
             // Avisos extra (saldo bajo, pago grande, duplicado...), uno por idea y nunca repetidos.
-            await InsightNotifier.post(immediateAlerts(afterStoring: m, in: snap.state, now: now, calendar: calendar, notSpending: transfers))
+            await InsightNotifier.post(immediateAlerts(afterStoring: m, in: snap.state, now: now, calendar: calendar))
             await AlertScheduler.reschedule(for: snap.state, now: now, calendar: calendar)
         case .unread:
             await AlertPoster.postUnread(bank: bank)
@@ -64,6 +61,14 @@ enum IngestRunner {
             }
         case .ignored:
             break
+        }
+    }
+
+    /// Pagos tuyos de hoy (los marcados "no es mío" no cuentan).
+    private static func spentToday(_ movements: [Movement], now: Date, calendar: Calendar) -> Int {
+        let start = calendar.startOfDay(for: now)
+        return movements.reduce(0) { sum, m in
+            m.kind == .payment && !m.flaggedNotMine && m.date >= start && m.date <= now ? sum + abs(m.amountCents) : sum
         }
     }
 }

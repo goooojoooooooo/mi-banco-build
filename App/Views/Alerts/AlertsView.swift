@@ -221,8 +221,6 @@ extension InsightKind {
         case .subscriptionPriceChange: "arrow.up.right"
         case .spendingPace: "gauge.with.dots.needle.33percent"
         case .weeklyDigest: "doc.text"
-        case .budgetWarning: "gauge.with.dots.needle.67percent"
-        case .budgetExceeded: "exclamationmark.triangle"
         }
     }
 }

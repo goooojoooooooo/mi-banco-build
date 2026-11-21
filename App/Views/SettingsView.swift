@@ -7,9 +7,6 @@ struct SettingsView: View {
     let model: LedgerModel
     /// Pedido desde la tarjeta de Inicio ("Editar saldo"): enfoca ese banco y se vacía.
     @Binding var focusRequest: BankID?
-    /// Copia de seguridad: abre una hoja de la raíz (compartir) y el selector de archivos (restaurar).
-    var present: (RootSheet) -> Void = { _ in }
-    var importBackup: () -> Void = {}
 
     @AppStorage("lockEnabled") private var lockEnabled = true
     @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
@@ -26,6 +23,10 @@ struct SettingsView: View {
     /// Solo los campos que el usuario ha editado se guardan; el resto sigue al modelo.
     @State private var dirty: Set<BankID> = []
     @FocusState private var focused: BankID?
+    #if DEBUG
+    /// Demo (`-MiBancoDemoAlertsGuide`): abre la guía de avisos nada más aparecer Ajustes.
+    @State private var demoOpensGuide = false
+    #endif
 
     var body: some View {
         NavigationStack {
@@ -48,6 +49,7 @@ struct SettingsView: View {
                     } label: {
                         OptionLabel(title: "Avisos al instante", detail: "Guía de 2 minutos y aviso de prueba", systemImage: "bolt")
                     }
+                    .accessibilityIdentifier("settings-alerts-guide")
                     .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Avisos")
@@ -69,8 +71,6 @@ struct SettingsView: View {
                 } footer: {
                     SettingsFooter("Al volver a la app te pedirá Face ID o tu código. El ojo de Inicio es el mismo modo privado.")
                 }
-
-                BackupSection(model: model, present: present, importBackup: importBackup)
 
                 Section {
                     Toggle(isOn: $logoDownloads) {
@@ -94,6 +94,10 @@ struct SettingsView: View {
             .listSectionSpacing(.compact)
             .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Ajustes")
+            #if DEBUG
+            .navigationDestination(isPresented: $demoOpensGuide) { AlertsGuideView(model: model) }
+            .task { if DemoMode.guideStart != nil || DemoMode.guideSeed != nil { demoOpensGuide = true } }
+            #endif
         }
         .onAppear {
             refreshUntouched()
@@ -255,7 +259,7 @@ private struct BalanceRow: View {
                         .onSubmit(onSubmit)
                         .padding(.horizontal, 10)
                         .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
-                        .background(Theme.fieldFill.opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                        .background(Color(hex: "#2A2A2D").opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                         .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
                         .privateField(editing: focused.wrappedValue == bank)
                         .accessibilityLabel("Saldo de \(bank.displayName)")
@@ -298,9 +302,9 @@ struct OptionLabel: View {
         HStack(spacing: 14) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Theme.iconGlyph)
+                .foregroundStyle(Color(hex: "#D1D1D6"))
                 .frame(width: 30, height: 30)
-                .background(Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
+                .background(Color(hex: "#232325"), in: .rect(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).titan(.option).foregroundStyle(Theme.label)
@@ -336,9 +340,14 @@ struct SettingsFooter: View {
     }
 }
 
-/// La guía de Atajos y el aviso de prueba, en su propia pantalla.
+/// Las guías de Atajos y el aviso de prueba, en su propia pantalla. Cada guía se empuja en esta misma navegación.
 struct AlertsGuideView: View {
     let model: LedgerModel
+    #if DEBUG
+    /// Demo (`-MiBancoDemoAlertsGuide`): paso concreto al que se salta nada más abrir.
+    @State private var demoStart: DemoGuideStart?
+    @Environment(AppPreferences.self) private var preferences
+    #endif
 
     var body: some View {
         Form {
@@ -350,5 +359,27 @@ struct AlertsGuideView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Avisos al instante")
         .navigationBarTitleDisplayMode(.inline)
+        #if DEBUG
+        .navigationDestination(item: $demoStart) { start in
+            GuideStepView(track: start.track, model: model, start: start.resume ? nil : start.step,
+                          resume: start.resume ? preferences.guideResume(start.track) : nil)
+        }
+        .task {
+            if let seed = DemoMode.guideSeed {
+                demoStart = DemoGuideStart(track: seed.track, step: seed.number - 1, resume: true)
+            } else if let start = DemoMode.guideStart, let track = start.track {
+                demoStart = DemoGuideStart(track: track, step: start.step)
+            }
+        }
+        #endif
     }
 }
+
+#if DEBUG
+struct DemoGuideStart: Hashable {
+    let track: GuideTrack
+    let step: Int
+    /// Con `-MiBancoDemoGuideSeed`: se abre retomando el paso guardado.
+    var resume = false
+}
+#endif

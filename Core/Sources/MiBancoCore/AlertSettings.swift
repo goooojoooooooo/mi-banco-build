@@ -10,13 +10,11 @@ public struct AlertSettings: Codable, Equatable, Sendable {
     public var duplicateCharge: Bool
     public var weeklyDigest: Bool
     public var spendingPace: Bool
-    /// Avisos al llegar al 80 % y al 100 % de un presupuesto.
-    public var budgets: Bool
 
     public init(everyMovement: Bool = true, lowBalance: Bool = true, lowBalanceThresholdCents: Int = 10_000,
                 largePayment: Bool = true, largePaymentThresholdCents: Int = 15_000, income: Bool = true,
                 subscriptions: Bool = true, duplicateCharge: Bool = true, weeklyDigest: Bool = true,
-                spendingPace: Bool = true, budgets: Bool = true) {
+                spendingPace: Bool = true) {
         self.everyMovement = everyMovement
         self.lowBalance = lowBalance
         self.lowBalanceThresholdCents = lowBalanceThresholdCents
@@ -27,12 +25,11 @@ public struct AlertSettings: Codable, Equatable, Sendable {
         self.duplicateCharge = duplicateCharge
         self.weeklyDigest = weeklyDigest
         self.spendingPace = spendingPace
-        self.budgets = budgets
     }
 
     private enum CodingKeys: String, CodingKey {
         case everyMovement, lowBalance, lowBalanceThresholdCents, largePayment, largePaymentThresholdCents
-        case income, subscriptions, duplicateCharge, weeklyDigest, spendingPace, budgets
+        case income, subscriptions, duplicateCharge, weeklyDigest, spendingPace
     }
 
     public init(from decoder: any Decoder) throws {
@@ -48,6 +45,5 @@ public struct AlertSettings: Codable, Equatable, Sendable {
         duplicateCharge = try c.decodeIfPresent(Bool.self, forKey: .duplicateCharge) ?? d.duplicateCharge
         weeklyDigest = try c.decodeIfPresent(Bool.self, forKey: .weeklyDigest) ?? d.weeklyDigest
         spendingPace = try c.decodeIfPresent(Bool.self, forKey: .spendingPace) ?? d.spendingPace
-        budgets = try c.decodeIfPresent(Bool.self, forKey: .budgets) ?? d.budgets
     }
 }

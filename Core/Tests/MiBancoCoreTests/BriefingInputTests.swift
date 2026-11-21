@@ -637,7 +637,7 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
                      date: date(10, 20, 12), isShop: true, bankRef: "e2", bankStatus: .booked, dayOnly: true),
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .statement,
-                     date: nov(20, 12), isShop: false, excludedFromSpending: true, dayOnly: true),
+                     date: nov(20, 12), isShop: false, dayOnly: true, excludedFromSpending: true),
         ]
         let excludedMorning = input(withExcluded, since: nov(19, 10), now: nov(20, 8, 30))
         #expect(excludedMorning.upcoming.filter { $0.name == "Netflix" }.count == 1)

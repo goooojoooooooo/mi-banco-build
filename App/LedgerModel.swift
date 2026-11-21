@@ -7,6 +7,7 @@ import MiBancoCore
 extension Notification.Name {
     /// Los intents la publican tras guardar en el almacén; el modelo recarga al recibirla.
     static let ledgerDidChange = Notification.Name("com.mibanco.ledgerDidChange")
+    // `ledgerDidSyncFromBank` (consulta a un banco) vive en `App/Banking/BankSync.swift`.
 }
 
 /// Un movimiento nuevo que acaba de llegar con la app abierta: dispara la coreografía de Inicio (la tarjeta se desliza,
@@ -28,9 +29,13 @@ final class LedgerModel {
     private(set) var snapshot = LedgerSnapshot()
     private let store: FileStore
     @ObservationIgnored private var observer: Task<Void, Never>?
+    @ObservationIgnored private var syncObserver: Task<Void, Never>?
     /// Publicación aplazada de una llegada; cualquier publicación posterior la deja sin efecto.
     @ObservationIgnored private var staged: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
+    /// Presupuestos escritos que no se entienden («abc»): se quedan (solo en memoria) para enseñarlos con su error al
+    /// volver a la pantalla, en vez de perderse sin decir nada.
+    @ObservationIgnored var budgetDrafts: [BudgetScope: String] = [:]
     #if DEBUG
     /// Demo: lo que "escribiría el intent en el almacén"; `reload` lo recoge como si lo leyera de disco.
     @ObservationIgnored private var demoIncoming: LedgerState?
@@ -41,7 +46,7 @@ final class LedgerModel {
         #if DEBUG
         if DemoMode.isActive {
             state = DemoMode.state()
-            snapshot = LedgerSnapshot(state: state)
+            snapshot = LedgerSnapshot(state: state, now: clock)
         }
         #endif
         reload()
@@ -51,14 +56,34 @@ final class LedgerModel {
                 model.reloadAfterIngest()
             }
         }
+        // Una consulta al banco recarga sin llegada animada, sin sonido ni vibración.
+        syncObserver = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .ledgerDidSyncFromBank) {
+                guard let model = self else { break }
+                model.reloadAfterSync()
+            }
+        }
+    }
+
+    /// El «ahora» del libro: el reloj (en la demo, `-MiBancoDemoToday` puede fijarlo para probar otros días).
+    private var clock: Date {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.now }
+        #endif
+        return Date()
     }
 
     /// Si falla la lectura se conserva lo que ya se mostraba.
     func reload() {
         guard let loaded = loadNext() else { return }
-        if loaded != state || !Calendar.current.isDateInToday(snapshot.day) {
+        if loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock) {
             publish(loaded)
         }
+    }
+
+    /// Tras una consulta a un banco: el estado nuevo se publica tal cual, sin `arrival`.
+    private func reloadAfterSync() {
+        reload()
     }
 
     /// Lo siguiente que hay en el almacén (en la demo, lo que dejó la llegada simulada; si no, nada nuevo).
@@ -77,7 +102,7 @@ final class LedgerModel {
         staged?.cancel()
         staged = nil
         state = next
-        snapshot = LedgerSnapshot(state: next)
+        snapshot = LedgerSnapshot(state: next, now: clock)
         reschedule(next)
     }
 
@@ -95,7 +120,9 @@ final class LedgerModel {
     private func reloadAfterIngest() {
         guard let next = loadNext(), next != state else { return }
         let known = Set(state.movements.map(\.id))
-        guard let newest = next.movements.filter({ !known.contains($0.id) }).max(by: { $0.date < $1.date }),
+        // Solo un aviso o un pago de Cartera es una llegada; lo que trae el banco (aunque se cuele aquí) nunca.
+        guard let newest = next.movements.filter({ !known.contains($0.id) && ($0.source == .notification || $0.source == .wallet) })
+            .max(by: { $0.date < $1.date }),
               abs(newest.date.timeIntervalSinceNow) < 600 else {
             publish(next)
             return
@@ -111,7 +138,7 @@ final class LedgerModel {
             let animation: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.roll
             withAnimation(animation) {
                 self.state = next
-                self.snapshot = LedgerSnapshot(state: next)
+                self.snapshot = LedgerSnapshot(state: next, now: self.clock)
             }
             self.staged = nil
             self.reschedule(next)
@@ -124,7 +151,7 @@ final class LedgerModel {
     /// coreografía, háptica, aviso de VoiceOver) es el código real.
     func demoSimulateArrival() {
         var ledger = Ledger(state: state)
-        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: Date()) else { return }
+        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: clock) else { return }
         demoIncoming = ledger.state
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
     }
@@ -162,6 +189,81 @@ final class LedgerModel {
 
     func unmute(_ merchant: MutedMerchant) throws {
         try mutate { $0.setMuted(false, merchant: merchant.raw) }
+    }
+
+    /// Categoría de un pago; con `applyToMerchant` se recuerda para todo el comercio. nil devuelve la que decide la app.
+    func setCategory(_ category: SpendingCategory?, for id: UUID, applyToMerchant: Bool) throws {
+        try mutate { $0.setCategory(category, for: id, applyToMerchant: applyToMerchant) }
+    }
+
+    /// «Volver a la categoría automática» (ver `Ledger.resetCategoryToAutomatic`).
+    func resetCategory(for id: UUID) throws {
+        try mutate { $0.resetCategoryToAutomatic(for: id) }
+    }
+
+    /// true si la categoría del pago la eligió el dueño (en el pago o para su comercio).
+    func hasChosenCategory(_ id: UUID) -> Bool {
+        Ledger(state: state).hasChosenCategory(id)
+    }
+
+    /// true si el pago tiene categoría elegida en él mismo (no solo la de su comercio).
+    func hasOwnCategory(_ id: UUID) -> Bool {
+        Ledger(state: state).hasOwnCategory(id)
+    }
+
+    /// true = traspaso entre tus cuentas; false = no lo es (aunque lo parezca); nil = que lo decida la app.
+    func setOwnTransfer(_ value: Bool?, for id: UUID) throws {
+        try mutate { $0.setOwnTransfer(value, for: id) }
+    }
+
+    func setMonthlyBudget(_ cents: Int?) throws {
+        try mutate { $0.setMonthlyBudget(cents) }
+    }
+
+    func setSubscriptionDismissed(_ dismissed: Bool, id: String) throws {
+        try mutate { $0.setSubscriptionDismissed(dismissed, id: id) }
+    }
+
+    func setBudget(_ cents: Int?, for category: SpendingCategory) throws {
+        try mutate { $0.setBudget(cents, for: category) }
+    }
+
+    /// Restaura una copia: antes guarda lo actual como `ledger-antes-de-restaurar.json`, las dos cosas dentro de una sola
+    /// actualización coordinada. Si esa copia falla no se restaura nada y lanza `RestoreError.safetyCopyFailed`.
+    func restore(_ file: BackupFile) throws {
+        #if DEBUG
+        if DemoMode.isActive {
+            // Las mismas reglas que en disco (`Ledger.restore`: las conexiones con bancos no salen de la copia).
+            var ledger = Ledger(state: state)
+            ledger.restore(file.ledger)
+            publish(ledger.state)
+            restoreCount += 1
+            return
+        }
+        #endif
+        try store.restoreKeepingCopy(file.ledger, copyName: Self.safetyCopyName)
+        // Se publica lo que quedó en disco aunque coincida con lo anterior: así se rehacen siempre el snapshot y los
+        // recordatorios (`reschedule`) con los datos restaurados.
+        let reloaded: LedgerState
+        do { reloaded = try store.load() } catch { throw RestoreError.reloadFailed }
+        publish(reloaded)
+        restoreCount += 1
+    }
+
+    /// Nombre de la copia que se guarda antes de cada restauración.
+    static let safetyCopyName = "ledger-antes-de-restaurar.json"
+
+    /// Sube con cada restauración: Ajustes relee la copia previa.
+    private(set) var restoreCount = 0
+
+    /// La copia guardada antes de la última restauración, lista para "Volver a lo de antes" (nil si no hay).
+    func previousPreview() -> RestorePreview? {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.scrollsToBackup ? DemoMode.demoPreviousPreview(currentCount: state.movements.count) : nil }
+        #endif
+        guard let info = store.copyInfo(named: Self.safetyCopyName) else { return nil }
+        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state),
+                              currentCount: state.movements.count, isPrevious: true)
     }
 
     func movement(_ id: UUID) -> Movement? {

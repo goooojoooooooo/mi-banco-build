@@ -93,6 +93,9 @@ public func applicationID(fromKeyFileName name: String) -> String? {
     guard trimmed.count >= 36 else { return nil }
     let candidate = String(trimmed.prefix(36))
     guard isValidApplicationID(candidate) else { return nil }
+    // Tras el id solo puede venir ".", un espacio o el final del nombre.
+    let rest = trimmed.dropFirst(36)
+    guard rest.isEmpty || rest.first == "." || rest.first == " " else { return nil }
     return candidate.lowercased()
 }
 

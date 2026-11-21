@@ -1,0 +1,167 @@
+import Foundation
+
+/// Copia de seguridad completa del libro (ver spec de los planes 3 y 4, §2.6).
+public struct BackupFile: Codable, Equatable, Sendable {
+    public static let currentVersion = 1
+
+    public var app: String
+    public var version: Int
+    public var exportedAt: Date
+    public var ledger: LedgerState
+    /// Cartera de inversiones (Plan 4b). Una copia anterior no trae la clave: queda en nil y quien restaura debe dejar
+    /// la cartera actual como está (no borrarla).
+    public var portfolio: Portfolio?
+    /// Entradas de la cartera que no se pudieron leer al abrir la copia (una cartera ilegible entera cuenta 1): la app
+    /// puede decir «vuelve a importar tu extracto». No se guarda en el fichero.
+    public private(set) var droppedPortfolioEntries: Int = 0
+
+    public init(app: String = "MiBanco", version: Int = BackupFile.currentVersion, exportedAt: Date, ledger: LedgerState,
+                portfolio: Portfolio? = nil) {
+        self.app = app
+        self.version = version
+        self.exportedAt = exportedAt
+        self.ledger = ledger
+        self.portfolio = portfolio
+    }
+
+    private enum CodingKeys: String, CodingKey { case app, version, exportedAt, ledger, portfolio }
+
+    /// Una cartera ilegible o con el tipo equivocado NUNCA tumba la copia (el libro se restaura igual): queda en nil.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        app = try c.decode(String.self, forKey: .app)
+        version = try c.decode(Int.self, forKey: .version)
+        exportedAt = try c.decode(Date.self, forKey: .exportedAt)
+        ledger = try c.decode(LedgerState.self, forKey: .ledger)
+        portfolio = nil
+        if c.contains(.portfolio), (try? c.decodeNil(forKey: .portfolio)) == false {
+            if let p = try? c.decode(Portfolio.self, forKey: .portfolio) {
+                portfolio = p
+                droppedPortfolioEntries = p.droppedEntries
+            } else {
+                droppedPortfolioEntries = 1
+            }
+        }
+    }
+
+    public static func == (a: BackupFile, b: BackupFile) -> Bool {
+        a.app == b.app && a.version == b.version && a.exportedAt == b.exportedAt && a.ledger == b.ledger
+            && a.portfolio == b.portfolio
+    }
+}
+
+/// Qué cartera queda al restaurar: una copia sin cartera (anterior a las inversiones, o con la cartera ilegible) deja la
+/// actual como está; con cartera, la sustituye.
+public func portfolioAfterRestore(current: Portfolio, backup: Portfolio?) -> Portfolio {
+    backup ?? current
+}
+
+public func portfolioAfterRestore(current: Portfolio, backup: BackupFile) -> Portfolio {
+    portfolioAfterRestore(current: current, backup: backup.portfolio)
+}
+
+public enum BackupError: Error, Equatable, Sendable {
+    /// El fichero no es una copia de Mi Banco (otro JSON, texto cualquiera...).
+    case notABackup
+    /// La copia viene de una versión más nueva de la app: no se toca nada.
+    case newerVersion(Int)
+}
+
+/// JSON con claves ordenadas; fechas con la estrategia por defecto para que la ida y vuelta sea exacta.
+public func encodeBackup(_ state: LedgerState, exportedAt: Date) throws -> Data {
+    try encodeBackup(state, portfolio: nil, exportedAt: exportedAt)
+}
+
+/// Igual, con la cartera de inversiones dentro (si no hay, la clave no se escribe).
+public func encodeBackup(_ state: LedgerState, portfolio: Portfolio?, exportedAt: Date) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+    return try encoder.encode(BackupFile(exportedAt: exportedAt, ledger: state, portfolio: portfolio))
+}
+
+private struct BackupHeader: Decodable {
+    let app: String
+    let version: Int
+}
+
+/// Decodifica primero solo `{app, version}`: así una copia de una versión futura (con otra forma) se rechaza por versión
+/// y un fichero ajeno por `notABackup`, siempre antes de tocar nada.
+public func decodeBackup(_ data: Data) throws -> BackupFile {
+    guard let header = try? JSONDecoder().decode(BackupHeader.self, from: data), header.app == "MiBanco" else {
+        throw BackupError.notABackup
+    }
+    if header.version > BackupFile.currentVersion { throw BackupError.newerVersion(header.version) }
+    guard let file = try? JSONDecoder().decode(BackupFile.self, from: data) else { throw BackupError.notABackup }
+    return file
+}
+
+private func datePart(_ date: Date, calendar: Calendar) -> String {
+    let c = calendar.dateComponents([.year, .month, .day], from: date)
+    return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+}
+
+public func backupFileName(exportedAt: Date, calendar: Calendar) -> String {
+    "MiBanco-\(datePart(exportedAt, calendar: calendar)).json"
+}
+
+public func movementsCSVFileName(exportedAt: Date, calendar: Calendar) -> String {
+    "MiBanco-movimientos-\(datePart(exportedAt, calendar: calendar)).csv"
+}
+
+/// Hora del movimiento para el CSV. Vacía cuando el movimiento no tiene hora real (R13): filas del banco de solo día.
+private func csvTime(of movement: Movement, calendar: Calendar) -> String {
+    if movement.dayOnly { return "" }
+    let c = calendar.dateComponents([.hour, .minute], from: movement.date)
+    return String(format: "%02d:%02d", c.hour ?? 0, c.minute ?? 0)
+}
+
+/// Importe en euros con coma decimal y sin separador de miles ("-12,50").
+private func csvAmount(_ cents: Int) -> String {
+    let rest = cents.magnitude % 100
+    return "\(cents < 0 ? "-" : "")\(cents.magnitude / 100),\(rest < 10 ? "0" : "")\(rest)"
+}
+
+private func csvField(_ value: String) -> String {
+    guard value.contains(where: { $0 == ";" || $0 == "\"" || $0 == "\r" || $0 == "\n" }) else { return value }
+    return "\"" + value.replacingOccurrences(of: "\"", with: "\"\"") + "\""
+}
+
+/// Texto libre (comercio, nota, categoría, banco) que un banco o un tercero puede haber escrito: si empieza por `=`, `+`, `-`,
+/// `@`, tabulador o retorno de carro, una hoja de cálculo lo evaluaría como fórmula. Se neutraliza con un apóstrofo delante.
+/// Solo para columnas de texto: el importe no pasa por aquí (un `-12,50` legítimo debe seguir siendo numérico).
+func csvText(_ value: String) -> String {
+    guard let first = value.unicodeScalars.first, "=+-@\t\r".unicodeScalars.contains(first) else { return value }
+    return "'" + value
+}
+
+/// Todos los movimientos, por fecha ascendente, separados por `;` (Excel en español), con fin de línea CRLF.
+public func movementsCSV(_ state: LedgerState, now: Date, calendar: Calendar) -> String {
+    let transfers = ownTransferIDs(in: state.movements)
+    // La categoría de un pago de suscripción sale de las suscripciones detectadas, que van sobre el gasto real: el
+    // conjunto completo (traspasos, sin confirmar, pareja probable), una vez.
+    let keys = subscriptionKeys(in: state, now: now, calendar: calendar, notSpending: spendingExclusions(in: state, now: now))
+    var lines = ["Fecha;Hora;Banco;Tipo;Comercio;Categoría;Importe;Nota;No es mío;Traspaso propio"]
+    let sorted = state.movements.sorted { $0.date != $1.date ? $0.date < $1.date : $0.id.uuidString < $1.id.uuidString }
+    for m in sorted {
+        let category = categoryOf(m, in: state, subscriptionKeys: keys)?.displayName ?? ""
+        let fields = [
+            datePart(m.date, calendar: calendar),
+            csvTime(of: m, calendar: calendar),
+            csvText(m.bank.displayName),
+            m.kind == .payment ? "Pago" : "Ingreso",
+            csvText(m.merchant ?? ""),
+            csvText(category),
+            csvAmount(m.amountCents),
+            csvText(m.note ?? ""),
+            m.flaggedNotMine ? "sí" : "",
+            transfers.contains(m.id) ? "sí" : "",
+        ]
+        lines.append(fields.map(csvField).joined(separator: ";"))
+    }
+    return lines.joined(separator: "\r\n") + "\r\n"
+}
+
+/// El mismo CSV con la marca de orden de bytes UTF-8 delante, para que Excel respete las tildes.
+public func movementsCSVData(_ state: LedgerState, now: Date, calendar: Calendar) -> Data {
+    Data([0xEF, 0xBB, 0xBF]) + Data(movementsCSV(state, now: now, calendar: calendar).utf8)
+}

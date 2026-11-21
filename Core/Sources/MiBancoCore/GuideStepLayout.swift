@@ -51,21 +51,3 @@ public func guideStepArrangement(visible: Double, essentials: Double, restart: D
     let drawing = available < minimum ? 0 : min(GuideStepArrangement.maxDrawing, available)
     return GuideStepArrangement(order: .drawingFirst, drawing: drawing)
 }
-
-/// Hasta dónde se desliza el contenido de un paso al abrir «¿No te sale esto?» (todo en puntos, desde arriba del
-/// contenido). Si la ayuda cabe en lo visible, se ve entera con el mínimo movimiento (si ya se ve, no se mueve; si su
-/// final queda debajo, ese final queda justo encima de los botones). Si no cabe, su primera línea queda arriba del todo.
-/// Nunca pasa del final del contenido ni de arriba del todo.
-/// - Parameters:
-///   - top: dónde empieza la ayuda dentro del contenido.
-///   - height: el alto de la ayuda.
-///   - offset: el desplazamiento de ahora.
-///   - visible: H, el alto visible.
-///   - content: el alto del contenido ya con la ayuda.
-public func guideHelpScrollTarget(top: Double, height: Double, offset: Double, visible: Double,
-                                  content: Double) -> Double {
-    let now = offset.isFinite ? max(0, offset) : 0
-    guard top.isFinite, height.isFinite, visible.isFinite, content.isFinite, visible > 0, height >= 0 else { return now }
-    let target = height <= visible ? min(max(now, top + height - visible), top) : top
-    return min(max(0, target), max(0, content - visible))
-}

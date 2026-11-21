@@ -255,45 +255,54 @@ final class GuideUITests: XCTestCase {
     }
 
     /// Cerrar la ayuda devuelve el paso exactamente a su sitio (G28 / I2): primero se afirma que al abrirla la ayuda se
-    /// vio de verdad (y con dibujo arriba el dibujo se ocultó o encogió), y después que al cerrarla tanto el título como
-    /// el dibujo vuelven a su sitio (±1 pt) y la instrucción empieza dentro de lo visible.
+    /// vio de verdad y el dibujo cedió su sitio, y después que al cerrarla tanto el título como el dibujo vuelven a su sitio
+    /// (±1 pt) y la instrucción empieza dentro de lo visible. Con letra de accesibilidad (G30 M3) el dibujo va debajo y no se
+    /// mueve: allí solo se comprueba lo que sí puede fallar (el principio de la ayuda se ve al abrir y desaparece al cerrar).
     func testClosingHelpPutsTheStepBack() throws {
-        for size in ["", "UICTContentSizeCategoryAccessibilityM"] {
-            launchResumed("wallet", 6, extra: size.isEmpty ? [] : ["-UIPreferredContentSizeCategoryName", size])
-            waitForApplePayStep(6, "No retomó wallet en el paso 6 (\(size))")
-            let title = app.staticTexts["guide-title"]
-            XCTAssertTrue(title.waitForExistence(timeout: 5), "Falta el título (\(size))")
-            let drawing = app.descendants(matching: .any).matching(identifier: "guide-drawing").firstMatch
-            XCTAssertTrue(drawing.exists, "Falta el dibujo antes de abrir la ayuda (\(size))")
-            let beforeTitle = title.frame.minY
-            let beforeDrawing = drawing.frame.height
-            let help = app.buttons["guide-help"]
-            let open = app.buttons["guide-open-shortcuts"]
-            let top = visibleTop()
+        // 1. Tamaño normal (dibujo arriba): el dibujo cede su sitio al abrir y vuelve exactamente al cerrar.
+        launchResumed("wallet", 6)
+        waitForApplePayStep(6, "No retomó wallet en el paso 6")
+        let title = app.staticTexts["guide-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5), "Falta el título")
+        let drawing = app.descendants(matching: .any).matching(identifier: "guide-drawing").firstMatch
+        XCTAssertTrue(drawing.exists, "Falta el dibujo antes de abrir la ayuda")
+        let beforeTitle = title.frame.minY
+        let beforeDrawing = drawing.frame.height
+        let help = app.buttons["guide-help"]
+        let open = app.buttons["guide-open-shortcuts"]
+        let top = visibleTop()
 
-            help.tap()
-            let text = app.staticTexts["guide-help-text"]
-            XCTAssertTrue(text.waitForExistence(timeout: 5), "La ayuda no se abrió (\(size))")
-            if size.isEmpty {
-                XCTAssertTrue(eventually(4) { text.frame.maxY <= open.frame.minY - 12 && text.frame.minY >= top - 1 },
-                              "La ayuda no se vio entera al abrirla (\(size)): ayuda \(text.frame), botón \(open.frame), arriba \(top)")
-                XCTAssertTrue(eventually(4) { !drawing.exists || drawing.frame.height < beforeDrawing - 1 },
-                              "El dibujo no cedió sitio al abrir la ayuda (\(size)): antes \(beforeDrawing), ahora \(drawing.frame.height)")
-            } else {
-                XCTAssertTrue(eventually(4) { text.frame.minY >= top - 1 && text.frame.minY + 34 <= open.frame.minY },
-                              "El principio de la ayuda no se vio al abrirla (\(size)): ayuda \(text.frame), botón \(open.frame)")
-            }
+        help.tap()
+        let text = app.staticTexts["guide-help-text"]
+        XCTAssertTrue(text.waitForExistence(timeout: 5), "La ayuda no se abrió")
+        XCTAssertTrue(eventually(4) { text.frame.maxY <= open.frame.minY - 12 && text.frame.minY >= top - 1 },
+                      "La ayuda no se vio entera al abrirla: ayuda \(text.frame), botón \(open.frame), arriba \(top)")
+        XCTAssertTrue(eventually(4) { !drawing.exists || drawing.frame.height < beforeDrawing - 1 },
+                      "El dibujo no cedió sitio al abrir la ayuda: antes \(beforeDrawing), ahora \(drawing.frame.height)")
 
-            help.tap()
-            XCTAssertTrue(eventually(4) { !text.exists }, "La ayuda no se cerró (\(size))")
-            let instruction = app.staticTexts["guide-instruction"]
-            XCTAssertTrue(eventually(4) { abs(title.frame.minY - beforeTitle) <= 1 },
-                          "Al cerrar la ayuda el título no vuelve a su sitio (\(size)): antes \(beforeTitle), ahora \(title.frame)")
-            XCTAssertTrue(eventually(4) { drawing.exists && abs(drawing.frame.height - beforeDrawing) <= 1 },
-                          "Al cerrar la ayuda el dibujo no vuelve a su alto (\(size)): antes \(beforeDrawing), ahora existe=\(drawing.exists) alto=\(drawing.frame.height)")
-            XCTAssertTrue(instruction.frame.minY >= top - 1 && instruction.frame.minY < open.frame.minY,
-                          "Al cerrar la ayuda la instrucción no empieza en lo visible (\(size)): \(instruction.frame), arriba \(top)")
-        }
+        help.tap()
+        XCTAssertTrue(eventually(4) { !text.exists }, "La ayuda no se cerró")
+        let instruction = app.staticTexts["guide-instruction"]
+        XCTAssertTrue(eventually(4) { abs(title.frame.minY - beforeTitle) <= 1 },
+                      "Al cerrar la ayuda el título no vuelve a su sitio: antes \(beforeTitle), ahora \(title.frame)")
+        XCTAssertTrue(eventually(4) { drawing.exists && abs(drawing.frame.height - beforeDrawing) <= 1 },
+                      "Al cerrar la ayuda el dibujo no vuelve a su alto: antes \(beforeDrawing), ahora existe=\(drawing.exists) alto=\(drawing.frame.height)")
+        XCTAssertTrue(instruction.frame.minY >= top - 1 && instruction.frame.minY < open.frame.minY,
+                      "Al cerrar la ayuda la instrucción no empieza en lo visible: \(instruction.frame), arriba \(top)")
+
+        // 2. Letra de accesibilidad (texto arriba): al abrir se ve el principio de la ayuda y al cerrar se oculta.
+        launchResumed("wallet", 6, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
+        waitForApplePayStep(6, "No retomó wallet en el paso 6 (accesibilidad)")
+        let axHelp = app.buttons["guide-help"]
+        let axOpen = app.buttons["guide-open-shortcuts"]
+        let axTop = visibleTop()
+        axHelp.tap()
+        let axText = app.staticTexts["guide-help-text"]
+        XCTAssertTrue(axText.waitForExistence(timeout: 5), "La ayuda no se abrió (accesibilidad)")
+        XCTAssertTrue(eventually(4) { axText.frame.minY >= axTop - 1 && axText.frame.minY + 34 <= axOpen.frame.minY },
+                      "El principio de la ayuda no se vio al abrirla (accesibilidad): ayuda \(axText.frame), botón \(axOpen.frame)")
+        axHelp.tap()
+        XCTAssertTrue(eventually(4) { !axText.exists }, "La ayuda no se cerró (accesibilidad)")
     }
 
     /// Con el texto arriba (letra de accesibilidad), VoiceOver lee en el orden de la pantalla (G27): lo imprescindible,

@@ -2,13 +2,18 @@ name: ios-build
 run-name: ios-build ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
+        required: false
+        default: "namespace-profile-onyx"
   push:
     tags: ['v*']
 permissions:
   contents: write
 jobs:
   build:
-    runs-on: namespace-profile-onyx
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     steps:
       - uses: actions/checkout@v4
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)

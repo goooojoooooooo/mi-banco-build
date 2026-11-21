@@ -4,16 +4,16 @@ import MiBancoCore
 
 /// Modo demo solo para compilaciones DEBUG: datos ficticios en memoria para las capturas del simulador.
 /// Se activa con `-MiBancoDemo`. Argumentos para abrir estados concretos:
-/// `-MiBancoDemoScreen inicio|avisos|ajustes`, `-MiBancoDemoCard todo|rev|ima|tr`, `-MiBancoDemoDetail`
+/// `-MiBancoDemoScreen inicio|gasto|avisos|ajustes`, `-MiBancoDemoCard todo|rev|ima|tr`, `-MiBancoDemoDetail`
 /// (hoja del movimiento más reciente), `-MiBancoDemoPrivate` (modo privado), `-MiBancoDemoSearch <texto>`,
 /// `-MiBancoDemoArrival` (llega un pago a los ~4 s), `-MiBancoDemoLock` (bloqueo y desbloqueo a los ~4 s),
 /// `-MiBancoDemoOnlineLogo` (una tienda fuera del directorio, para la descarga del logo),
 /// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores),
-/// `-MiBancoDemoAlertsGuide <rev|tr|wallet|wallet-rev|wallet-tr> <paso>` (wallet = Apple Pay de imagin) (con `-MiBancoDemoScreen ajustes`: abre la guía de avisos en ese paso,
-/// contando desde 1; con paso 0 solo abre la lista de guías).
-/// En la demo nada se escribe en el almacén ni en UserDefaults: los cambios viven en memoria.
+/// `-MiBancoDemoAlertsGuide <rev|tr|wallet|wallet-rev|wallet-tr> <paso>` (wallet = Apple Pay de imagin; con `-MiBancoDemoScreen ajustes`,
+/// abre la guía de avisos en ese paso contando desde 1; con paso 0 solo abre la lista de guías).
+/// En la demo nada se escribe en el almacén ni en UserDefaults (salvo `-MiBancoDemoPersistGuide`): los cambios viven en memoria.
 enum DemoMode {
-    enum Screen { case home, alerts, settings }
+    enum Screen { case home, spending, alerts, settings }
 
     private static var arguments: [String] { ProcessInfo.processInfo.arguments }
 
@@ -25,8 +25,27 @@ enum DemoMode {
 
     static var isActive: Bool { arguments.contains("-MiBancoDemo") }
 
+    /// `-MiBancoDemoToday <aaaa-mm-dd>` (solo con `-MiBancoDemo`): fija el «hoy» de la demo a las 12:00 de ese día, para probar
+    /// que el libro de la demo da lo mismo cualquier día del año. Un texto que no sea una fecha válida se ignora.
+    static var fixedNow: Date? {
+        guard isActive, let text = value(after: "-MiBancoDemoToday") else { return nil }
+        let parts = text.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        let calendar = Calendar.current
+        let components = DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12)
+        guard let date = calendar.date(from: components) else { return nil }
+        // Un día que no existe (30-02) se desplazaría al mes siguiente: se ignora.
+        let back = calendar.dateComponents([.year, .month, .day], from: date)
+        guard back.year == parts[0], back.month == parts[1], back.day == parts[2] else { return nil }
+        return date
+    }
+
+    /// El «ahora» de la demo: el reloj, salvo que `-MiBancoDemoToday` lo fije.
+    static var now: Date { fixedNow ?? Date() }
+
     static var screen: Screen {
         switch value(after: "-MiBancoDemoScreen") ?? "" {
+        case "gasto": .spending
         case "avisos": .alerts
         case "ajustes": .settings
         default: .home
@@ -100,7 +119,18 @@ enum DemoMode {
     /// `-MiBancoDemoGuideHelpOpen`: abre el paso de la guía con «¿No te sale esto?» desplegado (captura de G28).
     static var opensGuideHelp: Bool { arguments.contains("-MiBancoDemoGuideHelpOpen") }
 
-    static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
+    /// `-MiBancoDemoMonth <n>`: en Gasto, desplazamiento de meses respecto al actual (p. ej. `-1` = el mes anterior).
+    static var monthOffset: Int { value(after: "-MiBancoDemoMonth").flatMap(Int.init) ?? 0 }
+
+    /// `-MiBancoDemoCategory <raw>`: en Gasto, abre esa categoría del mes en curso. `-MiBancoDemoBudgets`: abre Presupuestos.
+    static var openCategory: SpendingCategory? { value(after: "-MiBancoDemoCategory").flatMap(SpendingCategory.init(rawValue:)) }
+    static var opensBudgets: Bool { arguments.contains("-MiBancoDemoBudgets") }
+    /// `-MiBancoDemoSubscriptions`: abre Suscripciones.
+    static var opensSubscriptions: Bool { arguments.contains("-MiBancoDemoSubscriptions") }
+
+    static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") || opensCategory }
+    /// `-MiBancoDemoDetailCategory`: la hoja del movimiento más reciente, con la rejilla de categorías desplegada.
+    static var opensCategory: Bool { arguments.contains("-MiBancoDemoDetailCategory") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".
     static var showsAlertRules: Bool { arguments.contains("-MiBancoDemoRules") }
     static var startsPrivate: Bool { arguments.contains("-MiBancoDemoPrivate") }
@@ -119,7 +149,7 @@ enum DemoMode {
     /// movimientos, todos anteriores, no los alteran (el pago de Mercadona de hoy ya está dentro de los 340,20 €).
     /// Hay historia para que salgan los avisos: Spotify sube de 9,99 a 10,99, Netflix se cobra en 3 días, una nómina,
     /// gasto repartido por el mes pasado (frase del ritmo) y compras previas en Mercadona (historial del comercio).
-    static func state(now: Date = Date()) -> LedgerState {
+    static func state(now: Date = DemoMode.now) -> LedgerState {
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: now)
 
@@ -146,6 +176,18 @@ enum DemoMode {
             .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
         ]
 
+        // Gasto: lo de este mes se fecha siempre dentro del mes en curso y nunca en el futuro, sea el día que sea.
+        // Hora fija (R19): el día sale de la fracción del mes transcurrido y la hora es siempre las 9:00 (hoy, las 0:30),
+        // así las cifras de las capturas no cambian con la hora del día.
+        let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? startOfToday
+        func thisMonth(_ fraction: Double) -> Date {
+            let today = calendar.component(.day, from: now)
+            let target = max(1, Int((Double(today) * fraction).rounded(.down)))
+            let dayStart = calendar.date(byAdding: .day, value: target - 1, to: monthStart) ?? monthStart
+            let fixed = dayStart.addingTimeInterval(target < today ? 9 * 3600 : 30 * 60)
+            return min(fixed, now.addingTimeInterval(-120))
+        }
+
         // Lo reciente (lo que se ve en Inicio).
         let spotifyDate = day(1, hour: 9, minute: 2)
         var movements = [
@@ -157,7 +199,7 @@ enum DemoMode {
             movement(.tr, 612, "Intereses", day(4, hour: 6)),
             movement(.tr, -4_995, "Zara", day(5, hour: 18, minute: 20)),
             movement(.ima, -2_340, "Lidl", day(5, hour: 11, minute: 5)),
-            movement(.rev, -1_830, "Glovo", day(6, hour: 21, minute: 40)),
+            movement(.rev, -1_830, "Glovo", max(day(6, hour: 21, minute: 40), thisMonth(0.2))),
             // Dos cargos iguales en Amazon con tres minutos de diferencia: "Posible cobro duplicado" (ámbar) en Avisos.
             movement(.ima, -2_499, "Amazon", day(1, hour: 16, minute: 2)),
             movement(.ima, -2_499, "Amazon", day(1, hour: 16, minute: 5)),
@@ -180,26 +222,55 @@ enum DemoMode {
         }
 
         // El mes pasado, repartido: la frase del ritmo compara con él.
-        let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? startOfToday
-        let lastMonth = monthsAgo(1, from: monthStart)
         let spread: [(Int, BankID, Int, String)] = [
             (2, .rev, -3_480, "Mercadona"), (4, .ima, -2_215, "Lidl"), (5, .rev, -1_260, "Glovo"),
-            (8, .tr, -8_990, "Zara"), (9, .rev, -1_480, "Renfe"), (11, .ima, -4_620, "Carrefour"),
+            (8, .tr, -8_990, "Zara"), (9, .rev, -2_960, "Renfe"), (11, .ima, -4_620, "Carrefour"),
             (13, .rev, -2_975, "Mercadona"), (15, .ima, -6_040, "Repsol"), (17, .rev, -950, "Starbucks"),
-            (18, .ima, -3_310, "Lidl"), (20, .rev, -2_145, "Glovo"), (23, .tr, -5_499, "Decathlon"),
-            (25, .rev, -3_760, "Mercadona"), (27, .ima, -1_985, "Carrefour"),
+            (18, .ima, -3_310, "Lidl"), (20, .rev, -2_650, "Glovo"), (23, .tr, -5_499, "Decathlon"),
+            (25, .rev, -3_760, "Mercadona"), (27, .ima, -3_150, "Carrefour"),
         ]
-        for (dayOfMonth, bank, cents, merchant) in spread {
-            guard let date = calendar.date(byAdding: .day, value: dayOfMonth - 1, to: lastMonth)?.addingTimeInterval(13 * 3600),
-                  date < monthStart else { continue }
-            movements.append(movement(bank, cents, merchant, date))
+        // Ojo: el ÚLTIMO cargo del mes pasado de un comercio que también tiene un pago reciente no puede parecerse en importe
+        // (±25 %) al reciente, o según el día del mes (26–35 días de distancia) la demo mostraría una suscripción de más
+        // (Glovo y Renfe lo hacían). Por eso Glovo del día 20 y Renfe cuestan bastante más que sus pagos recientes. Lo mismo con la
+        // llegada de la demo (Carrefour 23,45 €, imagin): el Carrefour del día 27 cuesta 31,50 €, fuera del ±25 % de 23,45 €.
+        // Los dos meses anteriores (el segundo, algo más barato): las comparaciones salen con cifras creíbles.
+        for (back, percent) in [(1, 100), (2, 90)] {
+            let first = monthsAgo(back, from: monthStart)
+            let next = monthsAgo(back - 1, from: monthStart)
+            for (dayOfMonth, bank, cents, merchant) in spread {
+                // Repsol, Starbucks y Decathlon solo salen una vez por mes: en el mes más antiguo se adelantan 8 días para que no
+                // se lean como suscripciones (cobros a 26-35 días); Suscripciones solo debe enseñar Spotify y Netflix.
+                let oneOff = back == 2 && ["Repsol", "Starbucks", "Decathlon"].contains(merchant)
+                guard let date = calendar.date(byAdding: .day, value: max(0, dayOfMonth - 1 - (oneOff ? 8 : 0)), to: first)?.addingTimeInterval(13 * 3600),
+                      date < next else { continue }
+                movements.append(movement(bank, cents * percent / 100, merchant, date))
+            }
         }
+
+        // Gasto: un traspaso entre tus bancos (no cuenta como gasto) y dos comidas fuera este mes.
+        func transfer(_ bank: BankID, _ cents: Int, _ merchant: String) -> Movement {
+            Movement(bank: bank, amountCents: cents, merchant: merchant, kind: cents < 0 ? .payment : .income,
+                     source: .notification, date: thisMonth(0.35), isShop: false)
+        }
+        movements.append(transfer(.rev, -20_000, "Transferencia a imagin"))
+        movements.append(transfer(.ima, 20_000, "Transferencia de Revolut"))
+        movements.append(movement(.rev, -4_650, "Restaurante Lateral", thisMonth(0.5)))
+        movements.append(movement(.rev, -1_240, "Bar Pepe", thisMonth(0.65)))
+
+        // Un traspaso de Revolut a imagin ayer por la noche (mismo importe, a un minuto): Inicio lo lista como "Traspaso" y no cuenta como gasto.
+        // Los textos hablan de transferencias y no son compras en tienda (`isShop` falso).
+        let transferDate = day(1, hour: 22)
+        movements.append(Movement(bank: .rev, amountCents: -5_000, merchant: "Transferencia a imagin", kind: .payment,
+                                  source: .notification, date: transferDate))
+        movements.append(Movement(bank: .ima, amountCents: 5_000, merchant: "Transferencia de Revolut", kind: .income,
+                                  source: .notification, date: transferDate.addingTimeInterval(60)))
 
         if includesUnknownShop {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.
             movements.append(movement(.ima, -3_900, "Tesla", day(0).addingTimeInterval(-120)))
         }
-        return LedgerState(balances: balances, movements: movements, unread: [])
+        return LedgerState(balances: balances, movements: movements, unread: [],
+                           budgets: Budgets(monthlyCents: 70_000, byCategory: [.comerFuera: 9_000]))
     }
 }
 #endif

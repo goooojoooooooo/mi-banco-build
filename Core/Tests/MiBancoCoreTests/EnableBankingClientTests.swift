@@ -141,15 +141,58 @@ private func tx(_ id: String) -> String {
         #expect(request.url.query == "date_from=2026-11-01&strategy=default")
     }
 
+    /// Páginas con claves distintas, para que solo el límite las pare.
+    private func endlessPages(_ count: Int) -> [Reply] {
+        (0..<count).map { .json(200, #"{"transactions":["# + tx("t\($0)") + #"],"continuation_key":"k\#($0)"}"#) }
+    }
+
     @Test func stopsAfterMaxPages() async throws {
-        let page = #"{"transactions":[],"continuation_key":"again"}"#
-        let transport = FixtureTransport([], fallback: .json(200, page))
+        let transport = FixtureTransport(endlessPages(60))
         await #expect(throws: BankingClientError.tooManyPages) {
             _ = try await makeClient(transport).transactions(
                 accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
         }
         let sent = await transport.requests
         #expect(sent.count == 50)
+    }
+
+    @Test func pageLimitKeepsWhatWasFetched() async throws {
+        let transport = FixtureTransport(endlessPages(60))
+        let fetch = try await makeClient(transport).fetchTransactions(
+            accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
+        #expect(fetch.complete == false)
+        #expect(fetch.transactions.count == 50)
+        #expect(fetch.transactions.first?.transactionID == "t0")
+        let sent = await transport.requests
+        #expect(sent.count == 50)
+    }
+
+    @Test func repeatedContinuationKeyStopsAndKeepsWhatWasFetched() async throws {
+        let page = #"{"transactions":["# + tx("t1") + #"],"continuation_key":"again"}"#
+        let transport = FixtureTransport([], fallback: .json(200, page))
+        let fetch = try await makeClient(transport).fetchTransactions(
+            accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
+        #expect(fetch.complete == false)
+        #expect(fetch.transactions.count == 2)
+        let sent = await transport.requests
+        #expect(sent.count == 2)
+    }
+
+    @Test func completeFetchIsComplete() async throws {
+        let transport = FixtureTransport([.json(200, #"{"transactions":["# + tx("t1") + #"]}"#)])
+        let fetch = try await makeClient(transport).fetchTransactions(
+            accountUID: "u-1", dateFrom: "2025-11-20", strategy: .standard)
+        #expect(fetch == TransactionFetch(transactions: fetch.transactions, complete: true))
+        #expect(fetch.transactions.count == 1)
+    }
+
+    @Test func networkFailureAfterSomePagesStillThrows() async {
+        let page = #"{"transactions":["# + tx("t1") + #"],"continuation_key":"k1"}"#
+        let transport = FixtureTransport([.json(200, page), .fail(.notConnectedToInternet)])
+        await #expect(throws: BankingClientError.offline) {
+            _ = try await makeClient(transport).fetchTransactions(
+                accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
+        }
     }
 
     @Test func mapsHTTPErrors() async {
@@ -173,6 +216,45 @@ private func tx(_ id: String) -> String {
         await #expect(throws: BankingClientError.badResponse) {
             _ = try await makeClient(garbage).balances(accountUID: "u")
         }
+    }
+
+    @Test func cancelledTransportIsCancellationNotOffline() async {
+        let cancelled = FixtureTransport([.fail(.cancelled)])
+        await #expect(throws: CancellationError.self) {
+            _ = try await makeClient(cancelled).balances(accountUID: "u")
+        }
+    }
+
+    @Test func nonASCIIIsPercentEscaped() async throws {
+        let transport = FixtureTransport([.json(200, #"{"balances":[]}"#)])
+        _ = try await makeClient(transport).balances(accountUID: "ñ٣é")
+        let sent = await transport.requests
+        let request = try #require(sent.first)
+        #expect(request.url.absoluteString == "https://api.enablebanking.com/accounts/%C3%B1%D9%A3%C3%A9/balances")
+    }
+
+    @Test func requestAndSessionDescriptionsAreRedacted() {
+        let secretToken = "tok-SECRET-123"
+        let secretQuery = "code=CODE-SECRET-9&state=STATE-SECRET-7"
+        let request = HTTPRequest(
+            method: "GET", url: URL(string: "https://api.example.test/p?" + secretQuery)!,
+            headers: ["Authorization": "Bearer " + secretToken], body: Data("BODY-SECRET".utf8))
+        let session = StoredSession(
+            sessionID: "SESSION-SECRET-5", accountUIDs: ["UID-SECRET-6"], validUntil: fixedNow,
+            aspspName: "Banco", aspspCountry: "ES")
+        let pending = PendingAuth(
+            state: "STATE-SECRET-7", bank: .rev, aspspName: "Banco", aspspCountry: "ES", startedAt: fixedNow)
+        let secrets = ["SECRET", secretToken, "CODE", "STATE", "BODY", "SESSION", "UID", "Bearer", "?"]
+        let texts = [
+            String(describing: request), String(reflecting: request), "\(request)",
+            String(describing: session), String(reflecting: session), "\(session)",
+            String(describing: pending), String(reflecting: pending), "\(pending)",
+        ]
+        for text in texts {
+            for secret in secrets { #expect(!text.contains(secret)) }
+        }
+        #expect(String(describing: request).contains("GET"))
+        #expect(String(describing: session).contains("Banco"))
     }
 
     @Test func eachRequestGetsAFreshJWT() async throws {

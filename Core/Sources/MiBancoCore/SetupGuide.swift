@@ -144,7 +144,7 @@ public let guideParts: [String] = [
 ]
 
 /// Lo último que dice la ayuda de cada paso.
-public let guideHelpTail = "Si tu pantalla se ve distinta, toca la opción con el nombre más parecido. Si no hay ninguna, para aquí. Puedes borrar la automatización en Atajos y empezar de nuevo cuando quieras."
+public let guideHelpTail = "Si tu pantalla se ve distinta, toca la opción con el nombre más parecido. Si no hay ninguna, no sigas. Puedes borrar la automatización en Atajos y empezar de nuevo cuando quieras."
 
 /// Qué guía hacer, en líneas cortas (encima de la lista).
 public let guideListAdvice: [String] = [

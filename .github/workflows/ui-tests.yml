@@ -3,16 +3,24 @@ run-name: ui-tests ${{ github.ref_name }}
 on:
   workflow_dispatch:
     inputs:
+      test_class:
+        description: "Clase de pruebas a ejecutar sola (vacio = todas)"
+        required: false
+        default: ""
       pequeno:
-        description: "En el iPhone mas pequeno que no es Max ni Plus (iPhone 15/16), como en screenshots.yml"
+        description: "En un iPhone de 393 pt (iPhone 15/16), como en screenshots.yml"
         type: boolean
         default: false
+      runner:
+        description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
+        required: false
+        default: "namespace-profile-onyx"
 permissions:
   contents: read
 jobs:
   ui:
-    runs-on: namespace-profile-onyx
-    timeout-minutes: 45
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
@@ -34,11 +42,13 @@ jobs:
           fi
           RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
-          # Interruptor pequeno: el mismo dispositivo que en screenshots.yml.
+          # Interruptor pequeno (G30 M5): exige un iPhone de 393 pt (15/16) y falla si no existe, sin elegir 402 pt en silencio.
           if [ "${{ inputs.pequeno }}" = "true" ]; then
             DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1 || true)
             if [ -z "$DEVICETYPE" ]; then
-              DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone [0-9]+ \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
+              echo "No se encontro un simulador de 393 pt (iPhone 15 o 16) para pequeno=true"
+              xcrun simctl list devicetypes | grep -E "^iPhone " || true
+              exit 1
             fi
           fi
           echo "Runtime: $RUNTIME_LINE"
@@ -52,23 +62,31 @@ jobs:
           fi
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
-          # Interruptor pequeno: el resumen dice en que iPhone se ha probado.
-          if [ "${{ inputs.pequeno }}" = "true" ]; then
-            echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
       - name: Pruebas de toques
+        env:
+          TEST_CLASS: ${{ github.event.inputs.test_class }}
         run: |
           mkdir -p build
           set +e
+          if [ -n "$TEST_CLASS" ]; then
+            case "$TEST_CLASS" in
+              *[!A-Za-z0-9_]*) echo "test_class solo admite letras, numeros y _"; echo "2" > build/status.txt; tail -n 1 build/status.txt; exit 1 ;;
+            esac
+            SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
+          else
+            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests"
+          fi
+          echo "SELECT=$SELECT" >> "$GITHUB_ENV"
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
-            -only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/ui.log 2>&1
+            $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
           exit 0
-      # A veces el simulador no deja arrancar las pruebas y ninguna llega a empezar («The test runner failed to
+      # G26: a veces el simulador no deja arrancar las pruebas y ninguna llega a empezar («The test runner failed to
       # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulador
-      # y se repite una sola vez la orden de «Pruebas de toques» (si cambia alli, cambiala aqui igual).
+      # y se repite una sola vez la misma orden de «Pruebas de toques».
       - name: Reintento si las pruebas no llegaron a empezar
         run: |
           if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test Case " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
@@ -83,7 +101,7 @@ jobs:
           set +e
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
-            -only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/ui.log 2>&1
+            $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
           exit 0
@@ -92,6 +110,15 @@ jobs:
           echo "== Resultado por prueba =="
           grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # R31: lo que dejó la prueba de un solo toque por pestaña (rojo o verde): del log y, si no, del xcresult.
+          echo "== R24: Cambio de pestaña con un solo toque =="
+          grep -h "Cambio de pestaña con un solo toque" build/ui.log | sort -u > build/r24.txt || true
+          if [ ! -s build/r24.txt ] && [ -d build/ui.xcresult ]; then
+            python3 .github/scripts/r24_tab_times.py build/ui.xcresult > build/r24.txt || true
+          fi
+          if [ ! -s build/r24.txt ]; then echo "R24: la prueba no se ejecutó en esta tanda (o no dejó mensaje)" > build/r24.txt; fi
+          cat build/r24.txt
+          { echo "### R24: un solo toque por pestaña"; echo '```'; cat build/r24.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "xcodebuild exit: $(cat build/status.txt)"
           if [ "$(cat build/status.txt)" != "0" ]; then
             echo "== Lineas con error: de build/ui.log =="

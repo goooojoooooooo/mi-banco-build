@@ -8,6 +8,15 @@ import MiBancoCore
 final class AppPreferences {
     static let privateModeKey = "privateMode"
 
+    /// El modo privado guardado (con la misma clave y el mismo ajuste de la demo que lee `init`): para quien no tiene las
+    /// preferencias en el entorno y aun así nunca debe enseñar un importe que el dueño tiene oculto.
+    static var storedPrivateMode: Bool {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.startsPrivate }
+        #endif
+        return UserDefaults.standard.bool(forKey: privateModeKey)
+    }
+
     var privateMode: Bool {
         didSet {
             #if DEBUG
@@ -17,10 +26,26 @@ final class AppPreferences {
         }
     }
 
+    static let motionLevelKey = "motionLevel"
+    /// Intensidad con la que se estrena la app (el dueño aprobó el movimiento en «Expresivo»): una sola constante.
+    static let defaultMotionLevel = MotionLevel.expressive
+
+    /// Intensidad del movimiento (Ajustes › Animaciones). Se guarda en UserDefaults.
+    var motionLevel: MotionLevel {
+        didSet {
+            #if DEBUG
+            if DemoMode.isActive { return }
+            #endif
+            UserDefaults.standard.set(motionLevel.rawValue, forKey: Self.motionLevelKey)
+        }
+    }
+
     init() {
+        let stored = UserDefaults.standard.string(forKey: Self.motionLevelKey).flatMap(MotionLevel.init(rawValue:))
+        privateMode = Self.storedPrivateMode
         #if DEBUG
         if DemoMode.isActive {
-            privateMode = DemoMode.startsPrivate
+            motionLevel = Self.defaultMotionLevel
             // La demo no guarda nada, salvo la prueba de reinicio de la guía (`-MiBancoDemoPersistGuide`).
             if DemoMode.persistsGuideProgress {
                 if DemoMode.resetsGuideProgress { UserDefaults.standard.removeObject(forKey: Self.guideStepKey) }
@@ -31,7 +56,7 @@ final class AppPreferences {
             return
         }
         #endif
-        privateMode = UserDefaults.standard.bool(forKey: Self.privateModeKey)
+        motionLevel = stored ?? Self.defaultMotionLevel
         guideLastStep = Self.storedGuideSteps()
     }
 

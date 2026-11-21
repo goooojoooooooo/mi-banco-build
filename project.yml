@@ -49,6 +49,13 @@ targets:
         CFBundleDisplayName: Mi Banco
         NSFaceIDUsageDescription: Para que solo tú veas tu dinero
         NSSupportsLiveActivities: true
+        # Actualización de bancos en segundo plano (tarea 10)
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.mibanco.app.refresh]
+        # Conexión bancaria (tarea 9): esquema de vuelta del banco
+        CFBundleURLTypes:
+          - CFBundleURLName: com.mibanco.app.callback
+            CFBundleURLSchemes: [mibanco]
         ALTAppGroups: [group.com.mibanco.shared]
         UIUserInterfaceStyle: Dark
         UILaunchScreen: {}

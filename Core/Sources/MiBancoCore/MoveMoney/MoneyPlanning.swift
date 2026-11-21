@@ -5,13 +5,25 @@ public struct UpcomingCharge: Equatable, Sendable {
     public let bank: BankID
     public let cents: Int
     public let date: Date
+    /// true = el cobro debía haberse hecho ya (su fecha cayó en los últimos 14 días y no está en el libro): se coloca HOY
+    /// (`date`) y se resta igual, y `dueDate` guarda cuándo debía cobrarse.
+    public let overdue: Bool
+    public let dueDate: Date?
 
-    public init(name: String, bank: BankID, cents: Int, date: Date) {
+    public init(name: String, bank: BankID, cents: Int, date: Date, overdue: Bool = false, dueDate: Date? = nil) {
         self.name = name
         self.bank = bank
         self.cents = cents
         self.date = date
+        self.overdue = overdue
+        self.dueDate = dueDate
     }
+}
+
+/// «con retraso, debía cobrarse el 18»: lo que acompaña a un cobro retrasado; nil si no lo está.
+public func overdueNote(_ charge: UpcomingCharge, calendar: Calendar) -> String? {
+    guard charge.overdue, let due = charge.dueDate else { return nil }
+    return "con retraso, debía cobrarse el \(calendar.component(.day, from: due))"
 }
 
 public struct PayOption: Equatable, Sendable {
@@ -77,7 +89,8 @@ public struct Shortfall: Equatable, Sendable {
 }
 
 /// Bancos incluidos a los que les falta saldo para un cobro de los próximos 3 días, con de dónde traspasar.
-/// Los cobros anteriores a `now` no cuentan (ya están en el saldo).
+/// Un cobro de hoy cuenta aunque su hora habitual ya haya pasado (se mira por días, no por la hora): el libro ya descartó los
+/// que de verdad se cobraron. Los de días anteriores no cuentan.
 public func shortfalls(balances: [BankID: Int], floors: [BankID: Int], upcoming: [UpcomingCharge], now: Date,
                        calendar: Calendar, included: Set<BankID> = Set(BankID.allCases),
                        estimated: Set<BankID> = []) -> [Shortfall] {
@@ -86,7 +99,7 @@ public func shortfalls(balances: [BankID: Int], floors: [BankID: Int], upcoming:
     var result: [Shortfall] = []
     for bank in BankID.allCases {
         guard included.contains(bank), let balance = balances[bank] else { continue }
-        let soon = upcoming.filter { $0.bank == bank && $0.date >= now && $0.date < horizon }.sorted { $0.date < $1.date }
+        let soon = upcoming.filter { $0.bank == bank && $0.date >= start && $0.date < horizon }.sorted { $0.date < $1.date }
         guard let first = soon.first else { continue }
         let missing = soon.reduce(0) { $0 + $1.cents } + (floors[bank] ?? 0) - balance
         guard missing > 0 else { continue }
@@ -123,8 +136,9 @@ public func freeMoney(balances: [BankID: Int], floors: [BankID: Int], banks: Set
     let known = banks.filter { balances[$0] != nil }
     guard !known.isEmpty else { return nil }
     let total = known.reduce(0) { $0 + (balances[$1] ?? 0) - (floors[$1] ?? 0) }
+    let startOfToday = calendar.startOfDay(for: now)
     let charges = pending.filter {
-        banks.contains($0.bank) && $0.date >= now && calendar.isDate($0.date, equalTo: now, toGranularity: .month)
+        banks.contains($0.bank) && $0.date >= startOfToday && calendar.isDate($0.date, equalTo: now, toGranularity: .month)
     }.reduce(0) { $0 + $1.cents }
     let free = total - charges
     guard free > 0,

@@ -156,6 +156,17 @@ private func move(_ cents: Int = 20000) -> PendingMove {
         #expect(withFloor[0].suggestedCents == 1000)
     }
 
+    @Test func dineroLibreCuentaUnCobroDeHoyAunqueLaHoraHayaPasado() {
+        let now = nov(20, 8, 30)
+        let earlier = UpcomingCharge(name: "Gimnasio", bank: .rev, cents: 3000, date: nov(20, 7))
+        let withCharge = freeMoney(balances: balances, floors: floors, banks: [.rev, .ima], pending: [earlier], now: now, calendar: cal)
+        let without = freeMoney(balances: balances, floors: floors, banks: [.rev, .ima], pending: [], now: now, calendar: cal)
+        #expect((without?.cents ?? 0) - (withCharge?.cents ?? 0) == 3000)
+        // Uno de ayer no.
+        let yesterday = UpcomingCharge(name: "Gimnasio", bank: .rev, cents: 3000, date: nov(19, 7))
+        #expect(freeMoney(balances: balances, floors: floors, banks: [.rev, .ima], pending: [yesterday], now: now, calendar: cal) == without)
+    }
+
     @Test func dineroLibre() {
         let now = nov(20, 8, 30)
         let decDate = date(12, 5)
@@ -251,9 +262,12 @@ private func move(_ cents: Int = 20000) -> PendingMove {
         let exact = shortfalls(balances: all, floors: [:], upcoming: [netflixSoon], now: now, calendar: cal)
         #expect(exact.first?.isEstimated == false)
         #expect(exact.first?.suggestedIsEstimated == false)
-        // Un cobro anterior a ahora ya está en el saldo.
+        // Un cobro de hoy cuyo hora habitual ya pasó sigue contando (día completo, no «desde ahora»): el libro ya quita los cobrados.
         let past = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1399, date: nov(19, 9))
-        #expect(shortfalls(balances: all, floors: [:], upcoming: [past], now: now, calendar: cal).isEmpty)
+        #expect(shortfalls(balances: all, floors: [:], upcoming: [past], now: now, calendar: cal).first?.charge == past)
+        // Uno de ayer ya no cuenta.
+        let yesterday = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1399, date: nov(18, 9))
+        #expect(shortfalls(balances: all, floors: [:], upcoming: [yesterday], now: now, calendar: cal).isEmpty)
     }
 
     @Test func pistaDeTradeRepublicConTelefono() {

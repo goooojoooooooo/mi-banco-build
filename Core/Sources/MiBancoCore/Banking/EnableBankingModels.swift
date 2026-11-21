@@ -37,6 +37,12 @@ public struct EBAmount: Codable, Equatable, Sendable {
         self.currency = currency
         self.amount = amount
     }
+
+    /// Céntimos solo si la divisa es EUR; con cualquier otra no se interpreta el número como euros.
+    public var euroCents: Int? {
+        guard currency.uppercased() == "EUR" else { return nil }
+        return centsFromDecimalString(amount)
+    }
 }
 
 public enum EBTransactionStatus: String, Codable, Sendable {
@@ -107,8 +113,9 @@ public struct EBTransaction: Codable, Equatable, Sendable {
     }
 
     /// DBIT negativo, CRDT positivo, siempre sobre el valor absoluto del importe.
+    /// Solo importes en euros: otra divisa da `nil` y nunca se casa ni se cuenta.
     public var signedCents: Int? {
-        guard let cents = centsFromDecimalString(transactionAmount.amount) else { return nil }
+        guard let cents = transactionAmount.euroCents else { return nil }
         switch creditDebitIndicator {
         case "DBIT": return -abs(cents)
         case "CRDT": return abs(cents)
@@ -122,19 +129,24 @@ public struct EBBalance: Codable, Equatable, Sendable {
     public let balanceAmount: EBAmount
     public let balanceType: String
     public let lastChangeDateTime: String?
+    /// Día de referencia del saldo (`yyyy-MM-dd`), p. ej. el cierre contabilizado de un día.
+    public let referenceDate: String?
 
     enum CodingKeys: String, CodingKey {
         case name
         case balanceAmount = "balance_amount"
         case balanceType = "balance_type"
         case lastChangeDateTime = "last_change_date_time"
+        case referenceDate = "reference_date"
     }
 
-    public init(name: String? = nil, balanceAmount: EBAmount, balanceType: String, lastChangeDateTime: String? = nil) {
+    public init(name: String? = nil, balanceAmount: EBAmount, balanceType: String, lastChangeDateTime: String? = nil,
+                referenceDate: String? = nil) {
         self.name = name
         self.balanceAmount = balanceAmount
         self.balanceType = balanceType
         self.lastChangeDateTime = lastChangeDateTime
+        self.referenceDate = referenceDate
     }
 }
 

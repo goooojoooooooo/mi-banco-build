@@ -14,7 +14,7 @@ private func steps(_ track: GuideTrack) -> [Row] {
     guideSteps(for: track).map { Row(title: $0.title, instruction: $0.instruction, tap: $0.tapTarget, help: $0.help, part: $0.part) }
 }
 
-private let tail = "Si tu pantalla se ve distinta, toca la opción con el nombre más parecido. Si no hay ninguna, para aquí. Puedes borrar la automatización en Atajos y empezar de nuevo cuando quieras."
+private let tail = "Si tu pantalla se ve distinta, toca la opción con el nombre más parecido. Si no hay ninguna, no sigas. Puedes borrar la automatización en Atajos y empezar de nuevo cuando quieras."
 
 private func row(_ part: Int, _ title: String, _ instruction: String, _ tap: String, _ help: String) -> Row {
     Row(title: title, instruction: instruction, tap: tap, help: "\(help) \(tail)", part: part)

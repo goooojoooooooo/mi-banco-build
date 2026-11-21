@@ -6,4 +6,7 @@ jobs:
     container: swift:6.4
     steps:
       - uses: actions/checkout@v4
+      - name: Ningún trabajo en macos-15-intel
+        run: |
+          if grep -nE '^[[:space:]]*runs-on:.*macos-15-intel|default:[[:space:]]*"?macos-15-intel' .github/workflows/*.yml; then echo "Hay un trabajo en macos-15-intel"; exit 1; fi
       - run: swift test --package-path Core

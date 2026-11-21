@@ -8,15 +8,15 @@ on:
         required: false
         default: ""
       runner:
-        description: "Runner macOS (por defecto: macos-15-intel)"
+        description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
-        default: "macos-15-intel"
+        default: "namespace-profile-onyx"
 permissions:
   contents: read
 jobs:
   ui:
-    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
-    timeout-minutes: 45
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)

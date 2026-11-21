@@ -4,16 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "Runner macOS (por defecto: macos-15-intel)"
+        description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
-        default: "macos-15-intel"
+        default: "namespace-profile-onyx"
   push:
     tags: ['v*']
 permissions:
   contents: write
 jobs:
   build:
-    runs-on: ${{ inputs.runner || 'macos-15-intel' }}
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     steps:
       - uses: actions/checkout@v4
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)

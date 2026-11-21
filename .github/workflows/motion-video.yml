@@ -6,7 +6,7 @@ permissions:
   contents: read
 jobs:
   video:
-    runs-on: macos-15-intel
+    runs-on: namespace-profile-onyx
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -14,7 +14,7 @@ jobs:
         run: |
           ls -d /Applications/Xcode*.app
           XCODE=/Applications/Xcode_26.2.app
-          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"; fi
           echo "Usando $XCODE"
           sudo xcode-select -s "$XCODE"
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
@@ -23,8 +23,11 @@ jobs:
       - name: Crear y arrancar el simulador (maximo 10 min)
         timeout-minutes: 14
         run: |
-          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
-          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
+          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS .*com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9]+-[0-9]+$" | sort -V | tail -1 || true)
+          if [ -z "$RUNTIME_LINE" ]; then
+            RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
+          fi
+          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"

@@ -141,12 +141,12 @@ private struct CardFront: View {
     private var investmentsFooter: some View {
         if let summary = portfolioSummary {
             VStack(alignment: .leading, spacing: 3) {
-                if let todayCents = summary.todayChangeCents {
+                if let todayCents = summary.todayChangeCents, let changeDay = summary.changeDay {
                     let eur = formatSignedEUR(todayCents).replacingOccurrences(of: "-", with: "\u{2212}")
                     let pct = summary.todayChangeTenths.map {
                         " (\(formatPercentTenths($0, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")))"
                     } ?? ""
-                    let session = PositionFormatting.sessionPhrase(changeDay: summary.changeDay)
+                    let session = PositionFormatting.sessionPhrase(changeDay: changeDay)
                     Text("\(eur) \(session)\(pct)")
                         .titan(.subtitle)
                         .fontWeight(.medium)
@@ -160,7 +160,7 @@ private struct CardFront: View {
                     let pct = summary.gainTenths.map {
                         " (\(formatPercentTenths($0, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")))"
                     } ?? ""
-                    let partial = summary.missingPrices > 0 ? " (con precio)" : ""
+                    let partial = summary.missingPrices > 0 ? " (de las que tienen precio)" : ""
                     Text("\(eur) desde la compra\(pct)\(partial)")
                         .titan(.meta)
                         .foregroundStyle(secondary)
@@ -172,15 +172,25 @@ private struct CardFront: View {
                     let missingText = summary.missingPrices == 1
                         ? "Falta el precio de 1 posición"
                         : "Falta el precio de \(summary.missingPrices) posiciones"
-                    Text(missingText)
+                    let staleSuffix: String = {
+                        guard summary.hasStalePrice, let oldest = summary.oldestPriceAt else { return "" }
+                        return " · precio antiguo del \(DateText.madridDay(oldest))"
+                    }()
+                    Text(missingText + staleSuffix)
+                        .titan(.caption)
+                        .foregroundStyle(Theme.warning)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                } else if summary.hasStalePrice, let oldest = summary.oldestPriceAt ?? summary.pricedAt {
+                    Text("Precio antiguo (del \(DateText.madridDay(oldest)))")
                         .titan(.caption)
                         .foregroundStyle(Theme.warning)
                         .lineLimit(1)
                 } else if let pricedAt = summary.pricedAt {
                     let timestamp = PositionFormatting.priceTimestamp(pricedAt, plural: summary.positions.count != 1)
-                    Text(summary.hasStalePrice ? "\(timestamp) · precio antiguo" : timestamp)
+                    Text(timestamp)
                         .titan(.caption)
-                        .foregroundStyle(summary.hasStalePrice ? Theme.warning : secondary)
+                        .foregroundStyle(secondary)
                         .lineLimit(1)
                 }
             }
@@ -339,17 +349,25 @@ private struct CardBack: View {
     @ViewBuilder
     private var investmentsBackBody: some View {
         if let summary = portfolioSummary {
-            HStack(spacing: 6) {
-                Text("Coste:")
+            let hasIncomplete = summary.positions.contains { $0.position.costIncomplete }
+            if summary.costCents == 0 && hasIncomplete {
+                Text("Coste: sin datos")
                     .titan(.cardTitle)
-                Text(formatEUR(summary.costCents))
-                    .titan(.cardTitle)
-                    .privateAmount()
+                    .foregroundStyle(secondary)
+                    .padding(.top, 14)
+            } else {
+                HStack(spacing: 6) {
+                    Text(hasIncomplete ? "Coste parcial:" : "Coste:")
+                        .titan(.cardTitle)
+                    Text(formatEUR(summary.costCents))
+                        .titan(.cardTitle)
+                        .privateAmount()
+                }
+                .padding(.top, 14)
             }
-            .padding(.top, 14)
         }
         if let lastImport = portfolioLastImport {
-            Text("Última importación: \(DateText.day(lastImport))")
+            Text("Última importación: \(DateText.madridDay(lastImport))")
                 .titan(.subtitle)
                 .foregroundStyle(secondary)
                 .padding(.top, 4)

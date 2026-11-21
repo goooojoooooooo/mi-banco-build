@@ -26,7 +26,6 @@ struct PositionDetailSheet: View {
                 PositionDetailContent(
                     portfolio: portfolio,
                     value: value,
-                    changeDay: portfolio.summary?.changeDay,
                     transactions: portfolio.recentTransactions(for: instrument, limit: 5),
                     onClose: { dismiss() }
                 )
@@ -57,12 +56,13 @@ struct PositionDetailSheet: View {
 private struct PositionDetailContent: View {
     let portfolio: PortfolioModel
     let value: PositionValue
-    let changeDay: Date?
     let transactions: [InvestmentTransaction]
     let onClose: () -> Void
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     @ScaledMetric(relativeTo: .largeTitle) private var amountSize: CGFloat = 46
     @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 60
@@ -71,6 +71,7 @@ private struct PositionDetailContent: View {
     @State private var priceText = ""
     @State private var priceError: String?
     @State private var priceSaved = false
+    @State private var saveCloseTask: Task<Void, Never>?
     @State private var saveTick = 0
     @State private var errorTick = 0
     @FocusState private var priceFocused: Bool
@@ -85,6 +86,11 @@ private struct PositionDetailContent: View {
     private var hasManualPrice: Bool {
         if case .manual = value.origin { return true }
         return false
+    }
+
+    private var positionChangeDay: Date? {
+        guard case .market(let at) = value.origin else { return nil }
+        return DateText.madridCalendar.startOfDay(for: at)
     }
 
     var body: some View {
@@ -138,24 +144,31 @@ private struct PositionDetailContent: View {
                     metricRow(
                         key: "Coste medio",
                         text: averageCostText,
-                        spoken: hidden ? "Coste medio: importe oculto" : "Coste medio: \(averageCostText)",
+                        spoken: !averageCostAvailable
+                            ? "Coste medio: Sin coste completo"
+                            : (hidden ? "Coste medio: importe oculto" : "Coste medio: \(averageCostText)"),
                         divided: true,
                         isSensitive: averageCostAvailable
                     )
                     metricRow(
                         key: "Precio",
                         text: priceSummaryText,
-                        spoken: hidden ? "Precio: importe oculto" : "Precio: \(priceSummaryText)",
+                        spoken: value.priceEUR == nil
+                            ? "Precio: Sin precio"
+                            : (hidden ? "Precio: importe oculto" : "Precio: \(priceSummaryText)"),
                         divided: true,
                         isSensitive: value.priceEUR != nil
                     )
-                    if let todayCents = value.todayChangeCents {
-                        let key = isChangeToday ? "Hoy" : "Última sesión"
-                        let text = signedSummary(cents: todayCents, tenths: PositionFormatting.todayTenths(for: value))
+                    if let todayCents = value.todayChangeCents, let changeDay = positionChangeDay {
+                        let key = DateText.madridCalendar.isDate(changeDay, inSameDayAs: Date())
+                            ? "Hoy"
+                            : "Última sesión (\(DateText.madridWeekday(changeDay)))"
+                        let tenths = PositionFormatting.todayTenths(for: value)
+                        let text = signedSummary(cents: todayCents, tenths: tenths)
                         metricRow(
                             key: key,
                             text: text,
-                            spoken: hidden ? "\(key): importe oculto" : "\(key): \(spokenSigned(todayCents))",
+                            spoken: hidden ? "\(key): importe oculto" : "\(key): \(spokenSigned(todayCents, tenths: tenths))",
                             tint: todayCents > 0 ? Theme.income : Theme.label,
                             divided: true
                         )
@@ -165,7 +178,9 @@ private struct PositionDetailContent: View {
                         metricRow(
                             key: "Desde la compra",
                             text: text,
-                            spoken: hidden ? "Desde la compra: importe oculto" : "Desde la compra: \(spokenSigned(gainCents))",
+                            spoken: hidden
+                                ? "Desde la compra: importe oculto"
+                                : "Desde la compra: \(spokenSigned(gainCents, tenths: value.gainTenths))",
                             tint: gainCents > 0 ? Theme.income : Theme.label,
                             divided: true
                         )
@@ -247,11 +262,13 @@ private struct PositionDetailContent: View {
         }
         .sensoryFeedback(Haptics.success, trigger: saveTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
-    }
-
-    private var isChangeToday: Bool {
-        guard let changeDay else { return true }
-        return madridCalendar.isDate(changeDay, inSameDayAs: Date())
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { priceFocused = false }
+        }
+        .onDisappear {
+            saveCloseTask?.cancel()
+            saveCloseTask = nil
+        }
     }
 
     private var averageCostAvailable: Bool {
@@ -269,10 +286,12 @@ private struct PositionDetailContent: View {
         let formatted = formatUnitPriceEUR(price)
         switch value.origin {
         case .market(let date):
-            let when = madridCalendar.isDate(date, inSameDayAs: Date()) ? DateText.time(date) : DateText.day(date)
+            let when = DateText.madridCalendar.isDate(date, inSameDayAs: Date())
+                ? DateText.madridTime(date)
+                : DateText.madridDay(date)
             return "\(formatted) · mercado, \(when)"
         case .manual(let date):
-            return "\(formatted) · a mano, \(DateText.day(date))"
+            return "\(formatted) · a mano, \(DateText.madridDay(date))"
         case .none:
             return formatted
         }
@@ -285,9 +304,17 @@ private struct PositionDetailContent: View {
         return "\(eur) (\(pct))"
     }
 
-    private func spokenSigned(_ cents: Int) -> String {
+    private func spokenSigned(_ cents: Int, tenths: Int?) -> String {
         let prefix = cents > 0 ? "más " : (cents < 0 ? "menos " : "")
-        return prefix + spokenAmount(abs(cents), hidden: false)
+        var text = prefix + spokenAmount(abs(cents), hidden: false)
+        if let tenths {
+            let pct = formatPercentTenths(tenths, signed: true)
+                .replacingOccurrences(of: "\u{00A0}%", with: " por ciento")
+                .replacingOccurrences(of: "+", with: "más ")
+                .replacingOccurrences(of: "-", with: "menos ")
+            text += ", \(pct)"
+        }
+        return text
     }
 
     private func metricRow(
@@ -298,27 +325,32 @@ private struct PositionDetailContent: View {
         divided: Bool,
         isSensitive: Bool = true
     ) -> some View {
-        HStack(spacing: 12) {
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
             Text(key)
                 .foregroundStyle(Theme.label2)
-            Spacer(minLength: 8)
+            if !stacked { Spacer(minLength: 8) }
             Group {
                 if isSensitive {
                     Text(text)
                         .fontWeight(.medium)
                         .foregroundStyle(tint)
-                        .multilineTextAlignment(.trailing)
+                        .multilineTextAlignment(stacked ? .leading : .trailing)
                         .privateAmount()
                 } else {
                     Text(text)
                         .fontWeight(.medium)
                         .foregroundStyle(Theme.label3)
-                        .multilineTextAlignment(.trailing)
+                        .multilineTextAlignment(stacked ? .leading : .trailing)
                 }
             }
         }
         .titan(.option)
         .fontWeight(.regular)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .frame(minHeight: 50)
@@ -339,21 +371,27 @@ private struct PositionDetailContent: View {
             kind = op.shares >= 0 ? "Compra" : "Venta"
         }
         let shares = "\(formatShares(op.shares.magnitude)) acc."
-        let day = DateText.day(op.date)
+        let day = DateText.madridDay(op.date)
         let amount = op.cashCents != 0 ? formatEUR(abs(op.cashCents)) : nil
         let spoken = hidden
             ? "\(kind) el \(day), importe oculto"
             : "\(kind), \(shares), \(day)" + (op.cashCents != 0 ? ", \(spokenAmount(abs(op.cashCents), hidden: false))" : "")
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: 6))
 
-        return HStack(spacing: 6) {
-            Text("\(kind) ·")
-                .foregroundStyle(Theme.label)
-            Text(shares)
-                .foregroundStyle(Theme.label2)
-                .privateAmount()
-            Text("· \(day)")
-                .foregroundStyle(Theme.label2)
-            Spacer(minLength: 4)
+        return layout {
+            HStack(spacing: 6) {
+                Text("\(kind) ·")
+                    .foregroundStyle(Theme.label)
+                Text(shares)
+                    .foregroundStyle(Theme.label2)
+                    .privateAmount()
+                Text("· \(day)")
+                    .foregroundStyle(Theme.label2)
+            }
+            if !stacked { Spacer(minLength: 4) }
             if let amount {
                 Text(amount)
                     .foregroundStyle(Theme.label)
@@ -361,9 +399,11 @@ private struct PositionDetailContent: View {
             }
         }
         .titan(.subtitle)
-        .lineLimit(1)
+        .lineLimit(stacked ? nil : 1)
         .minimumScaleFactor(0.8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
+        .padding(.vertical, stacked ? 10 : 6)
         .frame(minHeight: 46)
         .overlay(alignment: .top) {
             if divided {
@@ -375,7 +415,10 @@ private struct PositionDetailContent: View {
     }
 
     private var manualPriceEditor: some View {
-        DetailGroup {
+        let maskedValue = preferences.privateMode && !priceFocused && !priceText.isEmpty
+            ? "importe oculto"
+            : priceText
+        return DetailGroup {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
                     TextField("Precio en € (vacío para quitar)", text: $priceText)
@@ -390,6 +433,7 @@ private struct PositionDetailContent: View {
                         .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
                         .privateField(editing: priceFocused)
                         .accessibilityLabel("Precio a mano en euros")
+                        .accessibilityValue(maskedValue)
                         .accessibilityIdentifier("manualPriceField")
 
                     if priceSaved {
@@ -424,6 +468,9 @@ private struct PositionDetailContent: View {
     }
 
     private func startEditingPrice() {
+        saveCloseTask?.cancel()
+        saveCloseTask = nil
+        priceSaved = false
         if let current = value.priceEUR {
             priceText = formatUnitPriceEUR(current).replacingOccurrences(of: "\u{00A0}€", with: "")
         } else {
@@ -435,6 +482,8 @@ private struct PositionDetailContent: View {
     }
 
     private func commitManualPrice() {
+        saveCloseTask?.cancel()
+        saveCloseTask = nil
         priceFocused = false
         let trimmed = priceText.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "€", with: "")
@@ -453,24 +502,29 @@ private struct PositionDetailContent: View {
             priceError = nil
             priceSaved = true
             saveTick += 1
-            Task {
+            saveCloseTask = Task {
                 try? await Task.sleep(for: .milliseconds(900))
+                guard !Task.isCancelled else { return }
                 withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
                     priceSaved = false
                     editingPrice = false
                 }
+                saveCloseTask = nil
             }
         } catch {
-            priceError = "No se pudo guardar el precio. Inténtalo de nuevo."
+            priceError = "Escribe un precio válido, por ejemplo 110,50."
             errorTick += 1
         }
     }
 
     private func clearManualPrice() {
+        saveCloseTask?.cancel()
+        saveCloseTask = nil
         priceFocused = false
         do {
             try portfolio.setManualPrice(nil, for: value.position.instrument)
             priceError = nil
+            priceSaved = false
             saveTick += 1
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
                 editingPrice = false

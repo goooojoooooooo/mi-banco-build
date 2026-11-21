@@ -16,12 +16,15 @@ enum PortfolioImportError: Error, Sendable {
 /// En modo demo todo vive en memoria y nunca se toca la red ni el disco.
 @MainActor @Observable
 final class PortfolioModel {
-    static let maxImportBytes = 10 * 1024 * 1024
+    nonisolated static let maxImportBytes = 10 * 1024 * 1024
+    nonisolated static let safetyCopyName = "portfolio-antes-de-restaurar.json"
 
     private(set) var portfolio: Portfolio
     private(set) var summary: PortfolioSummary?
     private(set) var lastImport: ImportSummary?
     private(set) var lastImportError: String?
+    /// Sube en cada resultado o fallo de importación para que la háptica se dispare aunque el texto coincida.
+    private(set) var importFeedbackToken = 0
     private(set) var isRefreshingPrices = false
 
     @ObservationIgnored private let store: PortfolioStore
@@ -29,6 +32,9 @@ final class PortfolioModel {
     @ObservationIgnored private var lastPriceAttempt: Date?
     @ObservationIgnored private var summaryDay: Date
     @ObservationIgnored private var observer: Task<Void, Never>?
+    #if DEBUG
+    @ObservationIgnored private var demoSafetyCopy: Portfolio?
+    #endif
 
     var hasPositions: Bool { summary != nil }
 
@@ -45,18 +51,18 @@ final class PortfolioModel {
         self.store = store
         self.priceService = priceService
         let now = Date()
-        self.summaryDay = Calendar.current.startOfDay(for: now)
+        self.summaryDay = DateText.madridCalendar.startOfDay(for: now)
         #if DEBUG
         if DemoMode.isActive {
             let initial = DemoMode.includesPortfolio ? DemoMode.portfolio(now: now) : Portfolio()
             self.portfolio = initial
-            self.summary = portfolioSummary(initial, now: now, calendar: madridCalendar)
+            self.summary = portfolioSummary(initial, now: now, calendar: DateText.madridCalendar)
             return
         }
         #endif
         let loaded = (try? store.load()) ?? Portfolio()
         self.portfolio = loaded
-        self.summary = portfolioSummary(loaded, now: now, calendar: madridCalendar)
+        self.summary = portfolioSummary(loaded, now: now, calendar: DateText.madridCalendar)
         observer = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .portfolioDidChange) {
                 guard let self else { break }
@@ -65,15 +71,15 @@ final class PortfolioModel {
         }
     }
 
-    /// Relee la cartera de disco o recalcula el resumen si ha cambiado el día.
+    /// Relee la cartera de disco o recalcula el resumen si ha cambiado el día de Madrid.
     func reload() {
         let now = Date()
-        let today = Calendar.current.startOfDay(for: now)
+        let today = DateText.madridCalendar.startOfDay(for: now)
         #if DEBUG
         if DemoMode.isActive {
             if today != summaryDay {
                 summaryDay = today
-                summary = portfolioSummary(portfolio, now: now, calendar: madridCalendar)
+                summary = portfolioSummary(portfolio, now: now, calendar: DateText.madridCalendar)
             }
             return
         }
@@ -82,7 +88,7 @@ final class PortfolioModel {
         if loaded != portfolio || loaded.droppedEntries != portfolio.droppedEntries || today != summaryDay {
             portfolio = loaded
             summaryDay = today
-            summary = portfolioSummary(loaded, now: now, calendar: madridCalendar)
+            summary = portfolioSummary(loaded, now: now, calendar: DateText.madridCalendar)
         }
     }
 
@@ -105,26 +111,29 @@ final class PortfolioModel {
     func mergeRows(_ rows: [TradeRepublicRow]) throws -> ImportSummary {
         let extract = investmentTransactions(from: rows)
         let now = Date()
-        let result: ImportSummary
         #if DEBUG
         if DemoMode.isActive {
             var next = portfolio
-            result = next.merge(extract, now: now)
+            let result = next.merge(extract, now: now)
             portfolio = next
-            summaryDay = Calendar.current.startOfDay(for: now)
-            summary = portfolioSummary(next, now: now, calendar: madridCalendar)
+            summaryDay = DateText.madridCalendar.startOfDay(for: now)
+            summary = portfolioSummary(next, now: now, calendar: DateText.madridCalendar)
             lastImport = result
             lastImportError = nil
+            importFeedbackToken += 1
             return result
         }
         #endif
-        result = try store.update { $0.merge(extract, now: now) }
-        let reloaded = (try? store.load()) ?? portfolio
-        portfolio = reloaded
-        summaryDay = Calendar.current.startOfDay(for: now)
-        summary = portfolioSummary(reloaded, now: now, calendar: madridCalendar)
+        let (result, updated) = try store.update { current -> (ImportSummary, Portfolio) in
+            let summary = current.merge(extract, now: now)
+            return (summary, current)
+        }
+        portfolio = updated
+        summaryDay = DateText.madridCalendar.startOfDay(for: now)
+        summary = portfolioSummary(updated, now: now, calendar: DateText.madridCalendar)
         lastImport = result
         lastImportError = nil
+        importFeedbackToken += 1
         return result
     }
 
@@ -147,6 +156,7 @@ final class PortfolioModel {
     func recordImportError(_ message: String) {
         lastImport = nil
         lastImportError = message
+        importFeedbackToken += 1
     }
 
     func clearImportFeedback() {
@@ -162,7 +172,7 @@ final class PortfolioModel {
         guard !isRefreshingPrices else { return }
         guard UserDefaults.standard.bool(forKey: AppPreferences.pricesEnabledKey) else { return }
         let now = Date()
-        let lastFetch = lastPriceAttempt ?? portfolio.quotes.values.map(\.fetchedAt).max()
+        let lastFetch = [lastPriceAttempt, portfolio.quotes.values.map(\.fetchedAt).max()].compactMap { $0 }.max()
         guard force || shouldRefreshPrices(lastFetch: lastFetch, now: now) else { return }
 
         let openPositions = positions(from: portfolio.transactions)
@@ -176,7 +186,8 @@ final class PortfolioModel {
         var fetchedQuotes: [String: Quote] = [:]
         var fetchedSymbols: [String: String] = [:]
         for position in openPositions {
-            guard !Task.isCancelled else { break }
+            guard !Task.isCancelled,
+                  UserDefaults.standard.bool(forKey: AppPreferences.pricesEnabledKey) else { break }
             if let found = await priceService.quote(
                 for: position.instrument,
                 assetClass: position.assetClass,
@@ -186,17 +197,18 @@ final class PortfolioModel {
                 fetchedSymbols[position.instrument] = found.symbol
             }
         }
-        guard !fetchedQuotes.isEmpty || !fetchedSymbols.isEmpty else { return }
+        guard !fetchedQuotes.isEmpty || !fetchedSymbols.isEmpty,
+              UserDefaults.standard.bool(forKey: AppPreferences.pricesEnabledKey) else { return }
 
-        _ = try? store.update { current in
+        guard let updated = try? store.update({ current -> Portfolio in
             for (instrument, quote) in fetchedQuotes { current.quotes[instrument] = quote }
             for (instrument, symbol) in fetchedSymbols { current.symbols[instrument] = symbol }
-        }
+            return current
+        }) else { return }
         let updatedNow = Date()
-        let reloaded = (try? store.load()) ?? portfolio
-        portfolio = reloaded
-        summaryDay = Calendar.current.startOfDay(for: updatedNow)
-        summary = portfolioSummary(reloaded, now: updatedNow, calendar: madridCalendar)
+        portfolio = updated
+        summaryDay = DateText.madridCalendar.startOfDay(for: updatedNow)
+        summary = portfolioSummary(updated, now: updatedNow, calendar: DateText.madridCalendar)
     }
 
     /// Ruta de segundo plano para `BackgroundRefresh.run()`: respeta cancelación, permiso y cadencia de 15 minutos.
@@ -218,7 +230,8 @@ final class PortfolioModel {
         var fetchedQuotes: [String: Quote] = [:]
         var fetchedSymbols: [String: String] = [:]
         for position in openPositions {
-            guard !Task.isCancelled else { break }
+            guard !Task.isCancelled,
+                  UserDefaults.standard.bool(forKey: AppPreferences.pricesEnabledKey) else { break }
             if let found = await priceService.quote(
                 for: position.instrument,
                 assetClass: position.assetClass,
@@ -228,7 +241,8 @@ final class PortfolioModel {
                 fetchedSymbols[position.instrument] = found.symbol
             }
         }
-        guard !fetchedQuotes.isEmpty || !fetchedSymbols.isEmpty else { return }
+        guard !fetchedQuotes.isEmpty || !fetchedSymbols.isEmpty,
+              UserDefaults.standard.bool(forKey: AppPreferences.pricesEnabledKey) else { return }
         _ = try? store.update { portfolio in
             for (instrument, quote) in fetchedQuotes { portfolio.quotes[instrument] = quote }
             for (instrument, symbol) in fetchedSymbols { portfolio.symbols[instrument] = symbol }
@@ -244,33 +258,61 @@ final class PortfolioModel {
             guard price.isFinite, price > 0, price <= 1_000_000_000 else {
                 throw PortfolioImportError.unreadable
             }
+            if let open = positionValue(for: instrument)?.position {
+                let totalCents = open.shares * price * 100
+                guard totalCents.isFinite, totalCents.magnitude < Decimal(1_000_000_000_000) else {
+                    throw PortfolioImportError.unreadable
+                }
+            }
         }
         let now = Date()
+        // Si el mercado trae una hora ligeramente por delante del reloj local, el precio manual explícito manda igual.
+        let quoteDate = portfolio.quotes[instrument].map { $0.marketTime ?? $0.fetchedAt }
+        let effectiveSetAt = quoteDate.map { max(now, $0.addingTimeInterval(1)) } ?? now
         #if DEBUG
         if DemoMode.isActive {
             var next = portfolio
             if let price {
-                next.manualPrices[instrument] = ManualPrice(priceEUR: price, setAt: now)
+                next.manualPrices[instrument] = ManualPrice(priceEUR: price, setAt: effectiveSetAt)
             } else {
                 next.manualPrices.removeValue(forKey: instrument)
             }
             portfolio = next
-            summaryDay = Calendar.current.startOfDay(for: now)
-            summary = portfolioSummary(next, now: now, calendar: madridCalendar)
+            summaryDay = DateText.madridCalendar.startOfDay(for: now)
+            summary = portfolioSummary(next, now: now, calendar: DateText.madridCalendar)
             return
         }
         #endif
-        try store.update { current in
+        let updated = try store.update { current -> Portfolio in
             if let price {
-                current.manualPrices[instrument] = ManualPrice(priceEUR: price, setAt: now)
+                current.manualPrices[instrument] = ManualPrice(priceEUR: price, setAt: effectiveSetAt)
             } else {
                 current.manualPrices.removeValue(forKey: instrument)
             }
+            return current
         }
-        let reloaded = (try? store.load()) ?? portfolio
-        portfolio = reloaded
-        summaryDay = Calendar.current.startOfDay(for: now)
-        summary = portfolioSummary(reloaded, now: now, calendar: madridCalendar)
+        portfolio = updated
+        summaryDay = DateText.madridCalendar.startOfDay(for: now)
+        summary = portfolioSummary(updated, now: now, calendar: DateText.madridCalendar)
+    }
+
+    /// Guarda una copia de seguridad de la cartera actual antes de restaurar una copia (para «Volver a lo de antes»).
+    func saveSafetyCopy() throws {
+        #if DEBUG
+        if DemoMode.isActive {
+            demoSafetyCopy = portfolio
+            return
+        }
+        #endif
+        try store.saveCopy(portfolio, named: Self.safetyCopyName)
+    }
+
+    /// Cartera guardada antes de la última restauración (incluida una vacía si antes no había inversiones).
+    func loadSafetyCopy() -> Portfolio? {
+        #if DEBUG
+        if DemoMode.isActive { return demoSafetyCopy }
+        #endif
+        return store.loadCopy(named: Self.safetyCopyName)
     }
 
     /// Sustituye la cartera entera (restauración de copia de seguridad).
@@ -279,8 +321,8 @@ final class PortfolioModel {
         #if DEBUG
         if DemoMode.isActive {
             portfolio = next
-            summaryDay = Calendar.current.startOfDay(for: now)
-            summary = portfolioSummary(next, now: now, calendar: madridCalendar)
+            summaryDay = DateText.madridCalendar.startOfDay(for: now)
+            summary = portfolioSummary(next, now: now, calendar: DateText.madridCalendar)
             lastImport = nil
             lastImportError = nil
             return
@@ -288,8 +330,8 @@ final class PortfolioModel {
         #endif
         try store.save(next)
         portfolio = next
-        summaryDay = Calendar.current.startOfDay(for: now)
-        summary = portfolioSummary(next, now: now, calendar: madridCalendar)
+        summaryDay = DateText.madridCalendar.startOfDay(for: now)
+        summary = portfolioSummary(next, now: now, calendar: DateText.madridCalendar)
         lastImport = nil
         lastImportError = nil
     }

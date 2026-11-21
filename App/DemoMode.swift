@@ -59,13 +59,13 @@ enum DemoMode {
 
     /// Cartera inventada del Plan 4b (tareas 6–7): MSCI World (8 acc.), Apple (3 acc.) y Ethereum (0,01).
     static func portfolio(now: Date = Date()) -> Portfolio {
-        let cal = madridCalendar
+        let cal = DateText.madridCalendar
         let today = cal.startOfDay(for: now)
         let marketTime = cal.date(bySettingHour: 17, minute: 35, second: 0, of: today) ?? now
-        let importDate = cal.date(from: DateComponents(year: 2026, month: 11, day: 20, hour: 10, minute: 0)) ?? now
-        let txDate1 = cal.date(from: DateComponents(year: 2026, month: 4, day: 1, hour: 11, minute: 15)) ?? now
-        let txDate2 = cal.date(from: DateComponents(year: 2026, month: 7, day: 12, hour: 14, minute: 30)) ?? now
-        let txDate3 = cal.date(from: DateComponents(year: 2026, month: 9, day: 5, hour: 9, minute: 45)) ?? now
+        let importDate = cal.date(bySettingHour: 9, minute: 0, second: 0, of: today) ?? now
+        let txDate1 = cal.date(byAdding: .day, value: -180, to: today)?.addingTimeInterval(11 * 3600 + 15 * 60) ?? now
+        let txDate2 = cal.date(byAdding: .day, value: -90, to: today)?.addingTimeInterval(14 * 3600 + 30 * 60) ?? now
+        let txDate3 = cal.date(byAdding: .day, value: -45, to: today)?.addingTimeInterval(9 * 3600 + 45 * 60) ?? now
 
         var p = Portfolio()
         p.transactions = [

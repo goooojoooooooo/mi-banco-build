@@ -249,12 +249,20 @@ final class LedgerModel {
     private(set) var restoreCount = 0
 
     /// La copia guardada antes de la última restauración, lista para "Volver a lo de antes" (nil si no hay).
-    func previousPreview() -> RestorePreview? {
+    func previousPreview(portfolioSafetyCopy: Portfolio? = nil) -> RestorePreview? {
         #if DEBUG
-        if DemoMode.isActive { return DemoMode.scrollsToBackup ? DemoMode.demoPreviousPreview(currentCount: state.movements.count) : nil }
+        if DemoMode.isActive {
+            guard DemoMode.scrollsToBackup else { return nil }
+            let demo = DemoMode.demoPreviousPreview(currentCount: state.movements.count)
+            return RestorePreview(
+                file: BackupFile(exportedAt: demo.file.exportedAt, ledger: demo.file.ledger, portfolio: portfolioSafetyCopy),
+                currentCount: demo.currentCount,
+                isPrevious: true
+            )
+        }
         #endif
         guard let info = store.copyInfo(named: Self.safetyCopyName) else { return nil }
-        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state),
+        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state, portfolio: portfolioSafetyCopy),
                               currentCount: state.movements.count, isPrevious: true)
     }
 

@@ -5,6 +5,38 @@ import MiBancoCore
 enum DateText {
     private static let spanish = Locale(identifier: "es_ES")
 
+    /// Calendario gregoriano en Europa/Madrid y español, para alinear fechas con `MiBancoCore`.
+    static let madridCalendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Madrid") ?? .current
+        calendar.locale = spanish
+        return calendar
+    }()
+
+    /// "17:35" en hora de Madrid, independiente de la zona horaria del dispositivo o del simulador.
+    static func madridTime(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle(locale: spanish, timeZone: madridCalendar.timeZone)
+                .hour(.twoDigits(amPM: .omitted))
+                .minute(.twoDigits)
+        )
+    }
+
+    /// "20 nov" en fecha de Madrid.
+    static func madridDay(_ date: Date) -> String {
+        let month = date.formatted(
+            Date.FormatStyle(locale: spanish, timeZone: madridCalendar.timeZone).month(.abbreviated)
+        ).replacing(".", with: "")
+        return "\(madridCalendar.component(.day, from: date)) \(month)"
+    }
+
+    /// "viernes" en fecha de Madrid (para J10: día de la última sesión sin desfase por zona UTC).
+    static func madridWeekday(_ date: Date) -> String {
+        date.formatted(
+            Date.FormatStyle(locale: spanish, timeZone: madridCalendar.timeZone).weekday(.wide)
+        )
+    }
+
     static func time(_ date: Date) -> String {
         date.formatted(Date.FormatStyle(locale: spanish).hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
     }

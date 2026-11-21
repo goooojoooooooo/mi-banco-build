@@ -6,9 +6,9 @@ import MiBancoCore
 /// Ajustes son el mismo estado) se guarda en UserDefaults; cambiarlo dentro de `withAnimation` anima cada importe.
 @MainActor @Observable
 final class AppPreferences {
-    static let privateModeKey = "privateMode"
-    static let pricesEnabledKey = "investmentPrices"
-    static let pricesAskedKey = "investmentPricesAsked"
+    nonisolated static let privateModeKey = "privateMode"
+    nonisolated static let pricesEnabledKey = "investmentPrices"
+    nonisolated static let pricesAskedKey = "investmentPricesAsked"
 
     var privateMode: Bool {
         didSet {

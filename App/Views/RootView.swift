@@ -52,7 +52,7 @@ struct RootView: View {
             Tab("Inicio", systemImage: "house", value: AppTab.home) {
                 HomeView(model: model, portfolio: portfolio, isVisible: tab == .home && !isLocked,
                          revealToken: revealToken, zoom: zoom,
-                         detailOpen: detail != nil,
+                         detailOpen: sheet != nil,
                          openDetail: { openDetail($0, zooms: true) },
                          openPosition: openPosition,
                          openSettings: openSettings,
@@ -207,7 +207,7 @@ struct RootView: View {
     /// Las hojas nuevas (compartir, restaurar) nunca suben con el bloqueo delante ni fuera de primer plano.
     /// El selector de archivos, también con el estado vivo.
     private func startImport(_ kind: ImportKind) {
-        guard gate.canPresent, !isLocked, scenePhase == .active else { return }
+        guard gate.canPresent, !isLocked, scenePhase == .active, !importing else { return }
         importKind = kind
         importing = true
     }
@@ -238,13 +238,16 @@ struct RootView: View {
             let generation = gate.generation
             Task {
                 do {
-                    _ = try await portfolio.importCSVAsync(from: url)
-                    guard gate.generation == generation else { return }
+                    let rows = try await Task.detached(priority: .userInitiated) {
+                        try PortfolioModel.readTradeRepublicRows(from: url)
+                    }.value
+                    guard gate.generation == generation, gate.canPresent else { return }
+                    _ = try portfolio.mergeRows(rows)
                     if preferences.pricesEnabled {
                         await portfolio.refreshPrices(force: true)
                     }
                 } catch {
-                    guard gate.generation == generation else { return }
+                    guard gate.generation == generation, gate.canPresent else { return }
                     portfolio.recordImportError("Ese fichero no parece la exportación de Trade Republic.")
                 }
             }
@@ -252,10 +255,21 @@ struct RootView: View {
     }
 
     private func restoreBackup(_ file: BackupFile) throws {
+        // Guardamos la copia previa de la cartera ANTES de tocar el libro: así «Volver a lo de antes» nunca la pierde.
+        do {
+            try portfolio.saveSafetyCopy()
+        } catch {
+            throw RestoreError.safetyCopyFailed
+        }
         try model.restore(file)
         let nextPortfolio = portfolioAfterRestore(current: portfolio.portfolio, backup: file)
         if nextPortfolio != portfolio.portfolio {
-            try portfolio.replace(with: nextPortfolio)
+            do {
+                try portfolio.replace(with: nextPortfolio)
+            } catch {
+                // El libro ya se escribió en disco: nunca decir al usuario que sus datos no han cambiado.
+                throw RestoreError.reloadFailed
+            }
         }
     }
 

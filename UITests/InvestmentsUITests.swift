@@ -27,16 +27,25 @@ final class InvestmentsUITests: XCTestCase {
         }
     }
 
+    private func element(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
+    }
+
     private func waitFor(_ predicate: NSPredicate, _ object: Any, timeout: TimeInterval) -> Bool {
         let exp = XCTNSPredicateExpectation(predicate: predicate, object: object)
         return XCTWaiter().wait(for: [exp], timeout: timeout) == .completed
     }
 
+    /// Espera un instante por si `SettingsScrollHost` desplaza la vista solo, y luego busca hacia abajo y hacia arriba.
     private func scrollTo(_ el: XCUIElement, swipes: Int = 6) {
-        var left = swipes
-        while left > 0 && !(el.exists && el.isHittable) {
+        if el.waitForExistence(timeout: 2), el.isHittable { return }
+        for _ in 0..<swipes {
+            if el.exists && el.isHittable { return }
             app.swipeUp()
-            left -= 1
+        }
+        for _ in 0..<swipes {
+            if el.exists && el.isHittable { return }
+            app.swipeDown()
         }
     }
 
@@ -56,14 +65,55 @@ final class InvestmentsUITests: XCTestCase {
         let gone = NSPredicate(format: "exists == false")
         XCTAssertTrue(waitFor(gone, askTitle, timeout: 8), "La pregunta de precios no desapareció al aceptar")
 
-        let pricesSwitch = app.switches["Precios de tus inversiones"]
+        let pricesSwitch = element("investments-prices-toggle")
         scrollTo(pricesSwitch)
         XCTAssertTrue(pricesSwitch.waitForExistence(timeout: 5), "No aparece el interruptor de precios")
-        XCTAssertEqual(pricesSwitch.value as? String, "1", "El interruptor debería quedar activado tras aceptar")
+        let on = NSPredicate(format: "value == '1'")
+        XCTAssertTrue(waitFor(on, pricesSwitch, timeout: 8), "El interruptor debería quedar activado tras aceptar")
 
         pricesSwitch.tap()
         let off = NSPredicate(format: "value == '0'")
         XCTAssertTrue(waitFor(off, pricesSwitch, timeout: 8), "El interruptor no pasó a 0 al tocarlo")
+    }
+
+    func testPricesAskDeclineLeavesSwitchOff() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoInvestmentsSettings", "-MiBancoDemoAskPrices"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 15), "No se ve Ajustes")
+
+        let askTitle = app.staticTexts["¿Buscar los precios cada día?"]
+        scrollTo(askTitle)
+        XCTAssertTrue(askTitle.waitForExistence(timeout: 10), "No aparece la pregunta inicial de precios")
+
+        let decline = app.buttons["Los pondré yo"]
+        scrollTo(decline)
+        XCTAssertTrue(decline.waitForExistence(timeout: 5), "Falta el botón Los pondré yo")
+        decline.tap()
+
+        let gone = NSPredicate(format: "exists == false")
+        XCTAssertTrue(waitFor(gone, askTitle, timeout: 8), "La pregunta no desapareció al elegir Los pondré yo")
+
+        let pricesSwitch = element("investments-prices-toggle")
+        scrollTo(pricesSwitch)
+        XCTAssertTrue(pricesSwitch.waitForExistence(timeout: 5), "No aparece el interruptor de precios")
+        let off = NSPredicate(format: "value == '0'")
+        XCTAssertTrue(waitFor(off, pricesSwitch, timeout: 8), "El interruptor debería seguir en 0")
+    }
+
+    func testImportTradeRepublicOpensFilePicker() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoInvestmentsSettings"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 15), "No se ve Ajustes")
+
+        let importRow = element("investments-import")
+        scrollTo(importRow)
+        XCTAssertTrue(importRow.waitForExistence(timeout: 10), "Falta la fila Importar de Trade Republic")
+        importRow.tap()
+
+        let cancel = app.buttons["Cancelar"].exists ? app.buttons["Cancelar"] : app.buttons["Cancel"]
+        let pickerOpened = cancel.waitForExistence(timeout: 8)
+            || app.navigationBars["Explorar"].waitForExistence(timeout: 2)
+            || app.navigationBars["Browse"].waitForExistence(timeout: 2)
+        XCTAssertTrue(pickerOpened, "No se abrió el selector de archivos al tocar Importar de Trade Republic")
+        if cancel.exists { cancel.tap() }
     }
 
     func testCardAndPosition() throws {
@@ -100,6 +150,25 @@ final class InvestmentsUITests: XCTestCase {
         XCTAssertTrue(waitFor(gone, manualButton, timeout: 8), "La hoja de posición no se cerró")
     }
 
+    func testPositionSheetDismissesOnBackground() throws {
+        launch(["-MiBancoDemoCard", "inv"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+
+        let appleRow = app.buttons["Apple"]
+        scrollTo(appleRow)
+        XCTAssertTrue(appleRow.waitForExistence(timeout: 10), "No se ve la fila de Apple")
+        appleRow.tap()
+
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja de posición")
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+
+        let gone = NSPredicate(format: "exists == false")
+        XCTAssertTrue(waitFor(gone, close, timeout: 8), "La hoja de posición no se cerró al salir de primer plano")
+    }
+
     func testInvestmentsPrivateModeHidesAmounts() throws {
         launch(["-MiBancoDemoCard", "inv", "-MiBancoDemoPrivate"])
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
@@ -114,7 +183,26 @@ final class InvestmentsUITests: XCTestCase {
         let close = app.buttons["Cerrar"]
         XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja de posición en privado")
         let euroTexts = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '€'"))
-        XCTAssertEqual(euroTexts.count, 0, "La hoja de posición expuso importes a VoiceOver en modo privado")
+        XCTAssertEqual(euroTexts.count, 0, "La hoja de posición expuso € a VoiceOver en modo privado")
+        let pctTexts = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '%'"))
+        XCTAssertEqual(pctTexts.count, 0, "La hoja de posición expuso % a VoiceOver en modo privado")
+
+        let manualButton = app.buttons["Poner precio a mano"]
+        scrollTo(manualButton)
+        XCTAssertTrue(manualButton.waitForExistence(timeout: 5), "Falta Poner precio a mano")
+        manualButton.tap()
+
+        let field = app.textFields["manualPriceField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "No apareció el campo de precio a mano")
+        // Al guardar el precio actual, el campo pierde el foco y su valor de accesibilidad debe quedar oculto.
+        let save = app.buttons["Guardar"]
+        if save.waitForExistence(timeout: 3) {
+            save.tap()
+            if field.exists {
+                let valueText = (field.value as? String) ?? ""
+                XCTAssertFalse(valueText.contains("200"), "El campo sin foco filtró el precio a VoiceOver: \(valueText)")
+            }
+        }
         close.tap()
     }
 }

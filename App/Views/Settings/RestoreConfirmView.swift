@@ -32,6 +32,14 @@ struct RestoreConfirmView: View {
             Text("Antes de cambiarlo, lo que hay ahora se guarda como copia en este iPhone y podrás volver a ello desde Copia de seguridad. Esa copia se sustituye cada vez que restauras.")
                 .titan(.callout)
                 .foregroundStyle(Theme.label2)
+            if preview.file.droppedPortfolioEntries > 0 {
+                Text(preview.file.portfolio == nil
+                     ? "La parte de inversiones de esta copia no se pudo leer; se conservará tu cartera actual."
+                     : "Algunas entradas de inversiones de esta copia no se pudieron leer; podrás volver a importar tu extracto.")
+                    .titan(.meta)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 8)
             switch phase {
             case .restored:

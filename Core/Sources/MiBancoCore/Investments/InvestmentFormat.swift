@@ -30,12 +30,13 @@ public func formatShares(_ shares: Decimal) -> String {
     return sign + integer + (fraction.isEmpty ? "" : "," + fraction)
 }
 
-/// Precio unitario en euros con al menos 2 decimales y hasta 4 si el precio tiene más precisión ("110,00 €", "0,0045 €").
+/// Precio unitario en euros: 2 decimales a partir de 1 € ("110,00 €", "180,33 €") y hasta 4 por debajo de 1 € ("0,0045 €").
 public func formatUnitPriceEUR(_ price: Decimal) -> String {
     guard price.isFinite else { return "0,00\u{00A0}€" }
+    let scale = price.magnitude < 1 ? 4 : 2
     var input = price
     var rounded = Decimal()
-    NSDecimalRound(&rounded, &input, 4, .plain)
+    NSDecimalRound(&rounded, &input, scale, .plain)
     let plain = "\(rounded.magnitude)"
     let parts = plain.split(separator: ".", omittingEmptySubsequences: false)
     var grouped = ""

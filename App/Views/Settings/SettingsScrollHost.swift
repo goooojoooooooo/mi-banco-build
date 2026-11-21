@@ -5,16 +5,17 @@ import SwiftUI
 struct SettingsScrollHost<Content: View>: View {
     @Binding var scrollRequest: String?
     @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         ScrollViewReader { proxy in
             content
-                .onChange(of: scrollRequest) { _, target in
+                .onChange(of: scrollRequest, initial: true) { _, target in
                     guard let target else { return }
                     scrollRequest = nil
                     Task {
                         try? await Task.sleep(for: .milliseconds(350))
-                        withAnimation(.easeOut(duration: 0.25)) {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) {
                             proxy.scrollTo(target, anchor: .center)
                         }
                     }

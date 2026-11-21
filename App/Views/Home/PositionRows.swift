@@ -23,7 +23,6 @@ struct PositionRows: View {
         ForEach(Array(summary.positions.enumerated()), id: \.element.id) { index, value in
             PositionRowView(
                 value: value,
-                changeDay: summary.changeDay,
                 isLast: index == summary.positions.count - 1,
                 onOpen: { onOpen(value.position.instrument) }
             )
@@ -34,13 +33,17 @@ struct PositionRows: View {
 
 private struct PositionRowView: View {
     let value: PositionValue
-    let changeDay: Date?
     let isLast: Bool
     let onOpen: () -> Void
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 40
+
+    private var positionChangeDay: Date? {
+        guard case .market(let at) = value.origin else { return nil }
+        return DateText.madridCalendar.startOfDay(for: at)
+    }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
@@ -56,7 +59,7 @@ private struct PositionRowView: View {
                             .titan(.row)
                             .foregroundStyle(Theme.label)
                             .lineLimit(stacked ? nil : 1)
-                        subtitleView
+                        subtitleView(stacked: stacked)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -107,21 +110,25 @@ private struct PositionRowView: View {
         .accessibilityIdentifier(value.position.name)
     }
 
-    private var subtitleView: some View {
+    @ViewBuilder
+    private func subtitleView(stacked: Bool) -> some View {
         let shares = sharesText(value.position.shares)
-        return HStack(spacing: 4) {
+        let sessionLayout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(spacing: 4))
+        sessionLayout {
             Text(shares)
                 .privateAmount()
-            if let tenths = PositionFormatting.todayTenths(for: value) {
-                Text("·")
-                Text("\(formatPercentTenths(tenths, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")) \(PositionFormatting.sessionShortLabel(changeDay: changeDay))")
+            if let tenths = PositionFormatting.todayTenths(for: value), let day = positionChangeDay {
+                if !stacked { Text("·") }
+                Text("\(formatPercentTenths(tenths, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")) \(PositionFormatting.sessionShortLabel(changeDay: day))")
                     .foregroundStyle(tenths > 0 ? Theme.income : Theme.label3)
                     .privateAmount()
             }
         }
         .titan(.subtitle)
         .foregroundStyle(Theme.label3)
-        .lineLimit(1)
+        .lineLimit(stacked ? nil : 1)
     }
 
     private func sharesText(_ shares: Decimal) -> String {
@@ -180,6 +187,7 @@ struct PositionMonogramTile: View {
 }
 
 /// Ayudas compartidas de formato para la tarjeta de inversiones, filas y hoja de posición.
+/// Todas las fechas y horas se calculan y formatean en zona horaria `Europe/Madrid` (J10).
 enum PositionFormatting {
     /// Décimas de porcentaje del cambio del día de una posición individual.
     static func todayTenths(for value: PositionValue) -> Int? {
@@ -191,31 +199,28 @@ enum PositionFormatting {
     }
 
     /// "hoy" si `changeDay` cae en hoy (Madrid); si no, el día de la semana ("viernes") según J10.
-    static func sessionShortLabel(changeDay: Date?, now: Date = Date()) -> String {
-        guard let changeDay else { return "hoy" }
-        if madridCalendar.isDate(changeDay, inSameDayAs: now) { return "hoy" }
-        return changeDay.formatted(Date.FormatStyle(locale: Locale(identifier: "es_ES")).weekday(.wide))
+    static func sessionShortLabel(changeDay: Date, now: Date = Date()) -> String {
+        if DateText.madridCalendar.isDate(changeDay, inSameDayAs: now) { return "hoy" }
+        return DateText.madridWeekday(changeDay)
     }
 
     /// "hoy" o "en la última sesión (viernes)" (J10).
-    static func sessionPhrase(changeDay: Date?, now: Date = Date()) -> String {
-        guard let changeDay else { return "hoy" }
-        if madridCalendar.isDate(changeDay, inSameDayAs: now) { return "hoy" }
-        let weekday = changeDay.formatted(Date.FormatStyle(locale: Locale(identifier: "es_ES")).weekday(.wide))
-        return "en la última sesión (\(weekday))"
+    static func sessionPhrase(changeDay: Date, now: Date = Date()) -> String {
+        if DateText.madridCalendar.isDate(changeDay, inSameDayAs: now) { return "hoy" }
+        return "en la última sesión (\(DateText.madridWeekday(changeDay)))"
     }
 
-    /// "precios de las 17:35", "precio de ayer, 17:35" o "precios del 17 nov".
+    /// "precios de las 17:35", "precio de ayer, 17:35" o "precios del 17 nov" (hora de Madrid).
     static func priceTimestamp(_ date: Date, plural: Bool = true, now: Date = Date()) -> String {
-        let time = DateText.time(date)
-        if madridCalendar.isDate(date, inSameDayAs: now) {
+        let time = DateText.madridTime(date)
+        if DateText.madridCalendar.isDate(date, inSameDayAs: now) {
             return plural ? "precios de las \(time)" : "precio de las \(time)"
         }
-        if let yesterday = madridCalendar.date(byAdding: .day, value: -1, to: now),
-           madridCalendar.isDate(date, inSameDayAs: yesterday) {
+        if let yesterday = DateText.madridCalendar.date(byAdding: .day, value: -1, to: now),
+           DateText.madridCalendar.isDate(date, inSameDayAs: yesterday) {
             return "precio de ayer, \(time)"
         }
-        let day = DateText.day(date)
+        let day = DateText.madridDay(date)
         return plural ? "precios del \(day)" : "precio del \(day)"
     }
 }

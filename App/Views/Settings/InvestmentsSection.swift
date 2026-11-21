@@ -90,24 +90,29 @@ struct InvestmentsSection: View {
             }
         }
         .animation(reduceMotion ? nil : Theme.Motion.reveal, value: preferences.pricesAsked)
-        .animation(reduceMotion ? nil : Theme.Motion.quick, value: portfolio.lastImport)
-        .animation(reduceMotion ? nil : Theme.Motion.quick, value: portfolio.lastImportError)
-        .onChange(of: portfolio.lastImport) { _, new in
-            if new != nil { successTick += 1 }
-        }
-        .onChange(of: portfolio.lastImportError) { _, new in
-            if new != nil { errorTick += 1 }
+        .animation(reduceMotion ? nil : Theme.Motion.quick, value: portfolio.importFeedbackToken)
+        .onChange(of: portfolio.importFeedbackToken) { _, _ in
+            if portfolio.lastImport != nil {
+                successTick += 1
+            } else if portfolio.lastImportError != nil {
+                errorTick += 1
+            }
         }
         .sensoryFeedback(.success, trigger: successTick)
         .sensoryFeedback(.error, trigger: errorTick)
     }
 
     private var statusText: String {
-        guard let summary = portfolio.summary else { return "Aún no has importado nada" }
+        guard let summary = portfolio.summary else {
+            if let imported = portfolio.portfolio.lastImport {
+                return "Sin posiciones abiertas · importado el \(DateText.madridDay(imported))"
+            }
+            return "Aún no has importado nada"
+        }
         let count = summary.positions.count
         let base = count == 1 ? "1 posición" : "\(count) posiciones"
         if let imported = portfolio.portfolio.lastImport {
-            return "\(base) · importado el \(DateText.day(imported))"
+            return "\(base) · importado el \(DateText.madridDay(imported))"
         }
         return base
     }

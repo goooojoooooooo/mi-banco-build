@@ -245,8 +245,9 @@ private func portfolioWithFixture() throws -> Portfolio {
         #expect(formatShares(Decimal(string: "1234.5")!) == "1.234,5")
         #expect(formatUnitPriceEUR(Decimal(string: "110")!) == "110,00\(nbsp)€")
         #expect(formatUnitPriceEUR(Decimal(string: "3000.5")!) == "3.000,50\(nbsp)€")
+        #expect(formatUnitPriceEUR(Decimal(string: "180.3333")!) == "180,33\(nbsp)€")
         #expect(formatUnitPriceEUR(Decimal(string: "0.0045")!) == "0,0045\(nbsp)€")
-        #expect(formatUnitPriceEUR(Decimal(string: "12.34567")!) == "12,3457\(nbsp)€")
+        #expect(formatUnitPriceEUR(Decimal(string: "0.12346")!) == "0,1235\(nbsp)€")
     }
 
     @Test func resumenDeImportacionDeCartera() {
@@ -306,5 +307,13 @@ private func portfolioWithFixture() throws -> Portfolio {
         #expect(summary.added == 5)
         #expect(try store.load().transactions.count == 5)
         #expect(try store.update { $0.merge(extract, now: at(2026, 11, 19, 12, 5)) }.added == 0)
+
+        let saved = try store.load()
+        #expect(store.loadCopy(named: "portfolio-antes-de-restaurar.json") == nil)
+        try store.saveCopy(saved, named: "portfolio-antes-de-restaurar.json")
+        #expect(store.loadCopy(named: "portfolio-antes-de-restaurar.json") == saved)
+        // También conserva una copia explícitamente vacía para deshacer una restauración cuando antes no había cartera.
+        try store.saveCopy(Portfolio(), named: "portfolio-antes-de-restaurar.json")
+        #expect(store.loadCopy(named: "portfolio-antes-de-restaurar.json") == Portfolio())
     }
 }

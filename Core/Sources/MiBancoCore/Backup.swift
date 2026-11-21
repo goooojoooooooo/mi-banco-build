@@ -8,13 +8,56 @@ public struct BackupFile: Codable, Equatable, Sendable {
     public var version: Int
     public var exportedAt: Date
     public var ledger: LedgerState
+    /// Cartera de inversiones (Plan 4b). Una copia anterior no trae la clave: queda en nil y quien restaura debe dejar
+    /// la cartera actual como está (no borrarla).
+    public var portfolio: Portfolio?
+    /// Entradas de la cartera que no se pudieron leer al abrir la copia (una cartera ilegible entera cuenta 1): la app
+    /// puede decir «vuelve a importar tu extracto». No se guarda en el fichero.
+    public private(set) var droppedPortfolioEntries: Int = 0
 
-    public init(app: String = "MiBanco", version: Int = BackupFile.currentVersion, exportedAt: Date, ledger: LedgerState) {
+    public init(app: String = "MiBanco", version: Int = BackupFile.currentVersion, exportedAt: Date, ledger: LedgerState,
+                portfolio: Portfolio? = nil) {
         self.app = app
         self.version = version
         self.exportedAt = exportedAt
         self.ledger = ledger
+        self.portfolio = portfolio
     }
+
+    private enum CodingKeys: String, CodingKey { case app, version, exportedAt, ledger, portfolio }
+
+    /// Una cartera ilegible o con el tipo equivocado NUNCA tumba la copia (el libro se restaura igual): queda en nil.
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        app = try c.decode(String.self, forKey: .app)
+        version = try c.decode(Int.self, forKey: .version)
+        exportedAt = try c.decode(Date.self, forKey: .exportedAt)
+        ledger = try c.decode(LedgerState.self, forKey: .ledger)
+        portfolio = nil
+        if c.contains(.portfolio), (try? c.decodeNil(forKey: .portfolio)) == false {
+            if let p = try? c.decode(Portfolio.self, forKey: .portfolio) {
+                portfolio = p
+                droppedPortfolioEntries = p.droppedEntries
+            } else {
+                droppedPortfolioEntries = 1
+            }
+        }
+    }
+
+    public static func == (a: BackupFile, b: BackupFile) -> Bool {
+        a.app == b.app && a.version == b.version && a.exportedAt == b.exportedAt && a.ledger == b.ledger
+            && a.portfolio == b.portfolio
+    }
+}
+
+/// Qué cartera queda al restaurar: una copia sin cartera (anterior a las inversiones, o con la cartera ilegible) deja la
+/// actual como está; con cartera, la sustituye.
+public func portfolioAfterRestore(current: Portfolio, backup: Portfolio?) -> Portfolio {
+    backup ?? current
+}
+
+public func portfolioAfterRestore(current: Portfolio, backup: BackupFile) -> Portfolio {
+    portfolioAfterRestore(current: current, backup: backup.portfolio)
 }
 
 public enum BackupError: Error, Equatable, Sendable {
@@ -26,9 +69,14 @@ public enum BackupError: Error, Equatable, Sendable {
 
 /// JSON con claves ordenadas; fechas con la estrategia por defecto para que la ida y vuelta sea exacta.
 public func encodeBackup(_ state: LedgerState, exportedAt: Date) throws -> Data {
+    try encodeBackup(state, portfolio: nil, exportedAt: exportedAt)
+}
+
+/// Igual, con la cartera de inversiones dentro (si no hay, la clave no se escribe).
+public func encodeBackup(_ state: LedgerState, portfolio: Portfolio?, exportedAt: Date) throws -> Data {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-    return try encoder.encode(BackupFile(exportedAt: exportedAt, ledger: state))
+    return try encoder.encode(BackupFile(exportedAt: exportedAt, ledger: state, portfolio: portfolio))
 }
 
 private struct BackupHeader: Decodable {

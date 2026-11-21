@@ -1,0 +1,60 @@
+import Foundation
+
+/// Cuándo se enseñó el último resumen y desde cuándo cuenta el siguiente.
+public struct BriefingRecord: Codable, Equatable, Sendable {
+    public var shownAt: Date
+    public var since: Date
+
+    public init(shownAt: Date, since: Date) {
+        self.shownAt = shownAt
+        self.since = since
+    }
+}
+
+/// Un resumen al día. El día empieza a las 05:00 en el calendario que se pase (Madrid en la app): una apertura a la una y
+/// media de la madrugada todavía es "ayer".
+public enum BriefingSchedule {
+    public static let dayStartHour = 5
+
+    /// Lo máximo que mira hacia atrás un resumen tras muchos días sin abrir la app.
+    static let maxLookbackDays = 7
+
+    /// El día (a las 00:00) al que pertenece un instante: antes de las 05:00 cuenta como el día anterior.
+    static func briefingDay(of date: Date, calendar: Calendar) -> Date {
+        let start = calendar.startOfDay(for: date)
+        guard calendar.component(.hour, from: date) < dayStartHour,
+              let previous = calendar.date(byAdding: .day, value: -1, to: start) else { return start }
+        return calendar.startOfDay(for: previous)
+    }
+
+    /// Un registro guardado con `shownAt` posterior a `now` (reloj atrasado o cambiado) no vale: se actúa como si no hubiera
+    /// ninguno, así que un resumen nunca queda bloqueado hasta una fecha futura.
+    private static func valid(_ record: BriefingRecord?, now: Date) -> BriefingRecord? {
+        guard let record, record.shownAt <= now else { return nil }
+        return record
+    }
+
+    /// El registro del resumen que toca enseñar ahora, o nil si ya se enseñó uno hoy. La primera vez mira 24 horas atrás;
+    /// después, desde el resumen anterior (como mucho una semana).
+    public static func due(previous stored: BriefingRecord?, now: Date, calendar: Calendar) -> BriefingRecord? {
+        let previous = valid(stored, now: now)
+        guard let previous else {
+            return BriefingRecord(shownAt: now, since: now.addingTimeInterval(-86_400))
+        }
+        guard briefingDay(of: now, calendar: calendar) > briefingDay(of: previous.shownAt, calendar: calendar) else { return nil }
+        var since = previous.shownAt
+        if let limit = calendar.date(byAdding: .day, value: -maxLookbackDays, to: now), since < limit { since = limit }
+        return BriefingRecord(shownAt: now, since: since)
+    }
+
+    /// Abrir el resumen a mano: si ya hay uno de hoy se devuelve con el mismo "desde" y `shownAt` ahora (quien llama lo
+    /// guarda: así lo que se supo entre la primera apertura y esta no se repite mañana); si no, el que tocaría.
+    public static func manual(previous stored: BriefingRecord?, now: Date, calendar: Calendar) -> BriefingRecord {
+        let previous = valid(stored, now: now)
+        if let previous, briefingDay(of: now, calendar: calendar) <= briefingDay(of: previous.shownAt, calendar: calendar) {
+            return BriefingRecord(shownAt: now, since: previous.since)
+        }
+        return due(previous: previous, now: now, calendar: calendar) ?? previous
+            ?? BriefingRecord(shownAt: now, since: now.addingTimeInterval(-86_400))
+    }
+}

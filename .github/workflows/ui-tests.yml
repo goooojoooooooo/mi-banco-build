@@ -46,10 +46,34 @@ jobs:
           fi
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
+          # Interruptor pequeno: el resumen dice en que iPhone se ha probado.
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Pruebas de toques
         run: |
           mkdir -p build
+          set +e
+          xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
+            -only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/ui.log 2>&1
+          echo "$?" > build/status.txt
+          tail -n 60 build/ui.log
+          exit 0
+      # A veces el simulador no deja arrancar las pruebas y ninguna llega a empezar («The test runner failed to
+      # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulador
+      # y se repite una sola vez la orden de «Pruebas de toques» (si cambia alli, cambiala aqui igual).
+      - name: Reintento si las pruebas no llegaron a empezar
+        run: |
+          if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test Case " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
+            exit 0
+          fi
+          echo "== Las pruebas no llegaron a empezar =="
+          grep -E "encountered an error" build/ui.log | head -n 5 || true
+          xcrun simctl shutdown "$UDID" || true
+          xcrun simctl boot "$UDID"
+          perl -e 'alarm 600; exec @ARGV' xcrun simctl bootstatus "$UDID" -b > /dev/null || echo "El simulador tarda en arrancar"
+          mv build/ui.xcresult build/ui-primer-intento.xcresult || true
           set +e
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \

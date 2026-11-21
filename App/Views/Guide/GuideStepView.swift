@@ -11,10 +11,16 @@ struct GuideStepView: View {
     @State private var forward = true
     @State private var pendingStep: Int?
     @State private var helpOpen = false
-    /// Se acaba de abrir la ayuda: en cuanto tenga sitio, el contenido se desliza hasta ella.
+    /// Se acaba de abrir la ayuda: en cuanto el `ScrollView` tenga el contenido ya con ella, se desliza hasta ella.
     @State private var helpRevealPending = false
+    /// El alto de la ayuda abierta (0 mientras no se ha medido).
+    @State private var helpHeight: CGFloat = 0
+    /// Cuántas veces se ha abierto la ayuda: los indicadores destellan al abrirla, no al cerrarla.
+    @State private var helpOpenings = 0
     /// H: el alto visible entre la cabecera y los botones fijos.
     @State private var visibleHeight: CGFloat = 0
+    /// El alto de lo imprescindible, para que VoiceOver lea en el orden de la pantalla.
+    @State private var essentialsHeight: CGFloat = 0
     @State private var firstNoticeSeen = false
     @State private var shortcutsUnavailable = false
     /// Se abrió retomando una guía a medias: se ofrece «Empezar desde el principio».
@@ -126,35 +132,74 @@ struct GuideStepView: View {
     /// del dibujo los decide `guideStepArrangement` (Core) con lo que mide cada pieza: lo imprescindible nunca queda bajo
     /// los botones fijos cuando cabe.
     private var page: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                GuideStepStack(visible: visibleHeight, accessibility: bigText) {
-                    GuideIllustrationView(step: step, track: track, fitted: true)
-                        .accessibilityIdentifier("guide-drawing")
-                        .layoutValue(key: GuidePieceKey.self, value: .drawing)
-                    essentials
-                        .layoutValue(key: GuidePieceKey.self, value: .essentials)
-                    if helpOpen {
-                        helpText(proxy)
-                            .layoutValue(key: GuidePieceKey.self, value: .help)
+        GuideStepScroll { scroll in
+            ScrollViewReader { proxy in
+                ScrollView {
+                    GuideStepStack(visible: visibleHeight, accessibility: bigText) {
+                        // VoiceOver lee en el orden de la pantalla: con el texto arriba, el dibujo va al final.
+                        GuideIllustrationView(step: step, track: track, fitted: true)
+                            .accessibilityIdentifier("guide-drawing")
+                            .accessibilitySortPriority(readsTextFirst ? 0 : 4)
+                            .layoutValue(key: GuidePieceKey.self, value: .drawing)
+                        essentials(scroll)
+                            .accessibilitySortPriority(3)
+                            .layoutValue(key: GuidePieceKey.self, value: .essentials)
+                        if helpOpen {
+                            helpText
+                                .accessibilitySortPriority(2)
+                                .layoutValue(key: GuidePieceKey.self, value: .help)
+                        }
+                        // Solo en una guía retomada y nunca en el primer paso: texto dentro del contenido, después de la ayuda.
+                        if resumed && index > 0 {
+                            restartButton
+                                .accessibilitySortPriority(1)
+                                .layoutValue(key: GuidePieceKey.self, value: .restart)
+                        }
                     }
-                    // Solo en una guía retomada y nunca en el primer paso: texto dentro del contenido, después de la ayuda.
-                    if resumed && index > 0 {
-                        restartButton
-                            .layoutValue(key: GuidePieceKey.self, value: .restart)
-                    }
+                    .accessibilityElement(children: .contain)
+                    .padding(.horizontal, Theme.Space.gutter)
                 }
-                .padding(.horizontal, Theme.Space.gutter)
+                .scrollPosition(scroll.position)
+                // Al abrir la ayuda, el deslizamiento espera a que el `ScrollView` tenga ya el contenido con ella: pedido
+                // antes, el desplazamiento se recorta al contenido de antes (que cabía justo) y no se mueve nada.
+                .onScrollGeometryChange(for: GuideScrollGeometry.self) { geometry in
+                    GuideScrollGeometry(content: geometry.contentSize.height,
+                                        offset: geometry.contentOffset.y + geometry.contentInsets.top)
+                } action: { old, new in
+                    scroll.offset.current = new.offset
+                    guard helpRevealPending, new.content > old.content else { return }
+                    helpRevealPending = false
+                    // La ayuda entra entre lo imprescindible y lo que sigue, con 8 pt de separación encima.
+                    revealHelp(proxy, height: helpHeight > 0 ? helpHeight : new.content - old.content - Theme.Space.small)
+                }
+                // Los indicadores se ven y destellan si el contenido es más alto que lo visible: al aparecer y al abrir la ayuda.
+                .scrollIndicatorsFlash(onAppear: true)
+                .scrollIndicatorsFlash(trigger: helpOpenings)
             }
-            // Los indicadores se ven y destellan si el contenido es más alto que lo visible: al aparecer y al abrir la ayuda.
-            .scrollIndicatorsFlash(onAppear: true)
-            .scrollIndicatorsFlash(trigger: helpOpen)
+        }
+    }
+
+    /// Con el texto arriba (letra de accesibilidad o poco sitio para el dibujo): la misma regla que el reparto.
+    private var readsTextFirst: Bool {
+        bigText || guideStepArrangement(visible: Double(visibleHeight),
+                                        essentials: Double(essentialsHeight + Theme.Space.gutter),
+                                        restart: 0).order == .textFirst
+    }
+
+    /// Entera si cabe en lo visible (su final justo encima de los botones); si no, desde su primera línea arriba.
+    /// Reducir movimiento: sin animación.
+    private func revealHelp(_ proxy: ScrollViewProxy, height: CGFloat) {
+        let anchor: UnitPoint = height <= visibleHeight ? .bottom : .top
+        if reduceMotion {
+            proxy.scrollTo(Self.helpAnchor, anchor: anchor)
+        } else {
+            withAnimation(Theme.Motion.reveal) { proxy.scrollTo(Self.helpAnchor, anchor: anchor) }
         }
     }
 
     /// Lo imprescindible para seguir el paso: el aviso «¡Funciona!» si ha llegado, el título, la instrucción entera y
     /// «¿No te sale esto?» cerrado. Es lo que mide T.
-    private var essentials: some View {
+    private func essentials(_ scroll: GuideScrollControl) -> some View {
         VStack(alignment: .leading, spacing: Theme.Space.row) {
             if firstNoticeSeen { workingBanner.transition(.opacity.combined(with: .scale(scale: 0.96))) }
             Text(step.title)
@@ -168,9 +213,12 @@ struct GuideStepView: View {
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("guide-instruction")
-            helpButton
+            helpButton(scroll)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // Un grupo para VoiceOver: se ordena entero frente al dibujo y, dentro, se lee de arriba abajo.
+        .accessibilityElement(children: .contain)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { essentialsHeight = $0 }
     }
 
     private var restartButton: some View {
@@ -207,10 +255,31 @@ struct GuideStepView: View {
         .accessibilityIdentifier("guide-working")
     }
 
-    private var helpButton: some View {
+    private func helpButton(_ scroll: GuideScrollControl) -> some View {
         Button {
-            helpRevealPending = !helpOpen
-            withAnimation(reduceMotion ? .easeOut(duration: 0.15) : Theme.Motion.reveal) { helpOpen.toggle() }
+            if helpOpen {
+                // Al cerrarla, el paso vuelve a donde estaba al abrirla a la vez que la ayuda se recoge: el contenido
+                // no da un salto al encogerse. Reducir movimiento: vuelve sin animación.
+                helpRevealPending = false
+                let back = scroll.offset.beforeHelp
+                if reduceMotion {
+                    scroll.position.wrappedValue.scrollTo(y: back)
+                    withAnimation(.easeOut(duration: 0.15)) { helpOpen = false }
+                } else {
+                    withAnimation(Theme.Motion.reveal) {
+                        scroll.position.wrappedValue.scrollTo(y: back)
+                        helpOpen = false
+                    }
+                }
+            } else {
+                scroll.offset.beforeHelp = scroll.offset.current
+                // Sin posición pedida: así el «volver aquí» del próximo cierre siempre cuenta como un cambio.
+                scroll.position.wrappedValue = ScrollPosition(idType: String.self)
+                helpHeight = 0
+                helpRevealPending = true
+                helpOpenings += 1
+                withAnimation(reduceMotion ? .easeOut(duration: 0.15) : Theme.Motion.reveal) { helpOpen = true }
+            }
         } label: {
             HStack(spacing: 6) {
                 Text("¿No te sale esto?")
@@ -231,7 +300,7 @@ struct GuideStepView: View {
 
     private static let helpAnchor = "guide-help-text"
 
-    private func helpText(_ proxy: ScrollViewProxy) -> some View {
+    private var helpText: some View {
         Text(step.help)
             .font(.callout)
             .foregroundStyle(Theme.label2)
@@ -239,18 +308,8 @@ struct GuideStepView: View {
             .padding(Theme.Space.row)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.field, style: .continuous))
-            // Al abrirla, el contenido se desliza hasta que se ve: entera si cabe; si no, desde su primera línea.
-            // Se mide el alto (no la posición, que la transición desplaza) en cuanto la ayuda tiene sitio.
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                guard helpRevealPending else { return }
-                helpRevealPending = false
-                let anchor: UnitPoint = height <= visibleHeight ? .bottom : .top
-                if reduceMotion {
-                    proxy.scrollTo(Self.helpAnchor, anchor: anchor)
-                } else {
-                    withAnimation(Theme.Motion.reveal) { proxy.scrollTo(Self.helpAnchor, anchor: anchor) }
-                }
-            }
+            // Se mide el alto (no la posición, que la transición desplaza): decide si se enseña entera o desde arriba.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { helpHeight = $0 }
             .id(Self.helpAnchor)
             .transition(.opacity.combined(with: .move(edge: .top)))
             .accessibilityIdentifier("guide-help-text")
@@ -353,6 +412,7 @@ struct GuideStepView: View {
             index = target
             helpOpen = false
             helpRevealPending = false
+            helpHeight = 0
             shortcutsUnavailable = false
         }
     }
@@ -385,6 +445,44 @@ struct GuideStepView: View {
         }
         flush()
         return out
+    }
+}
+
+// MARK: Desplazamiento de un paso
+
+/// Dónde está el contenido de un paso: lo que se lee al deslizar, sin redibujar la vista en cada fotograma.
+@MainActor private final class GuideScrollOffset {
+    /// El desplazamiento de ahora (desde arriba del contenido).
+    var current: CGFloat = 0
+    /// El desplazamiento cuando se abrió la ayuda: al cerrarla se vuelve aquí.
+    var beforeHelp: CGFloat = 0
+}
+
+/// Lo que necesitan la ayuda y su botón para mover el contenido de su paso.
+@MainActor private struct GuideScrollControl {
+    let position: Binding<ScrollPosition>
+    let offset: GuideScrollOffset
+}
+
+/// El alto del contenido y el desplazamiento, tal como los ve el `ScrollView`.
+private struct GuideScrollGeometry: Equatable {
+    var content: CGFloat
+    var offset: CGFloat
+}
+
+/// El estado de desplazamiento nace y muere con cada paso (cada paso es un `ScrollView` nuevo, por su `.id`): una
+/// posición de un paso nunca se aplica al siguiente.
+private struct GuideStepScroll<Content: View>: View {
+    @State private var position = ScrollPosition(idType: String.self)
+    @State private var offset = GuideScrollOffset()
+    private let content: (GuideScrollControl) -> Content
+
+    init(@ViewBuilder content: @escaping (GuideScrollControl) -> Content) {
+        self.content = content
+    }
+
+    var body: some View {
+        content(GuideScrollControl(position: $position, offset: offset))
     }
 }
 

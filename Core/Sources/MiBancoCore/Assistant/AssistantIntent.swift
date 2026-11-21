@@ -738,9 +738,14 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil, kno
             w.hasPrefix("aport") && !pastDescribingTradeWords.contains(phoneticWord(w))
                 && !(w == "aporte" && rawPastAporteCount > 0)
         }
+        let isFactualInvestmentPerf = ["ha ido", "han ido", "ha subido", "han subido", "ha bajado", "han bajado",
+                                       "mas subio", "mas bajo", "mas ha subido", "mas ha bajado",
+                                       "va mejor", "van mejor", "va peor", "van peor", "tengo", "vale", "valen", "valia"]
+            .contains { joined.contains(" " + $0 + " ") }
         let hasChoice = list.contains("which")
-            || ["que etf", "que accion", "que acciones", "que fondo", "que fondos", "que cripto",
-                "cual elijo", "cual compro", "cual escojo"].contains { joined.contains(" " + $0 + " ") }
+            || (!isFactualInvestmentPerf && ["que etf", "que accion", "que acciones", "que fondo", "que fondos", "que cripto"]
+                .contains { joined.contains(" " + $0 + " ") })
+            || ["cual elijo", "cual compro", "cual escojo"].contains { joined.contains(" " + $0 + " ") }
             || (list.contains("o") && {
                 for idx in list.indices where list[idx] == "o" && idx > 0 && idx + 1 < list.count {
                     let left = list[idx - 1], right = list[idx + 1]
@@ -765,6 +770,7 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil, kno
         // REGLA A — Hay contexto FUERTE (S): es consejo SALVO que encaje en F sin ningún marcador D (U1 punto 3).
         if ctx.strong {
             let matchesFactualTemplate = factualInvestmentPhrases.contains { joined.contains(" " + $0 + " ") }
+                || list.contains { explicitBalanceWords.contains($0) }
                 || hasSpendingVerb
                 || !fullMerchantIdx.isEmpty
             if matchesFactualTemplate && !hasAnyDecisionMarker {
@@ -814,8 +820,8 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil, kno
         if !hasSpendingVerb && !list.contains("traspaso") && !list.contains("transferencia") {
             let asksWhatToDo = joined.contains(" que hago con ") || joined.contains(" que haria ") || joined.contains(" que harias ")
             if asksWhatToDo {
-                if let conIdx = list.firstIndex(of: "con"), conIdx + 1 < list.count {
-                    let objTokens = Array(list[(conIdx + 1)...])
+                if let conIdx = list.firstIndex(of: "con") {
+                    let objTokens = conIdx + 1 < list.count ? Array(list[(conIdx + 1)...]) : []
                     let objJoined = " " + objTokens.joined(separator: " ") + " "
                     let isOwnObj = objTokens.contains { ownBankWords.contains($0) }
                         || extractCategory(joined: objJoined) != nil
@@ -824,7 +830,7 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil, kno
                         || objTokens.contains("dinero") || objTokens.contains("ahorro") || objTokens.contains("ahorros")) {
                         return true
                     }
-                } else if list.contains("dinero") || list.contains("ahorro") || list.contains("ahorros") {
+                } else if hasExplicitAmount || list.contains("dinero") || list.contains("ahorro") || list.contains("ahorros") {
                     return true
                 }
             }
@@ -1446,7 +1452,7 @@ func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: String, r
             && !s.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     }
     guard isSafeSpanText(modelValue) else { return nil }
-    let spanEdgePrepositions: Set<String> = ["en", "de", "del", "por", "para", "con", "a", "al", "sobre", "desde", "el", "la", "los", "las"]
+    let spanEdgePrepositions: Set<String> = ["en", "de", "del", "por", "para", "con", "a", "al", "sobre", "desde"]
     let rawNormValue = normalizeMerchant(modelValue)
     let rawValueTokens = rawNormValue.split(separator: " ").map(String.init)
     // U2 punto 5: recorta en ambos bordes tanto preposiciones como palabras de `nonMerchantTargets` («total en Mercadona» -> «Mercadona»).

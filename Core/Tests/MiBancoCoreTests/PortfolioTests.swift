@@ -243,6 +243,30 @@ private func portfolioWithFixture() throws -> Portfolio {
         #expect(formatShares(Decimal(string: "0.01")!) == "0,01")
         #expect(formatShares(3) == "3")
         #expect(formatShares(Decimal(string: "1234.5")!) == "1.234,5")
+        #expect(formatUnitPriceEUR(Decimal(string: "110")!) == "110,00\(nbsp)€")
+        #expect(formatUnitPriceEUR(Decimal(string: "3000.5")!) == "3.000,50\(nbsp)€")
+        #expect(formatUnitPriceEUR(Decimal(string: "0.0045")!) == "0,0045\(nbsp)€")
+        #expect(formatUnitPriceEUR(Decimal(string: "12.34567")!) == "12,3457\(nbsp)€")
+    }
+
+    @Test func resumenDeImportacionDeCartera() {
+        let full = ImportSummary(added: 14, alreadyThere: 3, ignoredRows: 22, unreadableRows: 0)
+        #expect(formatPortfolioImportSummary(full)
+                == "Importadas 14 operaciones nuevas · 3 ya estaban · 22 filas sin acciones ignoradas")
+
+        let single = ImportSummary(added: 1, alreadyThere: 1, ignoredRows: 1, unreadableRows: 1,
+                                   notTradeRows: 1, notAppliedTypes: ["DIVIDEND"])
+        #expect(formatPortfolioImportSummary(single)
+                == "Importada 1 operación nueva · 1 ya estaba · 1 fila sin acciones ignorada · 1 fila no aplicada (DIVIDEND) · 1 fila que no se pudo leer")
+
+        let onlyNew = ImportSummary(added: 5, alreadyThere: 0, ignoredRows: 0, unreadableRows: 0)
+        #expect(formatPortfolioImportSummary(onlyNew) == "Importadas 5 operaciones nuevas")
+
+        let nothingNew = ImportSummary(added: 0, alreadyThere: 4, ignoredRows: 0, unreadableRows: 0)
+        #expect(formatPortfolioImportSummary(nothingNew) == "No había operaciones nuevas · 4 ya estaban")
+
+        let empty = ImportSummary(added: 0, alreadyThere: 0, ignoredRows: 0, unreadableRows: 0)
+        #expect(formatPortfolioImportSummary(empty) == "No había operaciones nuevas")
     }
 
     @Test func copiaConCartera() throws {

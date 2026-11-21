@@ -5,6 +5,7 @@ import UserNotifications
 @main
 struct MiBancoApp: App {
     @State private var model = LedgerModel()
+    @State private var portfolio = PortfolioModel()
     @State private var logos = MerchantLogos()
     @State private var preferences = AppPreferences()
     @State private var locked = true
@@ -47,12 +48,16 @@ struct MiBancoApp: App {
             content
             #endif
         }
+        // Actualización de bancos en segundo plano (tarea 10): mejor esfuerzo, la decide el sistema.
+        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
+            await BackgroundRefresh.run()
+        }
     }
 
     @ViewBuilder
     private var content: some View {
             ZStack {
-                RootView(model: model, isLocked: showsLock, revealToken: revealToken)
+                RootView(model: model, portfolio: portfolio, isLocked: showsLock, revealToken: revealToken)
                     .accessibilityHidden(showsLock)
                     .allowsHitTesting(!showsLock)
                 if showsLock {
@@ -74,6 +79,8 @@ struct MiBancoApp: App {
                 if launching && !showsLock { reveal() }
             }
             .task {
+                // Arranque en frío (tarea 10): puede que no haya cambio de escena que lo dispare.
+                await MainActor.run { BankSync.refreshOnOpen() }
                 await logos.prewarm(domains: [])
                 #if DEBUG
                 if DemoMode.isActive {
@@ -87,6 +94,7 @@ struct MiBancoApp: App {
                 await AlertPoster.setup()
                 // Con el permiso ya pedido: resumen semanal y recordatorios de suscripciones al día.
                 await AlertScheduler.reschedule(for: model.state)
+                await portfolio.refreshPrices(force: false)
             }
             .environment(logos)
             .environment(preferences)
@@ -97,14 +105,23 @@ struct MiBancoApp: App {
                 guard isBankCallbackURL(url) else { return }
                 Task { await BankConnector.shared.handle(url: url) }
             }
+            // Bancos (tarea 10): una conexión cambió (conectar, renovar, desconectar).
+            .onReceive(NotificationCenter.default.publisher(for: .bankLinkDidChange)) { note in
+                let bank = (note.userInfo?["bank"] as? String).flatMap(BankID.init(rawValue:))
+                Task { await BankSync.shared.linkDidChange(bank) }
+            }
             .onChange(of: scenePhase) { _, phase in
                 // Conexión bancaria (tarea 9): el conector decide con su propio estado; el bloqueo no interviene.
                 BankConnector.shared.sceneDidChange(to: phase)
                 switch phase {
                 case .active:
                     model.reload()
+                    portfolio.reload()
+                    BankSync.refreshOnOpen() // tarea 10
+                    Task { await portfolio.refreshPrices(force: false) }
                     Task { await LiveActivityController.endStale() }
                 case .background:
+                    BackgroundRefresh.schedule() // tarea 10
                     if lockEnabled { locked = true }
                 default:
                     break

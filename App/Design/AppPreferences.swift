@@ -7,6 +7,8 @@ import MiBancoCore
 @MainActor @Observable
 final class AppPreferences {
     static let privateModeKey = "privateMode"
+    static let pricesEnabledKey = "investmentPrices"
+    static let pricesAskedKey = "investmentPricesAsked"
 
     var privateMode: Bool {
         didSet {
@@ -17,14 +19,38 @@ final class AppPreferences {
         }
     }
 
+    /// Permiso para consultar precios diarios en Yahoo Finance (solo ISIN/símbolo; apagado por defecto).
+    var pricesEnabled: Bool {
+        didSet {
+            #if DEBUG
+            if DemoMode.isActive { return }
+            #endif
+            UserDefaults.standard.set(pricesEnabled, forKey: Self.pricesEnabledKey)
+        }
+    }
+
+    /// Si ya se ha mostrado y respondido la pregunta inicial de precios en Ajustes › Inversiones.
+    var pricesAsked: Bool {
+        didSet {
+            #if DEBUG
+            if DemoMode.isActive { return }
+            #endif
+            UserDefaults.standard.set(pricesAsked, forKey: Self.pricesAskedKey)
+        }
+    }
+
     init() {
         #if DEBUG
         if DemoMode.isActive {
             privateMode = DemoMode.startsPrivate
+            pricesEnabled = false
+            pricesAsked = DemoMode.asksPrices ? false : DemoMode.includesPortfolio
             return
         }
         #endif
         privateMode = UserDefaults.standard.bool(forKey: Self.privateModeKey)
+        pricesEnabled = UserDefaults.standard.bool(forKey: Self.pricesEnabledKey)
+        pricesAsked = UserDefaults.standard.bool(forKey: Self.pricesAskedKey)
     }
 }
 

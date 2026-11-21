@@ -7,10 +7,14 @@ import MiBancoCore
 /// nunca del `body`. Para VoiceOver es un solo elemento ajustable: "Cuenta, Revolut, 340,20 euros, 2 de 4".
 struct CardCarousel: View {
     let snapshot: LedgerSnapshot
+    let cards: [AccountCard]
+    var portfolioSummary: PortfolioSummary? = nil
+    var portfolioLastImport: Date? = nil
     @Binding var selection: AccountCard?
     @Binding var flipped: AccountCard?
     let motion: HomeMotion
     let onEdit: (BankID?) -> Void
+    var onImportInvestments: () -> Void = {}
 
     /// Tarjetas que ya se han visto: su cifra contó desde 0 la primera vez.
     @State private var seen: Set<AccountCard> = []
@@ -26,18 +30,25 @@ struct CardCarousel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppPreferences.self) private var preferences
 
-    private var current: AccountCard { selection ?? .all }
+    private var current: AccountCard {
+        if let selection, cards.contains(selection) { return selection }
+        return cards.first ?? .all
+    }
 
     var body: some View {
         let reduce = reduceMotion
         ScrollView(.horizontal) {
             HStack(spacing: CarouselMetrics.spacing) {
-                ForEach(AccountCard.allCases, id: \.self) { card in
+                ForEach(cards, id: \.self) { card in
                     AccountCardView(
                         card: card, balances: snapshot.balances, total: snapshot.total,
-                        monthSpent: snapshot.monthSpent[card] ?? 0, flipped: flipped == card,
+                        monthSpent: snapshot.monthSpent[card] ?? 0,
+                        portfolioSummary: portfolioSummary,
+                        portfolioLastImport: portfolioLastImport,
+                        flipped: flipped == card,
                         revealed: seen.contains(card),
-                        onFlip: { tap(card) }, onEdit: { onEdit(card.bank) })
+                        onFlip: { tap(card) }, onEdit: { onEdit(card.bank) },
+                        onImportInvestments: onImportInvestments)
                         .containerRelativeFrame(.horizontal)
                         .frame(maxHeight: .infinity)
                         .scrollTransition(.interactive, axis: .horizontal) { content, phase in
@@ -63,13 +74,13 @@ struct CardCarousel: View {
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             // Paso entre tarjetas medido en el contenido (n tarjetas + n−1 huecos), no en el contenedor: el ancho del
             // contenedor ya viene sin el margen lateral y restarlo otra vez desplazaba el indicador (1,2 en vez de 1).
-            let count = CGFloat(AccountCard.allCases.count)
+            let count = CGFloat(max(cards.count, 1))
             let step = (geometry.contentSize.width + CarouselMetrics.spacing) / count
             return step > 0 ? (geometry.contentOffset.x + geometry.contentInsets.leading) / step : 0
         } action: { _, position in
             guard position.isFinite else { return }
             motion.carouselPosition = position
-            let last = CGFloat(AccountCard.allCases.count - 1)
+            let last = CGFloat(max(cards.count - 1, 0))
             let over = position < -0.04 || position > last + 0.04
             if over != motion.carouselOverscrolled { motion.carouselOverscrolled = over }
         }
@@ -123,7 +134,21 @@ struct CardCarousel: View {
             }
         }
         .accessibilityAction(named: flipped == current ? "Ver el saldo" : "Ver detalles de la cuenta") { tap(current) }
-        .accessibilityAction(named: current == .all ? "Editar saldos" : "Editar saldo") { onEdit(current.bank) }
+        .accessibilityAction(named: primaryAccessibilityActionTitle) {
+            if current == .investments {
+                onImportInvestments()
+            } else {
+                onEdit(current.bank)
+            }
+        }
+    }
+
+    private var primaryAccessibilityActionTitle: String {
+        switch current {
+        case .all: "Editar saldos"
+        case .investments: "Importar de nuevo"
+        case .rev, .ima, .tr: "Editar saldo"
+        }
     }
 
     /// Fin de un desplazamiento programado. Si el dedo lo interrumpió y dejó el carrusel en otra tarjeta, esa pasa a ser
@@ -152,14 +177,20 @@ struct CardCarousel: View {
     }
 
     private func move(by step: Int) {
-        let all = AccountCard.allCases
-        let next = min(max(current.index + step, 0), all.count - 1)
-        withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { selection = all[next] }
+        guard !cards.isEmpty else { return }
+        let next = min(max(current.index(in: cards) + step, 0), cards.count - 1)
+        withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { selection = cards[next] }
     }
 
     private var spokenLabel: String {
         let hidden = preferences.privateMode
-        let position = "\(current.index + 1) de \(AccountCard.allCases.count)"
+        let position = "\(current.index(in: cards) + 1) de \(cards.count)"
+        if current == .investments {
+            let value = portfolioSummary?.valueCents.map { spokenAmount($0, hidden: hidden) } ?? "sin precio"
+            let count = portfolioSummary?.positions.count ?? 0
+            let positionsText = count == 1 ? "1 posición" : "\(count) posiciones"
+            return "Inversiones, \(value), \(positionsText), \(position)"
+        }
         guard let bank = current.bank else {
             let total = snapshot.total.map { spokenAmount($0, hidden: hidden) } ?? "sin saldo"
             return "Todo, \(total) en tres cuentas, \(position)"

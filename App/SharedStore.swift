@@ -16,6 +16,10 @@ enum SharedStore {
         FileStore(directory: resolved.directory)
     }
 
+    static func makePortfolioStore() -> PortfolioStore {
+        PortfolioStore(directory: resolved.directory)
+    }
+
     /// Prueba los grupos posibles en orden y se queda con el primero que el sistema concede.
     /// Si ninguno existe, usa la carpeta privada de la app a propósito: en el Plan 1 solo la app lee el libro.
     private static func resolve() -> (directory: URL, location: Location) {

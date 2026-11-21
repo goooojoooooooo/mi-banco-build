@@ -8,11 +8,14 @@ struct AccountCardView: View {
     let balances: [BankID: BalanceInfo]
     let total: Int?
     let monthSpent: Int
+    var portfolioSummary: PortfolioSummary? = nil
+    var portfolioLastImport: Date? = nil
     let flipped: Bool
     /// La cifra protagonista cuenta desde 0 la primera vez que la tarjeta se ve.
     let revealed: Bool
     let onFlip: () -> Void
     let onEdit: () -> Void
+    var onImportInvestments: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -21,12 +24,27 @@ struct AccountCardView: View {
         // así que se voltea de vuelta con un toque en cualquier otro sitio.
         ZStack {
             Button(action: onFlip) {
-                CardFront(card: card, balances: balances, total: total, revealed: revealed)
+                CardFront(
+                    card: card,
+                    balances: balances,
+                    total: total,
+                    portfolioSummary: portfolioSummary,
+                    revealed: revealed
+                )
             }
             .buttonStyle(PressableButtonStyle(scale: 0.985))
             .modifier(FlipFace(angle: flipped ? 180 : 0, isBack: false))
 
-            CardBack(card: card, balances: balances, monthSpent: monthSpent, flipped: flipped, onEdit: onEdit)
+            CardBack(
+                card: card,
+                balances: balances,
+                monthSpent: monthSpent,
+                portfolioSummary: portfolioSummary,
+                portfolioLastImport: portfolioLastImport,
+                flipped: flipped,
+                onEdit: onEdit,
+                onImportInvestments: onImportInvestments
+            )
                 .contentShape(.rect(cornerRadius: Theme.Radius.card))
                 .onTapGesture(perform: onFlip)
                 .modifier(FlipFace(angle: flipped ? 180 : 0, isBack: true))
@@ -58,11 +76,12 @@ private struct FlipFace: ViewModifier, Animatable {
     }
 }
 
-/// Cara delantera: «Todo» (total y los tres bancos) o un banco (logo, saldo, estado, total al pie).
+/// Cara delantera: «Todo» (total y los tres bancos), un banco (logo, saldo, estado, total al pie) o «Inversiones».
 private struct CardFront: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
     let total: Int?
+    let portfolioSummary: PortfolioSummary?
     let revealed: Bool
 
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -77,17 +96,19 @@ private struct CardFront: View {
                 if let cents = heroCents {
                     HeroBalance(cents: cents, revealed: revealed, centsColor: secondary)
                 } else {
-                    // Sin saldo: una raya, nunca "0,00 €" (no es que haya cero, es que no se sabe).
+                    // Sin saldo o sin precios: una raya, nunca "0,00 €".
                     Text("—")
                         .font(.system(size: 50, weight: .semibold))
                         .foregroundStyle(secondary)
-                        .accessibilityLabel("Sin saldo")
+                        .accessibilityLabel(card == .investments ? "Sin precio" : "Sin saldo")
                 }
             }
             .padding(.top, 14)
             Spacer(minLength: 18)
             if card == .all {
                 banks
+            } else if card == .investments {
+                investmentsFooter
             } else {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Total en los tres bancos")
@@ -111,14 +132,72 @@ private struct CardFront: View {
     }
 
     private var heroCents: Int? {
+        if card == .investments { return portfolioSummary?.valueCents }
         if let bank = card.bank { return balances[bank]?.cents }
         return total
     }
 
     @ViewBuilder
+    private var investmentsFooter: some View {
+        if let summary = portfolioSummary {
+            VStack(alignment: .leading, spacing: 3) {
+                if let todayCents = summary.todayChangeCents {
+                    let eur = formatSignedEUR(todayCents).replacingOccurrences(of: "-", with: "\u{2212}")
+                    let pct = summary.todayChangeTenths.map {
+                        " (\(formatPercentTenths($0, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")))"
+                    } ?? ""
+                    let session = PositionFormatting.sessionPhrase(changeDay: summary.changeDay)
+                    Text("\(eur) \(session)\(pct)")
+                        .titan(.subtitle)
+                        .fontWeight(.medium)
+                        .foregroundStyle(todayCents > 0 ? Theme.income : secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .privateAmount()
+                }
+                if let gainCents = summary.gainCents {
+                    let eur = formatSignedEUR(gainCents).replacingOccurrences(of: "-", with: "\u{2212}")
+                    let pct = summary.gainTenths.map {
+                        " (\(formatPercentTenths($0, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")))"
+                    } ?? ""
+                    let partial = summary.missingPrices > 0 ? " (con precio)" : ""
+                    Text("\(eur) desde la compra\(pct)\(partial)")
+                        .titan(.meta)
+                        .foregroundStyle(secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .privateAmount()
+                }
+                if summary.missingPrices > 0 {
+                    let missingText = summary.missingPrices == 1
+                        ? "Falta el precio de 1 posición"
+                        : "Falta el precio de \(summary.missingPrices) posiciones"
+                    Text(missingText)
+                        .titan(.caption)
+                        .foregroundStyle(Theme.warning)
+                        .lineLimit(1)
+                } else if let pricedAt = summary.pricedAt {
+                    let timestamp = PositionFormatting.priceTimestamp(pricedAt, plural: summary.positions.count != 1)
+                    Text(summary.hasStalePrice ? "\(timestamp) · precio antiguo" : timestamp)
+                        .titan(.caption)
+                        .foregroundStyle(summary.hasStalePrice ? Theme.warning : secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var header: some View {
         HStack(spacing: Theme.Space.small) {
-            if let bank = card.bank {
+            if card == .investments {
+                Text("Inversiones").titan(.cardTitle)
+                Spacer(minLength: 0)
+                let count = portfolioSummary?.positions.count ?? 0
+                Text(count == 1 ? "1 posición" : "\(count) posiciones")
+                    .titan(.meta)
+                    .foregroundStyle(secondary)
+            } else if let bank = card.bank {
                 HStack(spacing: 10) {
                     BankLogo(bank: bank, size: 30)
                     Text(bank.displayName).titan(.cardTitle)
@@ -187,8 +266,11 @@ private struct CardBack: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
     let monthSpent: Int
+    let portfolioSummary: PortfolioSummary?
+    let portfolioLastImport: Date?
     let flipped: Bool
     let onEdit: () -> Void
+    let onImportInvestments: () -> Void
 
     @Environment(\.colorSchemeContrast) private var contrast
     private var secondary: Color { contrast == .increased ? Theme.card2High : Theme.card2 }
@@ -196,7 +278,9 @@ private struct CardBack: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                if let bank = card.bank {
+                if card == .investments {
+                    Text("Inversiones").titan(.cardTitle)
+                } else if let bank = card.bank {
                     BankLogo(bank: bank, size: 30)
                     Text(bank.displayName).titan(.cardTitle)
                 } else {
@@ -210,34 +294,39 @@ private struct CardBack: View {
             }
             .frame(minHeight: 32)
 
-            Text(title)
-                .titan(.cardTitle)
-                .padding(.top, 14)
-            Text(explanation)
-                .titan(.subtitle)
-                .foregroundStyle(secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 4)
+            if card == .investments {
+                investmentsBackBody
+            } else {
+                Text(title)
+                    .titan(.cardTitle)
+                    .padding(.top, 14)
+                Text(explanation)
+                    .titan(.subtitle)
+                    .foregroundStyle(secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 4)
 
-            Spacer(minLength: 16)
+                Spacer(minLength: 16)
 
-            HStack(alignment: .bottom, spacing: Theme.Space.row) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Gastado este mes").titan(.meta).foregroundStyle(secondary)
-                    CountingAmount(cents: monthSpent, revealed: flipped)
-                        .titan(.cardTitle)
-                        .privateAmount()
+                HStack(alignment: .bottom, spacing: Theme.Space.row) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Gastado este mes").titan(.meta).foregroundStyle(secondary)
+                        CountingAmount(cents: monthSpent, revealed: flipped)
+                            .titan(.cardTitle)
+                            .privateAmount()
+                    }
+                    Spacer(minLength: 0)
+                    Button(action: onEdit) {
+                        Text(card == .all ? "Editar saldos" : "Editar saldo")
+                            .titan(.option)
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 16)
+                            .frame(minHeight: 44)
+                            .background(.white, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.pressable)
                 }
-                Spacer(minLength: 0)
-                Button(action: onEdit) {
-                    Text(card == .all ? "Editar saldos" : "Editar saldo")
-                        .titan(.option)
-                        .foregroundStyle(.black)
-                        .padding(.horizontal, 16)
-                        .frame(minHeight: 44)
-                        .background(.white, in: Capsule())
-                }
-                .buttonStyle(.pressable)
             }
         }
         .foregroundStyle(Theme.label)
@@ -245,6 +334,40 @@ private struct CardBack: View {
         .padding(.vertical, 20)
         .frame(maxWidth: .infinity, minHeight: CarouselMetrics.minHeight, maxHeight: .infinity, alignment: .topLeading)
         .background(CardSurface(material: card.material, moves: false))
+    }
+
+    @ViewBuilder
+    private var investmentsBackBody: some View {
+        if let summary = portfolioSummary {
+            HStack(spacing: 6) {
+                Text("Coste:")
+                    .titan(.cardTitle)
+                Text(formatEUR(summary.costCents))
+                    .titan(.cardTitle)
+                    .privateAmount()
+            }
+            .padding(.top, 14)
+        }
+        if let lastImport = portfolioLastImport {
+            Text("Última importación: \(DateText.day(lastImport))")
+                .titan(.subtitle)
+                .foregroundStyle(secondary)
+                .padding(.top, 4)
+        }
+        Spacer(minLength: 16)
+        HStack {
+            Spacer(minLength: 0)
+            Button(action: onImportInvestments) {
+                Text("Importar de nuevo")
+                    .titan(.option)
+                    .foregroundStyle(.black)
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 44)
+                    .background(.white, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+        }
     }
 
     private var title: String {

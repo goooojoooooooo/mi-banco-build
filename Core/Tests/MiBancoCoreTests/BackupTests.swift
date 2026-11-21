@@ -41,7 +41,21 @@ private func tempDirectory() -> URL {
             mutedMerchants: ["glovo"],
             categoryOverrides: ["glovo": .comerFuera],
             dismissedSubscriptions: ["rev|netflix"])
+        s.alertSettings = AlertSettings(everyMovement: false, lowBalance: false, lowBalanceThresholdCents: 4_200,
+                                        largePayment: true, largePaymentThresholdCents: 33_300, income: false,
+                                        subscriptions: false, duplicateCharge: false, weeklyDigest: false,
+                                        spendingPace: false, budgets: false)
         s.budgets = Budgets(monthlyCents: 90_000, byCategory: [.supermercado: 30_000, .ocio: 5_000])
+        // Campos de Plan 2: conexión con un banco, tramos cubiertos por extractos y un movimiento que viene del banco.
+        var link = BankLinkInfo(connectedAt: nov(2), consentValidUntil: nov(30))
+        link.lastSuccessAt = nov(19, 8)
+        link.historyLoaded = true
+        s.links = [.rev: link]
+        s.statementCoverage = [.rev: [DateInterval(start: nov(1), end: nov(10))]]
+        s.movements.append(Movement(bank: .rev, amountCents: -6_000, merchant: "Recibo luz", kind: .payment, source: .bank,
+                                    date: nov(18, 12), bankRef: "ref-1", statementRef: "fila-1", bankStatus: .booked,
+                                    importedAt: nov(19, 8), dayOnly: true, bankMerchant: "ELECTRICA SA",
+                                    excludedFromSpending: false, linkedAt: nov(19, 8)))
         return s
     }
 
@@ -49,6 +63,13 @@ private func tempDirectory() -> URL {
         let s = fullState()
         let file = try decodeBackup(encodeBackup(s, exportedAt: nov(20, 9)))
         #expect(file.ledger == s)
+        #expect(file.ledger.links[.rev]?.historyLoaded == true)
+        #expect(file.ledger.statementCoverage[.rev]?.count == 1)
+        let fromBank = file.ledger.movements.first { $0.source == .bank }
+        #expect(fromBank?.dayOnly == true && fromBank?.bankRef == "ref-1" && fromBank?.statementRef == "fila-1")
+        #expect(fromBank?.bankMerchant == "ELECTRICA SA" && fromBank?.bankStatus == .booked)
+        #expect(file.ledger.alertSettings != AlertSettings())
+        #expect(file.ledger.alertSettings.largePaymentThresholdCents == 33_300)
         #expect(file.version == 1)
         #expect(file.app == "MiBanco")
         #expect(file.exportedAt == nov(20, 9))
@@ -127,4 +148,166 @@ private func tempDirectory() -> URL {
         #expect(Array(data.prefix(3)) == [0xEF, 0xBB, 0xBF])
         #expect(String(decoding: data.dropFirst(3), as: UTF8.self) == movementsCSV(LedgerState(), now: nov(20), calendar: cal))
     }
+
+    @Test func csvNeutralizaFormulasEnColumnasDeTexto() {
+        let evil = pay(1250, "=HYPERLINK(\"http://x\",\"y\")", nov(19), note: "+34 600 000 000")
+        let at = income(500, "@SUM(A1)", nov(18), note: "-cmd")
+        let tab = pay(100, "\tTab", nov(17), note: "\rCR")
+        let csv = movementsCSV(LedgerState(movements: [evil, at, tab]), now: nov(20), calendar: cal)
+        #expect(csv.contains("\"'=HYPERLINK(\"\"http://x\"\",\"\"y\"\")\""))
+        #expect(csv.contains(";'+34 600 000 000;"))
+        #expect(csv.contains(";'@SUM(A1);"))
+        #expect(csv.contains(";'-cmd;"))
+        #expect(csv.contains(";'\tTab;"))
+        #expect(csv.contains("\"'\rCR\""))
+        // Ningún campo de texto empieza ya por un carácter de fórmula.
+        #expect(!csv.contains(";=HYPERLINK"))
+        #expect(!csv.contains(";+34"))
+    }
+
+    @Test func csvNoTocaElImporte() {
+        let neg = pay(1250, "Mercadona", nov(19), isShop: true)
+        let pos = income(2000, "Nómina", nov(18))
+        let csv = movementsCSV(LedgerState(movements: [neg, pos]), now: nov(20), calendar: cal)
+        let rows = csv.components(separatedBy: "\r\n")
+        #expect(rows[1].contains(";20,00;"))
+        #expect(rows[2].contains(";-12,50;"))
+        #expect(!csv.contains("'-12,50"))
+    }
+
+    @Test func copyCurrentSustituyeLaCopiaAnteriorSinDejarTemporales() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(a)
+        try store.copyCurrent(to: "copia.json")
+        try store.save(b)
+        try store.copyCurrent(to: "copia.json")
+        let saved = try Data(contentsOf: dir.appendingPathComponent("copia.json"))
+        #expect(try JSONDecoder().decode(LedgerState.self, from: saved) == b)
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        #expect(names == ["copia.json", "ledger.json"])
+    }
+
+    @Test func copiaQueFallaDejaIntactaLaAnterior() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        try store.save(a)
+        try store.copyCurrent(to: "copia.json")
+        let ledgerURL = dir.appendingPathComponent("ledger.json")
+        // Con ledger.json ilegible la copia falla; si se ejecuta como root no hay forma de provocarlo y no se comprueba.
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: ledgerURL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: ledgerURL.path) }
+        guard !FileManager.default.isReadableFile(atPath: ledgerURL.path) else { return }
+        #expect(throws: (any Error).self) { try store.copyCurrent(to: "copia.json") }
+        let saved = try Data(contentsOf: dir.appendingPathComponent("copia.json"))
+        #expect(try JSONDecoder().decode(LedgerState.self, from: saved) == a)
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        #expect(names == ["copia.json", "ledger.json"])
+    }
+
+    @Test func restaurarGuardaCopiaYSustituye() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        #expect(try store.load() == b)
+        let saved = try Data(contentsOf: dir.appendingPathComponent("antes.json"))
+        #expect(try JSONDecoder().decode(LedgerState.self, from: saved) == a)
+    }
+
+    @Test func siFallaLaCopiaPreviaNoSeRestauraNada() throws {
+        struct Boom: Error {}
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(a)
+        #expect(throws: RestoreError.safetyCopyFailed) {
+            try store.restoreKeepingCopy(b, copyName: "antes.json", makeCopy: { _, _ in throw Boom() })
+        }
+        #expect(try store.load() == a)
+    }
+
+    @Test func copiaQueFallaALaMitadDejaIntactaLaAnteriorTambienComoRoot() throws {
+        struct Boom: Error {}
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        try store.save(a)
+        try store.copyCurrent(to: "copia.json")
+        let before = try Data(contentsOf: dir.appendingPathComponent("copia.json"))
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(b)
+        // La copia escribe algo y falla a mitad: la anterior no se toca y no queda ningún temporal.
+        #expect(throws: Boom.self) {
+            try store.copyCurrent(to: "copia.json", copy: { _, temp in
+                try Data("a medias".utf8).write(to: temp)
+                throw Boom()
+            })
+        }
+        #expect(try Data(contentsOf: dir.appendingPathComponent("copia.json")) == before)
+        let names = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        #expect(names == ["copia.json", "ledger.json"])
+    }
+
+    @Test func restaurarFuncionaConElLibroActualCorrupto() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let corrupt = Data("esto no es json {{{".utf8)
+        try corrupt.write(to: dir.appendingPathComponent("ledger.json"))
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        #expect(try store.load() == b)
+        #expect(try Data(contentsOf: dir.appendingPathComponent("antes.json")) == corrupt)
+        // Una copia corrupta no se ofrece como "lo de antes".
+        #expect(store.copyInfo(named: "antes.json") == nil)
+    }
+
+    @Test func restaurarSinLibroPreviosTambienFunciona() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        #expect(try store.load() == b)
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("antes.json").path))
+    }
+
+    @Test func copyInfoDevuelveLoGuardadoYSuFecha() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        #expect(store.copyInfo(named: "antes.json") == nil)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        try store.save(a)
+        try store.copyCurrent(to: "antes.json")
+        let info = try #require(store.copyInfo(named: "antes.json"))
+        #expect(info.state == a)
+        #expect(abs(info.date.timeIntervalSinceNow) < 120)
+    }
 }
+

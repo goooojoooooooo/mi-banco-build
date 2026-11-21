@@ -29,3 +29,53 @@ public func formatShares(_ shares: Decimal) -> String {
     let sign = rounded < 0 ? "-" : ""
     return sign + integer + (fraction.isEmpty ? "" : "," + fraction)
 }
+
+/// Precio unitario en euros con al menos 2 decimales y hasta 4 si el precio tiene más precisión ("110,00 €", "0,0045 €").
+public func formatUnitPriceEUR(_ price: Decimal) -> String {
+    guard price.isFinite else { return "0,00\u{00A0}€" }
+    var input = price
+    var rounded = Decimal()
+    NSDecimalRound(&rounded, &input, 4, .plain)
+    let plain = "\(rounded.magnitude)"
+    let parts = plain.split(separator: ".", omittingEmptySubsequences: false)
+    var grouped = ""
+    for (i, ch) in String(parts[0]).reversed().enumerated() {
+        if i > 0 && i % 3 == 0 { grouped.append(".") }
+        grouped.append(ch)
+    }
+    let integer = String(grouped.reversed())
+    var fraction = parts.count > 1 ? String(parts[1]).replacingOccurrences(of: "0+$", with: "", options: .regularExpression) : ""
+    while fraction.count < 2 { fraction.append("0") }
+    let sign = rounded < 0 ? "\u{2212}" : ""
+    return "\(sign)\(integer),\(fraction)\u{00A0}€"
+}
+
+/// Resultado de importar una exportación de Trade Republic (se omiten las partes a cero).
+public func formatPortfolioImportSummary(_ summary: ImportSummary) -> String {
+    var parts: [String] = []
+    if summary.added == 1 {
+        parts.append("Importada 1 operación nueva")
+    } else if summary.added > 1 {
+        parts.append("Importadas \(summary.added) operaciones nuevas")
+    } else {
+        parts.append("No había operaciones nuevas")
+    }
+    if summary.alreadyThere > 0 {
+        parts.append(summary.alreadyThere == 1 ? "1 ya estaba" : "\(summary.alreadyThere) ya estaban")
+    }
+    if summary.ignoredRows > 0 {
+        parts.append(summary.ignoredRows == 1 ? "1 fila sin acciones ignorada" : "\(summary.ignoredRows) filas sin acciones ignoradas")
+    }
+    if summary.notTradeRows > 0 {
+        let base = summary.notTradeRows == 1 ? "1 fila no aplicada" : "\(summary.notTradeRows) filas no aplicadas"
+        if summary.notAppliedTypes.isEmpty {
+            parts.append(base)
+        } else {
+            parts.append("\(base) (\(summary.notAppliedTypes.joined(separator: ", ")))")
+        }
+    }
+    if summary.unreadableRows > 0 {
+        parts.append(summary.unreadableRows == 1 ? "1 fila que no se pudo leer" : "\(summary.unreadableRows) filas que no se pudieron leer")
+    }
+    return parts.joined(separator: " · ")
+}

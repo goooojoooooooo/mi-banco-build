@@ -114,7 +114,7 @@ struct MovementRowView: View {
         .buttonStyle(.row)
         .animation(Theme.Motion.morph, value: isFresh)
         .animation(Theme.Motion.quick, value: movement.flaggedNotMine)
-        .contextMenu {
+        .gatedContextMenu(privateTitle: movement.displayMerchant ?? "Movimiento") {
             if logo != nil, let merchant = movement.merchant {
                 Button("No usar este logo", systemImage: "eye.slash") { logos.block(merchant: merchant) }
             }
@@ -214,7 +214,7 @@ struct UnreadRowView: View {
                 .padding(.leading, Theme.Space.gutter + tileSize + 14)
                 .opacity(isLast ? 0 : 1)
         }
-        .contextMenu {
+        .gatedContextMenu(privateTitle: "Aviso sin leer") {
             Button("Borrar", systemImage: "trash", role: .destructive, action: onDelete)
         }
         .accessibilityElement(children: .ignore)

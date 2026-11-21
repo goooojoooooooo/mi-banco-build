@@ -122,53 +122,53 @@ import Testing
     }
 
     /// Fija el criterio único que usan `Ledger.balance` y "Te quedaban" (`LedgerSnapshot.balanceAfter`).
-    @Test func countsTowardBalancePredicateIsPinned() {
+    @Test func addsToReadingPredicateIsPinned() {
         func m(_ source: Movement.Source, bankRef: String? = nil, at: Date) -> Movement {
             Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: source, date: at, bankRef: bankRef)
         }
         let bankBase = ManualBalance(cents: 1, setAt: t, origin: .bank)
         let manualBase = ManualBalance(cents: 1, setAt: t, origin: .manual)
         // Capturados posteriores: cuentan sobre cualquier base.
-        #expect(Ledger.countsTowardBalance(m(.notification, at: t + 1), base: bankBase))
-        #expect(Ledger.countsTowardBalance(m(.wallet, at: t + 1), base: manualBase))
+        #expect(Ledger.addsToReading(m(.notification, at: t + 1), base: bankBase))
+        #expect(Ledger.addsToReading(m(.wallet, at: t + 1), base: manualBase))
         // Ni anteriores ni en el mismo instante de la lectura.
-        #expect(!Ledger.countsTowardBalance(m(.wallet, at: t), base: bankBase))
-        #expect(!Ledger.countsTowardBalance(m(.wallet, at: t - 1), base: bankBase))
+        #expect(!Ledger.addsToReading(m(.wallet, at: t), base: bankBase))
+        #expect(!Ledger.addsToReading(m(.wallet, at: t - 1), base: bankBase))
         // Registros del banco: nunca.
-        #expect(!Ledger.countsTowardBalance(m(.bank, at: t + 1), base: manualBase))
+        #expect(!Ledger.addsToReading(m(.bank, at: t + 1), base: manualBase))
         // R21: enlazado a un registro del banco cuenta solo si es posterior a la lectura (hora precisa).
-        #expect(Ledger.countsTowardBalance(m(.wallet, bankRef: "k", at: t + 1), base: bankBase))
-        #expect(!Ledger.countsTowardBalance(m(.wallet, bankRef: "k", at: t), base: bankBase))
-        #expect(!Ledger.countsTowardBalance(m(.wallet, bankRef: "k", at: t - 1), base: bankBase))
-        #expect(!Ledger.countsTowardBalance(Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: .wallet,
+        #expect(Ledger.addsToReading(m(.wallet, bankRef: "k", at: t + 1), base: bankBase))
+        #expect(!Ledger.addsToReading(m(.wallet, bankRef: "k", at: t), base: bankBase))
+        #expect(!Ledger.addsToReading(m(.wallet, bankRef: "k", at: t - 1), base: bankBase))
+        #expect(!Ledger.addsToReading(Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: .wallet,
                                                      date: t + 1, bankRef: "k", dayOnly: true), base: bankBase))
         // Extracto: solo sobre una base a mano.
-        #expect(Ledger.countsTowardBalance(m(.statement, at: t + 1), base: manualBase))
-        #expect(!Ledger.countsTowardBalance(m(.statement, at: t + 1), base: bankBase))
-        #expect(!Ledger.countsTowardBalance(m(.statement, at: t + 1), base: ManualBalance(cents: 1, setAt: t, origin: .statement)))
+        #expect(Ledger.addsToReading(m(.statement, at: t + 1), base: manualBase))
+        #expect(!Ledger.addsToReading(m(.statement, at: t + 1), base: bankBase))
+        #expect(!Ledger.addsToReading(m(.statement, at: t + 1), base: ManualBalance(cents: 1, setAt: t, origin: .statement)))
         // R27: enlazado cuyo registro ya se conocía al tomar la lectura (importedAt <= lectura) no cuenta; posterior, sí.
         func late(importedAt: Date?) -> Movement {
             Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: .notification, date: t + 300,
                      bankRef: "k", importedAt: importedAt)
         }
-        #expect(!Ledger.countsTowardBalance(late(importedAt: t), base: bankBase))
-        #expect(!Ledger.countsTowardBalance(late(importedAt: t - 60), base: bankBase))
-        #expect(Ledger.countsTowardBalance(late(importedAt: t + 60), base: bankBase))
-        #expect(Ledger.countsTowardBalance(late(importedAt: nil), base: bankBase))
+        #expect(!Ledger.addsToReading(late(importedAt: t), base: bankBase))
+        #expect(!Ledger.addsToReading(late(importedAt: t - 60), base: bankBase))
+        #expect(Ledger.addsToReading(late(importedAt: t + 60), base: bankBase))
+        #expect(Ledger.addsToReading(late(importedAt: nil), base: bankBase))
         // R31: con la hora de la consulta (`fetchedAt`) manda esa, no la de referencia del saldo (`setAt`).
         let fetchedBase = ManualBalance(cents: 1, setAt: t - 60, origin: .bank, fetchedAt: t)
-        #expect(!Ledger.countsTowardBalance(late(importedAt: t), base: fetchedBase))
-        #expect(!Ledger.countsTowardBalance(late(importedAt: t - 30), base: fetchedBase))
-        #expect(Ledger.countsTowardBalance(late(importedAt: t + 1), base: fetchedBase))
-        #expect(Ledger.countsTowardBalance(late(importedAt: nil), base: fetchedBase))
+        #expect(!Ledger.addsToReading(late(importedAt: t), base: fetchedBase))
+        #expect(!Ledger.addsToReading(late(importedAt: t - 30), base: fetchedBase))
+        #expect(Ledger.addsToReading(late(importedAt: t + 1), base: fetchedBase))
+        #expect(Ledger.addsToReading(late(importedAt: nil), base: fetchedBase))
         // Sin `fetchedAt` se usa `setAt`, como antes.
-        #expect(Ledger.countsTowardBalance(late(importedAt: t - 30), base: ManualBalance(cents: 1, setAt: t - 60, origin: .bank)))
+        #expect(Ledger.addsToReading(late(importedAt: t - 30), base: ManualBalance(cents: 1, setAt: t - 60, origin: .bank)))
         // R24: enlazado a una fila de extracto, sobre un saldo de extracto, nunca; sobre un saldo del banco, como R21.
         let stmtLinked = Movement(bank: .rev, amountCents: -100, merchant: nil, kind: .payment, source: .wallet, date: t + 300,
                                   statementRef: "s")
-        #expect(!Ledger.countsTowardBalance(stmtLinked, base: ManualBalance(cents: 1, setAt: t, origin: .statement)))
-        #expect(Ledger.countsTowardBalance(stmtLinked, base: bankBase))
-        #expect(Ledger.countsTowardBalance(stmtLinked, base: manualBase))
+        #expect(!Ledger.addsToReading(stmtLinked, base: ManualBalance(cents: 1, setAt: t, origin: .statement)))
+        #expect(Ledger.addsToReading(stmtLinked, base: bankBase))
+        #expect(Ledger.addsToReading(stmtLinked, base: manualBase))
         // La parte sin fecha (la que usa "Te quedaban" para el movimiento que cae justo en la lectura).
         #expect(Ledger.isBalanceEligible(m(.wallet, at: t), origin: .bank))
         #expect(!Ledger.isBalanceEligible(m(.bank, at: t), origin: .manual))

@@ -177,8 +177,10 @@ public func probableTwinPairs(in movements: [Movement], skipping skip: Set<UUID>
 /// Ids que nunca suman como gasto aunque sean pagos: los traspasos entre tus cuentas, los capturados sin confirmar
 /// (definición de 7 días de Plan 2) y los capturados con pareja probable en una fila del banco (R35, ya el mismo día).
 /// Se calcula una vez por reconstrucción y se pasa a todas las sumas (parámetros `notSpending:`).
-public func spendingExclusions(in state: LedgerState, now: Date) -> Set<UUID> {
-    let transfers = ownTransferIDs(in: state.movements)
+/// `ownTransfers`: el resultado de `ownTransferIDs(in:)` si quien llama ya lo tiene (la instantánea lo necesita aparte
+/// para la lista de traspasos): así el emparejado no se repite.
+public func spendingExclusions(in state: LedgerState, now: Date, ownTransfers: Set<UUID>? = nil) -> Set<UUID> {
+    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
     let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
     return transfers.union(unconfirmed)
         .union(probableTwinCaptureIDs(in: state.movements, skipping: transfers.union(unconfirmed)))

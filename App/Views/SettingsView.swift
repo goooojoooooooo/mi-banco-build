@@ -5,8 +5,13 @@ import MiBancoCore
 /// Los saldos se editan en su fila; solo se guarda un campo que el usuario ha tocado (`dirty`).
 struct SettingsView: View {
     let model: LedgerModel
+    let portfolio: PortfolioModel
     /// Pedido desde la tarjeta de Inicio ("Editar saldo"): enfoca ese banco y se vacía.
     @Binding var focusRequest: BankID?
+    /// Copia de seguridad e importación: abren la hoja raíz y el selector de archivos único.
+    var present: (RootSheet) -> Void = { _ in }
+    var importBackup: () -> Void = {}
+    var importTradeRepublic: () -> Void = {}
 
     @AppStorage("lockEnabled") private var lockEnabled = true
     @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
@@ -66,6 +71,10 @@ struct SettingsView: View {
                 } footer: {
                     SettingsFooter("Al volver a la app te pedirá Face ID o tu código. El ojo de Inicio es el mismo modo privado.")
                 }
+
+                InvestmentsSection(portfolio: portfolio, importTradeRepublic: importTradeRepublic)
+
+                BackupSection(model: model, portfolio: portfolio, present: present, importBackup: importBackup)
 
                 Section {
                     Toggle(isOn: $logoDownloads) {
@@ -250,7 +259,7 @@ private struct BalanceRow: View {
                         .onSubmit(onSubmit)
                         .padding(.horizontal, 10)
                         .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
-                        .background(Color(hex: "#2A2A2D").opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                        .background(Theme.fieldFill.opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                         .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
                         .privateField(editing: focused.wrappedValue == bank)
                         .accessibilityLabel("Saldo de \(bank.displayName)")
@@ -293,9 +302,9 @@ struct OptionLabel: View {
         HStack(spacing: 14) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color(hex: "#D1D1D6"))
+                .foregroundStyle(Theme.iconGlyph)
                 .frame(width: 30, height: 30)
-                .background(Color(hex: "#232325"), in: .rect(cornerRadius: 8, style: .continuous))
+                .background(Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).titan(.option).foregroundStyle(Theme.label)

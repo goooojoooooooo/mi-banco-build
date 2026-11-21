@@ -5,6 +5,7 @@ import MiBancoCore
 /// el gasto de 7 días y la lista por días que sigue a la tarjeta elegida. Todo sale de `model.snapshot`.
 struct HomeView: View {
     let model: LedgerModel
+    let portfolio: PortfolioModel
     /// false mientras se ve otra pestaña o con el bloqueo delante: la llegada no suena ni habla ni mueve nada.
     var isVisible = true
     /// Sube al arrancar (tras la marca) y al desbloquear: Inicio se monta por capas.
@@ -15,7 +16,9 @@ struct HomeView: View {
     /// Hay una hoja de movimiento abierta: la llegada no mueve nada debajo.
     var detailOpen = false
     let openDetail: (UUID) -> Void
+    let openPosition: (String) -> Void
     let openSettings: (BankID?) -> Void
+    let openInvestmentsSettings: () -> Void
 
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
@@ -42,37 +45,48 @@ struct HomeView: View {
 
     var body: some View {
         let snapshot = model.snapshot
-        let entries = snapshot.list(for: snapshot.total == nil ? .all : listCard)
+        let cards = AccountCard.visible(hasInvestments: portfolio.hasPositions)
+        let activeListCard = cards.contains(listCard) ? listCard : .all
+        let entries = snapshot.list(for: snapshot.total == nil ? .all : activeListCard)
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
                 if searching {
-                    SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains, query: query,
-                                  zoom: zoom, onOpen: open)
-                } else if snapshot.total != nil {
-                    CardCarousel(snapshot: snapshot, selection: $selection, flipped: $flipped, motion: motion,
-                                 onEdit: openSettings)
+                    SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains,
+                                  ownTransfers: snapshot.ownTransfers, query: query, zoom: zoom, onOpen: open)
+                } else if snapshot.total != nil || portfolio.hasPositions {
+                    CardCarousel(snapshot: snapshot, cards: cards,
+                                 portfolioSummary: portfolio.summary,
+                                 portfolioLastImport: portfolio.portfolio.lastImport,
+                                 selection: $selection, flipped: $flipped, motion: motion,
+                                 onEdit: openSettings,
+                                 onImportInvestments: openInvestmentsSettings)
                         .modifier(CarouselParallax(motion: motion, enabled: !reduceMotion))
                         .staggeredEntrance(1, rise: 36, scale: 0.97)
                         .padding(.top, 2)
                     Section {
-                        WeekBlock(card: listCard, week: snapshot.weeks[listCard] ?? WeekSpend(), pace: snapshot.pace,
-                                  balance: listCard.bank.flatMap { snapshot.balances[$0] })
-                            .opacity(listHidden ? 0 : 1)
-                            .staggeredEntrance(3, listIndex: 0)
-                        ForEach(entries) { entry in
-                            row(entry, snapshot: snapshot)
+                        if activeListCard == .investments, let summary = portfolio.summary {
+                            PositionRows(summary: summary, onOpen: openPosition)
                                 .opacity(listHidden ? 0 : 1)
-                                .staggeredEntrance(4 + entry.order, listIndex: 1 + entry.order)
-                        }
-                        if entries.isEmpty {
-                            Text("Aún no hay movimientos en esta cuenta.")
-                                .titan(.callout)
-                                .foregroundStyle(Theme.label2)
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 40)
+                        } else {
+                            WeekBlock(card: activeListCard, week: snapshot.weeks[activeListCard] ?? WeekSpend(), pace: snapshot.pace,
+                                      balance: activeListCard.bank.flatMap { snapshot.balances[$0] })
+                                .opacity(listHidden ? 0 : 1)
+                                .staggeredEntrance(3, listIndex: 0)
+                            ForEach(entries) { entry in
+                                row(entry, snapshot: snapshot)
+                                    .opacity(listHidden ? 0 : 1)
+                                    .staggeredEntrance(4 + entry.order, listIndex: 1 + entry.order)
+                            }
+                            if entries.isEmpty {
+                                Text("Aún no hay movimientos en esta cuenta.")
+                                    .titan(.callout)
+                                    .foregroundStyle(Theme.label2)
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.top, 40)
+                            }
                         }
                     } header: {
-                        CardSegments(selection: $selection, motion: motion)
+                        CardSegments(cards: cards, selection: $selection, motion: motion)
                             .padding(.top, 12)
                             .padding(.bottom, 4)
                             .background(Theme.canvas)
@@ -113,6 +127,15 @@ struct HomeView: View {
             guard let new, new != old else { return }
             if !quietSelection { detentTick += 1 }
             showList(for: new)
+            if new == .investments {
+                Task { await portfolio.refreshPrices(force: false) }
+            }
+        }
+        .onChange(of: portfolio.hasPositions) { _, hasPositions in
+            if !hasPositions && (selection == .investments || listCard == .investments) {
+                selection = .all
+                listCard = .all
+            }
         }
         .onChange(of: model.arrival) { _, new in
             if let new { choreograph(new) }
@@ -264,10 +287,10 @@ struct HomeView: View {
         }
         // `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente por el mismo camino que un toque en el segmentado.
         if DemoMode.switchesCard {
+            let cards = AccountCard.visible(hasInvestments: portfolio.hasPositions)
             Task {
                 try? await Task.sleep(for: .seconds(2))
-                let all = AccountCard.allCases
-                let next = all[min((selection ?? .all).index + 1, all.count - 1)]
+                let next = cards[min((selection ?? .all).index(in: cards) + 1, cards.count - 1)]
                 withAnimation(Theme.Motion.cardSettle) { selection = next }
             }
         }
@@ -275,10 +298,23 @@ struct HomeView: View {
             searching = true
             query = text
         }
-        if DemoMode.opensDetail, let first = model.snapshot.searchIndex.first {
+        if DemoMode.opensPosition, let instrument = DemoMode.demoPositionInstrument(in: portfolio.summary) {
             Task {
                 try? await Task.sleep(for: .seconds(1.5))
-                openDetail(first.id)
+                for _ in 0..<10 {
+                    openPosition(instrument)
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
+            }
+        } else if DemoMode.opensDetail, let first = model.snapshot.searchIndex.first {
+            Task {
+                // Se reintenta unos segundos: `openDetail` no abre con la app aún fuera de primer plano (arranque en el simulador de CI);
+                // repetir la misma ruta no hace nada una vez abierta.
+                try? await Task.sleep(for: .seconds(1.5))
+                for _ in 0..<10 {
+                    openDetail(first.id)
+                    try? await Task.sleep(for: .milliseconds(500))
+                }
             }
         }
     }

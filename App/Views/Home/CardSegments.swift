@@ -4,6 +4,7 @@ import SwiftUI
 /// El indicador (cristal en iOS 26+, #1C1C1E antes) no se anima aparte: sigue de forma continua la posición
 /// del carrusel mientras se arrastra, así que nunca va por detrás del dedo. Tocar un segmento desliza el carrusel.
 struct CardSegments: View {
+    let cards: [AccountCard]
     @Binding var selection: AccountCard?
     let motion: HomeMotion
 
@@ -11,7 +12,7 @@ struct CardSegments: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(AccountCard.allCases, id: \.self) { card in
+            ForEach(cards, id: \.self) { card in
                 Button {
                     select(card)
                 } label: {
@@ -31,7 +32,11 @@ struct CardSegments: View {
         .animation(.easeOut(duration: 0.2), value: selection)
         .background(alignment: .leading) {
             GeometryReader { geo in
-                SegmentIndicator(motion: motion, segmentWidth: geo.size.width / CGFloat(AccountCard.allCases.count))
+                SegmentIndicator(
+                    motion: motion,
+                    count: cards.count,
+                    segmentWidth: geo.size.width / CGFloat(max(cards.count, 1))
+                )
             }
         }
         .padding(.horizontal, Theme.Space.gutter)
@@ -45,10 +50,11 @@ struct CardSegments: View {
 /// Solo esta vista lee la posición del carrusel en cada fotograma.
 private struct SegmentIndicator: View {
     let motion: HomeMotion
+    let count: Int
     let segmentWidth: CGFloat
 
     var body: some View {
-        let last = CGFloat(AccountCard.allCases.count - 1)
+        let last = CGFloat(max(count - 1, 0))
         let position = min(max(motion.carouselPosition, 0), last)
         Color.clear
             .frame(width: max(segmentWidth - 6, 0), height: 36)

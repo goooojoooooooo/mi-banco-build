@@ -31,7 +31,7 @@ extension Ledger {
     /// banco va a `bankMerchant`.
     public mutating func reconcile(
         _ records: [BankRecord], bank: BankID, channel: RecordChannel, coverage: DateInterval?, now: Date,
-        calendar: Calendar
+        calendar: Calendar, holdPendingFlips: Bool = false
     ) -> ReconcileReport {
         var report = ReconcileReport()
         let channelSource: Movement.Source = channel == .bank ? .bank : .statement
@@ -66,8 +66,15 @@ extension Ledger {
             if let i = sameKey ?? oldKey {
                 if sameKey == nil { setRef(r.ref, on: i) }
                 var changed = false
-                if channel == .bank, state.movements[i].bankStatus != r.status {
+                // `holdPendingFlips`: sin una lectura de saldo nueva, un pendiente no pasa a apuntado (dejaría de sumar).
+                let holdsFlip = holdPendingFlips && state.movements[i].bankStatus == .pending && r.status == .booked
+                if channel == .bank, !holdsFlip, state.movements[i].bankStatus != r.status {
                     state.movements[i].bankStatus = r.status
+                    changed = true
+                }
+                // El día en que se apuntó (R54), en cuanto el registro llega apuntado.
+                if channel == .bank, !holdsFlip, let day = r.bookedDay, state.movements[i].bookedDay != day {
+                    state.movements[i].bookedDay = day
                     changed = true
                 }
                 if applyName(r.merchant, to: i) { changed = true }
@@ -80,8 +87,11 @@ extension Ledger {
                let i = best(records: r, calendar: calendar, among: { m in
                    m.bankStatus == .pending && m.bankRef != nil && m.bankRef != r.ref && !batchRefs.contains(m.bankRef ?? "")
                }) {
+                // Sin lectura nueva el apunte no se aplica (ni se cuenta como nada): lo hará la siguiente consulta.
+                if holdPendingFlips { continue }
                 state.movements[i].bankRef = r.ref
                 state.movements[i].bankStatus = .booked
+                state.movements[i].bookedDay = r.bookedDay
                 _ = applyName(r.merchant, to: i)
                 report.updated += 1
                 continue
@@ -95,6 +105,7 @@ extension Ledger {
                 if channel == .bank {
                     state.movements[i].bankStatus = r.status
                     state.movements[i].linkedAt = now
+                    state.movements[i].bookedDay = r.bookedDay
                 } else if state.movements[i].bankStatus == nil {
                     state.movements[i].bankStatus = .booked
                 }
@@ -114,18 +125,21 @@ extension Ledger {
                 source: channelSource, date: r.timing.date, isShop: r.isShop,
                 bankRef: channel == .bank ? r.ref : nil, statementRef: channel == .statement ? r.ref : nil,
                 bankStatus: channel == .bank ? r.status : .booked, importedAt: now, dayOnly: !r.timing.isExact,
-                excludedFromSpending: r.excludedFromSpending)
+                excludedFromSpending: r.excludedFromSpending, firstSeenStatus: channel == .bank ? r.status : nil,
+                bookedDay: channel == .bank ? r.bookedDay : nil)
             state.movements.append(movement)
             report.added += 1
             report.addedIDs.append(movement.id)
         }
 
-        // Pendientes que el banco ya no devuelve (solo con cobertura y solo del canal del banco).
+        // Pendientes que el banco ya no devuelve (solo con cobertura y solo del canal del banco): los de dentro de lo
+        // consultado y los atascados (más de `SyncPolicy.pendingReachDays` días, R52), que la ventana ya no alcanza.
         if channel == .bank, let coverage {
             let vanished = state.movements.indices.filter { i in
                 let m = state.movements[i]
                 return m.bank == bank && m.bankStatus == .pending && m.bankRef != nil
-                    && !batchRefs.contains(m.bankRef ?? "") && coverage.contains(m.date)
+                    && !batchRefs.contains(m.bankRef ?? "")
+                    && (coverage.contains(m.date) || Ledger.isStuckPending(m.date, now: now, calendar: calendar))
             }
             var toDelete = Set<UUID>()
             for i in vanished {
@@ -134,12 +148,14 @@ extension Ledger {
                 } else {
                     state.movements[i].bankRef = nil
                     state.movements[i].bankStatus = nil
+                    state.movements[i].bookedDay = nil
                     // Si el mismo pago ya llegó apuntado como fila propia del banco, se funden en UN movimiento.
                     if let j = foldCandidate(for: state.movements[i], excluding: toDelete, batchRefs: batchRefs, calendar: calendar) {
                         let row = state.movements[j]
                         state.movements[i].bankRef = row.bankRef
                         state.movements[i].bankStatus = row.bankStatus
                         state.movements[i].linkedAt = now
+                        state.movements[i].bookedDay = row.bookedDay
                         if state.movements[i].statementRef == nil { state.movements[i].statementRef = row.statementRef }
                         if let name = row.merchant, !name.isEmpty { state.movements[i].bankMerchant = name }
                         state.movements[i].isShop = state.movements[i].isShop || row.isShop

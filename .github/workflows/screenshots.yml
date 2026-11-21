@@ -44,7 +44,10 @@ jobs:
           RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
           if [ "${{ inputs.pequeno }}" = "true" ]; then
-            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1 || true)
+            if [ -z "$DEVICETYPE" ]; then
+              DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone [0-9]+ \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
+            fi
           fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
@@ -98,6 +101,7 @@ jobs:
           shot guia-escribir 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 4
           shot guia-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 10
           shot guia-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
+          shot guia-ayuda 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19 -MiBancoDemoGuideHelpOpen
           shot guia-cartera 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 6
           shot guia-cartera-banco 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 17
           # Con letra de accesibilidad el bloque de botones no debe apretar el contenido.
@@ -111,6 +115,7 @@ jobs:
           if [ "${{ inputs.pequeno }}" = "true" ]; then
             shot guia-pequeno-lista 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
             shot guia-pequeno-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            shot guia-pequeno-ayuda 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19 -MiBancoDemoGuideHelpOpen
             shot guia-pequeno-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 10
             # Letra un punto y tres puntos mayor (sin ser de accesibilidad), retomando el paso 19.
             xcrun simctl ui "$UDID" content_size extra-large

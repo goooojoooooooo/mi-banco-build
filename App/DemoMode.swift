@@ -97,6 +97,8 @@ enum DemoMode {
     /// `-MiBancoDemoGuideReset` lo borra al arrancar.
     static var persistsGuideProgress: Bool { arguments.contains("-MiBancoDemoPersistGuide") }
     static var resetsGuideProgress: Bool { arguments.contains("-MiBancoDemoGuideReset") }
+    /// `-MiBancoDemoGuideHelpOpen`: abre el paso de la guía con «¿No te sale esto?» desplegado (captura de G28).
+    static var opensGuideHelp: Bool { arguments.contains("-MiBancoDemoGuideHelpOpen") }
 
     static var opensDetail: Bool { arguments.contains("-MiBancoDemoDetail") }
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".

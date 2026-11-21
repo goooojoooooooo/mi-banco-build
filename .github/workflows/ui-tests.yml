@@ -36,7 +36,10 @@ jobs:
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
           # Interruptor pequeno: el mismo dispositivo que en screenshots.yml.
           if [ "${{ inputs.pequeno }}" = "true" ]; then
-            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1 || true)
+            if [ -z "$DEVICETYPE" ]; then
+              DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone [0-9]+ \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1)
+            fi
           fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
@@ -101,5 +104,6 @@ jobs:
           name: ui-xcresult
           path: |
             build/ui.xcresult
+            build/ui-primer-intento.xcresult
             build/ui.log
           if-no-files-found: warn

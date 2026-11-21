@@ -268,11 +268,13 @@ struct GuideIllustrationView: View {
         Group {
             if fitted {
                 GeometryReader { geo in
-                    let scale = min(1, geo.size.width / 295, geo.size.height / 395)
+                    let scale = max(0.001, min(1, geo.size.width / 295, geo.size.height / 395))
                     PhoneFrame { mock }
                         .scaleEffect(scale)
+                        .opacity(min(1, max(0, geo.size.height / 120)))
                         .frame(width: geo.size.width, height: geo.size.height)
                 }
+                .clipped()
             } else {
                 PhoneFrame { mock }
             }

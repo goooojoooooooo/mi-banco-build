@@ -159,6 +159,8 @@ struct GuideStepView: View {
             Text(step.title)
                 .font(.system(.title, weight: .bold))
                 .foregroundStyle(Theme.label)
+                // Con cualquier alto propuesto el título se parte en líneas: nunca se corta con «…».
+                .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             Text(Self.styled(step.instruction))
                 .font(.body)
@@ -176,6 +178,7 @@ struct GuideStepView: View {
         } label: {
             Text("Empezar desde el principio")
                 .font(.system(.callout, weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
                 .foregroundStyle(Theme.label2)
                 .frame(minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
@@ -210,6 +213,7 @@ struct GuideStepView: View {
             HStack(spacing: 6) {
                 Text("¿No te sale esto?")
                     .font(.system(.callout, weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
                 Image(systemName: "chevron.down")
                     .font(.system(.caption, weight: .bold))
                     .rotationEffect(.degrees(helpOpen ? 180 : 0))

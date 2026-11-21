@@ -348,5 +348,32 @@ private func tempDirectory() -> URL {
         #expect(info.state == a)
         #expect(abs(info.date.timeIntervalSinceNow) < 120)
     }
+
+    /// Al restaurar una copia, `guideSightings` conserva por guía la fecha más reciente de último aviso (y la más antigua de primero),
+    /// y la operación sigue siendo idempotente (R40).
+    @Test func restaurarConservaElUltimoAvisoMasRecientePorGuia() throws {
+        var local = LedgerState()
+        local.guideSightings = [
+            GuideTrack.revolut.rawValue: GuideSighting(first: nov(5), last: nov(18)),
+            GuideTrack.tradeRepublic.rawValue: GuideSighting(first: nov(8), last: nov(10)),
+            GuideTrack.walletImagin.rawValue: GuideSighting(first: nov(12), last: nov(16)),
+        ]
+        var backup = LedgerState()
+        backup.guideSightings = [
+            GuideTrack.revolut.rawValue: GuideSighting(first: nov(2), last: nov(14)),
+            GuideTrack.tradeRepublic.rawValue: GuideSighting(first: nov(9), last: nov(15)),
+            GuideTrack.walletRevolut.rawValue: GuideSighting(first: nov(7), last: nov(11)),
+        ]
+        var ledger = Ledger(state: local)
+        ledger.restore(backup)
+        #expect(ledger.state.guideSightings[GuideTrack.revolut.rawValue] == GuideSighting(first: nov(2), last: nov(18)))
+        #expect(ledger.state.guideSightings[GuideTrack.tradeRepublic.rawValue] == GuideSighting(first: nov(8), last: nov(15)))
+        #expect(ledger.state.guideSightings[GuideTrack.walletImagin.rawValue] == GuideSighting(first: nov(12), last: nov(16)))
+        #expect(ledger.state.guideSightings[GuideTrack.walletRevolut.rawValue] == GuideSighting(first: nov(7), last: nov(11)))
+        // Idempotencia (R40): volver a restaurar la misma copia deja el mismo estado.
+        let once = ledger.state
+        ledger.restore(backup)
+        #expect(ledger.state == once)
+    }
 }
 

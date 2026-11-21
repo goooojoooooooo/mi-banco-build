@@ -7,6 +7,10 @@ on:
         description: "Clase de pruebas a ejecutar sola (vacio = todas)"
         required: false
         default: ""
+      pequeno:
+        description: "En un iPhone de 393 pt (iPhone 15/16), como en screenshots.yml"
+        type: boolean
+        default: false
       runner:
         description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
@@ -38,6 +42,15 @@ jobs:
           fi
           RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          # Interruptor pequeno (G30 M5): exige un iPhone de 393 pt (15/16) y falla si no existe, sin elegir 402 pt en silencio.
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1 || true)
+            if [ -z "$DEVICETYPE" ]; then
+              echo "No se encontro un simulador de 393 pt (iPhone 15 o 16) para pequeno=true"
+              xcrun simctl list devicetypes | grep -E "^iPhone " || true
+              exit 1
+            fi
+          fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
           UDID=$(xcrun simctl create "MiBancoUI" "$DEVICETYPE" "$RUNTIME")
@@ -49,6 +62,7 @@ jobs:
           fi
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
       - name: Pruebas de toques
         env:
           TEST_CLASS: ${{ github.event.inputs.test_class }}
@@ -63,6 +77,28 @@ jobs:
           else
             SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests"
           fi
+          echo "SELECT=$SELECT" >> "$GITHUB_ENV"
+          xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
+            $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
+          echo "$?" > build/status.txt
+          tail -n 60 build/ui.log
+          exit 0
+      # G26: a veces el simulador no deja arrancar las pruebas y ninguna llega a empezar («The test runner failed to
+      # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulador
+      # y se repite una sola vez la misma orden de «Pruebas de toques».
+      - name: Reintento si las pruebas no llegaron a empezar
+        run: |
+          if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test Case " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
+            exit 0
+          fi
+          echo "== Las pruebas no llegaron a empezar =="
+          grep -E "encountered an error" build/ui.log | head -n 5 || true
+          xcrun simctl shutdown "$UDID" || true
+          xcrun simctl boot "$UDID"
+          perl -e 'alarm 600; exec @ARGV' xcrun simctl bootstatus "$UDID" -b > /dev/null || echo "El simulador tarda en arrancar"
+          mv build/ui.xcresult build/ui-primer-intento.xcresult || true
+          set +e
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
             $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
@@ -95,5 +131,6 @@ jobs:
           name: ui-xcresult
           path: |
             build/ui.xcresult
+            build/ui-primer-intento.xcresult
             build/ui.log
           if-no-files-found: warn

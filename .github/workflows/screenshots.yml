@@ -3,6 +3,10 @@ run-name: screenshots ${{ github.ref_name }}
 on:
   workflow_dispatch:
     inputs:
+      pequeno:
+        description: "Todo en un iPhone de 393 pt (iPhone 15/16), y ademas capturas pequeno de la guia"
+        type: boolean
+        default: false
       runner:
         description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
@@ -43,6 +47,15 @@ jobs:
           fi
           RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          # G30 M5: exige un iPhone de 393 pt (15/16) y falla si no existe, sin elegir 402 pt en silencio.
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1 || true)
+            if [ -z "$DEVICETYPE" ]; then
+              echo "No se encontro un simulador de 393 pt (iPhone 15 o 16) para pequeno=true"
+              xcrun simctl list devicetypes | grep -E "^iPhone " || true
+              exit 1
+            fi
+          fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
           UDID=$(xcrun simctl create "MiBancoShots" "$DEVICETYPE" "$RUNTIME")
@@ -98,10 +111,35 @@ jobs:
           shot ajustes 10 -MiBancoDemoScreen ajustes
           shot ajustes-copia 10 -MiBancoDemoScreen ajustes -MiBancoDemoBackup
           shot restaurar 10 -MiBancoDemoScreen ajustes -MiBancoDemoRestorePreview
+          # La guia de avisos: la lista y pasos de Revolut (apagar «Notificar al ejecutar», rellenar «Titulo») y de Apple Pay.
+          shot guia-avisos 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
+          shot guia-lista-media 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0 -MiBancoDemoGuideHalfway
+          shot guia-escribir 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 4
+          shot guia-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 10
+          shot guia-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
+          shot guia-ayuda 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19 -MiBancoDemoGuideHelpOpen
+          shot guia-cartera 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 6
+          shot guia-cartera-banco 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 17
+          # Con letra de accesibilidad el bloque de botones no debe apretar el contenido.
+          xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
+          shot guia-letra-grande 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
+          xcrun simctl ui "$UDID" content_size large
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.
           shot bloqueo 3.5 -MiBancoDemoLock
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            shot guia-pequeno-lista 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
+            shot guia-pequeno-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            shot guia-pequeno-ayuda 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19 -MiBancoDemoGuideHelpOpen
+            shot guia-pequeno-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 10
+            # Letra un punto y tres puntos mayor (sin ser de accesibilidad), retomando el paso 19.
+            xcrun simctl ui "$UDID" content_size extra-large
+            shot guia-pequeno-campo-xl 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            xcrun simctl ui "$UDID" content_size extra-extra-extra-large
+            shot guia-pequeno-campo-xxxl 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            xcrun simctl ui "$UDID" content_size large
+          fi
           ls -l out
       - uses: actions/upload-artifact@v4
         if: always()

@@ -26,6 +26,34 @@ jobs:
           xcodebuild -version
           xcodebuild -showsdks | grep -i iphoneos
       - run: brew install xcodegen && xcodegen
+      - name: La guia de avisos usa los mismos nombres que los Atajos
+        run: |
+          # Los nombres esperados salen de Core (una cadena por linea, `]` en la primera columna): no hay una segunda lista.
+          CORE=Core/Sources/MiBancoCore/SetupGuide.swift
+          fail() { echo "La guía y los Atajos no usan los mismos nombres: $1"; exit 1; }
+          names_of() {
+            awk -v list="$1" '$0 ~ "^public let " list ": \\[String\\] = \\[" {on=1; next} on && /^\]/ {exit} on {print}' "$CORE" \
+              | grep -o '"[^"]*"' | sed 's/^"//; s/"$//'
+          }
+          check_intent() {
+            list="$1"; file="$2"
+            names=$(names_of "$list")
+            [ -n "$names" ] || fail "no se pudo leer $list de $CORE"
+            action=$(printf '%s\n' "$names" | sed -n 1p)
+            grep -qF "static let title: LocalizedStringResource = \"$action\"" "$file" || fail "titulo de la accion \"$action\" en $file"
+            expected=0
+            while IFS= read -r name; do
+              expected=$((expected + 1))
+              [ "$expected" -eq 1 ] && continue
+              grep -qF "@Parameter(title: \"$name\")" "$file" || fail "@Parameter(title: \"$name\") en $file"
+            done <<< "$names"
+            # Ni un parametro de mas ni de menos: cada @Parameter del archivo esta en la lista.
+            declared=$(grep -c '@Parameter(title:' "$file" || true)
+            [ "$declared" -eq $((expected - 1)) ] || fail "$file declara $declared parametros y la guia espera $((expected - 1))"
+          }
+          check_intent guideNoticeIntentNames App/Intents/RegisterNoticeIntent.swift
+          check_intent guideWalletIntentNames App/Intents/RegisterWalletIntent.swift
+          echo ok
       - name: Archive (sin firmar)
         run: |
           xcodebuild -project MiBanco.xcodeproj -scheme MiBanco -sdk iphoneos -configuration Release \

@@ -8,8 +8,10 @@ import MiBancoCore
 /// (hoja del movimiento más reciente), `-MiBancoDemoPrivate` (modo privado), `-MiBancoDemoSearch <texto>`,
 /// `-MiBancoDemoArrival` (llega un pago a los ~4 s), `-MiBancoDemoLock` (bloqueo y desbloqueo a los ~4 s),
 /// `-MiBancoDemoOnlineLogo` (una tienda fuera del directorio, para la descarga del logo),
-/// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores).
-/// En la demo nada se escribe en el almacén ni en UserDefaults: los cambios viven en memoria.
+/// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores),
+/// `-MiBancoDemoAlertsGuide <rev|tr|wallet|wallet-rev|wallet-tr> <paso>` (wallet = Apple Pay de imagin; con `-MiBancoDemoScreen ajustes`,
+/// abre la guía de avisos en ese paso contando desde 1; con paso 0 solo abre la lista de guías).
+/// En la demo nada se escribe en el almacén ni en UserDefaults (salvo `-MiBancoDemoPersistGuide`): los cambios viven en memoria.
 enum DemoMode {
     enum Screen { case home, spending, alerts, settings }
 
@@ -62,6 +64,60 @@ enum DemoMode {
 
     /// `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente como lo haría un toque en el segmentado.
     static var switchesCard: Bool { arguments.contains("-MiBancoDemoSwitch") }
+
+    /// `-MiBancoDemoAlertsGuide <rev|tr|wallet|wallet-rev|wallet-tr> <paso>` (wallet = Apple Pay de imagin): paso desde 1 (0 = solo la lista); el paso en `step` cuenta desde 0.
+    static var guideStart: (track: GuideTrack?, step: Int)? {
+        guard let flag = arguments.firstIndex(of: "-MiBancoDemoAlertsGuide"), flag + 1 < arguments.count else { return nil }
+        let track: GuideTrack?
+        let number = flag + 2 < arguments.count ? Int(arguments[flag + 2]) ?? 1 : 1
+        // Paso 0: solo la lista de guías (sin entrar en ninguna).
+        if number <= 0 { return (nil, 0) }
+        switch arguments[flag + 1] {
+        case "rev": track = .revolut
+        case "tr": track = .tradeRepublic
+        case "wallet", "wallet-ima": track = .walletImagin
+        case "wallet-rev": track = .walletRevolut
+        case "wallet-tr": track = .walletTradeRepublic
+        default: track = nil
+        }
+        return (track, number - 1)
+    }
+
+    /// `-MiBancoDemoGuideHalfway`: la guía de Apple Pay de imagin queda a medias (paso 9), para ver la lista con una guía empezada.
+    static var guideProgressSeed: [String: String] {
+        var seed: [String: String] = [:]
+        if arguments.contains("-MiBancoDemoGuideHalfway") {
+            seed[GuideTrack.walletImagin.rawValue] = GuideSavedStep(step: 8, of: guideSteps(for: .walletImagin).count).stored
+        }
+        if let (track, number) = guideSeed {
+            seed[track.rawValue] = GuideSavedStep(step: number - 1, of: guideSteps(for: track).count).stored
+        }
+        return seed
+    }
+
+    /// `-MiBancoDemoGuideSeed <rev|tr|wallet|wallet-rev|wallet-tr> <paso>`: la guía queda guardada en ese paso (desde 1) y
+    /// se abre retomándola, como al volver a entrar desde la lista.
+    static var guideSeed: (track: GuideTrack, number: Int)? {
+        guard let flag = arguments.firstIndex(of: "-MiBancoDemoGuideSeed"), flag + 2 < arguments.count,
+              let number = Int(arguments[flag + 2]), number >= 2 else { return nil }
+        let track: GuideTrack
+        switch arguments[flag + 1] {
+        case "rev": track = .revolut
+        case "tr": track = .tradeRepublic
+        case "wallet", "wallet-ima": track = .walletImagin
+        case "wallet-rev": track = .walletRevolut
+        case "wallet-tr": track = .walletTradeRepublic
+        default: return nil
+        }
+        return (track, number)
+    }
+
+    /// `-MiBancoDemoPersistGuide`: la demo guarda el último paso de cada guía en UserDefaults (prueba de reinicio);
+    /// `-MiBancoDemoGuideReset` lo borra al arrancar.
+    static var persistsGuideProgress: Bool { arguments.contains("-MiBancoDemoPersistGuide") }
+    static var resetsGuideProgress: Bool { arguments.contains("-MiBancoDemoGuideReset") }
+    /// `-MiBancoDemoGuideHelpOpen`: abre el paso de la guía con «¿No te sale esto?» desplegado (captura de G28).
+    static var opensGuideHelp: Bool { arguments.contains("-MiBancoDemoGuideHelpOpen") }
 
     /// `-MiBancoDemoMonth <n>`: en Gasto, desplazamiento de meses respecto al actual (p. ej. `-1` = el mes anterior).
     static var monthOffset: Int { value(after: "-MiBancoDemoMonth").flatMap(Int.init) ?? 0 }

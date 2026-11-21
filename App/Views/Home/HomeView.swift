@@ -101,11 +101,11 @@ struct HomeView: View {
                             WeekBlock(card: activeListCard, week: snapshot.weeks[activeListCard] ?? WeekSpend(), pace: snapshot.pace,
                                       balance: activeListCard.bank.flatMap { snapshot.balances[$0] })
                                 .opacity(listHidden ? 0 : 1)
-                                .staggeredEntrance(3, listIndex: 0)
+                                .staggeredEntrance(4, listIndex: 1)
                             ForEach(entries) { entry in
                                 row(entry, snapshot: snapshot)
                                     .opacity(listHidden ? 0 : 1)
-                                    .staggeredEntrance(4 + entry.order, listIndex: 1 + entry.order)
+                                    .staggeredEntrance(5 + entry.order, listIndex: 2 + entry.order)
                             }
                             if entries.isEmpty {
                                 Text("Aún no hay movimientos en esta cuenta.")

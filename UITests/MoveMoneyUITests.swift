@@ -49,6 +49,20 @@ final class MoveMoneyUITests: XCTestCase {
         }
     }
 
+    /// Arrastre desde el centro del pulgar (48 pt) hasta el extremo derecho, con reintento (mismo patrón que `Plan3TapTests`).
+    private func dragSlide(_ slider: XCUIElement, until target: XCUIElement) -> Bool {
+        for _ in 0..<2 {
+            let frame = slider.frame
+            guard frame.width > 60 else { continue }
+            let origin = slider.coordinate(withNormalizedOffset: .zero)
+            let from = origin.withOffset(CGVector(dx: 28, dy: frame.height / 2))
+            let to = origin.withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
+            from.press(forDuration: 0.3, thenDragTo: to, withVelocity: 300, thenHoldForDuration: 0.2)
+            if target.waitForExistence(timeout: 8) { return true }
+        }
+        return target.waitForExistence(timeout: 4)
+    }
+
     func testMoveToRevolut() throws {
         launch(["-MiBancoDemoCard", "ima"])
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
@@ -78,12 +92,9 @@ final class MoveMoneyUITests: XCTestCase {
         let slider = element("move-slide")
         scrollTo(slider)
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "Falta Desliza para preparar")
-        let start = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.5))
-        let end = slider.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-        start.press(forDuration: 0.05, thenDragTo: end)
 
         let copied = app.staticTexts["IBAN de Revolut copiado"]
-        XCTAssertTrue(copied.waitForExistence(timeout: 10), "No apareció IBAN de Revolut copiado")
+        XCTAssertTrue(dragSlide(slider, until: copied), "No apareció IBAN de Revolut copiado")
 
         let openBank = app.buttons["Abrir imagin"]
         let fallbackHint = app.staticTexts["Abre imagin y pega el IBAN."]
@@ -122,20 +133,22 @@ final class MoveMoneyUITests: XCTestCase {
         scrollTo(maskedIma)
         XCTAssertTrue(maskedIma.waitForExistence(timeout: 8), "No aparece el IBAN enmascarado ES91 •••• 1332")
 
-        let addContact = app.buttons["Añadir contacto"]
+        let addContact = element("accounts-add-payee")
         scrollTo(addContact)
         XCTAssertTrue(addContact.waitForExistence(timeout: 8), "Falta el botón Añadir contacto")
         addContact.tap()
 
         let nameField = app.textFields["payeeNameField"]
+        scrollTo(nameField)
         XCTAssertTrue(nameField.waitForExistence(timeout: 5), "Falta el campo de nombre")
         nameField.tap()
-        nameField.typeText("Prueba")
+        nameField.typeText("Prueba\n")
 
         let ibanField = app.textFields["payeeIBANField"]
+        scrollTo(ibanField)
         XCTAssertTrue(ibanField.waitForExistence(timeout: 5), "Falta el campo de IBAN del contacto")
         ibanField.tap()
-        ibanField.typeText("ES91 2100")
+        ibanField.typeText("ES91 2100\n")
 
         let saveButton = app.buttons["Guardar contacto"]
         scrollTo(saveButton)
@@ -175,5 +188,32 @@ final class MoveMoneyUITests: XCTestCase {
         let netflix = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS 'Netflix'")).firstMatch
         scrollTo(netflix)
         XCTAssertTrue(netflix.waitForExistence(timeout: 8), "Netflix no aparece en los próximos 14 días")
+    }
+
+    func testMoveMoneyAndCalendarPrivateModeHidesAmounts() throws {
+        launch(["-MiBancoDemoCard", "ima", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+
+        let moveButton = app.buttons["Mover dinero"]
+        XCTAssertTrue(moveButton.waitForExistence(timeout: 10), "Falta Mover dinero")
+        moveButton.tap()
+        XCTAssertTrue(app.navigationBars["Mover dinero"].waitForExistence(timeout: 8), "No se abrió Mover dinero")
+
+        let revolutTarget = element("move-target-rev")
+        scrollTo(revolutTarget)
+        XCTAssertTrue(revolutTarget.waitForExistence(timeout: 8), "No aparece Revolut")
+        revolutTarget.tap()
+
+        XCTAssertTrue(app.buttons["2"].waitForExistence(timeout: 8), "No apareció el teclado")
+        app.buttons["2"].tap()
+        app.buttons["0"].tap()
+        app.buttons["0"].tap()
+
+        let euroTexts = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '€'"))
+        XCTAssertEqual(euroTexts.count, 0, "Mover dinero expuso € a VoiceOver en modo privado")
+        let euroButtons = app.buttons.matching(NSPredicate(format: "label CONTAINS '€'"))
+        XCTAssertEqual(euroButtons.count, 0, "Los chips de Mover dinero expusieron € en modo privado")
+
+        app.buttons["Cerrar"].tap()
     }
 }

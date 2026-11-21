@@ -34,6 +34,12 @@ struct AccountBookStore {
     #endif
 
     static func load() -> AccountBook {
+        (try? loadThrowing()) ?? AccountBook()
+    }
+
+    /// Lectura que distingue ausencia real (`errSecItemNotFound` → libro vacío) de un error temporal del Llavero
+    /// (p. ej. `errSecInteractionNotAllowed`), para que `reload()` nunca borre el estado en memoria por un fallo transitorio.
+    static func loadThrowing() throws -> AccountBook {
         #if DEBUG
         if DemoMode.isActive { return demo.load() }
         #endif
@@ -42,10 +48,18 @@ struct AccountBookStore {
         request[kSecMatchLimit] = kSecMatchLimitOne
         var result: CFTypeRef?
         let status = SecItemCopyMatching(request as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else {
+        switch status {
+        case errSecSuccess:
+            guard let data = result as? Data,
+                  let decoded = try? JSONDecoder().decode(AccountBook.self, from: data) else {
+                throw KeychainError.decoding
+            }
+            return decoded
+        case errSecItemNotFound:
             return AccountBook()
+        default:
+            throw KeychainError.status(status)
         }
-        return (try? JSONDecoder().decode(AccountBook.self, from: data)) ?? AccountBook()
     }
 
     static func save(_ book: AccountBook) throws {
@@ -94,7 +108,7 @@ final class AccountBookModel {
     }
 
     func reload() {
-        let loaded = AccountBookStore.load()
+        guard let loaded = try? AccountBookStore.loadThrowing() else { return }
         if loaded != book { book = loaded }
     }
 

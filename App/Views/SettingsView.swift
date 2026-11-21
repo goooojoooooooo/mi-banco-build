@@ -42,11 +42,20 @@ struct SettingsView: View {
                                    error: errors[bank], saved: savedFlash.contains(bank), focused: $focused,
                                    onSubmit: { commit(bank) })
                     }
-                    NavigationLink {
-                        AccountsView(accountBook: accountBook)
+                    Button {
+                        showAccounts = true
                     } label: {
-                        OptionLabel(title: "Cuentas y contactos", detail: "IBAN, colchón mínimo y destinatarios", systemImage: "building.columns")
+                        HStack(spacing: Theme.Space.row) {
+                            OptionLabel(title: "Cuentas y contactos", detail: "IBAN, colchón mínimo y destinatarios", systemImage: "building.columns")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.passive)
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityIdentifier("settings-accounts")
                     .listRowBackground(Theme.grouped)
                 } header: {

@@ -148,7 +148,7 @@ final class LedgerModel {
                 states[move.id] = .done(movementID: movementID)
                 if case .own = move.target,
                    let match = state.movements.first(where: { $0.id == movementID }),
-                   match.ownTransfer != true {
+                   match.ownTransfer == nil {
                     ownTransfersToMark.append(movementID)
                 }
                 if doneMoveTimers[move.id] == nil {
@@ -156,7 +156,10 @@ final class LedgerModel {
                     doneMoveTimers[moveID] = Task { [weak self] in
                         try? await Task.sleep(for: .seconds(6))
                         guard !Task.isCancelled, let self else { return }
-                        self.removePendingMove(moveID)
+                        let anim: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.quick
+                        withAnimation(anim) {
+                            self.removePendingMove(moveID)
+                        }
                     }
                 }
             }

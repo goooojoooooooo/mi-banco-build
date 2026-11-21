@@ -65,6 +65,7 @@ struct AccountsView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("accounts-add-payee")
                 .listRowBackground(Theme.grouped)
                 .listRowSeparatorTint(Theme.separator)
 
@@ -87,7 +88,12 @@ struct AccountsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: loadFloorTexts)
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { focusedField = nil }
+            if phase != .active {
+                focusedField = nil
+                editingIBANBank = nil
+                ibanDraft = ""
+                ibanError = nil
+            }
         }
         .onChange(of: focusedField) { old, _ in
             if case .floor(let bank) = old { commitFloor(bank) }
@@ -141,7 +147,7 @@ struct AccountsView: View {
                         .frame(minHeight: 44)
                         .background(Theme.raised, in: Capsule())
                         .contentShape(Capsule())
-                        .gesture(
+                        .simultaneousGesture(
                             DragGesture(minimumDistance: 0)
                                 .updating($revealedBank) { _, state, _ in
                                     state = bank
@@ -169,6 +175,7 @@ struct AccountsView: View {
                         .padding(.horizontal, 12)
                         .frame(minHeight: 44)
                         .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                        .privacySensitive()
                         .accessibilityLabel("IBAN de \(bank.displayName)")
                     if let ibanError {
                         Text(ibanError)
@@ -287,7 +294,9 @@ struct AccountsView: View {
             TextField("Nombre", text: $payeeName)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
+                .submitLabel(.done)
                 .focused($focusedField, equals: .payeeName)
+                .onSubmit { focusedField = nil }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
@@ -298,20 +307,26 @@ struct AccountsView: View {
                 .foregroundStyle(Theme.label)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
+                .submitLabel(.done)
                 .focused($focusedField, equals: .payeeIBAN)
+                .onSubmit { focusedField = nil }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .privacySensitive()
                 .accessibilityIdentifier("payeeIBANField")
 
             TextField("Móvil español (opcional)", text: $payeePhone)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
                 .keyboardType(.phonePad)
+                .submitLabel(.done)
                 .focused($focusedField, equals: .payeePhone)
+                .onSubmit { focusedField = nil }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .privacySensitive()
                 .accessibilityIdentifier("payeePhoneField")
 
             if let payeeError {

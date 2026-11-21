@@ -27,7 +27,8 @@ struct QuickActions: View {
                     }
                     if bank == .rev {
                         chip("Añadir dinero", systemImage: "plus") {
-                            onMove(MoveRequest(from: bestSource(excluding: .rev), target: .own(.rev)))
+                            // Sin fijar origen para que `whereToPay` elija dinámicamente el banco que mejor encaja según el importe.
+                            onMove(MoveRequest(from: nil, target: .own(.rev)))
                         }
                     }
                     if let iban = accountBook.book.ibans[bank] {
@@ -66,35 +67,12 @@ struct QuickActions: View {
             }
             .foregroundStyle(Theme.label)
             .padding(.horizontal, 14)
-            .frame(height: 36)
+            .padding(.vertical, 8)
+            .frame(minHeight: 36)
             .background(Theme.raised, in: Capsule())
             .frame(minHeight: 44)
             .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
-    }
-
-    private func bestSource(excluding dest: BankID) -> BankID? {
-        let now = Date()
-        var balances: [BankID: Int] = [:]
-        var estimated = Set<BankID>()
-        for bank in BankID.allCases where bank != dest {
-            if let info = model.snapshot.balances[bank] {
-                balances[bank] = info.cents
-                if info.estimated { estimated.insert(bank) }
-            }
-        }
-        let included = Set(BankID.allCases.filter { $0 != dest })
-        let upcoming = upcomingCalendar(state: model.state, book: accountBook.book, now: now, calendar: DateText.madridCalendar)
-            .prefix(7)
-            .flatMap(\.charges)
-        return whereToPay(
-            amountCents: 10_000,
-            balances: balances,
-            floors: accountBook.book.floors,
-            upcoming: Array(upcoming),
-            included: included,
-            estimated: estimated
-        ).first(where: \.fits)?.bank
     }
 }

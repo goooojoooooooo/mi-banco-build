@@ -18,7 +18,7 @@ struct KeypadAmount: Equatable, Sendable {
         self.eurosText = whole > 0 ? String(whole) : "0"
         if frac > 0 {
             self.hasDecimal = true
-            self.centsText = String(format: "%02d", frac)
+            self.centsText = frac % 10 == 0 ? String(frac / 10) : String(format: "%02d", frac)
         }
     }
 

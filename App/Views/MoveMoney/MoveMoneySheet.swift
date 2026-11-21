@@ -21,10 +21,17 @@ struct MoveMoneySheet: View {
         case ready(from: BankID, target: MoveTarget, amountCents: Int, kind: PasteKind)
     }
 
+    private struct SourceChoice: Equatable {
+        let option: PayOption
+        let hasKnownBalance: Bool
+    }
+
     @State private var step: Step = .target
     @State private var chosenTarget: MoveTarget?
     @State private var chosenFrom: BankID?
     @State private var amount = KeypadAmount()
+    /// Cobros próximos (7 días) cacheados para no recalcular en cada toque del teclado.
+    @State private var cachedUpcoming: [UpcomingCharge] = []
     /// Destino propio elegido al que aún le falta el IBAN (se pide en línea antes de seguir).
     @State private var missingIBANBank: BankID?
     @State private var inlineIBAN = ""
@@ -48,6 +55,19 @@ struct MoveMoneySheet: View {
         #else
         return false
         #endif
+    }
+
+    private var targetPasteKind: PasteKind? {
+        guard let target = chosenTarget else { return nil }
+        switch target {
+        case .own(let bank):
+            return accountBook.book.ibans[bank] != nil ? .iban : nil
+        case .payee(let id):
+            guard let payee = accountBook.payee(id: id) else { return nil }
+            if payee.iban != nil { return .iban }
+            if payee.phone != nil { return .phone }
+            return nil
+        }
     }
 
     var body: some View {
@@ -94,7 +114,12 @@ struct MoveMoneySheet: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { fieldFocused = false }
         }
-        .onAppear(perform: configureInitialState)
+        .onAppear {
+            configureInitialState()
+            refreshUpcoming()
+        }
+        .onChange(of: model.state) { _, _ in refreshUpcoming() }
+        .onChange(of: accountBook.book) { _, _ in refreshUpcoming() }
         .sensoryFeedback(Haptics.success, trigger: successTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
@@ -250,10 +275,13 @@ struct MoveMoneySheet: View {
                 .foregroundStyle(Theme.label)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
+                .submitLabel(.done)
                 .focused($fieldFocused)
+                .onSubmit { saveInlineIBAN(for: bank) }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .privacySensitive()
                 .accessibilityLabel("IBAN de \(bank.displayName)")
             Text("Se guarda solo en este iPhone.")
                 .titan(.meta)
@@ -286,7 +314,9 @@ struct MoveMoneySheet: View {
             TextField("Nombre", text: $newPayeeName)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
+                .submitLabel(.done)
                 .focused($fieldFocused)
+                .onSubmit { fieldFocused = false }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
@@ -295,18 +325,24 @@ struct MoveMoneySheet: View {
                 .foregroundStyle(Theme.label)
                 .textInputAutocapitalization(.characters)
                 .autocorrectionDisabled()
+                .submitLabel(.done)
                 .focused($fieldFocused)
+                .onSubmit { fieldFocused = false }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .privacySensitive()
             TextField("Móvil para Bizum (opcional)", text: $newPayeePhone)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
                 .keyboardType(.phonePad)
+                .submitLabel(.done)
                 .focused($fieldFocused)
+                .onSubmit { fieldFocused = false }
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .privacySensitive()
             Text("Se guarda solo en este iPhone.")
                 .titan(.meta)
                 .foregroundStyle(Theme.label3)
@@ -337,9 +373,10 @@ struct MoveMoneySheet: View {
 
     private var amountStep: some View {
         let hidden = preferences.privateMode
-        let options = sourceOptions(for: amount.cents)
-        let activeFrom = resolvedFrom(among: options)
-        let canConfirm = amount.cents > 0 && activeFrom != nil && chosenTarget != nil
+        let choices = sourceChoices(for: amount.cents)
+        let activeFrom = resolvedFrom(among: choices)
+        let unsupportedPhoneFromTR = activeFrom == .tr && targetPasteKind == .phone
+        let canConfirm = amount.cents > 0 && activeFrom != nil && chosenTarget != nil && targetPasteKind != nil && !unsupportedPhoneFromTR
 
         return ScrollView {
             VStack(spacing: 18) {
@@ -359,8 +396,11 @@ struct MoveMoneySheet: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                     .frame(maxWidth: .infinity)
-                    .privateAmount(radius: 14)
-                    .accessibilityLabel(spokenAmount(amount.cents, hidden: hidden))
+                    .blur(radius: hidden ? 14 : 0, opaque: false)
+                    .opacity(hidden ? 0.75 : 1)
+                    .privacySensitive()
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(hidden ? "importe oculto" : amount.formattedEUR)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Desde")
@@ -371,8 +411,8 @@ struct MoveMoneySheet: View {
 
                     ScrollView(.horizontal) {
                         HStack(spacing: 10) {
-                            ForEach(options, id: \.bank) { option in
-                                sourceChip(option: option, selected: activeFrom == option.bank, hidden: hidden)
+                            ForEach(choices, id: \.option.bank) { choice in
+                                sourceChip(choice: choice, selected: activeFrom == choice.option.bank, hidden: hidden)
                             }
                         }
                     }
@@ -381,7 +421,15 @@ struct MoveMoneySheet: View {
 
                 AmountKeypad(amount: $amount)
 
-                if canConfirm, let from = activeFrom, let target = chosenTarget {
+                if unsupportedPhoneFromTR {
+                    Text(bankTransferHint(from: .tr, kind: .phone, amountCents: amount.cents))
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.warning)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                } else if canConfirm, let from = activeFrom, let target = chosenTarget {
                     SlideToConfirm(
                         title: "Desliza para preparar",
                         systemImage: "doc.on.doc",
@@ -406,14 +454,21 @@ struct MoveMoneySheet: View {
         .scrollIndicators(.hidden)
     }
 
-    private func sourceChip(option: PayOption, selected: Bool, hidden: Bool) -> some View {
+    private func sourceChip(choice: SourceChoice, selected: Bool, hidden: Bool) -> some View {
+        let option = choice.option
         let prefix = option.isEstimated ? "≈\u{00A0}" : ""
-        let detail = option.fits
-            ? "te quedarían \(prefix)\(formatEUR(option.leftAfterCents))"
-            : "no llega"
-        let spokenDetail = option.fits
-            ? (hidden ? "importe oculto" : "te quedarían \(spokenAmount(option.leftAfterCents, hidden: false))")
-            : "no llega"
+        let detail: String
+        let spokenDetail: String
+        if !choice.hasKnownBalance {
+            detail = "sin saldo"
+            spokenDetail = "sin saldo"
+        } else if option.fits {
+            detail = "te quedarían \(prefix)\(formatEUR(option.leftAfterCents))"
+            spokenDetail = hidden ? "importe oculto" : "te quedarían \(spokenAmount(option.leftAfterCents, hidden: false))"
+        } else {
+            detail = "no llega"
+            spokenDetail = "no llega"
+        }
 
         return Button {
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
@@ -428,7 +483,10 @@ struct MoveMoneySheet: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(selected ? Theme.onTileSelected : Theme.label)
                     Group {
-                        if option.fits {
+                        if !choice.hasKnownBalance {
+                            Text(detail)
+                                .foregroundStyle(selected ? Color.black.opacity(0.65) : Theme.label3)
+                        } else if option.fits {
                             Text(detail)
                                 .foregroundStyle(selected ? Color.black.opacity(0.7) : Theme.label2)
                                 .privateAmount()
@@ -464,7 +522,8 @@ struct MoveMoneySheet: View {
         let rawHint = bankTransferHint(from: from, kind: kind, amountCents: amountCents)
         let shownHint = preferences.privateMode ? maskingAmounts(rawHint) : rawHint
         let spokenHint = preferences.privateMode ? maskingAmounts(rawHint, with: "importe oculto") : rawHint
-        let canOpenBank = BankApps.canOpen(from)
+        let supportedPair = !(from == .tr && kind == .phone)
+        let canOpenBank = supportedPair && BankApps.canOpen(from)
 
         return ScrollView {
             VStack(spacing: 20) {
@@ -495,7 +554,7 @@ struct MoveMoneySheet: View {
                         .foregroundStyle(Theme.label)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel(spokenHint)
-                    if !canOpenBank {
+                    if supportedPair && !canOpenBank {
                         Text(kind == .iban
                              ? "Abre \(from.displayName) y pega el IBAN."
                              : "Abre \(from.displayName) y pega el número.")
@@ -543,6 +602,11 @@ struct MoveMoneySheet: View {
     }
 
     // MARK: - Lógica
+
+    private func refreshUpcoming() {
+        let days = upcomingCalendar(state: model.state, book: accountBook.book, now: Date(), calendar: DateText.madridCalendar)
+        cachedUpcoming = Array(days.prefix(7).flatMap(\.charges))
+    }
 
     private func configureInitialState() {
         guard !initialized else { return }
@@ -700,9 +764,7 @@ struct MoveMoneySheet: View {
         return "Sin datos"
     }
 
-    private func sourceOptions(for cents: Int) -> [PayOption] {
-        let now = Date()
-        let cal = DateText.madridCalendar
+    private func sourceChoices(for cents: Int) -> [SourceChoice] {
         let snapshot = model.snapshot
         var balances: [BankID: Int] = [:]
         var estimated = Set<BankID>()
@@ -716,28 +778,41 @@ struct MoveMoneySheet: View {
         if case .own(let dest) = chosenTarget {
             included.remove(dest)
         }
-        let upcoming = upcomingCalendar(state: model.state, book: accountBook.book, now: now, calendar: cal)
-            .prefix(7)
-            .flatMap(\.charges)
         let ranked = whereToPay(
             amountCents: cents,
             balances: balances,
             floors: accountBook.book.floors,
-            upcoming: Array(upcoming),
+            upcoming: cachedUpcoming,
             included: included,
             estimated: estimated
         )
-        if !ranked.isEmpty { return ranked }
-        return BankID.allCases
-            .filter { included.contains($0) }
-            .map { PayOption(bank: $0, leftAfterCents: -cents, fits: false, isEstimated: true) }
+        var choices = ranked.map { SourceChoice(option: $0, hasKnownBalance: true) }
+        let present = Set(ranked.map(\.bank))
+        for bank in BankID.allCases where included.contains(bank) && !present.contains(bank) {
+            choices.append(
+                SourceChoice(
+                    option: PayOption(bank: bank, leftAfterCents: -cents, fits: false, isEstimated: true),
+                    hasKnownBalance: false
+                )
+            )
+        }
+        return choices
     }
 
-    private func resolvedFrom(among options: [PayOption]) -> BankID? {
-        if let chosenFrom, options.contains(where: { $0.bank == chosenFrom }) {
+    private func resolvedFrom(among choices: [SourceChoice]) -> BankID? {
+        if let chosenFrom, choices.contains(where: { $0.option.bank == chosenFrom }) {
             return chosenFrom
         }
-        return options.first(where: \.fits)?.bank ?? options.first?.bank
+        if targetPasteKind == .phone {
+            if let nonTRFit = choices.first(where: { $0.hasKnownBalance && $0.option.fits && $0.option.bank != .tr }) {
+                return nonTRFit.option.bank
+            }
+            if let nonTR = choices.first(where: { $0.option.bank != .tr }) {
+                return nonTR.option.bank
+            }
+        }
+        return choices.first(where: { $0.hasKnownBalance && $0.option.fits })?.option.bank
+            ?? choices.first?.option.bank
     }
 
     private func prepareTransfer(from: BankID, target: MoveTarget, cents: Int) {
@@ -759,7 +834,7 @@ struct MoveMoneySheet: View {
                 kind = .iban
             }
         }
-        guard let value = clipboardValue else {
+        guard !(from == .tr && kind == .phone), let value = clipboardValue else {
             slideAttempt += 1
             errorTick += 1
             return

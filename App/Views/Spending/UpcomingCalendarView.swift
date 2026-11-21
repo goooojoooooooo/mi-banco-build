@@ -11,15 +11,17 @@ struct UpcomingCalendarView: View {
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var showQuietDays = false
 
     var body: some View {
         let now = Date()
         let cal = DateText.madridCalendar
         let days = upcomingCalendar(state: model.state, book: accountBook.book, now: now, calendar: cal)
-        let activeDays = days.filter { !$0.isEmpty || !$0.belowFloor.isEmpty }
+        let firstBelow = firstBelowFloorDays(days)
+        let firstBelowDays = Set(firstBelow.values)
+        let activeDays = days.filter { !$0.isEmpty || firstBelowDays.contains($0.day) }
         let displayedDays = showQuietDays ? days : activeDays
-        let shortfallMap = shortfallLookup(days: days, now: now, calendar: cal)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -44,7 +46,7 @@ struct UpcomingCalendarView: View {
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
                 } else {
                     ForEach(displayedDays, id: \.day) { day in
-                        dayCard(day, now: now, calendar: cal, shortfalls: shortfallMap)
+                        dayCard(day, allDays: days, firstBelow: firstBelow, now: now, calendar: cal)
                     }
                 }
 
@@ -76,12 +78,17 @@ struct UpcomingCalendarView: View {
 
     private func dayCard(
         _ day: UpcomingDay,
+        allDays: [UpcomingDay],
+        firstBelow: [BankID: Date],
         now: Date,
-        calendar: Calendar,
-        shortfalls: [BankID: Shortfall]
+        calendar: Calendar
     ) -> some View {
         let hidden = preferences.privateMode
         let title = dayHeading(day.day, now: now, calendar: calendar)
+        let warningBanks = BankID.allCases.filter { bank in
+            firstBelow[bank] == day.day
+                || (day.belowFloor.contains(bank) && day.charges.contains { $0.bank == bank })
+        }
         let hasWarning = !day.belowFloor.isEmpty
 
         return VStack(alignment: .leading, spacing: 12) {
@@ -115,10 +122,8 @@ struct UpcomingCalendarView: View {
                 .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
             }
 
-            if !day.belowFloor.isEmpty {
-                ForEach(BankID.allCases.filter { day.belowFloor.contains($0) }, id: \.self) { bank in
-                    shortfallActionButton(bank: bank, day: day, shortfall: shortfalls[bank], hidden: hidden)
-                }
+            ForEach(warningBanks, id: \.self) { bank in
+                shortfallActionButton(bank: bank, day: day, allDays: allDays, hidden: hidden)
             }
 
             if !day.balanceAfter.isEmpty {
@@ -177,7 +182,7 @@ struct UpcomingCalendarView: View {
     }
 
     private func incomeRow(_ income: ExpectedIncome, divided: Bool, hidden: Bool) -> some View {
-        let spoken = "\(income.name), ingreso estimado en \(income.bank.displayName), \(spokenAmount(income.amountCents, hidden: hidden))"
+        let spoken = "\(income.name), ingreso estimado en \(income.bank.displayName), \(spokenAmount(income.cents, hidden: hidden))"
         return HStack(spacing: 12) {
             BankLogo(bank: income.bank, size: 28)
             VStack(alignment: .leading, spacing: 2) {
@@ -189,7 +194,7 @@ struct UpcomingCalendarView: View {
                     .foregroundStyle(Theme.label3)
             }
             Spacer(minLength: 8)
-            Text("+\(formatEUR(income.amountCents))")
+            Text("+\(formatEUR(income.cents))")
                 .titan(.option)
                 .foregroundStyle(Theme.income)
                 .privateAmount()
@@ -206,12 +211,12 @@ struct UpcomingCalendarView: View {
         .accessibilityLabel(spoken)
     }
 
-    private func shortfallActionButton(bank: BankID, day: UpcomingDay, shortfall: Shortfall?, hidden: Bool) -> some View {
+    private func shortfallActionButton(bank: BankID, day: UpcomingDay, allDays: [UpcomingDay], hidden: Bool) -> some View {
         let floor = accountBook.book.floors[bank] ?? 0
         let projected = day.balanceAfter[bank] ?? 0
         let missing = max(0, floor - projected)
-        let suggestedCents = shortfall?.suggestedCents ?? ((missing + 999) / 1_000 * 1_000)
-        let suggestedFrom = shortfall?.suggestedFrom
+        let suggestedCents = missing > 0 ? ((missing + 999) / 1_000 * 1_000) : 0
+        let suggestedFrom = suggestedSource(for: bank, amountCents: suggestedCents, upTo: day.day, allDays: allDays)
 
         let title = suggestedCents > 0
             ? "Pasar \(formatEUR(suggestedCents)) a \(bank.displayName)"
@@ -257,16 +262,25 @@ struct UpcomingCalendarView: View {
 
     private func balancesFooter(day: UpcomingDay, hidden: Bool) -> some View {
         let ordered = BankID.allCases.filter { day.balanceAfter[$0] != nil }
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
         return VStack(alignment: .leading, spacing: 4) {
             Text("Saldo previsto al final del día")
                 .titan(.caption)
                 .foregroundStyle(Theme.label3)
-            HStack(spacing: 12) {
+            layout {
                 ForEach(ordered, id: \.self) { bank in
                     if let cents = day.balanceAfter[bank] {
                         let estimated = day.estimatedBanks.contains(bank)
                         let below = day.belowFloor.contains(bank)
                         let text = (estimated ? "≈\u{00A0}" : "") + formatEUR(cents).replacingOccurrences(of: "-", with: "\u{2212}")
+                        let spokenParts = [
+                            bank.displayName,
+                            spokenAmount(cents, hidden: hidden),
+                            estimated ? "estimado" : nil,
+                            below ? "por debajo del mínimo" : nil,
+                        ].compactMap { $0 }
                         VStack(alignment: .leading, spacing: 1) {
                             Text(bank.shortName)
                                 .titan(.caption)
@@ -281,7 +295,7 @@ struct UpcomingCalendarView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(bank.displayName): \(spokenAmount(cents, hidden: hidden))")
+                        .accessibilityLabel(spokenParts.joined(separator: ", "))
                     }
                 }
             }
@@ -299,28 +313,24 @@ struct UpcomingCalendarView: View {
         return "\(weekday), \(DateText.madridDay(date))"
     }
 
-    private func shortfallLookup(days: [UpcomingDay], now: Date, calendar: Calendar) -> [BankID: Shortfall] {
+    private func suggestedSource(for destination: BankID, amountCents: Int, upTo day: Date, allDays: [UpcomingDay]) -> BankID? {
+        guard amountCents > 0 else { return nil }
         var balances: [BankID: Int] = [:]
         var estimated = Set<BankID>()
-        for bank in BankID.allCases {
+        for bank in BankID.allCases where bank != destination {
             if let info = model.snapshot.balances[bank] {
                 balances[bank] = info.cents
                 if info.estimated { estimated.insert(bank) }
             }
         }
-        let upcoming = days.flatMap(\.charges)
-        let list = shortfalls(
+        let chargesUpToDay = allDays.filter { $0.day <= day }.flatMap(\.charges)
+        return whereToPay(
+            amountCents: amountCents,
             balances: balances,
             floors: accountBook.book.floors,
-            upcoming: upcoming,
-            now: now,
-            calendar: calendar,
+            upcoming: chargesUpToDay,
+            included: Set(BankID.allCases.filter { $0 != destination }),
             estimated: estimated
-        )
-        var out: [BankID: Shortfall] = [:]
-        for item in list where out[item.bank] == nil {
-            out[item.bank] = item
-        }
-        return out
+        ).first(where: \.fits)?.bank
     }
 }

@@ -28,6 +28,9 @@ struct PendingMoveBanner: View {
         let hidden = preferences.privateMode
         let spokenPrefix = isDone ? "Hecho" : "Esperando"
         let spoken = "\(spokenPrefix): \(spokenAmount(move.amountCents, hidden: hidden)) de \(move.from.displayName) a \(targetName)"
+        let prefixColor = isDone ? Theme.income : Theme.label2
+        let amountText = hidden ? "•••" : formatEUR(move.amountCents)
+        let sentence = "\(Text(isDone ? "Hecho: " : "Esperando: ").foregroundStyle(prefixColor))\(Text(amountText).foregroundStyle(Theme.label))\(Text(" de \(move.from.displayName) a \(targetName)").foregroundStyle(Theme.label2))"
 
         return HStack(spacing: 12) {
             if isDone {
@@ -40,20 +43,13 @@ struct PendingMoveBanner: View {
                     .accessibilityHidden(true)
             }
 
-            HStack(spacing: 0) {
-                Text(isDone ? "Hecho: " : "Esperando: ")
-                    .foregroundStyle(isDone ? Theme.income : Theme.label2)
-                Text(formatEUR(move.amountCents))
-                    .foregroundStyle(Theme.label)
-                    .privateAmount()
-                Text(" de \(move.from.displayName) a \(targetName)")
-                    .foregroundStyle(Theme.label2)
-            }
-            .titan(.subtitle)
-            .lineLimit(2)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(spoken)
+            Text(sentence)
+                .titan(.subtitle)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .privacySensitive()
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(spoken)
 
             if !isDone {
                 Button {

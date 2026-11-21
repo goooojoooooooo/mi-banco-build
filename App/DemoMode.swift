@@ -150,11 +150,14 @@ enum DemoMode {
         // El mes pasado, repartido: la frase del ritmo compara con él.
         let spread: [(Int, BankID, Int, String)] = [
             (2, .rev, -3_480, "Mercadona"), (4, .ima, -2_215, "Lidl"), (5, .rev, -1_260, "Glovo"),
-            (8, .tr, -8_990, "Zara"), (9, .rev, -1_480, "Renfe"), (11, .ima, -4_620, "Carrefour"),
+            (8, .tr, -8_990, "Zara"), (9, .rev, -2_960, "Renfe"), (11, .ima, -4_620, "Carrefour"),
             (13, .rev, -2_975, "Mercadona"), (15, .ima, -6_040, "Repsol"), (17, .rev, -950, "Starbucks"),
-            (18, .ima, -3_310, "Lidl"), (20, .rev, -2_145, "Glovo"), (23, .tr, -5_499, "Decathlon"),
+            (18, .ima, -3_310, "Lidl"), (20, .rev, -2_650, "Glovo"), (23, .tr, -5_499, "Decathlon"),
             (25, .rev, -3_760, "Mercadona"), (27, .ima, -1_985, "Carrefour"),
         ]
+        // Ojo: el ÚLTIMO cargo del mes pasado de un comercio que también tiene un pago reciente no puede parecerse en importe
+        // (±25 %) al reciente, o según el día del mes (26–35 días de distancia) la demo mostraría una suscripción de más
+        // (Glovo y Renfe lo hacían). Por eso Glovo del día 20 y Renfe cuestan bastante más que sus pagos recientes.
         // Los dos meses anteriores (el segundo, algo más barato): las comparaciones salen con cifras creíbles.
         for (back, percent) in [(1, 100), (2, 90)] {
             let first = monthsAgo(back, from: monthStart)

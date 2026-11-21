@@ -710,7 +710,13 @@ final class Plan3TapTests: XCTestCase {
         link.tap()
         let row = app.descendants(matching: .any).matching(identifier: "suscripciones.fila").element(boundBy: 0)
         XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let merchant = row.label.split(separator: ",").first.map(String.init) ?? ""
         row.press(forDuration: 1.2)
+        // R43 (c) / Menor 3: comprobar también la vista previa con el ojo abierto de una fila de suscripción.
+        let preview = app.descendants(matching: .any).matching(identifier: "menu.vistaPrevia").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5), "Falta la vista previa del menú de suscripción (menu.vistaPrevia)")
+        XCTAssertFalse(merchant.isEmpty)
+        XCTAssertTrue(preview.label.contains(merchant), "La vista previa de suscripción no trae «\(merchant)»: «\(preview.label)»")
         let hide = app.buttons["Esto no es una suscripción"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5), "No salió el menú de ocultar")
         backgroundAndReturn()
@@ -755,24 +761,41 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(preview.label.contains("Mercadona"), "La vista previa no trae el nombre: «\(preview.label)»")
     }
 
-    /// R37(b): con el ojo cerrado la vista previa es solo el nombre: existe la privada («Mercadona»), no existe la normal y
-    /// ningún elemento de ella, de ningún tipo, tiene una etiqueta con forma de importe.
+    /// R37(b) y R43(c): con el ojo cerrado la vista previa es solo el nombre: existe la privada («Mercadona»), no existe la
+    /// normal, y al abrir el menú no aparece ningún elemento nuevo en TODA la app con forma de importe ni en `label` ni en `value`.
     func testPrivatePreviewHasNoAmount() throws {
         launch(["-MiBancoDemoPrivate"])
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas de movimiento")
+        func moneyShaped(_ text: String) -> Bool {
+            text.contains("€") || text.contains("euros") || text.range(of: #"\d,\d{2}"#, options: .regularExpression) != nil
+        }
+        func moneyStrings() -> [String] {
+            app.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
+                var found: [String] = []
+                if moneyShaped(el.label) { found.append("label:\(el.label)") }
+                if let val = el.value as? String, moneyShaped(val) { found.append("value:\(val)") }
+                return found
+            }
+        }
+        let before = NSCountedSet(array: moneyStrings())
         row.press(forDuration: 1.2)
         let preview = app.descendants(matching: .any).matching(identifier: "menu.vistaPreviaPrivada").firstMatch
         XCTAssertTrue(preview.waitForExistence(timeout: 5), "No existe la vista previa privada (menu.vistaPreviaPrivada)")
         XCTAssertEqual(preview.label, "Mercadona", "La vista previa privada no es solo el nombre: «\(preview.label)»")
+        if let val = preview.value as? String {
+            XCTAssertFalse(moneyShaped(val), "La vista previa privada trae importe en value: «\(val)»")
+        }
         XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "menu.vistaPrevia").firstMatch.exists,
                        "Con el ojo cerrado salió la vista previa normal")
-        func moneyShaped(_ text: String) -> Bool {
-            text.contains("€") || text.contains("euros") || text.range(of: #"\d,\d{2}"#, options: .regularExpression) != nil
+        let after = NSCountedSet(array: moneyStrings())
+        var leaked: [String] = []
+        for item in after {
+            if after.count(for: item) > before.count(for: item), let text = item as? String {
+                leaked.append(text)
+            }
         }
-        let inside = preview.descendants(matching: .any).allElementsBoundByIndex.map { $0.label }
-        let offenders = ([preview.label] + inside).filter(moneyShaped)
-        XCTAssertTrue(offenders.isEmpty, "La vista previa del modo privado trae importes: \(offenders)")
+        XCTAssertTrue(leaked.isEmpty, "Al abrir el menú en modo privado aparecieron importes en la app: \(leaked)")
     }
 }

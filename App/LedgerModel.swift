@@ -7,6 +7,7 @@ import MiBancoCore
 extension Notification.Name {
     /// Los intents la publican tras guardar en el almacén; el modelo recarga al recibirla.
     static let ledgerDidChange = Notification.Name("com.mibanco.ledgerDidChange")
+    // `ledgerDidSyncFromBank` (consulta a un banco) vive en `App/Banking/BankSync.swift`.
 }
 
 /// Un movimiento nuevo que acaba de llegar con la app abierta: dispara la coreografía de Inicio (la tarjeta se desliza,
@@ -28,6 +29,7 @@ final class LedgerModel {
     private(set) var snapshot = LedgerSnapshot()
     private let store: FileStore
     @ObservationIgnored private var observer: Task<Void, Never>?
+    @ObservationIgnored private var syncObserver: Task<Void, Never>?
     /// Publicación aplazada de una llegada; cualquier publicación posterior la deja sin efecto.
     @ObservationIgnored private var staged: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
@@ -54,6 +56,13 @@ final class LedgerModel {
                 model.reloadAfterIngest()
             }
         }
+        // Una consulta al banco recarga sin llegada animada, sin sonido ni vibración.
+        syncObserver = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .ledgerDidSyncFromBank) {
+                guard let model = self else { break }
+                model.reloadAfterSync()
+            }
+        }
     }
 
     /// El «ahora» del libro: el reloj (en la demo, `-MiBancoDemoToday` puede fijarlo para probar otros días).
@@ -70,6 +79,11 @@ final class LedgerModel {
         if loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock) {
             publish(loaded)
         }
+    }
+
+    /// Tras una consulta a un banco: el estado nuevo se publica tal cual, sin `arrival`.
+    private func reloadAfterSync() {
+        reload()
     }
 
     /// Lo siguiente que hay en el almacén (en la demo, lo que dejó la llegada simulada; si no, nada nuevo).
@@ -106,7 +120,9 @@ final class LedgerModel {
     private func reloadAfterIngest() {
         guard let next = loadNext(), next != state else { return }
         let known = Set(state.movements.map(\.id))
-        guard let newest = next.movements.filter({ !known.contains($0.id) }).max(by: { $0.date < $1.date }),
+        // Solo un aviso o un pago de Cartera es una llegada; lo que trae el banco (aunque se cuele aquí) nunca.
+        guard let newest = next.movements.filter({ !known.contains($0.id) && ($0.source == .notification || $0.source == .wallet) })
+            .max(by: { $0.date < $1.date }),
               abs(newest.date.timeIntervalSinceNow) < 600 else {
             publish(next)
             return

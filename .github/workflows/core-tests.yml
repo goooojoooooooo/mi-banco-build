@@ -6,4 +6,10 @@ jobs:
     container: swift:6.4
     steps:
       - uses: actions/checkout@v4
+      - name: Sin runners macOS de GitHub (R43)
+        run: |
+          if grep -nE '^[[:space:]]*runs-on:[[:space:]]*macos' .github/workflows/*.yml; then
+            echo "Ningun flujo macOS puede usar runners de GitHub (todo en Namespace)."
+            exit 1
+          fi
       - run: swift test --package-path Core

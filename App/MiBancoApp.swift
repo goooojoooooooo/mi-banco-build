@@ -7,6 +7,8 @@ struct MiBancoApp: App {
     @State private var model = LedgerModel()
     @State private var portfolio = PortfolioModel()
     @State private var accountBook = AccountBookModel()
+    @State private var briefing = BriefingModel()
+    @State private var speaker = BriefingSpeaker()
     @State private var logos = MerchantLogos()
     @State private var preferences = AppPreferences()
     @State private var locked = true
@@ -59,6 +61,7 @@ struct MiBancoApp: App {
     private var content: some View {
             ZStack {
                 RootView(model: model, portfolio: portfolio, accountBook: accountBook,
+                         briefing: briefing, speaker: speaker,
                          isLocked: showsLock, revealToken: revealToken)
                     .accessibilityHidden(showsLock)
                     .allowsHitTesting(!showsLock)
@@ -94,8 +97,9 @@ struct MiBancoApp: App {
                 }
                 #endif
                 await AlertPoster.setup()
-                // Con el permiso ya pedido: resumen semanal y recordatorios de suscripciones al día.
+                // Con el permiso ya pedido: resumen semanal, recordatorios de suscripciones y aviso matinal al día.
                 await AlertScheduler.reschedule(for: model.state)
+                await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday)
                 await portfolio.refreshPrices(force: false)
             }
             .environment(logos)
@@ -120,13 +124,24 @@ struct MiBancoApp: App {
                     model.reload()
                     portfolio.reload()
                     accountBook.reload()
+                    briefing.reloadPreferences()
+                    briefing.prefetchOpeningIfNeeded(
+                        state: model.state,
+                        portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+                        book: accountBook.book,
+                        privateMode: preferences.privateMode
+                    )
                     BankSync.refreshOnOpen() // tarea 10
                     Task { await portfolio.refreshPrices(force: false) }
+                    Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
                 case .background:
+                    speaker.stop()
                     BackgroundRefresh.schedule() // tarea 10
+                    Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     if lockEnabled { locked = true }
                 default:
+                    speaker.stop()
                     break
                 }
             }
@@ -138,6 +153,9 @@ struct MiBancoApp: App {
                 }
             }
             .onChange(of: showsLock) { wasLocked, isLocked in
+                if isLocked {
+                    speaker.stop()
+                }
                 // Al desbloquear, Inicio se monta por capas mientras el bloqueo se desvanece encima.
                 if wasLocked && !isLocked {
                     launching = false

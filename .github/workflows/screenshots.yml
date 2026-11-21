@@ -98,6 +98,9 @@ jobs:
           shot mover-listo 10 -MiBancoDemoMove 3
           shot cuentas 10 -MiBancoDemoScreen ajustes -MiBancoDemoAccounts
           shot proximos-cobros 10 -MiBancoDemoScreen gasto -MiBancoDemoUpcoming
+          shot resumen 12 -MiBancoDemoBriefing busy
+          shot resumen-tranquilo 12 -MiBancoDemoBriefing quiet
+          shot resumen-privado 12 -MiBancoDemoBriefing busy -MiBancoDemoPrivate
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.

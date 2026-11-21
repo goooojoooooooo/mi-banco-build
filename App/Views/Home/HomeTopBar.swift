@@ -7,6 +7,7 @@ struct HomeTopBar: View {
     @Binding var searching: Bool
     @Binding var query: String
     let motion: HomeMotion
+    var openBriefing: () -> Void = {}
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -42,6 +43,17 @@ struct HomeTopBar: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityAddTraits(.isHeader)
                         .transition(.opacity)
+                    Button(action: openBriefing) {
+                        AppMark(size: 22)
+                            .frame(width: 44, height: 44)
+                            .glassSurface(Circle())
+                            .glassID("briefing", in: glass)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.pressable)
+                    .transition(.opacity.combined(with: .scale(scale: 0.6)))
+                    .accessibilityLabel("Tu resumen")
+                    .accessibilityIdentifier("home-briefing-button")
                     Button(action: togglePrivacy) {
                         Image(systemName: hidden ? "eye.slash" : "eye")
                             .font(.system(size: 18, weight: .medium))

@@ -10,6 +10,7 @@ struct SpendingView: View {
     /// Abre el detalle de un movimiento (la hoja de `RootView`).
     var openDetail: (UUID) -> Void = { _ in }
     var openMoveMoney: (MoveRequest) -> Void = { _ in }
+    @Binding var openBudgetsRequest: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// El mes elegido (su inicio) y hacia dónde se fue, en un solo valor: cambian en la misma transacción.
@@ -149,6 +150,11 @@ struct SpendingView: View {
             selection.month = target == months.count - 1 ? nil : months[target]
         }
         #endif
+        .onChange(of: openBudgetsRequest, initial: true) { _, open in
+            guard open else { return }
+            openBudgetsRequest = false
+            path = [.budgets]
+        }
         .onChange(of: isVisible) { _, visible in
             guard visible, !reduceMotion else { return }
             begin(.assembly)

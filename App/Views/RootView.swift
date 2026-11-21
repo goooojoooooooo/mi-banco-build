@@ -8,6 +8,8 @@ struct RootView: View {
     let model: LedgerModel
     let portfolio: PortfolioModel
     let accountBook: AccountBookModel
+    let briefing: BriefingModel
+    let speaker: BriefingSpeaker
     /// Con el bloqueo delante, Inicio no suena ni habla aunque llegue un movimiento.
     var isLocked = false
     /// Sube al arrancar y al desbloquear: Inicio se monta por capas y la barra llega la última.
@@ -16,7 +18,9 @@ struct RootView: View {
     @State private var settingsFocus: BankID?
     @State private var settingsScroll: String?
     @State private var openAccountsRequest = false
-    /// La única hoja de la app: un movimiento, una posición, la hoja de compartir o la confirmación de restaurar.
+    @State private var openBudgetsRequest = false
+    @State private var selectHomeCard: AccountCard?
+    /// La única hoja de la app: un movimiento, una posición, mover dinero, el resumen/asistente, compartir o restaurar.
     @State private var sheet: RootSheet?
     /// Único selector de archivos de la app (copia de seguridad o extracto de Trade Republic); se cierra al bloquear.
     @State private var importing = false
@@ -29,6 +33,10 @@ struct RootView: View {
     @State private var noticeTask: Task<Void, Never>?
     /// La espera de 250 ms antes de abrir el detalle de un aviso tocado: se cancela al cerrar todo.
     @State private var routeTask: Task<Void, Never>?
+    /// Temporizador del resumen diario al arrancar o activar la app: se cancela al bloquear o salir.
+    @State private var briefingTask: Task<Void, Never>?
+    /// Transición diferida (350 ms) desde una acción del resumen hacia otra hoja (`moveMoney` / `movement`).
+    @State private var briefingActionTask: Task<Void, Never>?
     /// Hoja de un movimiento abierta desde Avisos o desde un aviso tocado.
     private var detail: DetailRoute? {
         get { if case .movement(let route) = sheet { route } else { nil } }
@@ -59,23 +67,27 @@ struct RootView: View {
                          openDetail: { openDetail($0, zooms: true) },
                          openPosition: openPosition,
                          openMoveMoney: openMoveMoney,
+                         openBriefing: openManualBriefing,
                          shareText: shareText,
                          openSettings: openSettings,
                          openInvestmentsSettings: openInvestmentsSettings,
-                         openAccounts: openAccounts)
+                         openAccounts: openAccounts,
+                         selectCardRequest: $selectHomeCard)
                     .id(restoreToken)
             }
             Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
                 SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
-                             openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney)
+                             openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
+                             openBudgetsRequest: $openBudgetsRequest)
             }
             Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
-                AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) })
+                AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
+                           onMorningRuleChanged: rescheduleMorningReminder)
             }
             .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
             Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
                 SettingsScrollHost(scrollRequest: $settingsScroll) {
-                    SettingsView(model: model, portfolio: portfolio, accountBook: accountBook,
+                    SettingsView(model: model, portfolio: portfolio, accountBook: accountBook, briefing: briefing,
                                  focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
                                  present: present,
                                  importBackup: { startImport(.backup) },
@@ -103,6 +115,15 @@ struct RootView: View {
                 PositionDetailSheet(portfolio: portfolio, instrument: instrument)
             case .moveMoney(let request):
                 MoveMoneySheet(model: model, accountBook: accountBook, request: request)
+            case .briefing:
+                BriefingSheet(
+                    model: model,
+                    portfolio: portfolio,
+                    accountBook: accountBook,
+                    briefingModel: briefing,
+                    speaker: speaker,
+                    onAction: handleBriefingAction
+                )
             case .share(let share):
                 ShareSheet(item: share, onFinish: { sheet = nil })
                     .ignoresSafeArea()
@@ -136,7 +157,15 @@ struct RootView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             gate.isActive = phase == .active || demoKeepsSheet
-            if !(phase == .active || demoKeepsSheet) { closeEverything() }
+            if !(phase == .active || demoKeepsSheet) {
+                closeEverything()
+            } else if phase == .active && !isLocked {
+                scheduleBriefingCheck(delay: .milliseconds(600))
+            }
+        }
+        .onChange(of: revealToken) { _, _ in
+            guard !isLocked else { return }
+            scheduleBriefingCheck(delay: reduceMotion ? .milliseconds(300) : .milliseconds(1_300))
         }
         // Red de seguridad: si por cualquier camino sube una hoja (o el selector) con el bloqueo puesto o fuera de
         // primer plano, se cierra al instante y se borra el fichero temporal.
@@ -191,7 +220,7 @@ struct RootView: View {
     /// y cerraría la hoja. El bloqueo sigue mandando (`gate.isLocked`). En Release es siempre `false`.
     private var demoKeepsSheet: Bool {
         #if DEBUG
-        DemoMode.isActive && (DemoMode.opensDetail || DemoMode.opensPosition || DemoMode.demoMoveStep != nil)
+        DemoMode.isActive && (DemoMode.opensDetail || DemoMode.opensPosition || DemoMode.demoMoveStep != nil || DemoMode.briefingMode != nil)
         #else
         false
         #endif
@@ -210,6 +239,11 @@ struct RootView: View {
         gate.generation += 1
         routeTask?.cancel()
         routeTask = nil
+        briefingTask?.cancel()
+        briefingTask = nil
+        briefingActionTask?.cancel()
+        briefingActionTask = nil
+        speaker.stop()
         sheet = nil
         importing = false
     }
@@ -339,8 +373,15 @@ struct RootView: View {
         guard !isLocked, let route = router.pending else { return }
         router.pending = nil
         switch route.destination {
-        case .home: tab = .home
-        case .alerts: tab = .alerts
+        case .home:
+            briefingTask?.cancel()
+            tab = .home
+        case .alerts:
+            briefingTask?.cancel()
+            tab = .alerts
+        case .briefing:
+            tab = .home
+            scheduleBriefingCheck(delay: .milliseconds(350))
         }
         if let id = route.movementID {
             // Tras el cambio de pestaña, para que la hoja suba sobre la pantalla buena.
@@ -350,6 +391,95 @@ struct RootView: View {
                 guard !Task.isCancelled else { return }
                 openDetail(id)
             }
+        }
+    }
+
+    // MARK: - Resumen diario y asistente Onyx
+
+    private func scheduleBriefingCheck(delay: Duration) {
+        briefingTask?.cancel()
+        let gen = gate.generation
+        briefingTask = Task {
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, gate.generation == gen else { return }
+            considerBriefing()
+        }
+    }
+
+    private func considerBriefing() {
+        guard gate.canPresent, !isLocked, isForeground, sheet == nil, !importing, router.pending == nil else { return }
+        let now = Date()
+        guard let due = briefing.dueRecord(now: now) else { return }
+        let isFirst = briefing.record == nil
+        briefing.prepare(
+            record: due,
+            isFirst: isFirst,
+            state: model.state,
+            portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+            book: accountBook.book,
+            privateMode: preferences.privateMode,
+            now: now
+        )
+        // Se guarda ANTES de presentar la hoja (tarea 9, Review Focus 2).
+        briefing.markShown(due)
+        sheet = .briefing(due)
+        rescheduleMorningReminder()
+    }
+
+    private func openManualBriefing() {
+        guard gate.canPresent, !isLocked, isForeground, !importing else { return }
+        let now = Date()
+        let rec = briefing.manualRecord(now: now)
+        let isFirst = briefing.record == nil
+        briefing.prepare(
+            record: rec,
+            isFirst: isFirst,
+            state: model.state,
+            portfolio: portfolio.hasPositions ? portfolio.portfolio : nil,
+            book: accountBook.book,
+            privateMode: preferences.privateMode,
+            now: now
+        )
+        briefing.markShown(rec)
+        sheet = .briefing(rec)
+        rescheduleMorningReminder()
+    }
+
+    private func handleBriefingAction(_ action: BriefingAction) {
+        speaker.stop()
+        let gen = gate.generation
+        sheet = nil
+        switch action {
+        case let .moveMoney(from, to, cents):
+            briefingActionTask?.cancel()
+            briefingActionTask = Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled, gate.generation == gen, gate.canPresent, !isLocked, isForeground else { return }
+                openMoveMoney(MoveRequest(from: from, target: .own(to), amountCents: cents))
+            }
+        case .openBankSettings(let bank):
+            openSettings(bank)
+        case .openBudgets:
+            openBudgetsRequest = true
+            tab = .spending
+        case .openInvestments:
+            selectHomeCard = .investments
+            tab = .home
+        case .openMovement(let id):
+            briefingActionTask?.cancel()
+            briefingActionTask = Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled, gate.generation == gen, gate.canPresent, !isLocked, isForeground else { return }
+                openDetail(id)
+            }
+        }
+    }
+
+    private func rescheduleMorningReminder() {
+        let settings = model.state.alertSettings
+        let shownToday = briefing.shownToday
+        Task {
+            await MorningBriefingNotifier.reschedule(settings: settings, shownToday: shownToday)
         }
     }
 
@@ -408,6 +538,7 @@ enum RootSheet: Identifiable {
     case movement(DetailRoute)
     case position(String)
     case moveMoney(MoveRequest)
+    case briefing(BriefingRecord)
     case share(ShareItem)
     case restore(RestorePreview)
 
@@ -416,6 +547,7 @@ enum RootSheet: Identifiable {
         case .movement(let route): "movement-\(route.id)"
         case .position(let instrument): "position-\(instrument)"
         case .moveMoney(let request): "move-\(request.id)"
+        case .briefing(let record): "briefing-\(record.shownAt.timeIntervalSince1970)"
         case .share(let item): "share-\(item.id)"
         case .restore(let preview): "restore-\(preview.id)"
         }

@@ -7,6 +7,7 @@ struct SettingsView: View {
     let model: LedgerModel
     let portfolio: PortfolioModel
     let accountBook: AccountBookModel
+    let briefing: BriefingModel
     /// Pedido desde la tarjeta de Inicio ("Editar saldo"): enfoca ese banco y se vacía.
     @Binding var focusRequest: BankID?
     /// Pedido desde Inicio ("Añadir IBAN") o demo: abre «Cuentas y contactos».
@@ -93,6 +94,8 @@ struct SettingsView: View {
                 }
 
                 InvestmentsSection(portfolio: portfolio, importTradeRepublic: importTradeRepublic)
+
+                AssistantSettingsSection(briefing: briefing)
 
                 BackupSection(model: model, portfolio: portfolio, present: present, importBackup: importBackup)
 

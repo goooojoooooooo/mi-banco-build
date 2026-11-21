@@ -22,6 +22,12 @@ enum BackgroundRefresh {
         if !Task.isCancelled {
             await PortfolioModel.refreshPricesInBackground()
         }
+        if !Task.isCancelled, let state = try? SharedStore.make().load() {
+            await MorningBriefingNotifier.reschedule(
+                settings: state.alertSettings,
+                shownToday: BriefingModel.storedShownToday()
+            )
+        }
         schedule()
     }
 }

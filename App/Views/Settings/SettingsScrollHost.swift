@@ -29,6 +29,9 @@ struct SettingsScrollHost<Content: View>: View {
                     } else if DemoMode.scrollsToInvestments {
                         try? await Task.sleep(for: .milliseconds(600))
                         proxy.scrollTo(InvestmentsSection.scrollID, anchor: .center)
+                    } else if DemoMode.scrollsToAssistant {
+                        try? await Task.sleep(for: .milliseconds(600))
+                        proxy.scrollTo(AssistantSettingsSection.scrollID, anchor: .center)
                     }
                 }
                 #endif

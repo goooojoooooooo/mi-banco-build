@@ -19,10 +19,12 @@ struct HomeView: View {
     let openDetail: (UUID) -> Void
     let openPosition: (String) -> Void
     let openMoveMoney: (MoveRequest) -> Void
+    let openBriefing: () -> Void
     let shareText: (String) -> Void
     let openSettings: (BankID?) -> Void
     let openInvestmentsSettings: () -> Void
     let openAccounts: () -> Void
+    @Binding var selectCardRequest: AccountCard?
 
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
@@ -141,7 +143,7 @@ struct HomeView: View {
             motion.listOffset = offset
         }
         .safeAreaInset(edge: .top, spacing: 0) {
-            HomeTopBar(searching: $searching, query: $query, motion: motion)
+            HomeTopBar(searching: $searching, query: $query, motion: motion, openBriefing: openBriefing)
                 .staggeredEntrance(0, rise: 0)
         }
         .background(Theme.canvas.ignoresSafeArea())
@@ -178,6 +180,16 @@ struct HomeView: View {
             if !hasPositions && (selection == .investments || listCard == .investments) {
                 selection = .all
                 listCard = .all
+            }
+        }
+        .onChange(of: selectCardRequest, initial: true) { _, requested in
+            guard let requested else { return }
+            selectCardRequest = nil
+            let cards = AccountCard.visible(hasInvestments: portfolio.hasPositions)
+            guard cards.contains(requested) else { return }
+            closeSearch()
+            withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) {
+                selection = requested
             }
         }
         .onChange(of: model.arrival) { _, new in

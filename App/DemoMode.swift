@@ -43,12 +43,17 @@ enum DemoMode {
         }
     }
 
+    enum BriefingMode: String { case busy, quiet }
+
     static var scrollsToInvestments: Bool { arguments.contains("-MiBancoDemoInvestmentsSettings") }
+    static var scrollsToAssistant: Bool { arguments.contains("-MiBancoDemoAssistantSettings") }
     static var asksPrices: Bool { arguments.contains("-MiBancoDemoAskPrices") }
     static var opensPosition: Bool { arguments.contains("-MiBancoDemoPosition") }
     static var demoMoveStep: Int? { value(after: "-MiBancoDemoMove").flatMap(Int.init) }
     static var opensAccounts: Bool { arguments.contains("-MiBancoDemoAccounts") }
     static var opensUpcoming: Bool { arguments.contains("-MiBancoDemoUpcoming") }
+    static var briefingMode: BriefingMode? { value(after: "-MiBancoDemoBriefing").flatMap(BriefingMode.init(rawValue:)) }
+    static var briefingShortfall: Bool { arguments.contains("-MiBancoDemoShortfall") }
 
     /// Cuaderno de cuentas de demo: solo IBANs de ejemplo publicados (ES91, DE89, GB82) y un contacto inventado.
     static func accountBook() -> AccountBook {
@@ -64,9 +69,85 @@ enum DemoMode {
         return book
     }
 
-    /// Solo carga cartera en demo cuando se pide alguna pantalla de inversiones: las capturas y pruebas previas no cambian.
+    /// Solo carga cartera en demo cuando se pide alguna pantalla de inversiones o el resumen movido: las capturas previas no cambian.
     static var includesPortfolio: Bool {
-        scrollsToInvestments || asksPrices || opensPosition || initialCard == .investments
+        scrollsToInvestments || asksPrices || opensPosition || initialCard == .investments || briefingMode == .busy
+    }
+
+    /// Entradas del resumen de demo (`-MiBancoDemoBriefing busy|quiet`, con `-MiBancoDemoShortfall` opcional).
+    static func briefingInput(mode: BriefingMode, shortfall: Bool, now: Date = Date()) -> BriefingInput {
+        let cal = DateText.madridCalendar
+        let today = cal.startOfDay(for: now)
+        let morning = cal.date(bySettingHour: 9, minute: 0, second: 0, of: today) ?? now
+        let since = cal.date(byAdding: .day, value: -1, to: morning) ?? now.addingTimeInterval(-86_400)
+        let summary = portfolioSummary(portfolio(now: morning), now: morning, calendar: cal)
+
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)?.addingTimeInterval(10 * 3600) ?? now
+        let inThreeDays = cal.date(byAdding: .day, value: 3, to: today)?.addingTimeInterval(10 * 3600) ?? now
+        let netflix = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1_399, date: shortfall ? tomorrow : inThreeDays)
+
+        if mode == .quiet {
+            return BriefingInput(
+                now: morning,
+                since: since,
+                isFirst: false,
+                banks: [
+                    BankLine(bank: .rev, cents: 34_020, estimated: false, changeCents: 0),
+                    BankLine(bank: .ima, cents: 128_455, estimated: true, changeCents: 0),
+                    BankLine(bank: .tr, cents: 215_000, estimated: true, changeCents: 0),
+                ],
+                totalCents: 377_475,
+                totalChangeCents: 0,
+                upcoming: [netflix],
+                investments: summary
+            )
+        }
+
+        let demoShortfalls: [Shortfall] = shortfall ? [
+            Shortfall(
+                bank: .rev,
+                charge: netflix,
+                balanceCents: 1_000,
+                missingCents: 399,
+                suggestedFrom: .ima,
+                suggestedCents: 1_000,
+                isEstimated: false,
+                suggestedIsEstimated: true
+            ),
+        ] : []
+
+        let income = [
+            MovementDigest(id: UUID(), bank: .ima, name: "Bizum de Laura", cents: 2_000, date: morning.addingTimeInterval(-3 * 3600)),
+        ]
+        let payments = [
+            MovementDigest(id: UUID(), bank: .rev, name: "Mercadona", cents: 1_250, date: morning.addingTimeInterval(-2 * 3600)),
+            MovementDigest(id: UUID(), bank: .rev, name: "Spotify", cents: 1_099, date: morning.addingTimeInterval(-6 * 3600)),
+        ]
+
+        return BriefingInput(
+            now: morning,
+            since: since,
+            isFirst: false,
+            banks: [
+                BankLine(bank: .rev, cents: 34_020, estimated: false, changeCents: -2_349),
+                BankLine(bank: .ima, cents: 128_455, estimated: true, changeCents: 2_000),
+                BankLine(bank: .tr, cents: 215_000, estimated: true, changeCents: 0),
+            ],
+            totalCents: 377_475,
+            totalChangeCents: -349,
+            income: income,
+            payments: payments,
+            upcoming: [netflix],
+            expected: ExpectedIncome(name: "Nómina", bank: .ima, cents: 145_000, date: inThreeDays),
+            attention: [
+                .warning(title: "Spotify ha subido 1,00\u{00A0}€", detail: "Antes 9,99\u{00A0}€, ahora 10,99\u{00A0}€."),
+            ],
+            month: MonthDigest(spentCents: 41_200, projectedCents: 64_000, paceDifferenceCents: -3_500, previousMonthName: "octubre"),
+            investments: summary,
+            shortfalls: demoShortfalls,
+            budgetTip: shortfall ? nil : BudgetTip(name: "Comer fuera", remainingCents: 3_110),
+            freeMoney: FreeMoney(cents: 92_000, daysLeft: 10)
+        )
     }
 
     static func demoPositionInstrument(in summary: PortfolioSummary?) -> String? {

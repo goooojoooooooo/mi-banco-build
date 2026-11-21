@@ -8,6 +8,7 @@ struct AlertRules: View {
     let model: LedgerModel
     let settings: AlertSettings
     let mutedCount: Int
+    var onMorningRuleChanged: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var errorTick = 0
@@ -50,6 +51,16 @@ struct AlertRules: View {
                 rule("Cobro duplicado", "Dos cargos iguales en la misma tienda en pocos minutos.", "square.on.square",
                      .duplicateCharge)
                 RuleDivider()
+                rule("Resumen cada mañana", morningReminderSubtitle(minutes: settings.morningBriefingMinutes),
+                     "sun.horizon", .morningBriefing, id: "alert-rule-morningBriefing")
+                if settings.morningBriefing {
+                    MorningTimeRow(minutes: settings.morningBriefingMinutes) { newMinutes in
+                        try model.updateAlertSettings { $0.morningBriefingMinutes = newMinutes }
+                        onMorningRuleChanged()
+                    }
+                    .transition(revealTransition)
+                }
+                RuleDivider()
                 rule("Resumen semanal", "El domingo a las 20:00, lo que llevas gastado esa semana.", "doc.text", .weeklyDigest)
                 RuleDivider()
                 rule("Ritmo de gasto", "Si vas por encima o por debajo del mes pasado.", "gauge.with.dots.needle.33percent",
@@ -90,12 +101,18 @@ struct AlertRules: View {
         }
     }
 
-    private func rule(_ title: String, _ detail: String, _ symbol: String, _ key: AlertRule) -> some View {
-        Toggle(isOn: binding(key)) {
+    @ViewBuilder
+    private func rule(_ title: String, _ detail: String, _ symbol: String, _ key: AlertRule, id: String? = nil) -> some View {
+        let toggle = Toggle(isOn: binding(key)) {
             OptionLabel(title: title, detail: detail, systemImage: symbol)
         }
         .toggleStyle(TitanToggleStyle())
         .padding(.horizontal, 16)
+        if let id {
+            toggle.accessibilityIdentifier(id)
+        } else {
+            toggle
+        }
     }
 
     /// El interruptor escribe en el libro (Core) y el snapshot nuevo llega dentro de la animación:
@@ -105,6 +122,7 @@ struct AlertRules: View {
             withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
                 do {
                     try model.updateAlertSettings { key.set(on, in: &$0) }
+                    if key == .morningBriefing { onMorningRuleChanged() }
                 } catch {
                     errorTick += 1
                 }
@@ -115,7 +133,7 @@ struct AlertRules: View {
 
 /// Cada interruptor de "Qué quieres que te avise" y el campo de `AlertSettings` que gobierna.
 enum AlertRule: Sendable {
-    case everyMovement, lowBalance, largePayment, income, subscriptions, duplicateCharge, weeklyDigest, spendingPace, budgets
+    case everyMovement, lowBalance, largePayment, income, subscriptions, duplicateCharge, morningBriefing, weeklyDigest, spendingPace, budgets
 
     func isOn(in s: AlertSettings) -> Bool {
         switch self {
@@ -125,6 +143,7 @@ enum AlertRule: Sendable {
         case .income: s.income
         case .subscriptions: s.subscriptions
         case .duplicateCharge: s.duplicateCharge
+        case .morningBriefing: s.morningBriefing
         case .weeklyDigest: s.weeklyDigest
         case .spendingPace: s.spendingPace
         case .budgets: s.budgets
@@ -139,10 +158,64 @@ enum AlertRule: Sendable {
         case .income: s.income = on
         case .subscriptions: s.subscriptions = on
         case .duplicateCharge: s.duplicateCharge = on
+        case .morningBriefing: s.morningBriefing = on
         case .weeklyDigest: s.weeklyDigest = on
         case .spendingPace: s.spendingPace = on
         case .budgets: s.budgets = on
         }
+    }
+}
+
+/// Selector de hora del aviso matinal («Resumen cada mañana»), siempre en hora de Madrid.
+private struct MorningTimeRow: View {
+    let minutes: Int
+    let save: (Int) throws -> Void
+
+    @State private var errorTick = 0
+
+    private var timeBinding: Binding<Date> {
+        Binding(
+            get: { Self.date(fromMinutes: minutes) },
+            set: { newDate in
+                let cal = DateText.madridCalendar
+                let comps = cal.dateComponents([.hour, .minute], from: newDate)
+                let total = (comps.hour ?? 8) * 60 + (comps.minute ?? 30)
+                guard total != minutes else { return }
+                do {
+                    try save(total)
+                } catch {
+                    errorTick += 1
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Space.row) {
+            Text("Hora del resumen")
+                .titan(.subtitle)
+                .foregroundStyle(Theme.label2)
+            Spacer(minLength: Theme.Space.small)
+            DatePicker("Hora del resumen", selection: timeBinding, displayedComponents: .hourAndMinute)
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .environment(\.calendar, DateText.madridCalendar)
+                .environment(\.timeZone, DateText.madridCalendar.timeZone)
+                .accessibilityLabel("Hora del resumen")
+                .accessibilityIdentifier("morning-briefing-time")
+        }
+        .padding(.leading, 60)
+        .padding(.trailing, 16)
+        .padding(.bottom, 10)
+        .frame(minHeight: 44)
+        .sensoryFeedback(.error, trigger: errorTick)
+    }
+
+    private static func date(fromMinutes minutes: Int) -> Date {
+        let cal = DateText.madridCalendar
+        let valid = (0..<1_440).contains(minutes) ? minutes : defaultMorningBriefingMinutes
+        let today = cal.startOfDay(for: Date())
+        return cal.date(bySettingHour: valid / 60, minute: valid % 60, second: 0, of: today) ?? today
     }
 }
 

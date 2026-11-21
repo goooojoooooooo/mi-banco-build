@@ -233,6 +233,15 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
         #expect(actionCount("Toca «Aplicación» y baja hasta el final.") == 2)
         #expect(actionCount("Pulsa el buscador y escribe «Mi Banco».") == 2)
         #expect(actionCount("Márcala y escríbelo.") == 2)
+        // Un toque más otro verbo de pantalla cuenta 2 (también con pronombre); el nombre «buscador» no es un verbo.
+        for second in ["busca «Revolut»", "búscala abajo", "selecciona «Revolut»", "añade otra acción", "añádela abajo",
+                       "borra lo escrito", "bórralo", "pon «Título»", "entra en «Automatización»", "pega el texto",
+                       "pégalo", "mantén el dedo encima", "arrastra la ficha", "arrástrala arriba", "desplaza la lista",
+                       "desplázala hacia arriba"] {
+            #expect(actionCount("Toca «Aplicación» y \(second).") == 2, "\(second)")
+        }
+        #expect(actionCount("Toca el buscador de arriba.") == 1)
+        #expect(actionCount("Toca «Añadir acción».") == 1)
         let field = "Toca «Título». Abajo verás una ficha llamada «Notificación»: tócala y luego elige «Título»."
         #expect(fieldRemainder(field, name: "Título", chip: "Notificación").isEmpty)
         let extra = fieldRemainder(field + " Después pulsa OK.", name: "Título", chip: "Notificación")

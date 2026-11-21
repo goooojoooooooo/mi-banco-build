@@ -30,7 +30,7 @@ struct PendingMoveBanner: View {
         let spoken = "\(spokenPrefix): \(spokenAmount(move.amountCents, hidden: hidden)) de \(move.from.displayName) a \(targetName)"
         let prefixColor = isDone ? Theme.income : Theme.label2
         let amountText = hidden ? "•••" : formatEUR(move.amountCents)
-        let sentence = "\(Text(isDone ? "Hecho: " : "Esperando: ").foregroundStyle(prefixColor))\(Text(amountText).foregroundStyle(Theme.label))\(Text(" de \(move.from.displayName) a \(targetName)").foregroundStyle(Theme.label2))"
+        let sentence: LocalizedStringKey = "\(Text(isDone ? "Hecho: " : "Esperando: ").foregroundStyle(prefixColor))\(Text(amountText).foregroundStyle(Theme.label))\(Text(" de \(move.from.displayName) a \(targetName)").foregroundStyle(Theme.label2))"
 
         return HStack(spacing: 12) {
             if isDone {
@@ -48,7 +48,6 @@ struct PendingMoveBanner: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .privacySensitive()
-                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(spoken)
 
             if !isDone {

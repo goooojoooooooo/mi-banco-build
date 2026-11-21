@@ -199,6 +199,7 @@ struct AccountsView: View {
                         .buttonStyle(.pressable)
                         Button {
                             editingIBANBank = nil
+                            ibanDraft = ""
                             ibanError = nil
                             focusedField = nil
                         } label: {

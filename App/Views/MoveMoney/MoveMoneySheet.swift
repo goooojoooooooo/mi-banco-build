@@ -399,7 +399,6 @@ struct MoveMoneySheet: View {
                     .blur(radius: hidden ? 14 : 0, opaque: false)
                     .opacity(hidden ? 0.75 : 1)
                     .privacySensitive()
-                    .accessibilityElement(children: .ignore)
                     .accessibilityLabel(hidden ? "importe oculto" : amount.formattedEUR)
 
                 VStack(alignment: .leading, spacing: 8) {

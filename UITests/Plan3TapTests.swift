@@ -251,7 +251,7 @@ final class Plan3TapTests: XCTestCase {
             XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 20), "No se ve Suscripciones el \(day)")
             let rows = app.descendants(matching: .any).matching(identifier: "suscripciones.fila")
             XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "No hay filas de suscripción el \(day)")
-            let labels = rows.allElementsBoundByIndex.map(\.label)
+            let labels = rows.allElementsBoundByIndex.map { $0.label }
             XCTAssertEqual(labels.count, 2, "El \(day) la demo no trae exactamente 2 suscripciones: \(describe(rows))")
             XCTAssertTrue(labels.contains { $0.hasPrefix("Spotify,") }, "El \(day) falta Spotify: \(labels)")
             XCTAssertTrue(labels.contains { $0.hasPrefix("Netflix,") }, "El \(day) falta Netflix: \(labels)")
@@ -702,7 +702,7 @@ final class Plan3TapTests: XCTestCase {
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas de movimiento")
         func labels() -> Set<String> {
-            Set((app.staticTexts.allElementsBoundByIndex + app.otherElements.allElementsBoundByIndex).map(\.label))
+            Set((app.staticTexts.allElementsBoundByIndex + app.otherElements.allElementsBoundByIndex).map { $0.label })
                 .subtracting([""])
         }
         let before = labels()

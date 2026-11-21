@@ -511,8 +511,11 @@ private struct PositionDetailContent: View {
                 }
                 saveCloseTask = nil
             }
-        } catch {
+        } catch PortfolioImportError.unreadable {
             priceError = "Escribe un precio válido, por ejemplo 110,50."
+            errorTick += 1
+        } catch {
+            priceError = "No se pudo guardar el precio. Inténtalo de nuevo."
             errorTick += 1
         }
     }

@@ -108,12 +108,11 @@ final class InvestmentsUITests: XCTestCase {
         XCTAssertTrue(importRow.waitForExistence(timeout: 10), "Falta la fila Importar de Trade Republic")
         importRow.tap()
 
-        let cancel = app.buttons["Cancelar"].exists ? app.buttons["Cancelar"] : app.buttons["Cancel"]
-        let pickerOpened = cancel.waitForExistence(timeout: 8)
-            || app.navigationBars["Explorar"].waitForExistence(timeout: 2)
-            || app.navigationBars["Browse"].waitForExistence(timeout: 2)
-        XCTAssertTrue(pickerOpened, "No se abrió el selector de archivos al tocar Importar de Trade Republic")
-        if cancel.exists { cancel.tap() }
+        let cancelNames = ["Cancelar", "Cancel", "Cerrar", "Close"]
+        let cancel = app.buttons.matching(NSPredicate(format: "label IN %@", cancelNames)).firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 20), "No se abrió el selector de archivos al tocar Importar de Trade Republic")
+        cancel.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), cancel, timeout: 10), "El selector de archivos no se cerró")
     }
 
     func testCardAndPosition() throws {
@@ -163,7 +162,9 @@ final class InvestmentsUITests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja de posición")
 
         XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
         app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
 
         let gone = NSPredicate(format: "exists == false")
         XCTAssertTrue(waitFor(gone, close, timeout: 8), "La hoja de posición no se cerró al salir de primer plano")
@@ -196,12 +197,11 @@ final class InvestmentsUITests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 5), "No apareció el campo de precio a mano")
         // Al guardar el precio actual, el campo pierde el foco y su valor de accesibilidad debe quedar oculto.
         let save = app.buttons["Guardar"]
-        if save.waitForExistence(timeout: 3) {
-            save.tap()
-            if field.exists {
-                let valueText = (field.value as? String) ?? ""
-                XCTAssertFalse(valueText.contains("200"), "El campo sin foco filtró el precio a VoiceOver: \(valueText)")
-            }
+        XCTAssertTrue(save.waitForExistence(timeout: 5), "Falta el botón Guardar")
+        save.tap()
+        if field.exists {
+            let valueText = (field.value as? String) ?? ""
+            XCTAssertFalse(valueText.contains("200"), "El campo sin foco filtró el precio a VoiceOver: \(valueText)")
         }
         close.tap()
     }

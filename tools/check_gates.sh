@@ -48,7 +48,10 @@ check_registros() {
 check_crlf() {
   local res
   local todos tolerados fallos_l
-  todos=$(git ls-files --eol | grep -E '^i/crlf' | cut -f2 || true)
+  # safe.directory: en el contenedor de CI el repo pertenece a otro usuario.
+  local eol
+  eol=$(git -c safe.directory="$PWD" ls-files --eol) || { fallo "No se pudo ejecutar git ls-files --eol" "(¿no es un repositorio git?)"; return 0; }
+  todos=$(grep -E '^i/crlf' <<<"$eol" | cut -f2 || true)
   # TODO(gates): CRLF heredado en un informe de docs (caso real, no tocado aqui):
   # normalizar a LF y quitar esta excepcion.
   tolerados=$(grep -xF 'docs/traspaso/informes/integracion2a-arreglos2-informe.md' <<<"$todos" || true)

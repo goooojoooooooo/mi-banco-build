@@ -22,7 +22,7 @@ struct Arrival: Equatable, Sendable {
 }
 
 /// Vista previa de un extracto CSV antes de aplicarlo al libro (Plan 2, tarea 12).
-struct ImportPreview: Equatable, Sendable, Identifiable {
+struct ImportPreview: Equatable, Hashable, Sendable, Identifiable {
     let id = UUID()
     let statement: ParsedStatement
     let report: ReconcileReport
@@ -30,6 +30,10 @@ struct ImportPreview: Equatable, Sendable, Identifiable {
 
     static func == (a: ImportPreview, b: ImportPreview) -> Bool {
         a.statement == b.statement && a.report == b.report && a.tradeRepublicRows == b.tradeRepublicRows
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
     }
 }
 

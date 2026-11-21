@@ -451,7 +451,7 @@ private struct BalanceRow: View {
             return !info.estimated ? "Exacto · del banco \(whenExact)" : "Estimado · desde el banco de \(when)"
         case .statement:
             return !info.estimated ? "Exacto · del extracto \(whenExact)" : "Estimado · desde el extracto de \(when)"
-        case .notification:
+        case .notice:
             return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso de \(when)"
         case .manual:
             if info.fromBank {

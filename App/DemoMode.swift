@@ -298,8 +298,8 @@ enum DemoMode {
 
         let balances: [BankID: ManualBalance] = if banksConnected {
             [
-                .rev: ManualBalance(cents: 34_020, setAt: now, fromBank: true, origin: .bank, fetchedAt: now),
-                .ima: ManualBalance(cents: 128_455, setAt: now, fromBank: true, origin: .bank, fetchedAt: now),
+                .rev: ManualBalance(cents: 34_020, setAt: now, origin: .bank, fetchedAt: now),
+                .ima: ManualBalance(cents: 128_455, setAt: now, origin: .bank, fetchedAt: now),
                 .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
             ]
         } else {

@@ -72,7 +72,7 @@ enum DateText {
         case .statement:
             if !info.estimated { return "Viene del extracto de \(bank.displayName) \(when)." }
             return "Parte del saldo del extracto \(when) y suma lo que ha llegado después."
-        case .notification:
+        case .notice:
             if !info.estimated { return "Lo dijo \(bank.displayName) en su aviso \(when)." }
             return "Parte del saldo que dio el banco en su aviso \(when) y suma lo que ha llegado después."
         case .manual:

@@ -11,6 +11,7 @@ struct ASPSPPickerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
     @State private var query = ""
+    @State private var isSearching = false
 
     private var filtered: [EBASPSP] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -50,14 +51,20 @@ struct ASPSPPickerView: View {
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.canvas.ignoresSafeArea())
-        .searchable(text: $query, prompt: "Buscar \(bank.displayName)")
+        .searchable(text: $query, isPresented: $isSearching, prompt: "Buscar \(bank.displayName)")
         .navigationTitle("Elegir \(bank.displayName)")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { query = "" }
+            if phase != .active {
+                isSearching = false
+                query = ""
+            }
         }
         .onChange(of: gate?.isLocked) { _, locked in
-            if locked == true { query = "" }
+            if locked == true {
+                isSearching = false
+                query = ""
+            }
         }
     }
 }

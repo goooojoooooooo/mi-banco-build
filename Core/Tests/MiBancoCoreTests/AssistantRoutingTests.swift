@@ -455,11 +455,15 @@ private func sampleState() -> LedgerState {
             "ħold Apple",
             "v е\u{0301} n d o Apple",
             "Ayer compré Apple, ¿que compre más?",
+            "Ayer compré Apple, ¿que c o m p r e más?",
+            "¿Es buena una compra de Apple?",
+            "¿Meto 500 € en Tesla desde Revolut?",
         ] {
             #expect(isAdviceRequest(advice, portfolio: portfolio), "Debió rechazar como consejo: \(advice)")
         }
 
-        // C2: el tramo devuelto de `originalQuestion` tampoco puede contener €/%/$/cirílico, categorías ni interrogativos.
+        // C2: el tramo devuelto de `originalQuestion` tampoco puede contener €/%/$/cirílico, categorías ni interrogativos;
+        // preposiciones al borde («en Mercadona») se recortan limpiamente.
         #expect(parseAssistantModelRoute("GASTO comercio=\"Tienda 50\"", originalQuestion: "¿Cuánto gasté en Tienda €50?",
                                          portfolio: portfolio) == nil)
         #expect(parseAssistantModelRoute("GASTO comercio=\"Tienda 50\"", originalQuestion: "¿Cuánto gasté en Tienda Ж50?",
@@ -468,6 +472,8 @@ private func sampleState() -> LedgerState {
                                          portfolio: portfolio) == nil)
         #expect(parseAssistantModelRoute("GASTO comercio=\"Supermercado\"", originalQuestion: "¿Cuánto gasté en Supermercado?",
                                          portfolio: portfolio) == nil)
+        #expect(parseAssistantModelRoute("GASTO comercio=\"en Mercadona\"", originalQuestion: "¿Cuánto gasté en Mercadona?",
+                                         portfolio: portfolio) == .spending(month: .current, category: nil, merchant: "Mercadona", bank: nil))
 
         // I4: «¿Cuánto llevo gastado en Apple?» sin pagos previos en tienda sigue siendo gasto, no cartera.
         var emptyShopState = state

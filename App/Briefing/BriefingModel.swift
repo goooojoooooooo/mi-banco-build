@@ -14,7 +14,6 @@ final class BriefingModel {
     private(set) var briefing: Briefing?
     private(set) var input: BriefingInput?
     private(set) var openingText: String = ""
-    private(set) var openingChosenByModel = false
     private(set) var cards: [InterestCard] = []
     private(set) var chips: [AssistantChip] = []
     private(set) var lastAnswer: AssistantAnswer?
@@ -178,7 +177,6 @@ final class BriefingModel {
         self.openingText = openingLine(
             briefing: built, choice: validModelChoice, day: now, privateMode: privateMode
         )
-        self.openingChosenByModel = (validModelChoice != nil)
         self.prefetchedChoice = nil
         self.prefetchTask?.cancel()
         self.prefetchTask = nil

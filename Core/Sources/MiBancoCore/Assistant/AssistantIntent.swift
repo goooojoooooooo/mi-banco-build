@@ -357,11 +357,10 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
     if hasCrossScriptConfusableWord(trimmed) { return true }
 
     // Conserva tildes del original (NFC) para distinguir el pretérito «compré» del subjuntivo «compre».
-    let rawAccentedTokens = Set(
-        withoutFormatCharacters(question).precomposedStringWithCanonicalMapping.lowercased()
-            .components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
-    )
-    let hasPastCompreOnly = rawAccentedTokens.contains("compré") && !rawAccentedTokens.contains("compre")
+    let rawAccentedList = withoutFormatCharacters(question).precomposedStringWithCanonicalMapping.lowercased()
+        .components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+    let rawPastCompreCount = rawAccentedList.filter { $0 == "compré" }.count
+    let rawUnaccentedCompreCount = rawAccentedList.filter { $0 == "compre" }.count
 
     // Tokens alfanuméricos para conservar ISINs (`US0378331005`), `sp500`, `IBEX 35`, `3M`.
     let alnumTokens = foldedQuery(foldConfusables(trimmed))
@@ -369,15 +368,14 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
     let hasMoneyCue = trimmed.contains("€") || trimmed.contains("$")
         || alnumTokens.contains("euros") || alnumTokens.contains("euro") || alnumTokens.contains("eur")
         || alnumTokens.contains("dinero")
-    let hasOwnBankMention = alnumTokens.contains("revolut") || alnumTokens.contains("imagin")
-        || alnumTokens.contains("caixabank") || alnumTokens.contains("caixa")
-        || alnumTokens.contains("traderepublic")
-        || (" " + alnumTokens.joined(separator: " ") + " ").contains(" trade republic ")
+    let ownBankTargetWords: Set<String> = ["revolut", "imagin", "caixabank", "caixa", "traderepublic", "cuenta", "cuentas", "banco", "bancos"]
 
     for list in allQuestionReadings(trimmed) {
         let joined = " " + list.joined(separator: " ") + " "
         let invContext = hasInvestmentContext(list, alphanumericTokens: alnumTokens, portfolio: portfolio)
         let hasTradeActionLead = list.contains { tradeActionLeadWords.contains($0) }
+        let listCompreCount = list.filter { $0 == "compre" }.count
+        let hasPastCompreOnly = rawPastCompreCount > 0 && rawUnaccentedCompreCount == 0 && listCompreCount <= rawPastCompreCount
 
         // 1. Palabras y prefijos incondicionales (incluye inglés `invest*` de J7).
         for (i, word) in list.enumerated() {
@@ -422,18 +420,28 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
         // 2. Frases incondicionales.
         if unconditionalAdvicePhrases.contains(where: { joined.contains(" " + $0 + " ") }) { return true }
 
-        // 2b. «¿Meto 500 € en Tesla?» / «¿Pongo 1.000 euros en Nvidia?» (importe entre meto/pongo y «en», sin banco propio ni verbo de gasto).
-        if hasMoneyCue && !hasOwnBankMention,
+        // 2b. «¿Meto 500 € en Tesla?» / «¿Meto 500 € en Tesla desde Revolut?» (importe entre meto/pongo y «en <destino no bancario>»).
+        if hasMoneyCue,
            list.contains(where: { ["meto", "meter", "mete", "pongo", "poner", "pon"].contains($0) }),
-           list.contains("en"),
            !list.contains(where: { ["gaste", "gasto", "gastado", "pague", "pagado", "traspaso", "transferencia"].contains($0) }) {
-            return true
+            for (idx, tok) in list.enumerated() where tok == "en" && idx + 1 < list.count {
+                let next = list[idx + 1]
+                let afterNext = idx + 2 < list.count ? list[idx + 2] : ""
+                let isOwnBankDest = ownBankTargetWords.contains(next)
+                    || (next == "trade" && afterNext == "republic")
+                    || (next == "mi" && ownBankTargetWords.contains(afterNext))
+                    || (next == "la" && afterNext == "cuenta")
+                if !isOwnBankDest { return true }
+            }
         }
 
-        // 3. Predicciones de mercado y «qué hago con …» solo en contexto de inversión o dinero/ahorros.
+        // 3. Predicciones de mercado, valoraciones («es buena idea») y «qué hago con …» en contexto de inversión.
         if invContext {
             if list.contains(where: { futurePriceWords.contains($0) }) { return true }
             if futurePricePhrases.contains(where: { joined.contains(" " + $0 + " ") }) { return true }
+            if ["es buena", "es buen", "buena idea", "mala idea", "buena opcion", "mala opcion"].contains(where: { joined.contains(" " + $0 + " ") }) {
+                return true
+            }
             if list.contains(where: { portfolioActionWords.contains($0) }) { return true }
             if list.contains(where: { $0.hasPrefix("reduc") }) { return true }
             // «esperar»/«espera» en inversiones es consejo, salvo «espero el cobro/dividendo» (hecho esperado).
@@ -836,7 +844,8 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
     let bank = extractBank(tokens: tokens, joined: joined)
     let month = extractMonth(tokens: tokens, joined: joined, rawFolded: rawFolded, now: now, calendar: calendar)
     let category = extractCategory(joined: joined)
-    let hasSpendingCue = tokens.contains { spendingCues.contains($0) }
+    let passiveCharged = joined.contains(" han cobrado ") || joined.contains(" me cobraron ")
+    let hasSpendingCue = tokens.contains { spendingCues.contains($0) } || passiveCharged
     let hasStrongShopCue = tokens.contains { strongShopSpendingCues.contains($0) }
     let hasAccentedBajo = withoutFormatCharacters(question).precomposedStringWithCanonicalMapping.lowercased().contains("bajó")
 
@@ -884,7 +893,6 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
     }
 
     // 8. Ingresos («me han cobrado» / «han cobrado» son pagos, nunca ingresos).
-    let passiveCharged = joined.contains(" han cobrado ") || joined.contains(" me cobraron ")
     let hasIncomeCue = tokens.contains { cue in
         if cue == "cobrado" && passiveCharged { return false }
         return incomeCues.contains(cue)
@@ -987,8 +995,13 @@ func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: String, r
             && !s.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
     }
     guard isSafeSpanText(modelValue) else { return nil }
-    let normValue = normalizeMerchant(modelValue)
-    let valueTokens = normValue.split(separator: " ").map(String.init)
+    let spanEdgePrepositions: Set<String> = ["en", "de", "del", "por", "para", "con", "a", "al", "sobre", "desde"]
+    let rawNormValue = normalizeMerchant(modelValue)
+    let rawValueTokens = rawNormValue.split(separator: " ").map(String.init)
+    var valueTokens = rawValueTokens
+    while let first = valueTokens.first, spanEdgePrepositions.contains(first) { valueTokens.removeFirst() }
+    while let last = valueTokens.last, spanEdgePrepositions.contains(last) { valueTokens.removeLast() }
+    let normValue = valueTokens.joined(separator: " ")
     guard normValue.count >= 2, !valueTokens.isEmpty,
           !valueTokens.allSatisfy({ nonMerchantTargets.contains($0) || merchantFillerWords.contains($0) || modelMerchantStopWords.contains($0) }),
           !valueTokens.contains(where: { modelMerchantStopWords.contains($0) }) else {
@@ -1005,7 +1018,7 @@ func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: String, r
         .replacingOccurrences(of: "`", with: "")
         .replacingOccurrences(of: "\u{00B4}", with: "")
     let rawWords = withoutApostrophes.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
-    guard rawWords == valueTokens else { return nil }
+    guard rawWords == rawValueTokens else { return nil }
 
     // Extrae palabras originales de la pregunta y busca un tramo contiguo cuya forma normalizada coincida (también «H&M»/«Basic-Fit»).
     let qRaw = compatNormalized(originalQuestion)

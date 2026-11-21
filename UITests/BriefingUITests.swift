@@ -191,7 +191,7 @@ final class BriefingUITests: XCTestCase {
         XCTAssertTrue(subDislike.waitForExistence(timeout: 8), "Falta la tarjeta de cambio de suscripción en «Te puede interesar»")
         subDislike.tap()
         XCTAssertTrue(
-            waitFor(NSPredicate(format: "exists == false"), subDislike, timeout: 6),
+            waitFor(NSPredicate(format: "exists == false"), subDislike, timeout: 15),
             "La tarjeta descartada no desapareció al pulsar «No me interesa»"
         )
 

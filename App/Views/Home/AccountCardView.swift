@@ -503,18 +503,23 @@ private struct CardBack: View {
             }
             let missing = BankID.allCases.filter { balances[$0] == nil }.map(\.displayName)
             let fromBank = known.filter { balances[$0]?.origin == .bank }.map(\.displayName)
-            let fromStatement = known.filter { balances[$0]?.origin == .statement && balances[$0]?.estimated == false }.map(\.displayName)
-            let estimated = known.filter { balances[$0]?.estimated == true && balances[$0]?.origin != .bank }.map(\.displayName)
+            let fromStatementExact = known.filter { balances[$0]?.origin == .statement && balances[$0]?.estimated == false }.map(\.displayName)
+            let fromStatementEstimated = known.filter { balances[$0]?.origin == .statement && balances[$0]?.estimated == true }.map(\.displayName)
+            let estimated = known.filter { balances[$0]?.estimated == true && balances[$0]?.origin != .bank && balances[$0]?.origin != .statement }.map(\.displayName)
 
-            if !fromBank.isEmpty || !fromStatement.isEmpty || !missing.isEmpty {
+            if !fromBank.isEmpty || !fromStatementExact.isEmpty || !fromStatementEstimated.isEmpty || !missing.isEmpty {
                 var clauses: [String] = []
                 if !fromBank.isEmpty {
                     let verb = fromBank.count == 1 ? "viene del banco" : "vienen del banco"
                     clauses.append("\(spanishJoin(fromBank)) \(verb)")
                 }
-                if !fromStatement.isEmpty {
-                    let verb = fromStatement.count == 1 ? "viene del extracto" : "vienen del extracto"
-                    clauses.append("\(spanishJoin(fromStatement)) \(verb)")
+                if !fromStatementExact.isEmpty {
+                    let verb = fromStatementExact.count == 1 ? "viene del extracto" : "vienen del extracto"
+                    clauses.append("\(spanishJoin(fromStatementExact)) \(verb)")
+                }
+                if !fromStatementEstimated.isEmpty {
+                    let verb = fromStatementEstimated.count == 1 ? "es estimado desde el extracto" : "son estimados desde el extracto"
+                    clauses.append("\(spanishJoin(fromStatementEstimated)) \(verb)")
                 }
                 if !estimated.isEmpty {
                     let verb = estimated.count == 1 ? "es estimado" : "son estimados"

@@ -205,16 +205,19 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         #expect(plainLines(twoSubs).contains { $0.contains("Netflix") })
         #expect(plainLines(twoSubs).contains { $0.contains("Spotify") })
 
-        // Caso 2: suscripción con `nextDate` hoy y pago hoy excluida de `subscriptionCharges` -> dice «cobrado hoy».
+        // Caso 2: suscripción con `nextDate` hoy y cobro hoy capturado como gemelo probable de una fila del banco -> dice «cobrado hoy».
         var sameDayUnlinked = LedgerState()
         sameDayUnlinked.movements = [
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
                      date: at(2026, 9, 20, 8), isShop: true, bankRef: "nf1", bankStatus: .booked),
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
                      date: at(2026, 10, 20, 8), isShop: true, bankRef: "nf2", bankStatus: .booked),
-            // Un pago marcado como `excludedFromSpending` o un cobro hoy que no entra en `detectSubscriptions` dispara `chargedToday`.
+            // Aviso capturado hoy con pareja probable en el banco (nombre distinto): queda en `spendingExclusions` para
+            // `detectSubscriptions`, pero `chargedToday` lo detecta como cobrado hoy.
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .notification,
-                     date: nov(20, 9, 0), isShop: true, excludedFromSpending: true),
+                     date: nov(20, 9, 0), isShop: true),
+            Movement(bank: .rev, amountCents: -1_399, merchant: "NETFLIX COM EU", kind: .payment, source: .bank,
+                     date: nov(20, 9, 5), isShop: true, bankRef: "nf3", bankStatus: .booked),
         ]
         let chargedTodayAns = answerQuestion("¿Qué suscripciones tengo?", state: sameDayUnlinked, portfolio: nil, book: AccountBook(), now: nov(20, 10), calendar: cal)
         #expect(plainLines(chargedTodayAns).contains { $0.contains("Netflix") && $0.contains("cobrado hoy") })

@@ -363,7 +363,7 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         let warnCard = warnCards.first { $0.topic == .budgetClose }
         #expect(warnCard != nil)
         if let warnCard {
-            prefs.recordFeedback(.disliked, for: warnCard, now: nov(10, 18))
+            prefs.recordFeedback(.notInterested, for: warnCard, now: nov(10, 18))
         }
         state.movements.append(
             Movement(bank: .rev, amountCents: -3_000, merchant: "Zara", kind: .payment, source: .notification,

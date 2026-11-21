@@ -67,7 +67,7 @@ struct BriefingLineView: View {
         var masked = render(parts, .masked)
         // Defensa extra: ningún porcentaje incrustado en un aviso de texto libre puede colarse en modo privado.
         masked = masked.replacingOccurrences(
-            of: #"[+\-\u{2212}]?[0-9]+(?:[.,][0-9]+)?[ \u{00A0}]?%"#,
+            of: "[+\\-\u{2212}]?[0-9]+(?:[.,][0-9]+)?[ \u{00A0}]?%",
             with: "•••",
             options: .regularExpression
         )

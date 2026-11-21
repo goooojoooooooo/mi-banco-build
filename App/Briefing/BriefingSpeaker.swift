@@ -9,7 +9,6 @@ import Observation
 final class BriefingSpeaker {
     enum Target: Equatable, Sendable {
         case briefing
-        case answer
     }
 
     private(set) var activeTarget: Target?

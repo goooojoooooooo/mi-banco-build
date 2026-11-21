@@ -545,6 +545,7 @@ struct BriefingSheet: View {
         }
         .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("assistant-answer-card")
     }
 

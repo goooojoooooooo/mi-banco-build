@@ -1077,12 +1077,12 @@ private func spokenParts(_ line: BriefingLine) -> String {
             // Las líneas de aviso del resumen (`attention-*`) llevan importes dentro de `.text`: solo convierte importes
             // reconocibles (`12,50 €`, `+10 %`), sin reescribir signos dentro de nombres de comercios (J13).
             if isAttentionWarning {
-                s = s.replacingOccurrences(of: #"(?<=[ \u{00A0}])\+(?=[0-9]+(?:[.,][0-9]+)?[ \u{00A0}]?[€%])"#,
+                s = s.replacingOccurrences(of: "(?<=^|[ (])\\+(?=[0-9]+(?:[.,][0-9]+)? ?[€%])",
                                            with: "más ", options: .regularExpression)
-                s = s.replacingOccurrences(of: #"(?<=[ \u{00A0}])[-−](?=[0-9]+(?:[.,][0-9]+)?[ \u{00A0}]?[€%])"#,
+                s = s.replacingOccurrences(of: "(?<=^|[ (])[-−](?=[0-9]+(?:[.,][0-9]+)? ?[€%])",
                                            with: "menos ", options: .regularExpression)
-                s = s.replacingOccurrences(of: #"(?<=[0-9])[ \u{00A0}]?%"#, with: " por ciento", options: .regularExpression)
-                s = s.replacingOccurrences(of: #"(?<=[0-9])[ \u{00A0}]?€"#, with: " euros", options: .regularExpression)
+                s = s.replacingOccurrences(of: "(?<=[0-9]) ?%", with: " por ciento", options: .regularExpression)
+                s = s.replacingOccurrences(of: "(?<=[0-9]) ?€", with: " euros", options: .regularExpression)
             }
             out += s
         case .amount(let c):

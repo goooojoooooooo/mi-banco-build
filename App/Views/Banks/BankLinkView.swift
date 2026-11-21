@@ -60,6 +60,11 @@ struct BankLinkView: View {
         }
     }
 
+    private var isFinishingThisBank: Bool {
+        if case .finishing(let b) = connector.phase { return b == bank }
+        return false
+    }
+
     private var canCancelWaiting: Bool {
         switch connector.phase {
         case .opening(let b), .waitingForBank(let b):
@@ -267,7 +272,7 @@ struct BankLinkView: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .tint(Theme.label)
-                    Text("Esperando a \(bank.displayName)…")
+                    Text(isFinishingThisBank ? "Terminando con \(bank.displayName)…" : "Esperando a \(bank.displayName)…")
                         .titan(.option)
                         .foregroundStyle(Theme.label)
                 }
@@ -362,7 +367,7 @@ struct BankLinkView: View {
 
     @ViewBuilder
     private var actionRows: some View {
-        if !isWaitingOnThisBank && !needsResumeForThisBank && failedMessageForThisBank == nil {
+        if !isWaitingOnThisBank && !needsResumeForThisBank && failedMessageForThisBank == nil && aspspChoicesForThisBank == nil {
             switch statusLines.action {
             case .connect:
                 Button {

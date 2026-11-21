@@ -171,11 +171,12 @@ enum DemoMode {
             (8, .tr, -8_990, "Zara"), (9, .rev, -2_960, "Renfe"), (11, .ima, -4_620, "Carrefour"),
             (13, .rev, -2_975, "Mercadona"), (15, .ima, -6_040, "Repsol"), (17, .rev, -950, "Starbucks"),
             (18, .ima, -3_310, "Lidl"), (20, .rev, -2_650, "Glovo"), (23, .tr, -5_499, "Decathlon"),
-            (25, .rev, -3_760, "Mercadona"), (27, .ima, -1_985, "Carrefour"),
+            (25, .rev, -3_760, "Mercadona"), (27, .ima, -3_150, "Carrefour"),
         ]
         // Ojo: el ÚLTIMO cargo del mes pasado de un comercio que también tiene un pago reciente no puede parecerse en importe
         // (±25 %) al reciente, o según el día del mes (26–35 días de distancia) la demo mostraría una suscripción de más
-        // (Glovo y Renfe lo hacían). Por eso Glovo del día 20 y Renfe cuestan bastante más que sus pagos recientes.
+        // (Glovo y Renfe lo hacían). Por eso Glovo del día 20 y Renfe cuestan bastante más que sus pagos recientes. Lo mismo con la
+        // llegada de la demo (Carrefour 23,45 €, imagin): el Carrefour del día 27 cuesta 31,50 €, fuera del ±25 % de 23,45 €.
         // Los dos meses anteriores (el segundo, algo más barato): las comparaciones salen con cifras creíbles.
         for (back, percent) in [(1, 100), (2, 90)] {
             let first = monthsAgo(back, from: monthStart)

@@ -228,9 +228,9 @@ private func tempDirectory() -> URL {
         #expect(try JSONDecoder().decode(LedgerState.self, from: saved) == a)
     }
 
-    /// R35: documenta el peligro que la hoja evita (tras «No se pudo terminar…» no ofrece deslizar otra vez): restaurar B por
-    /// segunda vez copia lo que hay en el disco, que ya es B, y la copia de A se pierde.
-    @Test func restaurarDosVecesLaMismaCopiaDejaBEnLaCopiaDeSeguridad() throws {
+    /// R35 y R40: restaurar B por segunda vez (tras «No se pudo terminar…», cerrar y elegir el mismo fichero) NO pisa la copia
+    /// de seguridad: en el disco ya está B y la copia sigue siendo la de antes de la primera restauración (A).
+    @Test func restaurarDosVecesLaMismaCopiaDejaALaCopiaDeSeguridad() throws {
         let dir = tempDirectory()
         defer { try? FileManager.default.removeItem(at: dir) }
         let store = FileStore(directory: dir)
@@ -240,14 +240,31 @@ private func tempDirectory() -> URL {
         b.movements = [pay(900, "Zara", nov(11), isShop: true)]
         try store.save(a)
         try store.restoreKeepingCopy(b, copyName: "antes.json")
-        let afterFirst = try store.load()
         let firstCopy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
         #expect(firstCopy == a)
         try store.restoreKeepingCopy(b, copyName: "antes.json")
         let secondCopy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
-        #expect(secondCopy == afterFirst)
-        #expect(secondCopy != a)
-        #expect(secondCopy.movements == b.movements)
+        #expect(secondCopy == a)
+        #expect(try store.load() == b)
+    }
+
+    /// R40: restaurar B y luego otra copia distinta C sí sustituye la copia de seguridad, que pasa a ser B (sin cambios).
+    @Test func restaurarBYLuegoCDejaBEnLaCopiaDeSeguridad() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        var c = LedgerState()
+        c.movements = [pay(1_200, "Lidl", nov(12))]
+        try store.save(a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        try store.restoreKeepingCopy(c, copyName: "antes.json")
+        let copy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
+        #expect(copy == b)
+        #expect(try store.load() == c)
     }
 
     @Test func siFallaLaCopiaPreviaNoSeRestauraNada() throws {

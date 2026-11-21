@@ -223,7 +223,8 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Escribe un importe como 120,00"].waitForExistence(timeout: 5),
                       "El importe mal escrito se perdió al volver")
 
-        field.tap()
+        // El campo alinea el texto a la derecha (AmountField): tocar el borde derecho deja el cursor al final de «abc».
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "100\n")
         XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].waitForExistence(timeout: 2))
         // Guardado: al salir y volver, el campo enseña el límite (formateado) y no hay error.
@@ -241,20 +242,36 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].exists)
     }
 
-    /// R30 (b): la demo enseña exactamente Spotify y Netflix como suscripciones CUALQUIER día del año. Se fija el «hoy» de la
-    /// demo (`-MiBancoDemoToday`, solo en DEBUG y con `-MiBancoDemo`) en días de cada hueco del mes en que antes se encadenaban
-    /// Renfe (7 a 16) y Glovo (21 a 30), en fin de mes, en un cambio de año y en un marzo tras un febrero corto.
+    /// R30 (b) y R38: la demo enseña exactamente Spotify y Netflix como suscripciones CUALQUIER día del año, y además ese día
+    /// es el que se pidió. Se fija el «hoy» de la demo (`-MiBancoDemoToday`, solo en DEBUG y con `-MiBancoDemo`) en días de cada
+    /// hueco del mes en que antes se encadenaban Renfe (7 a 16) y Glovo (21 a 30), en fin de mes, en un cambio de año y en un
+    /// marzo tras un febrero corto. Netflix se cobra tres días después del «hoy» de la demo: su fila lo dice, y si el «hoy» no
+    /// se aplicara (se ignorara el argumento) fallarían cinco de las seis fechas. Los dos últimos días de noviembre se repiten
+    /// con la llegada de la demo (`-MiBancoDemoArrival`: Carrefour 23,45 € ~4 s tras arrancar), que no debe encadenarse con el
+    /// Carrefour del mes pasado (31,50 € el día 27).
     func testDemoSubscriptionsAreSpotifyAndNetflixOnAnyDay() throws {
-        for day in ["2026-11-07", "2026-11-16", "2026-11-21", "2026-11-30", "2027-01-31", "2027-03-01"] {
+        let cases: [(day: String, arrival: Bool, netflix: String)] = [
+            ("2026-11-07", false, "10 nov"), ("2026-11-16", false, "19 nov"), ("2026-11-21", false, "24 nov"),
+            ("2026-11-30", false, "3 dic"), ("2027-01-31", false, "3 feb"), ("2027-03-01", false, "4 mar"),
+            ("2026-11-22", true, "25 nov"), ("2026-11-30", true, "3 dic"),
+        ]
+        for c in cases {
+            let day = c.day + (c.arrival ? " con llegada" : "")
             if app != nil { app.terminate() }
-            launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoSubscriptions", "-MiBancoDemoToday", day])
+            launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoSubscriptions", "-MiBancoDemoToday", c.day]
+                   + (c.arrival ? ["-MiBancoDemoArrival"] : []))
             XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 20), "No se ve Suscripciones el \(day)")
             let rows = app.descendants(matching: .any).matching(identifier: "suscripciones.fila")
             XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "No hay filas de suscripción el \(day)")
+            // La llegada entra a los ~4 s: se espera a que haya pasado antes de contar.
+            if c.arrival { Thread.sleep(forTimeInterval: 9) }
             let labels = rows.allElementsBoundByIndex.map { $0.label }
             XCTAssertEqual(labels.count, 2, "El \(day) la demo no trae exactamente 2 suscripciones: \(describe(rows))")
             XCTAssertTrue(labels.contains { $0.hasPrefix("Spotify,") }, "El \(day) falta Spotify: \(labels)")
-            XCTAssertTrue(labels.contains { $0.hasPrefix("Netflix,") }, "El \(day) falta Netflix: \(labels)")
+            let netflix = labels.first { $0.hasPrefix("Netflix,") }
+            XCTAssertNotNil(netflix, "El \(day) falta Netflix: \(labels)")
+            XCTAssertTrue(netflix?.contains(c.netflix) == true,
+                          "El \(day) la fila de Netflix no trae «\(c.netflix)» (¿se aplicó el «hoy» de la demo?): \(netflix ?? "")")
         }
     }
 
@@ -455,7 +472,11 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "90"), category, timeout: 5),
                       "La demo no trae el límite de Comer fuera")
         category.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
-        category.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + " €\n")
+        // R40 (c): primero « €», se comprueba que «€» llegó al campo, y SOLO después se pulsa Intro.
+        category.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + " €")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "€"), category, timeout: 5),
+                      "El símbolo «€» no llegó al campo antes de pulsar Intro: «\(String(describing: category.value))»")
+        category.typeText("\n")
         assertLimitRemoved(category)
         goBack()
         scrollTo(link)
@@ -596,9 +617,12 @@ final class Plan3TapTests: XCTestCase {
 
     // MARK: - R24 y R31: un solo toque en cada pestaña (con los tiempos a la vista, sin poner en rojo la ejecución)
 
-    /// Mide, para cada pestaña, el tiempo desde UN toque hasta que la pestaña se ve (o «no cambió en 5 s»). Las cuatro cifras
-    /// van en el nombre de una actividad y en el mensaje del fallo esperado; el paso «Resumen por prueba» de `ui-tests.yml`
-    /// las imprime en cada ejecución. El simulador no distingue un simulador lento de una barra lenta: se mira en el iPhone.
+    /// R39. Mide, para cada pestaña, lo que tarda UN toque en dejarla seleccionada (`isSelected` de su botón en la barra) y en
+    /// dejar su contenido a la vista. El reloj arranca cuando `tap()` ya volvió. Un paso cuya pestaña ya estaba seleccionada
+    /// antes del toque se da por «sin medir» y nunca como un tiempo. Se hacen DOS vueltas: la 1 es la primera visita de cada
+    /// pestaña; la 2, cuando las cuatro ya se han visitado. Las cifras van en el nombre de una actividad y en el mensaje del
+    /// fallo esperado; el paso «Resumen por prueba» de `ui-tests.yml` las imprime en cada ejecución. Vuelta 2 en verde y la 1
+    /// no: el coste es construir la pestaña la primera vez; vuelta 2 en rojo: es el toque sintético del simulador.
     func testTabSwitchSingleTapStrict() throws {
         continueAfterFailure = true
         launch()
@@ -609,17 +633,39 @@ final class Plan3TapTests: XCTestCase {
             ("Gasto", element("gasto.total")),
             ("Inicio", app.staticTexts["Tu dinero"]),
         ]
-        var figures: [String] = []
+        var laps: [String] = []
         var allChanged = true
-        for (name, target) in steps {
-            let start = Date()
-            app.tabBars.buttons[name].tap()
-            let changed = target.waitForExistence(timeout: 5)
-            let seconds = Date().timeIntervalSince(start)
-            figures.append(changed ? "\(name) \(String(format: "%.1f", seconds)) s" : "\(name) no cambió en 5 s")
-            if !changed { allChanged = false }
+        var visited: Set<String> = ["Inicio"]
+        for lap in 1...2 {
+            // R39: la segunda vuelta empieza SOLO cuando las cuatro pestañas ya se han visitado de verdad y se está en Inicio.
+            if lap == 2 {
+                for (name, target) in steps where !visited.contains(name) {
+                    _ = selectTab(app.tabBars.buttons[name], until: target)
+                }
+                let home = app.tabBars.buttons["Inicio"]
+                if !home.isSelected { _ = selectTab(home, until: app.staticTexts["Tu dinero"]) }
+            }
+            var figures: [String] = []
+            for (name, target) in steps {
+                let tab = app.tabBars.buttons[name]
+                if tab.isSelected {
+                    figures.append("\(name) sin medir (ya estaba seleccionada)")
+                    continue
+                }
+                tab.tap()
+                let start = Date()
+                let selected = waitFor(NSPredicate(format: "isSelected == true"), tab, timeout: 5)
+                let selectedAt = Date().timeIntervalSince(start)
+                let shown = target.waitForExistence(timeout: 5)
+                let shownAt = Date().timeIntervalSince(start)
+                let tabText = selected ? String(format: "pestaña %.1f s", selectedAt) : "pestaña no seleccionada en 5 s"
+                let contentText = shown ? String(format: "contenido %.1f s", shownAt) : "contenido no visto en 5 s"
+                figures.append("\(name) \(tabText), \(contentText)")
+                if selected && shown { visited.insert(name) } else { allChanged = false }
+            }
+            laps.append("vuelta \(lap): " + figures.joined(separator: "; "))
         }
-        let summary = "Cambio de pestaña con un solo toque: " + figures.joined(separator: "; ")
+        let summary = "Cambio de pestaña con un solo toque, " + laps.joined(separator: "; ")
         XCTContext.runActivity(named: summary) { _ in }
         XCTExpectFailure(summary, strict: false) {
             XCTAssertTrue(allChanged, summary)

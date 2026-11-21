@@ -54,12 +54,16 @@ struct RestoreConfirmView: View {
                 SlideToConfirm(title: preview.isPrevious ? "Desliza para volver" : "Desliza para restaurar", systemImage: "arrow.counterclockwise", tint: Theme.label,
                                action: run)
                     .id(attempt)
+                    // R40: al pasar a «No se pudo terminar…» el control sale con la animación normal de la hoja (ninguna con
+                    // «Reducir movimiento»).
+                    .transition(reduceMotion ? .identity : .opacity)
                     .accessibilityIdentifier("restore-slide")
                     .allowsHitTesting(phase != .restored)
             }
             if phase != .restored {
                 Button { dismiss() } label: {
-                    Text("Cancelar")
+                    // R40: tras «No se pudo terminar…» los datos YA cambiaron: la salida se llama «Cerrar», no «Cancelar».
+                    Text(isStuck ? "Cerrar" : "Cancelar")
                         .titan(.option)
                         .foregroundStyle(Theme.label2)
                         // La hoja a media altura se dibuja escalada (0,9636 en iOS 26): 48 pt de diseño dejan más de 44 pt en pantalla.
@@ -73,7 +77,7 @@ struct RestoreConfirmView: View {
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.canvas.ignoresSafeArea())
-        .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph, value: phase)
+        .animation(reduceMotion ? (isStuck ? nil : .easeOut(duration: 0.2)) : Theme.Motion.morph, value: phase)
         .sensoryFeedback(.success, trigger: doneTick)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)

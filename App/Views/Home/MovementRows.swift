@@ -118,6 +118,28 @@ struct MovementRowView: View {
             if logo != nil, let merchant = movement.merchant {
                 Button("No usar este logo", systemImage: "eye.slash") { logos.block(merchant: merchant) }
             }
+        } preview: {
+            HStack(spacing: 14) {
+                MerchantTile(image: logo, symbol: movement.fallbackSymbol, size: tileSize)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.title)
+                        .titan(.row)
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                    Text(row.subtitle)
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label3)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Text(signedEUR(movement.amountCents))
+                    .titan(.row)
+                    .foregroundStyle(amountColor)
+                    .strikethrough(movement.flaggedNotMine, color: Theme.label3)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .privateAmount()
+            }
         }
         // Con el ajuste en la clave: al volver a activarlo, las filas visibles buscan su logo.
         .task(id: LogoTaskID(merchant: movement.merchant, downloads: logos.downloadsEnabled)) {
@@ -216,6 +238,24 @@ struct UnreadRowView: View {
         }
         .gatedContextMenu(privateTitle: "Aviso sin leer") {
             Button("Borrar", systemImage: "trash", role: .destructive, action: onDelete)
+        } preview: {
+            HStack(alignment: .top, spacing: 14) {
+                MerchantTile(image: nil, symbol: "questionmark", size: tileSize, symbolColor: Theme.warning)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("No se pudo leer este aviso")
+                        .titan(.row)
+                        .foregroundStyle(Theme.label)
+                    Text(shownText)
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label3)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("\(notice.bank.displayName) · \(DateText.time(notice.date))")
+                        .titan(.meta)
+                        .foregroundStyle(Theme.label3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("No se pudo leer este aviso. \(spokenText). \(notice.bank.displayName), \(DateText.moment(notice.date))")

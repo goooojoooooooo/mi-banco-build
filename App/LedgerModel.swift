@@ -135,7 +135,7 @@ final class LedgerModel {
     /// coreografía, háptica, aviso de VoiceOver) es el código real.
     func demoSimulateArrival() {
         var ledger = Ledger(state: state)
-        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: Date()) else { return }
+        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: clock) else { return }
         demoIncoming = ledger.state
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
     }

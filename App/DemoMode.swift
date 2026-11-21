@@ -31,9 +31,10 @@ enum DemoMode {
         guard parts.count == 3 else { return nil }
         let calendar = Calendar.current
         let components = DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12)
-        guard let date = calendar.date(from: components),
-              calendar.dateComponents([.year, .month, .day], from: date) == DateComponents(year: parts[0], month: parts[1], day: parts[2])
-        else { return nil }
+        guard let date = calendar.date(from: components) else { return nil }
+        // Un día que no existe (30-02) se desplazaría al mes siguiente: se ignora.
+        let back = calendar.dateComponents([.year, .month, .day], from: date)
+        guard back.year == parts[0], back.month == parts[1], back.day == parts[2] else { return nil }
         return date
     }
 

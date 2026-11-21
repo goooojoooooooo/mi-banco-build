@@ -350,11 +350,24 @@ private func sampleState() -> LedgerState {
     // MARK: Contrato con el modelo (A2, A6, J21(d), C1, Minor 1)
 
     @Test func elPromptDelModeloNoLlevaDatosBancarios() {
-        let prompt = assistantRoutingPrompt(question: "¿Cuánto llevo en Mercadona?", now: nov(20), calendar: cal)
+        // U7: firma sin `LedgerState` + comprobación frente a un libro rico con importes y comercios ajenos a la pregunta.
+        let fn: (String, Date, Calendar) -> String = assistantRoutingPrompt
+        let state = sampleState()
+        let prompt = fn("¿Cuánto llevo en Mercadona?", nov(20), cal)
         #expect(prompt.contains("Mes actual: 2026-11"))
         #expect(prompt.contains("Pregunta: ¿Cuánto llevo en Mercadona?"))
         #expect(!prompt.contains("€"))
-        #expect(!prompt.contains("340,20"))
+        for (_, bal) in state.balances {
+            let formatted = formatEUR(bal.cents).replacingOccurrences(of: "\u{00A0}€", with: "")
+            #expect(!prompt.contains(formatted), "El prompt no puede filtrar el saldo \(formatted)")
+        }
+        for m in state.movements {
+            let formatted = formatEUR(abs(m.amountCents)).replacingOccurrences(of: "\u{00A0}€", with: "")
+            #expect(!prompt.contains(formatted), "El prompt no puede filtrar el importe \(formatted)")
+            if let merchant = m.merchant, !merchant.localizedCaseInsensitiveContains("Mercadona") {
+                #expect(!prompt.contains(merchant), "El prompt no puede filtrar el comercio \(merchant)")
+            }
+        }
         #expect(assistantRoutingInstructions.contains("Onyx"))
         #expect(assistantRoutingInstructions.contains("CONSEJO"))
     }
@@ -491,5 +504,193 @@ private func sampleState() -> LedgerState {
         let oldYear = routeAssistantQuestion("¿Cuánto gasté en octubre de 1999?", state: state, portfolio: portfolio,
                                              now: nov(20), calendar: cal)
         #expect(oldYear == .spending(month: .specific(year: 1999, month: 10), category: nil, merchant: nil, bank: nil))
+    }
+
+    // MARK: U1 — Detector estructural de peticiones de consejo (dos tablas literales)
+
+    private static func merchantKeys(in state: LedgerState) -> Set<String> {
+        var keys = Set<String>()
+        for m in state.movements {
+            for raw in [m.merchant, m.bankMerchant].compactMap({ $0 }) {
+                let k = normalizeMerchant(raw)
+                if !k.isEmpty { keys.insert(k) }
+            }
+        }
+        return keys
+    }
+
+    @Test func detectaPeticionesDeConsejoDelInforme() throws {
+        let state = sampleState()
+        let known = Self.merchantKeys(in: state)
+        let questions = [
+            "¿Añado 100 € al fondo indexado?",
+            "¿Añado más al MSCI World?",
+            "¿Es Apple una buena inversión?",
+            "¿Apple es una buena inversión?",
+            "¿Suelto mis acciones?",
+            "¿Pillo acciones de Apple?",
+            "¿Qué ETF me pillo?",
+            "¿Cojo más acciones?",
+            "¿Me hago con acciones de Tesla?",
+            "¿Recompro Apple?",
+            "¿Revendo Apple?",
+            "¿Cancelo el plan de inversión?",
+            "¿Subo la aportación al ETF?",
+            "¿Cuánto aporto al mes?",
+            "¿Hago DCA en bitcoin?",
+            "¿Bendo mis acciones?",
+            "¿Bendo Apple?",
+            "¿Cuánto debería inbertir?",
+            "¿Cuánto imbierto?",
+            "¿Kompro bitcoin?",
+            "¿V3ndo Apple?",
+            "¿C0mpro Tesla?",
+            "¿Apuesto por Nvidia?",
+            "¿Subirá Nvidia?",
+            "¿Le meto más a Tesla?",
+            "¿Qué hago con Tesla?",
+            "¿Qué hago con 1000 €?",
+            "¿Está cara Tesla?",
+            "¿Es rentable Tesla?",
+            "¿Me compensa Apple?",
+            "¿Bitcoin o Ethereum?",
+            "Is Apple overvalued?",
+            "Which ETF?",
+        ]
+        for portfolio in [samplePortfolio() as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            for q in questions {
+                #expect(isAdviceRequest(q, portfolio: portfolio, knownMerchants: known), "[\(tag)] isAdviceRequest: \(q)")
+                let intent = routeAssistantQuestion(q, state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+                if case .adviceRequest = intent {
+                } else {
+                    Issue.record("[\(tag)] Esperaba .adviceRequest para «\(q)», salió \(intent)")
+                }
+                let ans = answerQuestion(q, state: state, portfolio: portfolio, book: AccountBook(), now: nov(20), calendar: cal)
+                #expect(ans.isAdviceRefusal, "[\(tag)] isAdviceRefusal: \(q)")
+                let firstLine = try #require(ans.lines.first, "[\(tag)] sin líneas para \(q)")
+                #expect(render(firstLine.parts, .plain) == investmentAdviceRefusal, "[\(tag)] negativa literal: \(q)")
+            }
+        }
+    }
+
+    @Test func noBloqueaFalsosPositivosDelInforme() {
+        var state = sampleState()
+        state.movements += [
+            Movement(bank: .rev, amountCents: -250, merchant: "Vending Sur", kind: .payment, source: .bank,
+                     date: nov(10, 11), isShop: true, bankRef: "v1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -600, merchant: "El vendedor de lotería", kind: .payment, source: .bank,
+                     date: nov(11, 11), isShop: true, bankRef: "v2", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -1_800, merchant: "Vendome", kind: .payment, source: .bank,
+                     date: nov(12, 11), isShop: true, bankRef: "v3", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -2_200, merchant: "Comprarte", kind: .payment, source: .bank,
+                     date: nov(13, 11), isShop: true, bankRef: "v4", bankStatus: .booked),
+        ]
+        let known = Self.merchantKeys(in: state)
+        let questions = [
+            "¿Qué compre ayer?",
+            "¿Que compre ayer?",
+            "¿Cuánto he pagado a la asesoría?",
+            "¿Cuánto me cobra el asesor?",
+            "¿Cuánto pagué en la Asesoría Pérez?",
+            "¿Cuál es mi gasto promedio al mes?",
+            "¿Cuánto gasto de promedio?",
+            "¿Con cuánto voy a quedarme a fin de mes?",
+            "¿Cuánto debería quedarme en Revolut a fin de mes?",
+            "¿Cuánto tengo que pagar de la renta?",
+            "¿Cuándo tengo que pagar la renta?",
+            "¿Debo algo de la renta?",
+            "¿Tengo que pagar el bono del gimnasio?",
+            "¿Tengo que recargar el bono transporte?",
+            "¿Cuánto tengo que pagar por el depósito?",
+            "Compras",
+            "Compra",
+            "Ventas",
+            "Compras este mes",
+            "¿Cuánto gasté comprando ropa?",
+            "¿Cuánto gasté en comprar regalos?",
+            "¿Qué compraron con mi tarjeta?",
+            "¿Cuánto me queda tras comprar el coche?",
+            "¿Cuánto me he gastado en vending?",
+            "¿Cuánto me he gastado en el vendedor de lotería?",
+            "¿Cuánto me he gastado en Vendome?",
+            "¿Cuánto me he gastado en Comprarte?",
+            "¿Cuánto dinero meto en la hucha?",
+            "¿Cuánto dinero pongo en el súper cada mes?",
+            "¿Cuál fue el momento de más gasto?",
+            "¿Cuánto mantengo en Revolut?",
+            "¿Cuánto me cuesta mantener el coche?",
+            "¿Cuánto me paso en el mercado?",
+            "¿Cuánto paso cada mes a la fundación?",
+        ]
+        let comprasExact: Set<String> = ["Compras", "Compra", "Compras este mes"]
+        let unsupportedExact: Set<String> = ["¿Qué compre ayer?", "¿Que compre ayer?"]
+        let spendingExact: Set<String> = [
+            "¿Cuánto he pagado a la asesoría?",
+            "¿Cuánto me cobra el asesor?",
+            "¿Cuánto pagué en la Asesoría Pérez?",
+            "¿Cuánto gasté comprando ropa?",
+            "¿Cuánto gasté en comprar regalos?",
+            "¿Cuánto me he gastado en vending?",
+            "¿Cuánto me he gastado en el vendedor de lotería?",
+            "¿Cuánto me he gastado en Vendome?",
+            "¿Cuánto me he gastado en Comprarte?",
+        ]
+        for portfolio in [samplePortfolio() as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            for q in questions {
+                #expect(!isAdviceRequest(q, portfolio: portfolio, knownMerchants: known), "[\(tag)] falso positivo: \(q)")
+                let intent = routeAssistantQuestion(q, state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+                if case .adviceRequest = intent {
+                    Issue.record("[\(tag)] routeAssistantQuestion dio .adviceRequest para «\(q)»")
+                }
+                if comprasExact.contains(q) {
+                    #expect(intent == .spending(month: .current, category: .compras, merchant: nil, bank: nil), "[\(tag)] \(q) -> \(intent)")
+                } else if unsupportedExact.contains(q) {
+                    #expect(intent == .unsupportedPeriod, "[\(tag)] \(q) -> \(intent)")
+                } else if spendingExact.contains(q) {
+                    if case .spending = intent {
+                    } else {
+                        Issue.record("[\(tag)] esperaba .spending para «\(q)», salió \(intent)")
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: U3 — Periodos («del año pasado», importes de 4 cifras y hoy/ayer/semana/año)
+
+    @Test func mesDelAnoPasado() {
+        let state = sampleState()
+        #expect(routeAssistantQuestion("¿Cuánto gasté en octubre del año pasado?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .specific(year: 2025, month: 10), category: nil, merchant: nil, bank: nil))
+        #expect(routeAssistantQuestion("¿Cuánto gasté en noviembre del año pasado?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .specific(year: 2025, month: 11), category: nil, merchant: nil, bank: nil))
+    }
+
+    @Test func importeNoEsAno() {
+        let state = sampleState()
+        #expect(routeAssistantQuestion("¿Gasté más de 1000 € en octubre?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: nil, bank: nil))
+    }
+
+    @Test func hoyAyerSemanaAnoNoSonElMes() throws {
+        let state = sampleState()
+        for q in [
+            "¿Cuánto he gastado hoy?",
+            "¿Qué compré ayer?",
+            "¿Cuánto gasté esta semana?",
+            "¿Cuánto he gastado este año?",
+        ] {
+            #expect(routeAssistantQuestion(q, state: state, portfolio: nil, now: nov(20), calendar: cal) == .unsupportedPeriod, "\(q)")
+            let ans = answerQuestion(q, state: state, portfolio: nil, book: AccountBook(), now: nov(20), calendar: cal)
+            let line = try #require(ans.lines.first)
+            #expect(render(line.parts, .plain) == "Aún no sé contarte el gasto por días, semanas o años; sí por meses.", "\(q)")
+            #expect(ans.chips.map(\.label) == ["¿Cuánto llevo este mes?", "¿Cuánto gasté el mes pasado?"], "\(q)")
+        }
+        // Control: el resumen diario sigue siendo `.briefingRecap`.
+        #expect(routeAssistantQuestion("¿Qué ha pasado desde ayer?", state: state, portfolio: nil, now: nov(20), calendar: cal) == .briefingRecap)
+        // El modelo no puede emitir `.unsupportedPeriod`.
+        #expect(parseAssistantModelRoute("PERIODO_NO_SOPORTADO", originalQuestion: "¿Cuánto gasté hoy?", portfolio: nil) == nil)
     }
 }

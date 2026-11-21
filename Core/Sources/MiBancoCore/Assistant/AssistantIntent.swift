@@ -36,6 +36,7 @@ public enum AssistantIntent: Equatable, Hashable, Sendable {
     case investments(positionQuery: String?, moversOnly: Bool)
     case briefingRecap
     case adviceRequest(positionQuery: String?)
+    case unsupportedPeriod
     case unknown
 }
 
@@ -351,7 +352,7 @@ private func hasInvestmentContext(_ list: [String], alphanumericTokens: [String]
 /// true si la pregunta del dueño pide un consejo de inversión (qué comprar, vender, mantener, cuánto invertir o predicciones).
 /// A diferencia de `containsAdvice` (pensado para texto libre del modelo), NO rechaza preguntas factuales neutras como
 /// «¿Cómo van mis inversiones?», «¿Cuánto vale mi cartera?» o «¿Cuánto gasté en compras?».
-public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> Bool {
+public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil, knownMerchants: Set<String> = []) -> Bool {
     let trimmed = compatNormalized(question).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return false }
     if hasCrossScriptConfusableWord(trimmed) { return true }

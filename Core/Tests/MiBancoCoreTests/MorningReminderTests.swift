@@ -77,26 +77,29 @@ private func nov(_ day: Int, _ hour: Int, _ minute: Int = 0, _ second: Int = 0) 
         let spring = morningReminderDates(now: at(2026, 3, 28, 10, 0), minutes: 510, shownToday: false, calendar: cal)
         #expect(spring == [at(2026, 3, 29, 8, 30), at(2026, 3, 30, 8, 30), at(2026, 3, 31, 8, 30)])
 
-        // Hora inexistente (02:30 el 29 mar 2026): desde 01:30 CET y desde 03:05 CEST produce 3 fechas crecientes > now.
+        var utcCal = Calendar(identifier: .gregorian)
+        utcCal.timeZone = TimeZone(secondsFromGMT: 0)!
+
+        // U7: hora inexistente (02:30 el 29 mar 2026): fecha exacta en Linux (03:30 CEST = 01:30Z).
+        let expectedSpring29 = at(2026, 3, 29, 1, 30, calendar: utcCal) // 03:30 CEST en Madrid
         let fromEarly = at(2026, 3, 29, 1, 30)
         let springFromEarly = morningReminderDates(now: fromEarly, minutes: 150, shownToday: false, calendar: cal)
-        #expect(springFromEarly.count == 3 && springFromEarly[0] > fromEarly)
-        #expect(springFromEarly[0] < springFromEarly[1] && springFromEarly[1] < springFromEarly[2])
+        #expect(springFromEarly == [expectedSpring29, at(2026, 3, 30, 2, 30), at(2026, 3, 31, 2, 30)])
 
         let fromAfterJump = at(2026, 3, 29, 3, 5)
         let springFromAfter = morningReminderDates(now: fromAfterJump, minutes: 150, shownToday: false, calendar: cal)
-        #expect(springFromAfter.count == 3 && springFromAfter[0] > fromAfterJump)
-        #expect(springFromAfter[0] < springFromAfter[1] && springFromAfter[1] < springFromAfter[2])
+        #expect(springFromAfter == [expectedSpring29, at(2026, 3, 30, 2, 30), at(2026, 3, 31, 2, 30)])
 
         // Cambio de hora de otoño (25 oct 2026: 02:00-03:00 repetida; 02:30 primera +0200 = 00:30Z, segunda +0100 = 01:30Z).
         let autumn = morningReminderDates(now: at(2026, 10, 24, 10, 0), minutes: 510, shownToday: false, calendar: cal)
         #expect(autumn == [at(2026, 10, 25, 8, 30), at(2026, 10, 26, 8, 30), at(2026, 10, 27, 8, 30)])
 
-        var utcCal = Calendar(identifier: .gregorian)
-        utcCal.timeZone = TimeZone(secondsFromGMT: 0)!
         let first0215 = at(2026, 10, 25, 0, 15, calendar: utcCal)   // 02:15 +0200 Madrid
         let first0230 = at(2026, 10, 25, 0, 30, calendar: utcCal)   // 02:30 +0200 Madrid
         let second0215 = at(2026, 10, 25, 1, 15, calendar: utcCal)  // 02:15 +0100 Madrid
+        // U7: también desde el día anterior (24 oct 10:00) el aviso de 02:30 cae exactamente en la primera 02:30 (+0200).
+        let autumn0230 = morningReminderDates(now: at(2026, 10, 24, 10, 0), minutes: 150, shownToday: false, calendar: cal)
+        #expect(autumn0230 == [first0230, at(2026, 10, 26, 2, 30), at(2026, 10, 27, 2, 30)])
         let fromFirst0215 = morningReminderDates(now: first0215, minutes: 150, shownToday: false, calendar: cal)
         #expect(fromFirst0215 == [first0230, at(2026, 10, 26, 2, 30), at(2026, 10, 27, 2, 30)])
         // Ya pasada la primera 02:30 (a las 02:30 +0200 o en la segunda 02:15 +0100) no dispara dos veces el 25 oct.

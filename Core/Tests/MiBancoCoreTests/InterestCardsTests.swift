@@ -114,7 +114,7 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         }
     }
 
-    @Test func meInteresaYNoMeInteresaAjustanPesosYDescartarShortfallNoLoResucita() {
+    @Test func meInteresaYNoMeInteresaAjustanPesosYDescartarShortfallNoLoResucita() throws {
         let fx = allSixSignalsFixture()
         var prefs = AssistantPreferences()
 
@@ -135,7 +135,7 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         #expect(!ranked.map(\.topic).contains(.subscriptionPriceChange))
 
         // I4 REGRESIÓN: descartar la tarjeta urgente de shortfall NO resucita un «shortfall-cal» del mismo banco.
-        let urgentShortfall = ranked.first { $0.topic == .shortfall }!
+        let urgentShortfall = try #require(ranked.first { $0.topic == .shortfall })
         prefs.recordFeedback(.notInterested, for: urgentShortfall, now: fx.now)
         let afterDismiss = interestCards(state: fx.state, portfolio: fx.portfolio, book: fx.book,
                                          now: fx.now, calendar: cal, preferences: prefs)
@@ -348,6 +348,65 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         #expect(throws: Error.self) {
             try brokenStore.update { $0.setEnabled(false, for: .budgetClose) }
         }
+    }
+
+    // MARK: U4, U5, U7 — Gravedad, caso mayor, nombre del tema y tope de 3
+
+    @Test func tresTarjetasComoMucho() {
+        let fx = allSixSignalsFixture()
+        let cards = interestCards(state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(cards.count == 3)
+    }
+
+    @Test func descartesNoBajanUnPresupuestoSuperado() {
+        var fx = allSixSignalsFixture()
+        // Presupuesto mensual SUPERADO (gasto total del mes en fixture >= 100 €, ponemos tope 50 €).
+        fx.state.budgets.monthlyCents = 5_000
+        let prefs = AssistantPreferences(topicWeights: [.budgetClose: -2, .portfolioMover: 5, .spendingPace: 5])
+        let cards = interestCards(state: fx.state, portfolio: fx.portfolio, book: fx.book,
+                                  now: fx.now, calendar: cal, preferences: prefs)
+        #expect(cards.count == 3)
+        #expect(cards.map(\.title).contains("Presupuesto superado"), "Títulos: \(cards.map(\.title))")
+    }
+
+    @Test func descartesNoBajanFaltaSaldo() {
+        let fx = allSixSignalsFixture()
+        let prefs = AssistantPreferences(topicWeights: [.shortfall: -3, .portfolioMover: 5, .unusualPayment: 5])
+        let cards = interestCards(state: fx.state, portfolio: fx.portfolio, book: fx.book,
+                                  now: fx.now, calendar: cal, preferences: prefs)
+        #expect(cards.count == 3)
+        #expect(cards.map(\.title).contains("Falta saldo para un cobro"), "Títulos: \(cards.map(\.title))")
+    }
+
+    @Test func casoMayorEsOtraTarjeta() throws {
+        var state = LedgerState()
+        state.balances[.rev] = ManualBalance(cents: 5_500, setAt: nov(20, 8), origin: .bank)
+        state.balances[.ima] = ManualBalance(cents: 120_000, setAt: nov(20, 8), origin: .bank)
+        state.movements = [
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                     date: at(2026, 9, 21, 12), isShop: true, bankRef: "n1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                     date: at(2026, 10, 21, 12), isShop: true, bankRef: "n2", bankStatus: .booked),
+        ]
+        var book = AccountBook()
+        book.floors[.rev] = 5_000
+        var prefs = AssistantPreferences()
+
+        let firstCards = interestCards(state: state, portfolio: nil, book: book, now: nov(20, 10), calendar: cal, preferences: prefs)
+        let first = try #require(firstCards.first { $0.topic == .shortfall })
+        #expect(render(first.parts, .plain).contains(nb("Pasa 10,00 €")))
+        prefs.recordFeedback(.notInterested, for: first, now: nov(20, 10))
+
+        // Baja el saldo de Revolut a 15 € -> ahora faltan 48,99 € -> «Pasa 50,00 €»: es otra tarjeta y vuelve a salir.
+        state.balances[.rev] = ManualBalance(cents: 1_500, setAt: nov(20, 11), origin: .bank)
+        let secondCards = interestCards(state: state, portfolio: nil, book: book, now: nov(20, 11), calendar: cal, preferences: prefs)
+        let second = try #require(secondCards.first { $0.topic == .shortfall })
+        #expect(second.id != first.id)
+        #expect(render(second.parts, .plain).contains(nb("Pasa 50,00 €")))
+    }
+
+    @Test func nombreDelTemaShortfall() {
+        #expect(AssistantTopic.shortfall.displayName == "Cobros que dejan una cuenta justa")
     }
 
     @Test func descartarAviso80PorCientoNoSilenciaEl100PorCiento() {

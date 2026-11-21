@@ -137,9 +137,17 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         let spendRev = answerQuestion("¿Cuánto gasté en Revolut este mes?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         #expect(plainLines(spendRev)[0] == nb("Este mes llevas 168,45 € gastados en Revolut."))
 
-        // Comercio sin pagos -> respuesta honesta.
+        // Comercio inexistente en el libro -> U2: no afirma «no tienes pagos».
         let emptyMerchant = answerQuestion("¿Cuánto llevo en Lidl?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
-        #expect(plainLines(emptyMerchant) == ["Este mes no tienes pagos en Lidl."])
+        #expect(plainLines(emptyMerchant) == ["No encuentro pagos a nombre de «Lidl»."])
+        #expect(emptyMerchant.chips.map(\.label) == ["¿Cuánto llevo en Supermercado?", "¿Cuánto llevo en Comer fuera?"])
+
+        // Comercio que SÍ existe en el libro (en otro mes) pero sin pagos este mes -> sí dice «Este mes no tienes pagos…».
+        var withOldLidl = fx.state
+        withOldLidl.movements.append(Movement(bank: .rev, amountCents: -2_000, merchant: "Lidl", kind: .payment, source: .bank,
+                                              date: at(2026, 9, 10, 12), isShop: true, bankRef: "lidl-sep", bankStatus: .booked))
+        let oldLidlAns = answerQuestion("¿Cuánto llevo en Lidl?", state: withOldLidl, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(plainLines(oldLidlAns) == ["Este mes no tienes pagos en Lidl."])
 
         // Categoría Comer fuera: 45,00 €
         let cat = answerQuestion("¿Cuánto llevo en Comer fuera?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
@@ -343,12 +351,13 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         #expect(plainLines(penniesAns).contains("Sin contar imagin: no tengo su saldo."))
     }
 
-    @Test func inversionesResumenMoversYPosicionConcreta() {
+    @Test func inversionesResumenMoversYPosicionConcreta() throws {
         let fx = richFixture()
         let overview = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         let lines = plainLines(overview)
-        #expect(lines[0] == nb("Valen 1.510,00 €: +6,00 € hoy (+0,4 %)"))
-        #expect(lines[1] == nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."))
+        // U5: sujeto y punto final en el resumen de cartera del asistente.
+        #expect(try #require(lines.first) == nb("Tus inversiones valen 1.510,00 €: +6,00 € hoy (+0,4 %)."))
+        #expect(try #require(lines.dropFirst().first) == nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."))
         #expect(overview.lines.allSatisfy { $0.action == .openInvestments })
 
         // Posición concreta: Apple (con cambio negativo usando U+2212).
@@ -507,7 +516,7 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         #expect(!refusalSpoken.contains("600"))
     }
 
-    @Test func auditoriaC3I1I3PrivacidadDayOnlyYTraspasos() {
+    @Test func auditoriaC3I1I3PrivacidadDayOnlyYTraspasos() throws {
         // C3: render(.masked) y spokenAssistantAnswer tapan %, €, U+2212, U+202F y decimales con punto.
         for raw in ["Dia %", "Gym +24 %", "€\u{2212}13,99", "20\u{202F}€", "Tienda 12.50", "Tienda €"] {
             let masked = render([.text("Este mes en \(raw)")], .masked)
@@ -536,7 +545,8 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                                     book: AccountBook(), now: morningNow, calendar: cal)
         #expect(render(incAns.lines[0].parts, .plain).contains("1.850,00"))
 
-        // C2: `answerQuestion` rechaza un `modelIntent` con `merchant` no presente en la pregunta original.
+        // C2 + U2: `answerQuestion` rechaza un `modelIntent` con `merchant` no presente en la pregunta original,
+        // y lo que enseña tampoco afirma «no tienes pagos».
         let injectedAns = answerQuestion(
             "¿Cuánto gasté en comida este mes?",
             state: morningState,
@@ -547,5 +557,153 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
             calendar: cal
         )
         #expect(injectedAns.intent != .spending(month: .current, category: nil, merchant: "Supermercado", bank: nil))
+        let injectedFirst = try #require(plainLines(injectedAns).first)
+        #expect(!injectedFirst.lowercased().contains("no tienes pagos"), "No debe afirmar ausencia: \(injectedFirst)")
+    }
+
+    // MARK: U2 — Comercios inexistentes, artículos, dominio y tramo del modelo
+
+    @Test func comidaNoAfirmaQueNoHayPagos() throws {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Cuánto gasté en comida este mes?", state: fx.state, portfolio: fx.portfolio,
+                                 book: fx.book, now: fx.now, calendar: cal)
+        let first = try #require(plainLines(ans).first)
+        #expect(first == "No encuentro pagos a nombre de «comida».")
+        #expect(ans.chips.map(\.label) == ["¿Cuánto llevo en Supermercado?", "¿Cuánto llevo en Comer fuera?"])
+    }
+
+    @Test func elCocheSinArticulo() throws {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Cuánto gasté en el coche?", state: fx.state, portfolio: fx.portfolio,
+                                 book: fx.book, now: fx.now, calendar: cal)
+        let first = try #require(plainLines(ans).first)
+        #expect(first == "No encuentro pagos a nombre de «coche».")
+    }
+
+    @Test func amazonPorDominio() throws {
+        var state = LedgerState()
+        state.movements = [
+            Movement(bank: .rev, amountCents: -2_599, merchant: "AMZN Mktp ES*2K4", kind: .payment, source: .bank,
+                     date: nov(12, 14), isShop: true, bankRef: "amz1", bankStatus: .booked),
+        ]
+        let ans = answerQuestion("¿Cuánto llevo en Amazon?", state: state, portfolio: nil, book: AccountBook(),
+                                 now: nov(20, 10), calendar: cal)
+        let first = try #require(plainLines(ans).first)
+        #expect(first.contains("25,99"), "Esperaba 25,99 en: \(first)")
+    }
+
+    @Test func diaEsUnComercio() throws {
+        var state = LedgerState()
+        state.movements = [
+            Movement(bank: .rev, amountCents: -1_240, merchant: "DIA Alcalá", kind: .payment, source: .bank,
+                     date: nov(12, 14), isShop: true, bankRef: "dia1", bankStatus: .booked),
+        ]
+        let ans = answerQuestion("¿Cuánto llevo en Dia?", state: state, portfolio: nil, book: AccountBook(),
+                                 now: nov(20, 10), calendar: cal)
+        let first = try #require(plainLines(ans).first)
+        #expect(first.contains("12,40"), "Esperaba 12,40 en: \(first)")
+    }
+
+    @Test func totalEnMercadonaDelModelo() throws {
+        let fx = richFixture()
+        let ans = answerQuestion(
+            "¿Cuánto gasté en total en Mercadona?",
+            state: fx.state,
+            portfolio: fx.portfolio,
+            book: fx.book,
+            modelIntent: .spending(month: .current, category: nil, merchant: "total en Mercadona", bank: nil),
+            now: fx.now,
+            calendar: cal
+        )
+        let first = try #require(plainLines(ans).first)
+        #expect(first.contains("en Mercadona") && first.contains("73,50"), "Cabecera inesperada: \(first)")
+        #expect(!first.contains("en total en Mercadona"), "No debe arrastrar «total en»: \(first)")
+    }
+
+    // MARK: U5 — Textos honestos del Core del asistente
+
+    @Test func sinColchonDiceEnNegativo() throws {
+        var state = LedgerState()
+        state.balances[.rev] = ManualBalance(cents: 2_000, setAt: nov(20, 8), origin: .bank)
+        // Cobro dentro de 5 días (25 nov, 30 €): cae en el aviso de 14 días (no en urgente de 3 días).
+        state.movements = [
+            Movement(bank: .rev, amountCents: -3_000, merchant: "Gimnasio", kind: .payment, source: .bank,
+                     date: at(2026, 9, 25, 12), isShop: true, bankRef: "g1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -3_000, merchant: "Gimnasio", kind: .payment, source: .bank,
+                     date: at(2026, 10, 25, 12), isShop: true, bankRef: "g2", bankStatus: .booked),
+        ]
+        let ans = answerQuestion("¿Qué cobros vienen?", state: state, portfolio: nil, book: AccountBook(),
+                                 now: nov(20, 10), calendar: cal)
+        let lines = plainLines(ans)
+        #expect(lines.contains { $0.contains("se quedaría en negativo") }, "Líneas: \(lines)")
+        #expect(!lines.joined().contains("su mínimo"), "No debe decir «su mínimo» sin colchón: \(lines)")
+
+        // También en tarjetas de «Te puede interesar» (InterestCards.swift:339).
+        let cards = interestCards(state: state, portfolio: nil, book: AccountBook(), now: nov(20, 10), calendar: cal)
+        let card = try #require(cards.first { $0.topic == .shortfall })
+        let cardText = render(card.parts, .plain)
+        #expect(cardText.contains("se quedaría en negativo"), "Tarjeta: \(cardText)")
+        #expect(!cardText.contains("su mínimo"), "Tarjeta sin colchón: \(cardText)")
+    }
+
+    @Test func tradeRepublicEsEfectivo() throws {
+        let fx = richFixture()
+        let ans = answerQuestion("¿Cuánto tengo en Trade Republic?", state: fx.state, portfolio: fx.portfolio,
+                                 book: fx.book, now: fx.now, calendar: cal)
+        let first = try #require(plainLines(ans).first)
+        #expect(first == nb("En Trade Republic tienes unos 2.150,00 € de efectivo, sin contar tus inversiones."))
+
+        // Con saldo exacto del banco:
+        var exact = fx.state
+        exact.balances[.tr] = ManualBalance(cents: 215_000, setAt: nov(20, 8), origin: .bank)
+        let exactAns = answerQuestion("¿Cuánto tengo en Trade Republic?", state: exact, portfolio: fx.portfolio,
+                                      book: fx.book, now: fx.now, calendar: cal)
+        #expect(try #require(plainLines(exactAns).first) == nb("En Trade Republic tienes 2.150,00 € de efectivo, sin contar tus inversiones."))
+
+        // Sin cartera abierta: como hoy.
+        let noPortfolio = answerQuestion("¿Cuánto tengo en Trade Republic?", state: exact, portfolio: nil,
+                                         book: fx.book, now: fx.now, calendar: cal)
+        #expect(try #require(plainLines(noPortfolio).first) == nb("En Trade Republic tienes 2.150,00 €."))
+    }
+
+    // MARK: U6 — Patas manuales sin pareja no se suman como dinero movido
+
+    @Test func patasSinParejaNoDuplican() throws {
+        var unpaired = LedgerState()
+        unpaired.movements = [
+            Movement(bank: .ima, amountCents: -20_000, merchant: "Envío Revolut", kind: .payment, source: .bank,
+                     date: nov(15, 10), ownTransfer: true, bankRef: "u1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: 15_000, merchant: "Recarga imagin", kind: .income, source: .bank,
+                     date: nov(17, 10), ownTransfer: true, bankRef: "u2", bankStatus: .booked),
+        ]
+        let ans = answerQuestion("¿Qué traspasos hice entre mis cuentas este mes?", state: unpaired, portfolio: nil,
+                                 book: AccountBook(), now: nov(20, 10), calendar: cal)
+        let head = try #require(plainLines(ans).first)
+        #expect(!head.contains("350,00"), "No debe sumar patas sin pareja: \(head)")
+        #expect(head == "Este mes tienes 2 movimientos marcados como traspaso sin pareja:", "Cabecera: \(head)")
+
+        // Control: emparejados (-200 / +200 en 2 días) siguen sumando 200,00 €.
+        var paired = LedgerState()
+        paired.movements = [
+            Movement(bank: .ima, amountCents: -20_000, merchant: "Envío Revolut", kind: .payment, source: .bank,
+                     date: nov(15, 10), ownTransfer: true, bankRef: "p1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: 20_000, merchant: "Recarga imagin", kind: .income, source: .bank,
+                     date: nov(17, 10), ownTransfer: true, bankRef: "p2", bankStatus: .booked),
+        ]
+        let pairedAns = answerQuestion("¿Qué traspasos hice entre mis cuentas este mes?", state: paired, portfolio: nil,
+                                       book: AccountBook(), now: nov(20, 10), calendar: cal)
+        #expect(try #require(plainLines(pairedAns).first) == nb("Este mes has movido 200,00 € entre tus cuentas (1 traspaso)."))
+
+        // Emparejado + 1 pata sin pareja: la cabecera solo suma el emparejado y la pata va detrás de su línea propia.
+        var mixed = paired
+        mixed.movements.append(
+            Movement(bank: .ima, amountCents: -5_000, merchant: "Recarga suelta", kind: .payment, source: .bank,
+                     date: nov(18, 10), ownTransfer: true, bankRef: "p3", bankStatus: .booked)
+        )
+        let mixedAns = answerQuestion("¿Qué traspasos hice entre mis cuentas este mes?", state: mixed, portfolio: nil,
+                                      book: AccountBook(), now: nov(20, 10), calendar: cal)
+        let mixedLines = plainLines(mixedAns)
+        #expect(try #require(mixedLines.first) == nb("Este mes has movido 200,00 € entre tus cuentas (1 traspaso)."))
+        #expect(mixedLines.contains("Además, 1 movimiento marcado como traspaso no tiene pareja:"))
     }
 }

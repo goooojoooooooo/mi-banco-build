@@ -117,6 +117,8 @@ public func answerIntent(_ intent: AssistantIntent, state: LedgerState, portfoli
         chips.append(AssistantChip(id: "balances", label: "¿Cuánto tengo?"))
         chips.append(AssistantChip(id: "upcoming", label: "¿Qué cobros vienen?"))
         return AssistantAnswer(intent: intent, lines: lines, chips: chips, isAdviceRefusal: true)
+    case .unsupportedPeriod:
+        return AssistantAnswer(intent: intent, lines: [])
     case .unknown:
         let chips = suggestedAssistantChips(state: state, portfolio: portfolio, now: now, calendar: calendar)
         return AssistantAnswer(intent: intent,

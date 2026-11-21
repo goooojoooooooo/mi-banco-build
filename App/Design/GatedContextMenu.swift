@@ -28,8 +28,11 @@ private struct GatedContextMenu<Items: View>: ViewModifier {
                         .foregroundStyle(Theme.label)
                         .padding(20)
                         .background(Theme.canvas)
+                        .accessibilityIdentifier("menu.vistaPreviaPrivada")
                 } else {
                     content
+                        .accessibilityElement(children: .combine)
+                        .accessibilityIdentifier("menu.vistaPrevia")
                 }
             }
         }

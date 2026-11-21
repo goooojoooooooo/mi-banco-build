@@ -236,7 +236,8 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 5), "No se ve Suscripciones")
         XCTAssertTrue(element("suscripciones.pie").exists, "Falta cómo ocultar una suscripción")
         let rows = app.descendants(matching: .any).matching(identifier: "suscripciones.fila")
-        XCTAssertEqual(rows.count, 2)
+        // Se espera a que la lista se asiente (con el cambio de fila del menú, un instante pueden verse dos copias de una fila).
+        XCTAssertTrue(waitFor(NSPredicate(format: "count == 2"), rows, timeout: 8), "La demo no trae exactamente 2 suscripciones")
 
         rows.element(boundBy: 0).press(forDuration: 1.2)
         let hide = app.buttons["Esto no es una suscripción"]

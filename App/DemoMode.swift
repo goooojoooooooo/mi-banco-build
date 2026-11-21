@@ -74,22 +74,34 @@ enum DemoMode {
         scrollsToInvestments || asksPrices || opensPosition || initialCard == .investments || briefingMode == .busy
     }
 
-    /// Entradas del resumen de demo (`-MiBancoDemoBriefing busy|quiet`, con `-MiBancoDemoShortfall` opcional).
+    /// Entradas del resumen de demo (`-MiBancoDemoBriefing busy|quiet`, con `-MiBancoDemoShortfall` opcional):
+    /// valores idénticos a `busy` / `quiet` / `consejoPorFalta` de la Tarea 5 (`BriefingTests.swift`).
     static func briefingInput(mode: BriefingMode, shortfall: Bool, state: LedgerState? = nil, now: Date = Date()) -> BriefingInput {
         let cal = DateText.madridCalendar
-        let today = cal.startOfDay(for: now)
-        let morning = cal.date(bySettingHour: 9, minute: 0, second: 0, of: today) ?? now
-        let since = cal.date(byAdding: .day, value: -1, to: morning) ?? now.addingTimeInterval(-86_400)
-        let summary = portfolioSummary(portfolio(now: morning), now: morning, calendar: cal)
+        func nov(_ day: Int, _ hour: Int = 12, _ minute: Int = 0) -> Date {
+            cal.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute)) ?? now
+        }
+        let spotify = UpcomingCharge(name: "Spotify", bank: .rev, cents: 1_099, date: nov(22, 12))
+        let netflix = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1_399, date: nov(25, 12))
+        let month = MonthDigest(spentCents: 41_230, projectedCents: 69_000, paceDifferenceCents: -3_510, previousMonthName: "octubre")
 
-        let tomorrow = cal.date(byAdding: .day, value: 1, to: today)?.addingTimeInterval(10 * 3600) ?? now
-        let inThreeDays = cal.date(byAdding: .day, value: 3, to: today)?.addingTimeInterval(10 * 3600) ?? now
-        let netflix = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1_399, date: shortfall ? tomorrow : inThreeDays)
+        let demoShortfalls: [Shortfall] = shortfall ? [
+            Shortfall(
+                bank: .rev,
+                charge: UpcomingCharge(name: "Netflix", bank: .rev, cents: 1_399, date: nov(21, 12)),
+                balanceCents: 920,
+                missingCents: 479,
+                suggestedFrom: .ima,
+                suggestedCents: 1_000
+            ),
+        ] : []
 
         if mode == .quiet {
+            let quietNow = nov(21, 9, 10)
+            let quietSummary = portfolioSummary(portfolio(now: nov(20, 17, 35)), now: quietNow, calendar: cal)
             return BriefingInput(
-                now: morning,
-                since: since,
+                now: quietNow,
+                since: nov(20, 8, 30),
                 isFirst: false,
                 banks: [
                     BankLine(bank: .rev, cents: 34_020, estimated: false, changeCents: 0),
@@ -98,23 +110,16 @@ enum DemoMode {
                 ],
                 totalCents: 377_475,
                 totalChangeCents: 0,
-                upcoming: [netflix],
-                investments: summary
+                upcoming: [spotify, netflix],
+                month: month,
+                investments: quietSummary,
+                shortfalls: demoShortfalls,
+                freeMoney: FreeMoney(cents: 154_977, daysLeft: 10)
             )
         }
 
-        let demoShortfalls: [Shortfall] = shortfall ? [
-            Shortfall(
-                bank: .rev,
-                charge: netflix,
-                balanceCents: 1_000,
-                missingCents: 399,
-                suggestedFrom: .ima,
-                suggestedCents: 1_000,
-                isEstimated: false,
-                suggestedIsEstimated: true
-            ),
-        ] : []
+        let busyNow = nov(20, 8, 30)
+        let busySummary = portfolioSummary(portfolio(now: nov(19, 17, 35)), now: busyNow, calendar: cal)
 
         func movementID(merchant: String, cents: Int) -> UUID {
             state?.movements.first {
@@ -122,37 +127,37 @@ enum DemoMode {
             }?.id ?? UUID()
         }
 
-        let income = [
-            MovementDigest(id: movementID(merchant: "Bizum de Laura", cents: 2_000), bank: .ima, name: "Bizum de Laura", cents: 2_000, date: morning.addingTimeInterval(-3 * 3600)),
-        ]
-        let payments = [
-            MovementDigest(id: movementID(merchant: "Mercadona", cents: 1_250), bank: .rev, name: "Mercadona", cents: 1_250, date: morning.addingTimeInterval(-2 * 3600)),
-            MovementDigest(id: movementID(merchant: "Spotify", cents: 1_099), bank: .rev, name: "Spotify", cents: 1_099, date: morning.addingTimeInterval(-6 * 3600)),
-        ]
-
         return BriefingInput(
-            now: morning,
-            since: since,
+            now: busyNow,
+            since: nov(19, 22, 10),
             isFirst: false,
             banks: [
-                BankLine(bank: .rev, cents: 34_020, estimated: false, changeCents: -2_349),
-                BankLine(bank: .ima, cents: 128_455, estimated: true, changeCents: 2_000),
+                BankLine(bank: .rev, cents: 34_020, estimated: false, changeCents: 13_755),
+                BankLine(bank: .ima, cents: 128_455, estimated: true, changeCents: 165_000),
                 BankLine(bank: .tr, cents: 215_000, estimated: true, changeCents: 0),
             ],
             totalCents: 377_475,
-            totalChangeCents: -349,
-            income: income,
-            payments: payments,
-            upcoming: [netflix],
-            expected: ExpectedIncome(name: "Nómina", bank: .ima, cents: 145_000, date: inThreeDays),
-            attention: [
-                .warning(title: "Spotify ha subido 1,00\u{00A0}€", detail: "Antes 9,99\u{00A0}€, ahora 10,99\u{00A0}€."),
+            totalChangeCents: 178_755,
+            income: [
+                MovementDigest(id: movementID(merchant: "Nómina", cents: 145_000), bank: .ima, name: "Nómina ACME", cents: 185_000, date: nov(20, 6, 5)),
             ],
-            month: MonthDigest(spentCents: 41_200, projectedCents: 64_000, paceDifferenceCents: -3_500, previousMonthName: "octubre"),
-            investments: summary,
+            payments: [
+                MovementDigest(id: movementID(merchant: "Zara", cents: 4_995), bank: .rev, name: "Zara", cents: 4_995, date: nov(20, 7)),
+                MovementDigest(id: movementID(merchant: "Mercadona", cents: 1_250), bank: .rev, name: "Mercadona", cents: 1_250, date: nov(20, 7)),
+            ],
+            transfers: [
+                TransferDigest(from: .ima, to: .rev, cents: 20_000),
+            ],
+            upcoming: [spotify, netflix],
+            attention: [
+                .bankProblem(.ima, .bankUnavailable),
+                .consentExpiring(.rev, nov(30, 10)),
+            ],
+            month: month,
+            investments: busySummary,
             shortfalls: demoShortfalls,
-            budgetTip: shortfall ? nil : BudgetTip(name: "Comer fuera", remainingCents: 3_110),
-            freeMoney: FreeMoney(cents: 92_000, daysLeft: 10)
+            budgetTip: BudgetTip(name: "Comer fuera", remainingCents: 2_380),
+            freeMoney: FreeMoney(cents: 154_977, daysLeft: 11)
         )
     }
 
@@ -313,11 +318,14 @@ enum DemoMode {
         // El mes pasado, repartido: la frase del ritmo compara con él.
         let spread: [(Int, BankID, Int, String)] = [
             (2, .rev, -3_480, "Mercadona"), (4, .ima, -2_215, "Lidl"), (5, .rev, -1_260, "Glovo"),
-            (8, .tr, -8_990, "Zara"), (9, .rev, -1_480, "Renfe"), (11, .ima, -4_620, "Carrefour"),
+            (8, .tr, -8_990, "Zara"), (9, .rev, -2_960, "Renfe"), (11, .ima, -4_620, "Carrefour"),
             (13, .rev, -2_975, "Mercadona"), (15, .ima, -6_040, "Repsol"), (17, .rev, -950, "Starbucks"),
-            (18, .ima, -3_310, "Lidl"), (20, .rev, -2_145, "Glovo"), (23, .tr, -5_499, "Decathlon"),
+            (18, .ima, -3_310, "Lidl"), (20, .rev, -2_650, "Glovo"), (23, .tr, -5_499, "Decathlon"),
             (25, .rev, -3_760, "Mercadona"), (27, .ima, -1_985, "Carrefour"),
         ]
+        // Ojo: el ÚLTIMO cargo del mes pasado de un comercio que también tiene un pago reciente no puede parecerse en importe
+        // (±25 %) al reciente, o según el día del mes (26–35 días de distancia) la demo mostraría una suscripción de más
+        // (Glovo y Renfe lo hacían). Por eso Glovo del día 20 y Renfe cuestan bastante más que sus pagos recientes.
         // Los dos meses anteriores (el segundo, algo más barato): las comparaciones salen con cifras creíbles.
         for (back, percent) in [(1, 100), (2, 90)] {
             let first = monthsAgo(back, from: monthStart)

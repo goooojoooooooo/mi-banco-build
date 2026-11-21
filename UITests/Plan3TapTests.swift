@@ -70,6 +70,15 @@ final class Plan3TapTests: XCTestCase {
 
     private let gone = NSPredicate(format: "exists == false")
 
+    /// Lista cada elemento que coincide (tipo, identificador, etiqueta y marco) para que un recuento inesperado se explique solo.
+    private func describe(_ query: XCUIElementQuery) -> String {
+        let all = query.allElementsBoundByIndex
+        let lines = all.enumerated().map { i, el in
+            "[\(i)] tipo \(el.elementType.rawValue) id «\(el.identifier)» etiqueta «\(el.label)» marco \(el.frame)"
+        }
+        return "\(all.count) elementos: " + lines.joined(separator: " | ")
+    }
+
     /// Cierra la hoja de compartir. El botón de cerrar aparece un instante DESPUÉS de la lista (mirar `exists` sin esperar era
     /// la causa de que `testBackupRowsInSettings` fallara a veces en el simulador lento de CI): se espera por él, se toca y se
     /// espera a que la hoja se vaya; si no, se desliza la hoja hacia abajo desde su borde superior y, en último lugar, se toca fuera.
@@ -237,7 +246,8 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(element("suscripciones.pie").exists, "Falta cómo ocultar una suscripción")
         let rows = app.descendants(matching: .any).matching(identifier: "suscripciones.fila")
         // Se espera a que la lista se asiente (con el cambio de fila del menú, un instante pueden verse dos copias de una fila).
-        XCTAssertTrue(waitFor(NSPredicate(format: "count == 2"), rows, timeout: 8), "La demo no trae exactamente 2 suscripciones")
+        XCTAssertTrue(waitFor(NSPredicate(format: "count == 2"), rows, timeout: 8),
+                      "La demo no trae exactamente 2 suscripciones: \(describe(rows))")
 
         rows.element(boundBy: 0).press(forDuration: 1.2)
         let hide = app.buttons["Esto no es una suscripción"]

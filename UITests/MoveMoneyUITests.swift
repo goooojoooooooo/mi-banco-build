@@ -209,14 +209,18 @@ final class MoveMoneyUITests: XCTestCase {
         app.buttons["0"].tap()
         app.buttons["0"].tap()
 
-        let euroElements = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
+        let moveSheet = app.scrollViews["move-money-scroll"]
+        XCTAssertTrue(moveSheet.waitForExistence(timeout: 5), "Falta el contenedor de Mover dinero")
+        let euroElements = moveSheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
         XCTAssertEqual(euroElements.count, 0, "Mover dinero expuso € a VoiceOver en modo privado")
 
         app.buttons["Cerrar"].tap()
 
         launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoUpcoming", "-MiBancoDemoPrivate"])
         XCTAssertTrue(app.navigationBars["Próximos cobros"].waitForExistence(timeout: 15), "No se abrió Próximos cobros en privado")
-        let calEuro = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
+        let calScroll = app.scrollViews["upcoming-calendar-scroll"]
+        XCTAssertTrue(calScroll.waitForExistence(timeout: 5), "Falta el contenedor de Próximos cobros")
+        let calEuro = calScroll.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
         XCTAssertEqual(calEuro.count, 0, "Próximos cobros expuso € a VoiceOver en modo privado")
     }
 }

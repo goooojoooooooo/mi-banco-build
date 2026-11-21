@@ -207,7 +207,7 @@ struct BriefingSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             if briefingModel.openingChosenByModel && !preferences.privateMode {
-                Text("Elegido por Apple Intelligence en tu iPhone")
+                Text("Escrito por Apple Intelligence en tu iPhone")
                     .titan(.caption)
                     .foregroundStyle(Theme.label3)
             }

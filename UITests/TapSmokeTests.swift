@@ -99,6 +99,9 @@ final class TapSmokeTests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 5), "No se abrió la hoja de detalle")
         close.tap()
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 5))
-        XCTAssertFalse(button("Cerrar").exists)
+        // La hoja se va con una animación: se espera a que «Cerrar» desaparezca en vez de mirarlo en el mismo instante.
+        let gone = NSPredicate(format: "exists == false")
+        let exp = XCTNSPredicateExpectation(predicate: gone, object: button("Cerrar"))
+        XCTAssertEqual(XCTWaiter().wait(for: [exp], timeout: 8), .completed, "La hoja de detalle no se cerró")
     }
 }

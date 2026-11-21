@@ -94,13 +94,16 @@ final class BriefingUITests: XCTestCase {
         let doneButton = app.buttons["Vale"]
         XCTAssertTrue(doneButton.waitForExistence(timeout: 12), "El resumen en modo privado no apareció")
 
-        let masked = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '•••'")).firstMatch
+        let sheet = app.scrollViews["briefing-scroll"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 8), "Falta el contenedor del resumen")
+
+        let masked = sheet.staticTexts.matching(NSPredicate(format: "label CONTAINS '•••'")).firstMatch
         XCTAssertTrue(masked.waitForExistence(timeout: 8), "Las líneas tapadas («•••») del resumen no aparecieron")
 
-        let euroElements = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
+        let euroElements = sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
         XCTAssertEqual(euroElements.count, 0, "El resumen expuso '€' en modo privado")
 
-        let percentElements = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%'"))
+        let percentElements = sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%'"))
         XCTAssertEqual(percentElements.count, 0, "El resumen expuso '%' en modo privado")
 
         let tipButton = element("briefing-tip-action")

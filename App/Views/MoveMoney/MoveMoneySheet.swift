@@ -263,6 +263,7 @@ struct MoveMoneySheet: View {
         }
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
+        .accessibilityIdentifier("move-money-scroll")
     }
 
     private func inlineMissingIBANCard(for bank: BankID) -> some View {
@@ -451,6 +452,7 @@ struct MoveMoneySheet: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
+        .accessibilityIdentifier("move-money-scroll")
     }
 
     private func sourceChip(choice: SourceChoice, selected: Bool, hidden: Bool) -> some View {
@@ -489,6 +491,7 @@ struct MoveMoneySheet: View {
                             Text(detail)
                                 .foregroundStyle(selected ? Color.black.opacity(0.7) : Theme.label2)
                                 .privateAmount()
+                                .accessibilityLabel(hidden ? "importe oculto" : detail)
                         } else {
                             Text(detail)
                                 .foregroundStyle(selected ? Color.black.opacity(0.75) : Theme.warning)

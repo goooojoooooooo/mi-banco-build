@@ -71,6 +71,7 @@ struct UpcomingCalendarView: View {
             .padding(.bottom, Theme.Space.section)
         }
         .scrollIndicators(.hidden)
+        .accessibilityIdentifier("upcoming-calendar-scroll")
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Próximos cobros")
         .navigationBarTitleDisplayMode(.inline)
@@ -168,6 +169,7 @@ struct UpcomingCalendarView: View {
                 .titan(.option)
                 .foregroundStyle(Theme.label)
                 .privateAmount()
+                .accessibilityLabel(hidden ? "importe oculto" : "\u{2212}\(formatEUR(charge.cents))")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -198,6 +200,7 @@ struct UpcomingCalendarView: View {
                 .titan(.option)
                 .foregroundStyle(Theme.income)
                 .privateAmount()
+                .accessibilityLabel(hidden ? "importe oculto" : "+\(formatEUR(income.cents))")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -292,6 +295,7 @@ struct UpcomingCalendarView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
                                 .privateAmount()
+                                .accessibilityLabel(hidden ? "importe oculto" : text)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .ignore)

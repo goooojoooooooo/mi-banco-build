@@ -510,8 +510,8 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
 
     @Test func nominaDelDia31AjustaAlMes() {
         let state = salary([date(8, 31), date(9, 30)])
-        // El último fue el 30 de septiembre y estamos en octubre: la próxima, el 30 de octubre.
-        #expect(expectedIncome(in: state, now: date(10, 5, 9), calendar: cal)?.date == date(10, 30, 12))
+        // U22: 31 ago + 30 sep (último día del mes corto) recupera el ancla 31 en octubre.
+        #expect(expectedIncome(in: state, now: date(10, 5, 9), calendar: cal)?.date == date(10, 31, 12))
         let jan = salary([date(11, 30), date(12, 31)])
         #expect(expectedIncome(in: jan, now: date(1, 5, 9, year: 2027), calendar: cal)?.date == date(1, 31, 12, year: 2027))
         let feb = salary([date(12, 31), date(1, 31, year: 2027)])

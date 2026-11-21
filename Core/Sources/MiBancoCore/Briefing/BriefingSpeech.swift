@@ -87,7 +87,7 @@ public func spokenBriefing(_ briefing: Briefing, input: BriefingInput, privateMo
 /// Texto hablado en modo privado (U36): sustituye importes, porcentajes y «•••» por «importe oculto».
 public func privateSpokenText(_ maskedText: String) -> String {
     var out = maskedText.replacingOccurrences(
-        of: #"[+\-\u{2212}]?[0-9][0-9.,]*[ \u{00A0}\u{202F}]*(?:€|%)"#,
+        of: "[+\\-\u{2212}]?[0-9][0-9.,]*[ \u{00A0}\u{202F}]*(?:€|%)",
         with: "importe oculto",
         options: .regularExpression
     )

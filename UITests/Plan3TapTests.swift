@@ -399,7 +399,9 @@ final class Plan3TapTests: XCTestCase {
         // La demo trae un presupuesto del mes de 700 €.
         XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "700"), field, timeout: 5), "La demo no trae el límite del mes")
 
-        field.tap()
+        // El texto va pegado a la derecha y un toque en el centro deja el cursor al principio (borrar no quita nada):
+        // se toca junto al borde derecho, donde el cursor queda al final del texto.
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + "\n")
         goBack()
         scrollTo(link)
@@ -502,7 +504,8 @@ final class Plan3TapTests: XCTestCase {
         // 1. Para todo el comercio: sin elección propia, el botón quita la del comercio y lo dice con su nombre.
         chip.tap()
         app.buttons["category-tile-casa"].tap()
-        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Casa"), chip, timeout: 5))
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Casa y facturas"), chip, timeout: 5),
+                      "La categoría para todo el comercio no se aplicó (la ficha «Casa y facturas»)")
         chip.tap()
         let reset = app.buttons["category-automatic"]
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
@@ -519,7 +522,7 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(reset.waitForExistence(timeout: 5))
         XCTAssertEqual(reset.label, "Volver a la categoría automática")
         reset.tap()
-        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Casa"), chip, timeout: 5),
+        XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", "Categoría: Casa y facturas"), chip, timeout: 5),
                       "Volver a lo automático borró también la elección del comercio")
 
         // 3. Ahora solo queda la del comercio: el botón dice su nombre y la quita.

@@ -58,7 +58,8 @@ struct RestoreConfirmView: View {
                     Text("Cancelar")
                         .titan(.option)
                         .foregroundStyle(Theme.label2)
-                        .frame(maxWidth: .infinity, minHeight: 44)
+                        // La hoja a media altura se dibuja escalada (0,9636 en iOS 26): 48 pt de diseño dejan más de 44 pt en pantalla.
+                        .frame(maxWidth: .infinity, minHeight: 48)
                         .contentShape(Rectangle())
                 }
                 .accessibilityIdentifier("restore-cancel")

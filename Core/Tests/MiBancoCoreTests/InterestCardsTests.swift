@@ -25,7 +25,7 @@ private func nb(_ s: String) -> String {
 private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio, book: AccountBook, now: Date) {
     let now = nov(20, 10, 0)
     var state = LedgerState()
-    // 1. Shortfall: Revolut tiene 55 € con colchón 50 € y el 22 nov entra Netflix (15,99 €).
+    // 1. Shortfall: Revolut tiene 55 € con colchón 50 € y el 22 nov entra Spotify (10,99 €).
     state.balances[.rev] = ManualBalance(cents: 5_500, setAt: nov(20, 8), origin: .bank)
     state.balances[.ima] = ManualBalance(cents: 120_000, setAt: nov(20, 8), origin: .bank)
     // 2. Budget close: presupuesto de Comer fuera = 100 €, gastado 88 € (88 % -> warning).
@@ -114,7 +114,7 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         }
     }
 
-    @Test func meInteresaYNoMeInteresaAjustanPesosYOcultanDescartadas() {
+    @Test func meInteresaYNoMeInteresaAjustanPesosYDescartarShortfallNoLoResucita() {
         let fx = allSixSignalsFixture()
         var prefs = AssistantPreferences()
 
@@ -134,15 +134,25 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         #expect(ranked.map(\.topic).contains(.portfolioMover))
         #expect(!ranked.map(\.topic).contains(.subscriptionPriceChange))
 
-        // Descartar una tarjeta concreta («No me interesa») la oculta de inmediato y entra la siguiente.
-        let first = ranked[0]
-        prefs.recordFeedback(.notInterested, for: first, now: fx.now)
+        // I4 REGRESIÓN: descartar la tarjeta urgente de shortfall NO resucita un «shortfall-cal» del mismo banco.
+        let urgentShortfall = ranked.first { $0.topic == .shortfall }!
+        prefs.recordFeedback(.notInterested, for: urgentShortfall, now: fx.now)
         let afterDismiss = interestCards(state: fx.state, portfolio: fx.portfolio, book: fx.book,
                                          now: fx.now, calendar: cal, preferences: prefs)
-        #expect(!afterDismiss.contains { $0.id == first.id })
+        #expect(!afterDismiss.contains { $0.topic == .shortfall })
     }
 
-    @Test func repetirToqueEsIdempotenteYLosPesosQuedanAcotados() {
+    @Test func bancoBajoMinimoSinCobrosNoSacaTarjetaFalsa() {
+        // I5 REGRESIÓN: Revolut tiene 40 € y colchón 50 €, pero CERO cobros próximos -> no debe salir «Saldo justo para un cobro».
+        var state = LedgerState()
+        state.balances[.rev] = ManualBalance(cents: 4_000, setAt: nov(20, 8), origin: .bank)
+        var book = AccountBook()
+        book.floors[.rev] = 5_000
+        let cards = interestCards(state: state, portfolio: nil, book: book, now: nov(20, 10), calendar: cal)
+        #expect(cards.isEmpty)
+    }
+
+    @Test func repetirToqueEsIdempotenteYCambioDeOpinionEnElTopeEsExacto() {
         var prefs = AssistantPreferences()
         let now = nov(20)
         // Tocar dos veces «Me interesa» en la misma tarjeta solo suma una vez.
@@ -162,6 +172,16 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         #expect(prefs.weight(for: .portfolioMover) == AssistantPreferences.maxWeight)
         #expect(prefs.weight(for: .spendingPace) == AssistantPreferences.minWeight)
 
+        // Minor 9: si estando en el tope (+5) se pulsa «Me interesa» (delta real 0) y luego cambia a «No me interesa», baja a 4 (no a 3).
+        prefs.recordFeedback(.interested, cardID: "at-cap", topic: .portfolioMover, now: now)
+        #expect(prefs.weight(for: .portfolioMover) == 5)
+        prefs.recordFeedback(.notInterested, cardID: "at-cap", topic: .portfolioMover, now: now)
+        #expect(prefs.weight(for: .portfolioMover) == 4)
+
+        // Minor 9: `init(topicWeights:)` descarta ceros para mantener igualdad tras codificar/decodificar.
+        let withZero = AssistantPreferences(topicWeights: [.shortfall: 0, .budgetClose: 2])
+        #expect(withZero == AssistantPreferences(topicWeights: [.budgetClose: 2]))
+
         // Las respuestas de más de 30 días se limpian automáticamente.
         prefs.recordFeedback(.notInterested, cardID: "very-old", topic: .budgetClose, now: at(2026, 9, 1))
         prefs.recordFeedback(.interested, cardID: "fresh", topic: .budgetClose, now: nov(20))
@@ -177,12 +197,12 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
                               now: fx.now, calendar: cal, preferences: prefs).isEmpty)
     }
 
-    @Test func decodificacionToleranteDePreferencias() throws {
-        // JSON con temas desconocidos, pesos fuera de rango y entradas corruptas.
+    @Test func decodificacionToleranteDePreferenciasYTiposRotos() throws {
+        // JSON con temas desconocidos, pesos fuera de rango, floats y entradas corruptas.
         let json = """
         {
           "disabledTopics": ["shortfall", "temaInventado", 123],
-          "topicWeights": {"portfolioMover": 99, "spendingPace": -99, "temaRaro": 2, "budgetClose": "mal"},
+          "topicWeights": {"portfolioMover": 99, "spendingPace": -99, "temaRaro": 2, "budgetClose": "mal", "unusualPayment": 1.5},
           "cardFeedback": {"ok": {"feedback": "interested", "date": 0}, "roto": "basura"}
         }
         """
@@ -194,6 +214,11 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         #expect(decoded.weight(for: .budgetClose) == 0)
         #expect(decoded.feedback(for: "ok") == .interested)
         #expect(decoded.feedback(for: "roto") == nil)
+
+        // Claves raíz con tipo totalmente incorrecto no rompen la decodificación.
+        let wrongRoot = #"{"disabledTopics": "mal", "topicWeights": [1,2], "cardFeedback": 42}"#
+        let empty = try JSONDecoder().decode(AssistantPreferences.self, from: Data(wrongRoot.utf8))
+        #expect(empty == AssistantPreferences())
 
         // Ida y vuelta limpia.
         let roundTrip = try JSONDecoder().decode(AssistantPreferences.self, from: JSONEncoder().encode(decoded))
@@ -208,15 +233,12 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
             let cards = interestCards(state: fx.state, portfolio: fx.portfolio, book: fx.book,
                                       now: fx.now, calendar: cal, preferences: prefs)
             for card in cards {
-                // El título nunca lleva dígitos, € ni %.
                 #expect(!card.title.contains { $0.isNumber }, "\(card.title)")
                 #expect(!card.title.contains("€") && !card.title.contains("%"), "\(card.title)")
-                // El cuerpo enmascarado no filtra importes ni porcentajes.
                 let masked = render(card.parts, .masked)
                 #expect(!masked.contains("€") && !masked.contains("%"), "\(masked)")
                 #expect(masked.range(of: "[0-9],[0-9]{2}", options: .regularExpression) == nil, "\(masked)")
                 #expect(masked.range(of: "[0-9]\\.[0-9]{3}", options: .regularExpression) == nil, "\(masked)")
-                // Nunca consejos de inversión en la tarjeta de inversiones.
                 if card.topic == .portfolioMover {
                     let plain = render(card.parts, .plain)
                     #expect(!hasAdviceMarker(plain), "\(plain)")
@@ -226,7 +248,7 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         }
     }
 
-    @Test func ignoraMovimientosHistoricosYSilenciadosYRespetaDiaCinco() {
+    @Test func ignoraMovimientosHistoricosSilenciadosPreciosViejosYDiaCinco() {
         let fx = allSixSignalsFixture()
         // Día 4 del mes: no debe salir spendingPace.
         var onlyPace = AssistantPreferences()
@@ -249,6 +271,17 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         }
         #expect(interestCards(state: histState, portfolio: nil, book: fx.book, now: fx.now,
                               calendar: cal, preferences: onlyUnusual).isEmpty)
+
+        // Minor 8: una cotización de hace 10 días (vieja) no genera tarjeta diaria de movimiento en inversiones.
+        var stalePortfolio = fx.portfolio
+        stalePortfolio.quotes["IE00B4L5Y983"] = Quote(priceEUR: Decimal(string: "102.5")!, previousCloseEUR: 100,
+                                                      fetchedAt: nov(10, 9, 30), marketTime: nov(10, 9, 25))
+        stalePortfolio.quotes["US0378331005"] = Quote(priceEUR: Decimal(string: "197.0")!, previousCloseEUR: 200,
+                                                      fetchedAt: nov(10, 9, 30), marketTime: nov(10, 9, 25))
+        var onlyMover = AssistantPreferences()
+        for t in AssistantTopic.allCases where t != .portfolioMover { onlyMover.setEnabled(false, for: t) }
+        #expect(interestCards(state: LedgerState(), portfolio: stalePortfolio, book: AccountBook(),
+                              now: fx.now, calendar: cal, preferences: onlyMover).isEmpty)
     }
 
     @Test func unaSolaPosicionConMovimientoFuerteTambienGeneraTarjeta() {

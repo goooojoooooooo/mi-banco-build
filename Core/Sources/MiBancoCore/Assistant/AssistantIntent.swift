@@ -25,7 +25,7 @@ public enum AssistantMonth: Equatable, Hashable, Sendable {
 /// parámetros; el Core calcula siempre las cifras y escribe las frases (J21(d)).
 public enum AssistantIntent: Equatable, Hashable, Sendable {
     case balances(bank: BankID?)
-    case spending(month: AssistantMonth, category: SpendingCategory?, merchant: String?)
+    case spending(month: AssistantMonth, category: SpendingCategory?, merchant: String?, bank: BankID? = nil)
     case biggestPayments(month: AssistantMonth)
     case subscriptions
     case upcomingCharges(bank: BankID?)
@@ -78,17 +78,22 @@ public func suggestedAssistantChips(state: LedgerState, portfolio: Portfolio?, n
     return Array(chips.prefix(6))
 }
 
-// MARK: Normalización y confusables
+// MARK: Normalización, NFKD y confusables
+
+/// Descompone caracteres de compatibilidad (ancho completo «ｖｅｎｄｏ», matemáticos «𝐯𝐞𝐧𝐝𝐨»...) y quita `\p{Cf}`.
+private func compatNormalized(_ text: String) -> String {
+    withoutFormatCharacters(text).decomposedStringWithCompatibilityMapping
+}
 
 private func foldedQuery(_ text: String) -> String {
-    withoutFormatCharacters(text)
+    compatNormalized(text)
         .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         .replacingOccurrences(of: "\u{00A0}", with: " ")
         .lowercased()
 }
 
-/// Cambia letras parecidas de otros alfabetos o latín extendido (cirílico «е»/«а», «đ», «ø», «ł»...) por su letra ASCII para
-/// detectar trucos de escritura en peticiones de consejo (J22).
+/// Cambia letras parecidas de otros alfabetos o latín extendido (cirílico «е»/«а», griego «υ», «đ», «ø», «ł»...) por su letra
+/// ASCII para detectar trucos de escritura en peticiones de consejo (J22).
 private let confusableMap: [Character: String] = [
     "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "х": "x", "у": "y", "і": "i", "ї": "i", "ј": "j", "ѕ": "s", "ԁ": "d",
     "к": "k", "м": "m", "т": "t", "н": "h", "в": "b",
@@ -98,7 +103,7 @@ private let confusableMap: [Character: String] = [
 
 private func foldConfusables(_ text: String) -> String {
     var out = ""
-    for ch in withoutFormatCharacters(text).lowercased() {
+    for ch in compatNormalized(text).lowercased() {
         if let mapped = confusableMap[ch] {
             out += mapped
         } else {
@@ -108,79 +113,100 @@ private func foldConfusables(_ text: String) -> String {
     return out
 }
 
-/// Lecturas del texto original más las lecturas tras doblar caracteres confusables.
+/// Lecturas del texto normalizado con NFKD más las lecturas tras doblar confusables.
 private func allQuestionReadings(_ text: String) -> [[String]] {
-    var readings = wordReadings(text)
+    let compat = compatNormalized(text)
+    var readings = wordReadings(compat)
     let conf = foldConfusables(text)
     for r in wordReadings(conf) where !readings.contains(r) { readings.append(r) }
     return readings
 }
 
-/// true si una misma palabra mezcla letras ASCII (a-z) y letras no latinas (ataque de homóglifos como «vеndo» o «bυy»).
-private func hasMixedScriptWord(_ text: String) -> Bool {
-    let tokens = withoutFormatCharacters(text).components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+private func isLetterScalar(_ scalar: UnicodeScalar) -> Bool {
+    let cat = scalar.properties.generalCategory
+    return cat == .uppercaseLetter || cat == .lowercaseLetter || cat == .titlecaseLetter
+        || cat == .modifierLetter || cat == .otherLetter
+}
+
+/// true si el escalar pertenece al alfabeto latino (ASCII, Latin-1, Latin Extended-A/B o Latin Extended Additional).
+/// Así «Ørsted», «Straße» y «Møller» cuentan como latinos, mientras cirílico/griego/etc. cuentan como otra escritura.
+private func isLatinScriptLetter(_ scalar: UnicodeScalar) -> Bool {
+    guard isLetterScalar(scalar) else { return false }
+    let v = scalar.value
+    return v <= 0x024F || (0x1E00...0x1EFF).contains(v)
+}
+
+/// true si una misma palabra mezcla letras latinas con letras de otra escritura (p. ej. «vеndo» con cirílico o «bυy» con griego).
+private func hasCrossScriptConfusableWord(_ text: String) -> Bool {
+    let tokens = compatNormalized(text).components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
     for token in tokens {
-        var hasASCII = false
+        var hasLatin = false
         var hasNonLatin = false
-        for scalar in token.decomposedStringWithCanonicalMapping.unicodeScalars {
-            let cat = scalar.properties.generalCategory
-            let isLetter = cat == .uppercaseLetter || cat == .lowercaseLetter || cat == .titlecaseLetter
-                || cat == .modifierLetter || cat == .otherLetter
-            guard isLetter else { continue }
-            if scalar.value < 128 { hasASCII = true } else { hasNonLatin = true }
+        for scalar in token.unicodeScalars where isLetterScalar(scalar) {
+            if isLatinScriptLetter(scalar) { hasLatin = true } else { hasNonLatin = true }
         }
-        if hasASCII && hasNonLatin { return true }
+        if hasLatin && hasNonLatin { return true }
     }
     return false
 }
 
+/// true si el texto contiene alguna letra fuera de la escritura latina (cirílico, griego, CJK...).
+private func hasNonLatinScriptLetter(_ text: String) -> Bool {
+    compatNormalized(text).unicodeScalars.contains { isLetterScalar($0) && !isLatinScriptLetter($0) }
+}
+
 // MARK: Detector de peticiones de consejo de inversión (A3, J7, J15, J21(c), J22)
 
-/// Palabras que por sí solas marcan una petición de consejo o de operación (nunca aparecen en preguntas factuales).
+/// Palabras enteras que siempre marcan una petición de consejo o de operación.
 private let unconditionalAdviceWords: Set<String> = [
     "conviene", "convienen", "quedate", "quedarme", "tendrias", "should",
     "buy", "buys", "buying", "sell", "sells", "selling", "hold", "holds", "stay",
-    "vendo", "vendes", "vende", "vender", "venderia", "venderias", "vendere", "venda", "vendas", "vendamos", "vendan",
-    "vendemos", "venden",
-    "compro", "comprar", "compraria", "comprarias", "comprare", "compres", "compremos", "compren", "compramos", "compran",
-    "invierto", "inviertes", "invierte", "invertir", "invertiria", "invertirias", "invertire", "invierta", "inviertas",
-    "inviertan", "invierten", "invertimos",
-    "aguanto", "aguantas", "aguanta", "aguantar", "aguantaria", "aguantes", "aguante",
-    "mantengo", "mantienes", "mantiene", "mantener", "manten", "mantendria", "mantengas", "mantenga",
 ]
 
-/// Prefijos que marcan siempre petición de consejo.
+/// Prefijos que siempre marcan una petición de consejo (incluye inglés `invest*` de J7, gerundios y clíticos).
 private let unconditionalAdvicePrefixes = [
     "recomiend", "recomend", "aconsej", "suger", "sugier", "asesor", "aprovech",
-    "diversific", "reequilibr", "rebalanc", "promedi", "deshaz", "convendr", "acumul", "refuerz", "reforz",
+    "diversific", "reequilibr", "rebalanc", "promedi", "deshaz", "deshag", "deshac",
+    "convendr", "acumul", "refuerz", "reforz", "aguant", "manten", "mantien",
     "recommend", "purchase",
 ]
 
-/// Frases que marcan siempre petición de consejo.
+/// Frases que siempre marcan una petición de consejo.
 private let unconditionalAdvicePhrases = [
     "buen momento", "es momento de", "el momento de", "es hora de", "buena idea", "vale la pena", "merece la pena",
     "yo que tu", "yo de ti", "habria que", "tendrias que",
     "toma beneficios", "tomo beneficios", "tomar beneficios", "tomamos beneficios",
     "recoge beneficios", "recojo beneficios", "recoger beneficios",
     "toma ganancias", "tomo ganancias", "tomar ganancias", "recojo ganancias", "recoger ganancias",
-    "sal de", "salir de bolsa", "entrar en bolsa", "meter dinero en", "mete dinero en", "meto dinero en",
-    "pon dinero en", "pongo dinero en", "poner dinero en", "donde meto", "donde meter", "donde pongo mi dinero",
-    "donde poner mi dinero", "en que pongo", "en que poner", "donde invierto", "en que invierto", "donde invertir",
-    "en que invertir", "sacar rentabilidad", "que hago con", "que haria", "que harias",
+    "sal de", "salir de bolsa", "salgo de bolsa", "entrar en bolsa", "entro en bolsa",
+    "meter dinero en", "mete dinero en", "meto dinero en",
+    "pon dinero en", "pongo dinero en", "poner dinero en",
+    "donde meto", "donde meter", "donde pongo mi dinero", "donde poner mi dinero",
+    "en que pongo", "en que poner", "donde invierto", "en que invierto", "donde invertir", "en que invertir",
+    "sacar rentabilidad",
     "take profit", "take profits", "get out", "stay put", "should i", "good time to",
     "worth buying", "worth selling", "worth investing", "how much to invest", "what to invest",
-    "mejor esperar", "espera a que", "esperar a que", "va a subir", "va a bajar", "van a subir", "van a bajar",
-    "seguira subiendo", "seguira bajando",
+    "mejor esperar", "espera a que", "esperar a que",
 ]
 
-/// Determinantes y palabras de contexto de gasto que convierten «compra»/«compras»/«venta»/«ventas» en sustantivo factual.
+/// Formas pasadas que solo describen hechos ya ocurridos (J7).
+private let pastDescribingTradeWords: Set<String> = [
+    "comprado", "comprada", "comprados", "compradas", "compraste",
+    "vendido", "vendida", "vendidos", "vendidas", "vendiste", "vendi",
+    "invertido", "invertida", "invertidos", "invertidas", "invertiste", "inverti",
+]
+
+/// Determinantes y palabras de contexto de gasto que convierten «compra(s)»/«venta(s)» en sustantivo factual.
 private let factualNounPredecessors: Set<String> = [
-    "en", "de", "del", "categoria", "presupuesto", "presupuestos", "gasto", "gastos", "gaste", "llevo",
+    "en", "de", "del", "para", "por", "sobre", "con", "sin",
+    "categoria", "presupuesto", "presupuestos", "gasto", "gastos", "gaste", "llevo",
+    "cuanto", "cuanta", "cuantos", "cuantas",
     "tu", "tus", "la", "las", "una", "unas", "esa", "esas", "esta", "estas", "mi", "mis", "su", "sus",
     "cada", "ultima", "ultimas", "primera", "primeras", "mayor", "mayores", "gran", "grandes",
+    "hice", "hechas",
 ]
 
-/// Marcadores condicionales: piden consejo si acompañan vocabulario de inversión, una posición o una acción de mercado.
+/// Marcadores condicionales: piden consejo si acompañan contexto de inversión o verbo de espera/estrategia.
 private let conditionalAdviceWords: Set<String> = [
     "deberia", "deberias", "deberiamos", "debo", "debes", "debemos", "debiera", "tendria", "podria", "podrias",
     "mejor", "considera", "considerar", "plantea", "plantear", "planteo", "evita", "evitar", "procura", "intenta",
@@ -191,16 +217,37 @@ private let conditionalAdvicePhrases = [
     "tengo que", "tienes que", "hay que", "crees que", "piensas que", "que me dices de",
 ]
 
-private let marketActionPrefixes = [
-    "esper", "aguard", "reduc", "toqu", "toc", "entr", "salg", "sali", "met", "retir", "apost", "oper", "dej",
-    "subir", "bajar",
+/// Verbos de acción sobre cartera/posiciones: en contexto de inversión (cartera, acciones, Apple...) son petición de consejo.
+private let portfolioActionWords: Set<String> = [
+    "meto", "meter", "mete", "metemos", "meten", "meteria", "metiendo",
+    "pongo", "poner", "pone", "ponemos", "ponen", "pondria", "poniendo",
+    "salgo", "salir", "sal", "salimos", "salen", "saldria", "saliendo",
+    "entro", "entrar", "entra", "entramos", "entran", "entraria", "entrando",
+    "quedo", "quedar", "quedamos", "quedaria",
+    "cambio", "cambiar", "cambia", "cambiamos", "cambiaria", "cambiando",
+    "aporto", "aportar", "aporta", "aportamos", "aportaria", "aportando",
+    "elijo", "elegir", "elige", "elegiria", "escojo", "escoger",
+    "liquido", "liquidar", "liquida", "liquidamos", "liquidaria", "liquidando",
+    "saco", "sacar", "saca", "sacaria", "sacando",
+    "toco", "tocar", "toques", "toque",
+]
+
+/// Frases de rendimiento pasado/actual con «mejor» que son factuales, nunca consejos.
+private let factualMejorPhrases = [
+    "mejor ha ido", "mejor han ido", "ha ido mejor", "han ido mejor", "fue mejor", "fueron mejor",
+    "va mejor", "van mejor", "mejor posicion", "mejor valor", "mejor rendimiento",
+]
+
+/// Frases de predicción de precios (consejo cuando acompañan contexto de inversión).
+private let futurePricePhrases = [
+    "va a subir", "va a bajar", "van a subir", "van a bajar", "seguira subiendo", "seguira bajando",
 ]
 
 private let futurePriceWords: Set<String> = [
     "subira", "subiran", "bajara", "bajaran", "subiria", "bajaria",
 ]
 
-/// Palabras de contexto de inversión para evaluar marcadores condicionales (sin bloquear preguntas factuales solas).
+/// Vocabulario de inversión para evaluar marcadores condicionales (sin bloquear por sí solo preguntas factuales).
 private let investmentContextPrefixes = [
     "invers", "invert", "inviert", "invirt", "accion", "cartera", "fondo", "bolsa", "posicion", "exposicion",
     "beneficio", "dividendo", "etf", "cripto", "bitcoin", "ethereum", "broker", "stock", "share", "fund",
@@ -209,6 +256,11 @@ private let investmentContextPrefixes = [
 
 private let investmentContextWords: Set<String> = [
     "mercado", "mercados", "oro", "gold", "btc", "eth", "msci", "sp500", "valores",
+]
+
+private let billOrPaymentWords: Set<String> = [
+    "pagar", "cobro", "cobros", "recibo", "recibos", "factura", "facturas", "nomina", "ingreso", "ingresos",
+    "dividendo", "dividendos",
 ]
 
 private func hasInvestmentContext(_ list: [String], portfolio: Portfolio?) -> Bool {
@@ -228,61 +280,105 @@ private func hasInvestmentContext(_ list: [String], portfolio: Portfolio?) -> Bo
 /// A diferencia de `containsAdvice` (pensado para texto libre del modelo), NO rechaza preguntas factuales neutras como
 /// «¿Cómo van mis inversiones?», «¿Cuánto vale mi cartera?» o «¿Cuánto gasté en compras?».
 public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> Bool {
-    let trimmed = withoutFormatCharacters(question).trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmed = compatNormalized(question).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return false }
-    if hasMixedScriptWord(trimmed) { return true }
+    if hasCrossScriptConfusableWord(trimmed) { return true }
+
+    // Conserva tildes del original (NFC) para distinguir el pretérito «compré» del subjuntivo «compre».
+    let rawAccentedTokens = Set(
+        withoutFormatCharacters(question).precomposedStringWithCanonicalMapping.lowercased()
+            .components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+    )
+    let hasPastCompre = rawAccentedTokens.contains("compré")
 
     for list in allQuestionReadings(trimmed) {
         let joined = " " + list.joined(separator: " ") + " "
         let invContext = hasInvestmentContext(list, portfolio: portfolio)
 
-        // 1. Palabras y prefijos que siempre piden consejo.
-        for word in list {
+        // 1. Palabras y prefijos incondicionales (incluye inglés `invest*` de J7).
+        for (i, word) in list.enumerated() {
             if unconditionalAdviceWords.contains(word) { return true }
             if unconditionalAdvicePrefixes.contains(where: { word.hasPrefix($0) }) { return true }
-            if futurePriceWords.contains(word) && invContext { return true }
+            if word.hasPrefix("invest") && !word.hasPrefix("investig") { return true }
+
+            // Raíces de comprar / vender / invertir (cubren gerundios «comprando/vendiendo/invirtiendo» y clíticos «véndelo»).
+            if !pastDescribingTradeWords.contains(word) {
+                if word.hasPrefix("vend") {
+                    if word == "venta" || word == "ventas" {
+                        if isFactualTradeNoun(word, at: i, in: list) { continue }
+                    }
+                    return true
+                }
+                if word.hasPrefix("invert") || word.hasPrefix("inviert") || word.hasPrefix("invirt") {
+                    return true
+                }
+                if word.hasPrefix("compr") {
+                    if word == "compra" || word == "compras" {
+                        if isFactualTradeNoun(word, at: i, in: list) { continue }
+                        return true
+                    }
+                    if word == "compre" {
+                        // «¿Qué compré en Mercadona?» / «¿Cuánto compré en Apple Store?» lleva tilde en el original.
+                        if hasPastCompre { continue }
+                        let pastShop = list.contains("cuanto") && list.contains("en") && !invContext
+                        if pastShop { continue }
+                        return true
+                    }
+                    if word == "compramos" && !invContext && (list.contains("cuanto") || list.contains("que")) {
+                        continue
+                    }
+                    return true
+                }
+            }
         }
+
         // 2. Frases incondicionales.
         if unconditionalAdvicePhrases.contains(where: { joined.contains(" " + $0 + " ") }) { return true }
 
-        // 3. «compra»/«compras»/«venta»/«ventas» como verbo (imperativo o indicativo), no como categoría o sustantivo factual.
-        for (i, word) in list.enumerated() where word == "compra" || word == "compras" || word == "venta" || word == "ventas" {
-            if i > 0, factualNounPredecessors.contains(list[i - 1]) { continue }
-            if i == 0, (word == "venta" || word == "ventas"), i + 1 < list.count, list[i + 1] == "de" { continue }
-            if word == "compras", i > 0, list[i - 1] == "que",
-               i + 1 < list.count, ["hice", "he", "hubo", "fueron"].contains(list[i + 1]) { continue }
+        // 3. Predicciones de mercado y «qué hago con …» solo en contexto de inversión o dinero/ahorros.
+        if invContext {
+            if list.contains(where: { futurePriceWords.contains($0) }) { return true }
+            if futurePricePhrases.contains(where: { joined.contains(" " + $0 + " ") }) { return true }
+            if list.contains(where: { portfolioActionWords.contains($0) }) { return true }
+            if list.contains(where: { $0.hasPrefix("reduc") }) { return true }
+            // «esperar»/«espera» en inversiones es consejo, salvo «espero el cobro/dividendo» (hecho esperado).
+            let expectsScheduled = list.contains("espero") && list.contains { billOrPaymentWords.contains($0) }
+            if !expectsScheduled && list.contains(where: { $0.hasPrefix("esper") || $0.hasPrefix("aguard") }) {
+                return true
+            }
+        }
+
+        let asksWhatToDo = joined.contains(" que hago con ") || joined.contains(" que haria ") || joined.contains(" que harias ")
+        if asksWhatToDo && (invContext || list.contains("dinero") || list.contains("ahorro") || list.contains("ahorros")) {
             return true
         }
 
-        // 4. «compre» (sin tilde puede ser pasado «compré» en una tienda o subjuntivo de consejo).
-        if list.contains("compre") {
-            let pastShop = list.contains("cuanto") && list.contains("en") && !invContext
-            if !pastShop { return true }
+        // 4. Marcadores condicionales + contexto de inversión o espera de mercado.
+        let isFactualMejor = factualMejorPhrases.contains { joined.contains(" " + $0 + " ") }
+            && !list.contains(where: { portfolioActionWords.contains($0) })
+        let hasConditionalWord = list.contains { w in
+            if w == "mejor" && isFactualMejor { return false }
+            return conditionalAdviceWords.contains(w)
         }
-
-        // 5. «entra en» / «no toques» con vocabulario de inversión.
-        if invContext, joined.contains(" entra en ") || joined.contains(" entrar en ") || joined.contains(" no toques ") {
-            return true
-        }
-
-        // 6. Marcadores condicionales + contexto de inversión o verbo de espera/reducción de cartera.
-        let hasConditional = list.contains { conditionalAdviceWords.contains($0) }
-            || conditionalAdvicePhrases.contains { joined.contains(" " + $0 + " ") }
+        let hasConditional = hasConditionalWord || conditionalAdvicePhrases.contains { joined.contains(" " + $0 + " ") }
         if hasConditional {
             if invContext { return true }
-            let hasMarketAction = list.contains { w in
-                marketActionPrefixes.contains { w.hasPrefix($0) }
+            let hasMarketHesitation = list.contains { w in
+                w.hasPrefix("esper") || w.hasPrefix("aguard") || w.hasPrefix("reduc") || w.hasPrefix("apost")
             }
-            // «¿qué tengo que pagar?» es cobros pendientes, no consejo; «¿debería esperar?» sí es consejo.
-            let isBillQuestion = list.contains("pagar") || list.contains("cobro") || list.contains("cobros")
-                || list.contains("recibo") || list.contains("recibos") || list.contains("factura") || list.contains("facturas")
-            if hasMarketAction && !isBillQuestion { return true }
+            let expectsBill = list.contains { billOrPaymentWords.contains($0) }
+            if hasMarketHesitation && !expectsBill { return true }
         }
+    }
+    return false
+}
 
-        // 7. Verbos de cartera/reducción sin marcador cuando acompañan vocabulario de inversión («reduce exposición»).
-        if invContext, list.contains(where: { $0.hasPrefix("reduc") || $0.hasPrefix("esper") || $0.hasPrefix("aguard") }) {
-            return true
-        }
+private func isFactualTradeNoun(_ word: String, at i: Int, in list: [String]) -> Bool {
+    if i > 0, factualNounPredecessors.contains(list[i - 1]) { return true }
+    if i == 0, i + 1 < list.count, ["de", "del", "en"].contains(list[i + 1]) { return true }
+    if word == "compras", i > 0, list[i - 1] == "que",
+       i + 1 < list.count, ["hice", "he", "tengo", "hubo", "fueron", "pague", "hay"].contains(list[i + 1]) {
+        return true
     }
     return false
 }
@@ -301,9 +397,8 @@ private func extractMonth(tokens: [String], joined: String, rawFolded: String, n
     }
     let currentYear = calendar.component(.year, from: now)
     let currentMonth = calendar.component(.month, from: now)
-    // Buscar año explícito de 4 cifras (2020...2099).
     let digits = rawFolded.components(separatedBy: CharacterSet.decimalDigits.inverted).filter { $0.count == 4 }
-    let explicitYear = digits.compactMap(Int.init).first { (2020...2099).contains($0) }
+    let explicitYear = digits.compactMap(Int.init).first { (2000...2100).contains($0) }
     for entry in spanishMonthNames where tokens.contains(entry.name) {
         let year = explicitYear ?? (entry.month > currentMonth ? currentYear - 1 : currentYear)
         return .specific(year: year, month: entry.month)
@@ -333,6 +428,10 @@ private let categoryMatchers: [(category: SpendingCategory, phrases: [String])] 
     (.sinCategoria, ["sin categoria"]),
 ]
 
+private let categoryKeywordWords: Set<String> = Set(
+    categoryMatchers.flatMap { $0.phrases.flatMap { $0.split(separator: " ").map(String.init) } }
+)
+
 private func extractCategory(joined: String) -> SpendingCategory? {
     for entry in categoryMatchers {
         for phrase in entry.phrases where joined.contains(" " + phrase + " ") {
@@ -345,6 +444,7 @@ private func extractCategory(joined: String) -> SpendingCategory? {
 /// Palabras demasiado cortas o genéricas que no identifican por sí solas una posición de cartera.
 private let positionStopWords: Set<String> = [
     "core", "fund", "etf", "ucits", "acc", "eur", "usd", "inc", "corp", "plc", "ltd", "the", "and", "class",
+    "banco", "bancos", "bank", "group", "holding", "holdings",
     "de", "la", "el", "los", "las", "en", "con", "por", "para", "del", "mis", "tus", "sus",
 ]
 
@@ -388,7 +488,8 @@ private func foldedJoinedContains(_ joined: String, _ needle: String) -> Bool {
 
 /// Palabras que nunca se toman como nombre de comercio cuando van detrás de «en …».
 private let nonMerchantTargets: Set<String> = [
-    "total", "general", "mes", "este", "pasado", "anterior", "hoy", "ayer", "semana", "ano", "cuenta", "cuentas",
+    "total", "general", "mes", "meses", "este", "pasado", "anterior", "ultimo", "ultimos", "hoy", "ayer",
+    "semana", "semanas", "dia", "dias", "ano", "anos", "va", "cuenta", "cuentas", "tarjeta", "tarjetas",
     "banco", "bancos", "revolut", "imagin", "caixabank", "caixa", "trade", "republic", "traderepublic",
     "inversiones", "inversion", "cartera", "bolsa", "acciones", "fondos", "cripto", "presupuesto", "presupuestos",
     "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "setiembre",
@@ -396,13 +497,24 @@ private let nonMerchantTargets: Set<String> = [
 ]
 
 private let trailingTimePhrases = [
-    "este mes", "el mes pasado", "el mes anterior", "mes pasado", "mes anterior", "esta semana", "este ano",
-    "hoy", "ayer",
+    "lo que va de mes", "el ultimo mes", "ultimo mes", "este mes", "el mes pasado", "el mes anterior",
+    "mes pasado", "mes anterior", "esta semana", "este ano", "mi tarjeta", "la tarjeta", "hoy", "ayer",
     "en enero", "en febrero", "en marzo", "en abril", "en mayo", "en junio", "en julio", "en agosto",
     "en septiembre", "en setiembre", "en octubre", "en noviembre", "en diciembre",
     "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "setiembre",
     "octubre", "noviembre", "diciembre",
 ]
+
+private let merchantFillerWords: Set<String> = [
+    "que", "el", "la", "los", "las", "un", "una", "mi", "mis", "lo", "de", "del",
+]
+
+/// Busca el texto exacto de una palabra de la pregunta cuya forma normalizada coincide con `target` (conserva mayúsculas).
+private func originalWordMatching(_ target: String, in rawQuestion: String) -> String {
+    let cleaned = rawQuestion.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    if let hit = cleaned.first(where: { normalizeMerchant($0) == target }) { return hit }
+    return target.prefix(1).uppercased() + target.dropFirst()
+}
 
 /// Busca un comercio conocido del libro o uno nombrado explícitamente tras «en …» en una pregunta de gasto.
 private func extractMerchant(rawQuestion: String, joined: String, tokens: [String], state: LedgerState,
@@ -419,14 +531,21 @@ private func extractMerchant(rawQuestion: String, joined: String, tokens: [Strin
     }
     var bestKnown: (length: Int, display: String)?
     for item in known {
+        // Coincidencia exacta con todo el nombre del comercio (p. ej. «Restaurante Sol» sí gana a la categoría).
         if joined.contains(" " + item.key + " ") {
-            if item.key.count > (bestKnown?.length ?? 0) { bestKnown = (item.key.count, item.display) }
+            if !categoryKeywordWords.contains(item.key) || item.key.contains(" ") {
+                if item.key.count > (bestKnown?.length ?? 0) { bestKnown = (item.key.count, item.display) }
+            }
             continue
         }
-        // También el primer nombre de marca si tiene 4+ letras («Mercadona» casa con «Mercadona Torrejón»).
-        if let first = item.key.split(separator: " ").first.map(String.init),
-           first.count >= 4, !nonMerchantTargets.contains(first), tokens.contains(first) {
-            if first.count > (bestKnown?.length ?? 0) { bestKnown = (first.count, String(item.display.split(separator: " ").first ?? Substring(item.display))) }
+        // Primer nombre de marca si tiene 4+ letras, nunca si es palabra de categoría («restaurante», «farmacia», «casa»...).
+        if category == nil,
+           let first = item.key.split(separator: " ").first.map(String.init),
+           first.count >= 4, !nonMerchantTargets.contains(first), !categoryKeywordWords.contains(first),
+           tokens.contains(first) {
+            if first.count > (bestKnown?.length ?? 0) {
+                bestKnown = (first.count, originalWordMatching(first, in: rawQuestion))
+            }
         }
     }
     if let bestKnown { return bestKnown.display }
@@ -449,17 +568,15 @@ private func extractMerchant(rawQuestion: String, joined: String, tokens: [Strin
             candidateParts.append(parts[idx])
         }
         guard !candidateParts.isEmpty else { continue }
-        if let last = candidateParts.last {
-            candidateParts[candidateParts.count - 1] = last.trimmingCharacters(in: CharacterSet.punctuationCharacters)
-        }
-        var candidate = candidateParts.filter { !$0.isEmpty }.joined(separator: " ")
-        // Quita años sueltos y coletillas de tiempo al final («Mercadona este mes» -> «Mercadona»).
+        var candidate = candidateParts.joined(separator: " ")
+            .trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces))
+        // Quita años sueltos y coletillas de tiempo al final («Zara, el mes pasado» -> «Zara»).
         var changed = true
         while changed {
             changed = false
+            candidate = candidate.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces))
             let low = foldedQuery(candidate)
             if low.isEmpty { break }
-            // Quita «de 2025» o «2025» al final.
             let words = candidate.split(separator: " ")
             if let lastW = words.last, lastW.count == 4, lastW.allSatisfy({ $0.isASCII && $0.isNumber }) {
                 candidate = words.dropLast().joined(separator: " ")
@@ -481,14 +598,13 @@ private func extractMerchant(rawQuestion: String, joined: String, tokens: [Strin
                 }
             }
         }
+        candidate = candidate.trimmingCharacters(in: CharacterSet.punctuationCharacters.union(.whitespaces))
         let key = normalizeMerchant(candidate)
         guard key.count >= 2, key.count <= 40, !nonMerchantTargets.contains(key) else { continue }
         if let bank, key == normalizeMerchant(bank.displayName) { continue }
         if extractCategory(joined: " " + key + " ") != nil { continue }
         let keyTokens = key.split(separator: " ").map(String.init)
-        if keyTokens.allSatisfy({ nonMerchantTargets.contains($0) || ["que", "el", "la", "los", "las", "un", "una", "mi", "mis"].contains($0) }) {
-            continue
-        }
+        if keyTokens.allSatisfy({ nonMerchantTargets.contains($0) || merchantFillerWords.contains($0) }) { continue }
         return candidate
     }
     return nil
@@ -497,7 +613,11 @@ private func extractMerchant(rawQuestion: String, joined: String, tokens: [Strin
 // MARK: Enrutador determinista (sin modelo)
 
 private let spendingCues = [
-    "gastado", "gaste", "gastos", "gasto", "gastar", "llevo", "pagado", "pague", "pagos",
+    "gastado", "gaste", "gastos", "gasto", "gastar", "llevo", "pagado", "pague", "pagos", "compre", "comprado", "compramos",
+]
+
+private let strongShopSpendingCues = [
+    "gastado", "gaste", "gastos", "gasto", "gastar", "pagado", "pague", "pagos", "compre", "comprado", "compramos",
 ]
 
 private let investmentCues = [
@@ -506,14 +626,16 @@ private let investmentCues = [
     "invertido", "inverti", "rentabilidad", "ganancia", "ganancias", "dividendos",
 ]
 
-private let moverPhrases = [
-    "mas ha subido", "mas subio", "mas han subido", "subido mas", "mas ha bajado", "mas bajo",
-    "mas han bajado", "bajado mas", "mejor ha ido", "peor ha ido",
+private let unconditionalMoverPhrases = [
+    "mas ha subido", "mas subio", "mas han subido", "subido mas",
+    "mas ha bajado", "mas han bajado", "bajado mas",
+    "mejor ha ido", "mejor han ido", "ha ido mejor", "han ido mejor",
+    "peor ha ido", "peor han ido", "ha ido peor", "han ido peor",
 ]
 
 private let recapPhrases = [
     "que ha pasado", "que paso", "desde ayer", "resumen de hoy", "resumen diario", "mi resumen",
-    "ponme al dia", "al dia", "novedades", "que hay de nuevo", "cuentame el resumen",
+    "ponme al dia", "ponte al dia", "ponerme al dia", "novedades", "que hay de nuevo", "cuentame el resumen",
 ]
 
 private let transferPhrases = [
@@ -541,6 +663,7 @@ private let upcomingPhrases = [
     "quedo corto", "quedare corto", "me quedo corto", "me llega para", "me da para", "llega el saldo",
     "bajo del minimo", "baja del minimo", "colchon", "cuando me cobran", "que tengo que pagar",
     "tengo que pagar", "van a cobrar", "me cobran", "calendario de cobros",
+    "espero el cobro", "cobros espero",
 ]
 
 private let subscriptionCues = [
@@ -570,14 +693,31 @@ private let balanceCues = [
     "saldo", "saldos", "dinero", "cuentas", "cuenta", "total",
 ]
 
+private let explicitBalanceWords: Set<String> = ["saldo", "saldos"]
+
 private let balancePhrases = [
     "cuanto tengo", "cuanto me queda", "cuanto queda", "cuanto hay", "como estan mis cuentas", "como van mis cuentas",
 ]
 
+private func hasKnownShopMerchant(_ query: String, in state: LedgerState) -> Bool {
+    let key = normalizeMerchant(query)
+    guard !key.isEmpty else { return false }
+    let qTokens = key.split(separator: " ").map(String.init)
+    return state.movements.contains { m in
+        guard m.kind == .payment && !m.flaggedNotMine && !m.excludedFromSpending else { return false }
+        return [m.merchant, m.bankMerchant].compactMap { $0 }.contains { raw in
+            let mk = normalizeMerchant(raw)
+            if mk == key { return true }
+            let mt = mk.split(separator: " ").map(String.init)
+            return qTokens.count <= mt.count && (0...(mt.count - qTokens.count)).contains { Array(mt[$0..<($0 + qTokens.count)]) == qTokens }
+        }
+    }
+}
+
 /// Traduce la pregunta del dueño a una intención conocida sin usar ningún modelo.
 public func routeAssistantQuestion(_ question: String, state: LedgerState, portfolio: Portfolio?,
                                    now: Date, calendar: Calendar) -> AssistantIntent {
-    let trimmed = withoutFormatCharacters(question).trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmed = compatNormalized(question).trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmed.isEmpty else { return .unknown }
 
     let rawFolded = foldedQuery(trimmed)
@@ -596,6 +736,8 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
     let month = extractMonth(tokens: tokens, joined: joined, rawFolded: rawFolded, now: now, calendar: calendar)
     let category = extractCategory(joined: joined)
     let hasSpendingCue = tokens.contains { spendingCues.contains($0) }
+    let hasStrongShopCue = tokens.contains { strongShopSpendingCues.contains($0) }
+    let hasAccentedBajo = withoutFormatCharacters(question).precomposedStringWithCanonicalMapping.lowercased().contains("bajó")
 
     // 1. Resumen («¿qué ha pasado desde ayer?»).
     if recapPhrases.contains(where: { joined.contains(" " + $0 + " ") }) {
@@ -603,9 +745,10 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
     }
 
     // 2. Inversiones explícitas (cartera, subidas/bajadas).
-    let wantsMovers = moverPhrases.contains { joined.contains(" " + $0 + " ") }
     let hasInvCue = tokens.contains { investmentCues.contains($0) }
-    if wantsMovers && (hasInvCue || positionQuery != nil || !hasSpendingCue) {
+    let hasUnconditionalMover = unconditionalMoverPhrases.contains { joined.contains(" " + $0 + " ") }
+    let hasBajoMover = joined.contains(" mas bajo ") && (hasAccentedBajo || hasInvCue || positionQuery != nil)
+    if (hasUnconditionalMover || hasBajoMover) && (hasInvCue || positionQuery != nil || !hasSpendingCue) {
         return .investments(positionQuery: nil, moversOnly: true)
     }
     if hasInvCue {
@@ -649,25 +792,46 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
         return .biggestPayments(month: month)
     }
 
-    // 10. Gastos (mes, categoría o comercio).
+    // 10. Saldo explícito («saldo», «saldos», o «cuánto tengo en <banco>») antes de posición suelta
+    // (evita que acciones de «CaixaBank» pisen el saldo del banco).
+    if tokens.contains(where: { explicitBalanceWords.contains($0) })
+        || (bank != nil && balancePhrases.contains(where: { joined.contains(" " + $0 + " ") })) {
+        return .balances(bank: bank)
+    }
+
+    // 11. Posición concreta de cartera cuando no hay un verbo de compra en tienda para un comercio del libro
+    // («¿Cuánto llevo en MSCI World?», «¿Cuánto llevo ganado en Apple?», «¿Cómo va Apple?»).
+    if let positionQuery {
+        let matchedPositionName = portfolio.flatMap { p in
+            positions(from: p.transactions).first { $0.instrument == positionQuery }?.name
+        }
+        let isGainQuery = tokens.contains("ganado") || tokens.contains("perdido")
+        let isShopSpending = hasStrongShopCue && !isGainQuery
+            && (matchedPositionName.map { hasKnownShopMerchant($0, in: state) } ?? false)
+        if !isShopSpending {
+            let isOnlyLlevoWithoutShop = tokens.contains("llevo")
+                && !(matchedPositionName.map { hasKnownShopMerchant($0, in: state) } ?? false)
+            if isGainQuery || !hasSpendingCue || isOnlyLlevoWithoutShop {
+                return .investments(positionQuery: positionQuery, moversOnly: false)
+            }
+        }
+    }
+
+    // 12. Gastos (mes, categoría, comercio o banco).
     let merchant = extractMerchant(rawQuestion: trimmed, joined: joined, tokens: tokens, state: state,
                                    category: category, bank: bank)
     if hasSpendingCue {
-        // «¿cuánto llevo en Mercadona?» -> comercio; «¿cuánto llevo en Comer fuera?» -> categoría; si no, total del mes.
-        return .spending(month: month, category: merchant == nil ? category : nil, merchant: merchant)
-    }
-    // Posición concreta de la cartera («¿cómo va Apple?», «¿cuánto vale Apple?», «¿cuánto tengo en Apple?»).
-    if let positionQuery {
-        return .investments(positionQuery: positionQuery, moversOnly: false)
+        return .spending(month: month, category: merchant == nil ? category : nil, merchant: merchant,
+                         bank: merchant == nil ? bank : nil)
     }
     if let merchant, joined.contains(" cuanto ") || joined.contains(" pagos ") {
-        return .spending(month: month, category: nil, merchant: merchant)
+        return .spending(month: month, category: nil, merchant: merchant, bank: nil)
     }
     if let category, joined.contains(" cuanto ") || month != .current {
-        return .spending(month: month, category: category, merchant: nil)
+        return .spending(month: month, category: category, merchant: nil, bank: bank)
     }
 
-    // 11. Saldos (todos o un banco).
+    // 13. Saldos (todos o un banco).
     if tokens.contains(where: { balanceCues.contains($0) }) || balancePhrases.contains(where: { joined.contains(" " + $0 + " ") }) {
         return .balances(bank: bank)
     }
@@ -700,11 +864,71 @@ public func assistantRoutingPrompt(question: String, now: Date, calendar: Calend
     return "Mes actual: \(year)-\(mm)\nPregunta: \(clean)\nIntención:"
 }
 
-/// Lee la línea que devuelve el modelo del dispositivo y valida cada parámetro. Si la pregunta pide consejo, devuelve siempre
-/// `.adviceRequest` diga lo que diga el modelo; si la respuesta del modelo no se entiende o inventa texto que no estaba en la
-/// pregunta, devuelve nil para usar el enrutador determinista.
-public func parseAssistantModelRoute(_ response: String, originalQuestion: String, portfolio: Portfolio?,
-                                     now: Date, calendar: Calendar) -> AssistantIntent? {
+/// Comprueba que el valor propuesto por el modelo aparece como una secuencia de palabras enteras dentro de `originalQuestion`,
+/// sin caracteres añadidos ni símbolos prohibidos, y devuelve el trozo original de la pregunta (nunca el texto crudo del modelo).
+private func validatedSpanFromQuestion(_ modelValue: String, originalQuestion: String) -> String? {
+    guard !hasNonLatinScriptLetter(modelValue),
+          !modelValue.contains("€"), !modelValue.contains("%"), !modelValue.contains("$"),
+          !modelValue.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) }) else {
+        return nil
+    }
+    let normValue = normalizeMerchant(modelValue)
+    let valueTokens = normValue.split(separator: " ").map(String.init)
+    guard normValue.count >= 2, !valueTokens.isEmpty,
+          !valueTokens.allSatisfy({ nonMerchantTargets.contains($0) || merchantFillerWords.contains($0) }) else {
+        return nil
+    }
+    // Comprueba que `modelValue` no trae palabras extra eliminadas por `normalizeMerchant` (como sufijos o basura),
+    // respetando apóstrofos propios del nombre («McDonald's»).
+    let withoutApostrophes = foldedQuery(modelValue)
+        .replacingOccurrences(of: "'", with: "")
+        .replacingOccurrences(of: "\u{2019}", with: "")
+        .replacingOccurrences(of: "`", with: "")
+        .replacingOccurrences(of: "\u{00B4}", with: "")
+    let rawWords = withoutApostrophes.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    guard rawWords == valueTokens else { return nil }
+
+    // Extrae palabras originales de la pregunta y busca una secuencia contigua exacta.
+    let qRaw = compatNormalized(originalQuestion)
+        .replacingOccurrences(of: "¿", with: " ")
+        .replacingOccurrences(of: "?", with: " ")
+        .replacingOccurrences(of: "¡", with: " ")
+        .replacingOccurrences(of: "!", with: " ")
+        .split(whereSeparator: \.isWhitespace)
+        .map { $0.trimmingCharacters(in: CharacterSet.punctuationCharacters) }
+        .filter { !$0.isEmpty }
+    let qNorm = qRaw.map { normalizeMerchant($0) }
+    guard valueTokens.count <= qNorm.count else { return nil }
+    for start in 0...(qNorm.count - valueTokens.count) {
+        let slice = Array(qNorm[start..<(start + valueTokens.count)])
+        if slice == valueTokens {
+            return qRaw[start..<(start + valueTokens.count)].joined(separator: " ")
+        }
+    }
+    return nil
+}
+
+/// Parámetros permitidos por cada comando del modelo (cualquier parámetro ajeno invalida la línea).
+private let allowedParamsByCommand: [String: Set<String>] = [
+    "SALDO": ["banco"],
+    "GASTO": ["mes", "categoria", "comercio", "banco"],
+    "MAYORES_PAGOS": ["mes"],
+    "SUSCRIPCIONES": [],
+    "PROXIMOS_COBROS": ["banco"],
+    "PRESUPUESTOS": ["categoria"],
+    "INGRESOS": ["mes"],
+    "TRASPASOS": ["mes"],
+    "DINERO_LIBRE": [],
+    "INVERSIONES": ["posicion", "movers"],
+    "RESUMEN": [],
+    "CONSEJO": ["posicion"],
+    "DESCONOCIDO": [],
+]
+
+/// Lee la línea que devuelve el modelo del dispositivo y valida estrictamente cada parámetro.
+/// Si la pregunta pide consejo, devuelve siempre `.adviceRequest` diga lo que diga el modelo; si la respuesta del modelo no se
+/// entiende, trae parámetros no permitidos o inventa texto ausente en la pregunta, devuelve nil para usar el enrutador determinista.
+public func parseAssistantModelRoute(_ response: String, originalQuestion: String, portfolio: Portfolio?) -> AssistantIntent? {
     let originalFolded = foldedQuery(originalQuestion)
     let originalTokens = originalFolded.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
     let originalJoined = " " + originalTokens.joined(separator: " ") + " "
@@ -719,11 +943,12 @@ public func parseAssistantModelRoute(_ response: String, originalQuestion: Strin
         .map({ $0.trimmingCharacters(in: .whitespaces) })
         .first(where: { !$0.isEmpty }) else { return nil }
 
-    // Acepta parámetros con comillas («comercio="El Corte Inglés"») o sin ellas.
     let parts = tokenizeModelLine(firstLine)
     guard let rawCommand = parts.first else { return nil }
     let command = rawCommand.uppercased()
+    guard let allowedKeys = allowedParamsByCommand[command] else { return nil }
 
+    var seenKeys = Set<String>()
     var bank: BankID?
     var month: AssistantMonth = .current
     var category: SpendingCategory?
@@ -735,7 +960,7 @@ public func parseAssistantModelRoute(_ response: String, originalQuestion: Strin
         guard let eq = token.firstIndex(of: "=") else { return nil }
         let key = token[..<eq].lowercased()
         let value = String(token[token.index(after: eq)...]).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !value.isEmpty, value.count <= 60 else { return nil }
+        guard allowedKeys.contains(key), seenKeys.insert(key).inserted, !value.isEmpty, value.count <= 60 else { return nil }
         switch key {
         case "banco":
             guard let parsed = BankID(rawValue: value.lowercased()) else { return nil }
@@ -747,23 +972,24 @@ public func parseAssistantModelRoute(_ response: String, originalQuestion: Strin
             guard let parsed = SpendingCategory(rawValue: value) else { return nil }
             category = parsed
         case "comercio":
-            // Seguridad (J21(d)): ningún texto inventado por el modelo llega a la pantalla; debe aparecer en la pregunta.
-            let norm = normalizeMerchant(value)
-            guard !norm.isEmpty, foldedQuery(originalQuestion).contains(norm) || originalJoined.contains(" " + norm + " ") else {
-                return nil
-            }
-            merchant = value
+            // Seguridad (J21(d)): nunca se muestra texto crudo del modelo; se extrae el trozo exacto de `originalQuestion`.
+            guard let safeSpan = validatedSpanFromQuestion(value, originalQuestion: originalQuestion) else { return nil }
+            merchant = safeSpan
         case "posicion":
+            guard !hasNonLatinScriptLetter(value), !value.contains("€"), !value.contains("%") else { return nil }
             let norm = normalizeMerchant(value)
             guard !norm.isEmpty else { return nil }
-            let inQuestion = foldedQuery(originalQuestion).contains(norm) || originalJoined.contains(" " + norm + " ")
-            let matched = portfolio.flatMap { p in
+            if let matched = portfolio.flatMap({ p in
                 positions(from: p.transactions).first {
                     normalizeMerchant($0.instrument) == norm || normalizeMerchant($0.name) == norm
                 }?.instrument
+            }) {
+                position = matched
+            } else if let safeSpan = validatedSpanFromQuestion(value, originalQuestion: originalQuestion) {
+                position = safeSpan
+            } else {
+                return nil
             }
-            guard inQuestion || matched != nil else { return nil }
-            position = matched ?? value
         case "movers":
             let low = foldedQuery(value)
             guard low == "si" || low == "no" else { return nil }
@@ -777,7 +1003,8 @@ public func parseAssistantModelRoute(_ response: String, originalQuestion: Strin
     case "SALDO":
         return .balances(bank: bank)
     case "GASTO":
-        return .spending(month: month, category: merchant == nil ? category : nil, merchant: merchant)
+        return .spending(month: month, category: merchant == nil ? category : nil, merchant: merchant,
+                         bank: merchant == nil ? bank : nil)
     case "MAYORES_PAGOS":
         return .biggestPayments(month: month)
     case "SUSCRIPCIONES":

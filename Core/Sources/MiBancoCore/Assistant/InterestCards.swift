@@ -34,10 +34,23 @@ public enum CardFeedback: String, Codable, Equatable, Sendable {
 public struct RecordedCardFeedback: Codable, Equatable, Sendable {
     public let feedback: CardFeedback
     public let date: Date
+    /// Cambio real que aplicó sobre el peso del tema (0 si ya estaba en el tope): permite deshacerlo con exactitud si cambia de opinión.
+    public let appliedDelta: Int
 
-    public init(feedback: CardFeedback, date: Date) {
+    public init(feedback: CardFeedback, date: Date, appliedDelta: Int? = nil) {
         self.feedback = feedback
         self.date = date
+        self.appliedDelta = appliedDelta ?? (feedback == .interested ? 1 : -1)
+    }
+
+    private enum CodingKeys: String, CodingKey { case feedback, date, appliedDelta }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        feedback = try c.decode(CardFeedback.self, forKey: .feedback)
+        date = try c.decode(Date.self, forKey: .date)
+        let rawDelta = try c.decodeIfPresent(Int.self, forKey: .appliedDelta)
+        appliedDelta = rawDelta.map { min(1, max(-1, $0)) } ?? (feedback == .interested ? 1 : -1)
     }
 }
 
@@ -64,8 +77,13 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
     public init(disabledTopics: Set<AssistantTopic> = [], topicWeights: [AssistantTopic: Int] = [:],
                 cardFeedback: [String: RecordedCardFeedback] = [:]) {
         self.disabledTopics = disabledTopics
-        self.topicWeights = topicWeights.mapValues { Self.clampedWeight($0) }
-        self.cardFeedback = cardFeedback
+        var cleanWeights: [AssistantTopic: Int] = [:]
+        for (topic, w) in topicWeights {
+            let clamped = Self.clampedWeight(w)
+            if clamped != 0 { cleanWeights[topic] = clamped }
+        }
+        self.topicWeights = cleanWeights
+        self.cardFeedback = Self.cappedFeedback(cardFeedback)
     }
 
     public func isEnabled(_ topic: AssistantTopic) -> Bool {
@@ -86,20 +104,19 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
 
     /// Registra «Me interesa» o «No me interesa» sobre una tarjeta y ajusta el peso del tema de forma acotada e idempotente.
     public mutating func recordFeedback(_ feedback: CardFeedback, cardID: String, topic: AssistantTopic, now: Date) {
-        let previous = cardFeedback[cardID]?.feedback
-        if previous != feedback {
-            let delta: Int
-            switch (previous, feedback) {
-            case (nil, .interested): delta = 1
-            case (nil, .notInterested): delta = -1
-            case (.notInterested, .interested): delta = 2
-            case (.interested, .notInterested): delta = -2
-            default: delta = 0
-            }
-            let updated = Self.clampedWeight(weight(for: topic) + delta)
-            if updated == 0 { topicWeights.removeValue(forKey: topic) } else { topicWeights[topic] = updated }
+        let existing = cardFeedback[cardID]
+        if let existing, existing.feedback == feedback {
+            cardFeedback[cardID] = RecordedCardFeedback(feedback: feedback, date: now, appliedDelta: existing.appliedDelta)
+            pruneFeedback(now: now)
+            return
         }
-        cardFeedback[cardID] = RecordedCardFeedback(feedback: feedback, date: now)
+        // Deshace primero el cambio real anterior (0 si estuvo en el tope) y aplica el nuevo (±1), acotado.
+        let baseWeight = Self.clampedWeight(weight(for: topic) - (existing?.appliedDelta ?? 0))
+        let desired = feedback == .interested ? 1 : -1
+        let updated = Self.clampedWeight(baseWeight + desired)
+        let actualDelta = updated - baseWeight
+        if updated == 0 { topicWeights.removeValue(forKey: topic) } else { topicWeights[topic] = updated }
+        cardFeedback[cardID] = RecordedCardFeedback(feedback: feedback, date: now, appliedDelta: actualDelta)
         pruneFeedback(now: now)
     }
 
@@ -109,13 +126,15 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
 
     private mutating func pruneFeedback(now: Date) {
         let cutoff = now.addingTimeInterval(-Double(Self.feedbackRetentionDays) * 86_400)
-        cardFeedback = cardFeedback.filter { $0.value.date >= cutoff }
-        if cardFeedback.count > Self.maxFeedbackEntries {
-            let newest = cardFeedback.sorted {
-                $0.value.date != $1.value.date ? $0.value.date > $1.value.date : $0.key < $1.key
-            }.prefix(Self.maxFeedbackEntries)
-            cardFeedback = Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
-        }
+        cardFeedback = Self.cappedFeedback(cardFeedback.filter { $0.value.date >= cutoff })
+    }
+
+    private static func cappedFeedback(_ entries: [String: RecordedCardFeedback]) -> [String: RecordedCardFeedback] {
+        guard entries.count > maxFeedbackEntries else { return entries }
+        let newest = entries.sorted {
+            $0.value.date != $1.value.date ? $0.value.date > $1.value.date : $0.key < $1.key
+        }.prefix(maxFeedbackEntries)
+        return Dictionary(uniqueKeysWithValues: newest.map { ($0.key, $0.value) })
     }
 
     private static func clampedWeight(_ value: Int) -> Int {
@@ -140,7 +159,7 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
             topicWeights = parsed
         }
         if let rawFeedback = try? c.decode([String: LossyDecodable<RecordedCardFeedback>].self, forKey: .cardFeedback) {
-            cardFeedback = rawFeedback.compactMapValues(\.value)
+            cardFeedback = Self.cappedFeedback(rawFeedback.compactMapValues(\.value))
         }
     }
 
@@ -299,6 +318,7 @@ private func shortfallCard(state: LedgerState, book: AccountBook, now: Date, cal
     let soonCharges = allCharges.filter { $0.date >= startOfToday && $0.date < horizon }
     let urgent = shortfalls(balances: balances, floors: book.floors, upcoming: soonCharges, now: now, calendar: calendar,
                             estimated: estimated)
+    let urgentBanks = Set(urgent.map(\.bank))
     for s in urgent {
         let id = "shortfall|\(s.bank.rawValue)|\(normalizeMerchant(s.charge.name))|\(cardDayKey(s.charge.date, calendar))"
         guard !isDismissed(id) else { continue }
@@ -307,16 +327,16 @@ private func shortfallCard(state: LedgerState, book: AccountBook, now: Date, cal
                             parts: line.parts, action: line.action)
     }
 
-    // Si no hay falta urgente en 3 días, avisa si algún banco baja de su mínimo en los próximos 14 días.
+    // Solo para bancos que tienen cobros próximos (I5) y que NO estaban ya cubiertos por `urgent` (I4: descartar no resucita).
     let days = upcomingCalendar(state: state, book: book, now: now, calendar: calendar)
-    let firstBelow = firstBelowFloorDays(days)
-    for b in BankID.allCases {
+    let firstBelow = firstChargeBelowFloorDays(days)
+    for b in BankID.allCases where !urgentBanks.contains(b) {
         guard let day = firstBelow[b] else { continue }
         let id = "shortfall-cal|\(b.rawValue)|\(cardDayKey(day, calendar))"
         guard !isDismissed(id) else { continue }
         return InterestCard(
             id: id, topic: .shortfall, title: "Saldo justo para un cobro",
-            parts: [.text("Con los próximos cobros, \(b.displayName) bajaría de su mínimo el \(cardShortDate(day, calendar)).")],
+            parts: [.text("Con los próximos cobros, \(b.displayName) quedaría por debajo de su mínimo el \(cardShortDate(day, calendar)).")],
             action: .moveMoney(from: nil, to: b, cents: nil))
     }
     return nil
@@ -359,17 +379,20 @@ private func budgetCard(state: LedgerState, now: Date, calendar: Calendar,
 
 private func subscriptionChangeCard(state: LedgerState, now: Date, calendar: Calendar,
                                     exclusions: Set<UUID>, isDismissed: (String) -> Bool) -> InterestCard? {
+    func matchingMovement(for sub: Subscription) -> Movement? {
+        state.movements.first {
+            $0.kind == .payment && !$0.flaggedNotMine && !$0.excludedFromSpending && !exclusions.contains($0.id)
+                && $0.bank == sub.bank && $0.date == sub.lastDate && abs($0.amountCents) == sub.amountCents
+                && normalizeMerchant($0.merchant ?? "") == sub.id
+        }
+    }
     let subs = activeSubscriptions(in: state, now: now, calendar: calendar, notSpending: exclusions)
         .filter { sub in
             guard sub.previousAmountCents != nil,
                   sub.lastDate <= now,
                   now.timeIntervalSince(sub.lastDate) < cardRecentWindow,
                   !cardIsMuted(sub.merchant, in: state) else { return false }
-            // Un cobro histórico importado de antes no salta como novedad.
-            if let matching = state.movements.first(where: {
-                $0.kind == .payment && !$0.flaggedNotMine && !$0.excludedFromSpending && !exclusions.contains($0.id)
-                    && $0.bank == sub.bank && $0.date == sub.lastDate && normalizeMerchant($0.merchant ?? "") == sub.id
-            }), matching.isHistorical { return false }
+            if let matching = matchingMovement(for: sub), matching.isHistorical { return false }
             return true
         }
         .sorted { a, b in
@@ -385,10 +408,7 @@ private func subscriptionChangeCard(state: LedgerState, now: Date, calendar: Cal
         guard !isDismissed(id) else { continue }
         let diff = abs(sub.amountCents - before)
         let up = sub.amountCents > before
-        let movementID = state.movements.first {
-            $0.kind == .payment && !$0.flaggedNotMine && !$0.excludedFromSpending && !exclusions.contains($0.id)
-                && $0.bank == sub.bank && $0.date == sub.lastDate && normalizeMerchant($0.merchant ?? "") == sub.id
-        }?.id
+        let movementID = matchingMovement(for: sub)?.id
         return InterestCard(
             id: id, topic: .subscriptionPriceChange, title: "Cambio en una suscripción",
             parts: [.text("\(clippedName(sub.merchant)) ha \(up ? "subido" : "bajado") "), .amount(diff),
@@ -456,6 +476,8 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
                                 isDismissed: (String) -> Bool) -> InterestCard? {
     guard let summary = portfolioSummary(portfolio, now: now, calendar: calendar),
           let day = summary.changeDay else { return nil }
+    // Una sesión vieja (> 4 días) no genera tarjeta diaria (Minor 8).
+    guard now.timeIntervalSince(day) <= stalePriceAge else { return nil }
     let id = "portfolioMover|\(cardDayKey(day, calendar))"
     guard !isDismissed(id) else { return nil }
 
@@ -463,6 +485,7 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
     var dayMovers: [(name: String, tenths: Int)] = []
     for p in summary.positions {
         guard case .market(let at) = p.origin, calendar.startOfDay(for: at) == day,
+              now.timeIntervalSince(at) <= stalePriceAge,
               let val = p.valueCents, let ch = p.todayChangeCents, val - ch > 0,
               let tenths = roundedQuotient(1000 * ch, val - ch) else { continue }
         dayMovers.append((p.position.name, tenths))
@@ -474,7 +497,7 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
                             parts: movers.parts, action: .openInvestments)
     }
 
-    // Con una sola posición en cartera (o empate exacto) que se ha movido al menos un 2,0 %, la enseña sin verbos de acción.
+    // Con una sola posición con precio de mercado del día que se haya movido al menos un 2,0 %, la enseña sin verbos de acción.
     if dayMovers.count == 1, let only = dayMovers.first, abs(only.tenths) >= 20 {
         let isToday = (calendar.dateComponents([.day], from: calendar.startOfDay(for: day),
                                                to: calendar.startOfDay(for: now)).day ?? 0) <= 0

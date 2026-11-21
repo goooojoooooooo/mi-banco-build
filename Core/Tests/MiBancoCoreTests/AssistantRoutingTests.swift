@@ -46,7 +46,7 @@ private func sampleState() -> LedgerState {
 }
 
 @Suite struct AssistantRoutingTests {
-    // MARK: Detector de peticiones de consejo (A3, J7, J15, J21(c), J22)
+    // MARK: Detector de peticiones de consejo (A3, J7, J15, J21(c), J22, C2)
 
     @Test(arguments: [
         // Preguntas directas en español
@@ -78,6 +78,31 @@ private func sampleState() -> LedgerState {
         "¿Bajará la bolsa esta semana?",
         "¿Qué opinas de mi cartera?",
         "¿Mejor esperar antes de entrar?",
+        // C2: asignación, salida, rotación, gerundios, clíticos, inglés `invest*` y Unicode ancho completo / matemático
+        "¿Meto 500 € en MSCI?",
+        "¿Pongo más dinero en Apple?",
+        "¿Salgo de Ethereum?",
+        "¿Me salgo de bolsa?",
+        "¿Entro en Apple?",
+        "¿Me deshago de Apple?",
+        "¿Liquido mi cartera?",
+        "¿Cambio mis acciones por bonos?",
+        "¿Qué ETF elegir?",
+        "¿Me quedo con Apple?",
+        "¿Sigo aportando al fondo?",
+        "¿Sigo comprando Apple?",
+        "¿Sigo vendiendo acciones?",
+        "¿Sigo invirtiendo en MSCI?",
+        "¿Sigo manteniendo Apple?",
+        "¿Sigo aguantando Ethereum?",
+        "¿Comprarme acciones de Apple?",
+        "¿Véndelo ya?",
+        "Invest in Apple?",
+        "Where to invest?",
+        "Investing in gold?",
+        "ｖｅｎｄｏ Apple",
+        "ｃｏｍｐｒａｒ ETF",
+        "𝐯𝐞𝐧𝐝𝐨 Apple",
         // Tabla completa de J15 / J22
         "mejor esperar", "espera a que baje", "no toques tu cartera", "quédate como estás",
         "sal de esa posición", "entra en el fondo", "refuerza tu posición", "reduce exposición",
@@ -116,7 +141,29 @@ private func sampleState() -> LedgerState {
         "¿Cuánto he ganado con mis inversiones?",
         "¿Qué es lo que más ha subido hoy?",
         "¿Cuál ha bajado más en mi cartera?",
-        // Preguntas bancarias cotidianas que no deben disparar falsos positivos
+        // I1: preguntas factuales que antes daban falso positivo
+        "¿Qué es lo que mejor ha ido en mi cartera?",
+        "¿Qué acción ha ido mejor hoy?",
+        "¿Cuál de mis fondos ha ido mejor?",
+        "¿Cómo va el presupuesto para compras?",
+        "¿Cuántas compras hice este mes?",
+        "¿Qué compras tengo este mes?",
+        "¿Cuánto me queda para compras?",
+        "¿Compras del mes pasado?",
+        "¿Qué compré en Mercadona?",
+        "¿Cuánto compré el mes pasado?",
+        "¿Cuánto compré en Apple Store?",
+        "¿Cuánto compramos en Mercadona?",
+        "¿Cómo va Ørsted?",
+        "¿Cuánto gasté en Straße?",
+        "¿Cuánto gasté en Møller?",
+        "¿Cuándo espero el cobro de Apple?",
+        "¿Qué dividendos espero este mes?",
+        "¿Cuánto tengo que dejar en Revolut?",
+        "¿Cuánto dinero tengo que meter en imagin?",
+        "¿Mi alquiler va a subir?",
+        "¿Qué hago con el presupuesto de Comer fuera?",
+        // Preguntas bancarias cotidianas
         "¿Cuánto gasté en compras este mes?",
         "¿Cuánto llevo en compras?",
         "¿Cuál fue mi compra más cara?",
@@ -133,7 +180,7 @@ private func sampleState() -> LedgerState {
         #expect(!isAdviceRequest(question, portfolio: samplePortfolio()), "Falso positivo en: \(question)")
     }
 
-    // MARK: Enrutador determinista (todas las intenciones de A3)
+    // MARK: Enrutador determinista (todas las intenciones de A3 + I2 + I3)
 
     @Test func enrutaSaldos() {
         let state = sampleState()
@@ -143,36 +190,100 @@ private func sampleState() -> LedgerState {
         #expect(routeAssistantQuestion("saldo en Trade Republic", state: state, portfolio: nil, now: nov(20), calendar: cal) == .balances(bank: .tr))
     }
 
-    @Test func enrutaGastosPorMesCategoriaYComercio() {
+    @Test func enrutaGastosPorMesCategoriaComercioYBanco() {
         let state = sampleState()
         #expect(routeAssistantQuestion("¿Cuánto llevo gastado este mes?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .current, category: nil, merchant: nil))
+            == .spending(month: .current, category: nil, merchant: nil, bank: nil))
         #expect(routeAssistantQuestion("¿Cuánto gasté el mes pasado?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .previous, category: nil, merchant: nil))
+            == .spending(month: .previous, category: nil, merchant: nil, bank: nil))
         #expect(routeAssistantQuestion("¿Cuánto gasté en octubre?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: nil))
+            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: nil, bank: nil))
         #expect(routeAssistantQuestion("¿Cuánto gasté en diciembre?", state: state, portfolio: nil, now: at(2026, 2, 10), calendar: cal)
-            == .spending(month: .specific(year: 2025, month: 12), category: nil, merchant: nil))
+            == .spending(month: .specific(year: 2025, month: 12), category: nil, merchant: nil, bank: nil))
+        #expect(routeAssistantQuestion("¿Cuánto gasté en octubre de 2019?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .specific(year: 2019, month: 10), category: nil, merchant: nil, bank: nil))
         #expect(routeAssistantQuestion("¿Cuánto llevo en Comer fuera?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .current, category: .comerFuera, merchant: nil))
+            == .spending(month: .current, category: .comerFuera, merchant: nil, bank: nil))
         #expect(routeAssistantQuestion("¿Cuánto gasté en compras este mes?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .current, category: .compras, merchant: nil))
+            == .spending(month: .current, category: .compras, merchant: nil, bank: nil))
         #expect(routeAssistantQuestion("¿Cuánto llevo en Mercadona?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .current, category: nil, merchant: "Mercadona"))
-        // Comercio aún sin pagos en el libro, y combinado con mes:
+            == .spending(month: .current, category: nil, merchant: "Mercadona", bank: nil))
+        // Comercio aún sin pagos en el libro, combinado con mes y puntuación:
         #expect(routeAssistantQuestion("¿Cuánto gasté en Zara en octubre?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: "Zara"))
+            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: "Zara", bank: nil))
         #expect(routeAssistantQuestion("¿Cuánto gasté en octubre en Zara?", state: state, portfolio: nil, now: nov(20), calendar: cal)
-            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: "Zara"))
+            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: "Zara", bank: nil))
+        // I3: coma antes del sufijo temporal, «en el último mes», «en Revolut», categoría vs comercio genérico.
+        #expect(routeAssistantQuestion("¿Cuánto gasté en Zara, el mes pasado?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .previous, category: nil, merchant: "Zara", bank: nil))
+        #expect(routeAssistantQuestion("¿Cuánto gasté en el último mes?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .previous, category: nil, merchant: nil, bank: nil))
+        #expect(routeAssistantQuestion("¿Cuánto gasté en lo que va de mes?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .current, category: nil, merchant: nil, bank: nil))
+        #expect(routeAssistantQuestion("¿Cuánto gasté en Revolut?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .current, category: nil, merchant: nil, bank: .rev))
+
+        var withRest = state
+        withRest.movements.append(Movement(bank: .rev, amountCents: -2_000, merchant: "Restaurante Sol", kind: .payment,
+                                           source: .bank, date: nov(15, 21), isShop: true, bankRef: "r1", bankStatus: .booked))
+        withRest.movements.append(Movement(bank: .rev, amountCents: -999, merchant: "APPLE.COM/BILL", kind: .payment,
+                                           source: .bank, date: nov(14, 12), isShop: true, bankRef: "a1", bankStatus: .booked))
+        // Preguntar por «restaurante» va a categoría Comer fuera, no solo a «Restaurante Sol».
+        #expect(routeAssistantQuestion("¿Cuánto gasté en restaurante este mes?", state: withRest, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .current, category: .comerFuera, merchant: nil, bank: nil))
+        // «APPLE.COM/BILL» no contamina el nombre extraído al preguntar por Apple.
+        #expect(routeAssistantQuestion("¿Cuánto gasté en Apple este mes?", state: withRest, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .current, category: nil, merchant: "Apple", bank: nil))
+    }
+
+    @Test func precedenciaDeEnrutadoSinSecuestros() {
+        let state = sampleState()
+        var portfolio = samplePortfolio()
+        portfolio.transactions.append(
+            InvestmentTransaction(id: "cb1", date: at(2026, 4, 1, 9), instrument: "ES0140609019",
+                                  name: "CaixaBank", assetClass: "STOCK", shares: 10, cashCents: -5_000, priceEUR: 5)
+        )
+        portfolio.transactions.append(
+            InvestmentTransaction(id: "san1", date: at(2026, 4, 2, 9), instrument: "ES0113900J37",
+                                  name: "Banco Santander", assetClass: "STOCK", shares: 10, cashCents: -4_000, priceEUR: 4)
+        )
+
+        // I2 #1: «al día» en dinero libre nunca es secuestrado por el resumen diario.
+        #expect(routeAssistantQuestion("¿Cuánto puedo gastar al día?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .freeMoney)
+        #expect(routeAssistantQuestion("¿Cuánto dinero tengo libre al día?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .freeMoney)
+
+        // I2 #2: «más bajo» (menor) en saldo o pago nunca va a movers de inversiones.
+        #expect(routeAssistantQuestion("¿Qué banco tiene el saldo más bajo?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .balances(bank: nil))
+        #expect(routeAssistantQuestion("¿Cuál es mi saldo más bajo?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .balances(bank: nil))
+        #expect(routeAssistantQuestion("¿Qué es lo que mejor ha ido en mi cartera?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .investments(positionQuery: nil, moversOnly: true))
+        #expect(routeAssistantQuestion("¿Cuál es lo que más bajó hoy?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .investments(positionQuery: nil, moversOnly: true))
+
+        // I2 #3: «llevo» con una posición de cartera va a inversiones, no a comercio sin pagos.
+        #expect(routeAssistantQuestion("¿Cuánto llevo en MSCI World?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .investments(positionQuery: "IE00B4L5Y983", moversOnly: false))
+        #expect(routeAssistantQuestion("¿Cuánto llevo ganado en Apple?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .investments(positionQuery: "US0378331005", moversOnly: false))
+
+        // I2 #4: saldo en CaixaBank / saldo en cada banco van a saldos aunque el dueño tenga acciones de bancos.
+        #expect(routeAssistantQuestion("¿Cuál es mi saldo en CaixaBank?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .balances(bank: .ima))
+        #expect(routeAssistantQuestion("¿Cuánto tengo en CaixaBank?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .balances(bank: .ima))
+        #expect(routeAssistantQuestion("¿Cuánto saldo tengo en cada banco?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
+            == .balances(bank: nil))
     }
 
     @Test func distingueComercioYPosicionConElMismoNombre() {
         let state = sampleState()
         let portfolio = samplePortfolio()
-        // Con verbo de gasto -> gasto en el comercio Apple.
         #expect(routeAssistantQuestion("¿Cuánto gasté en Apple este mes?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
-            == .spending(month: .current, category: nil, merchant: "Apple"))
-        // Sin verbo de gasto -> posición Apple de la cartera.
+            == .spending(month: .current, category: nil, merchant: "Apple", bank: nil))
         #expect(routeAssistantQuestion("¿Cómo va Apple?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
             == .investments(positionQuery: "US0378331005", moversOnly: false))
         #expect(routeAssistantQuestion("¿Cuánto tengo en MSCI World?", state: state, portfolio: portfolio, now: nov(20), calendar: cal)
@@ -217,7 +328,7 @@ private func sampleState() -> LedgerState {
         #expect(routeAssistantQuestion("   ", state: state, portfolio: portfolio, now: nov(20), calendar: cal) == .unknown)
     }
 
-    // MARK: Contrato con el modelo (A2, A6, J21(d))
+    // MARK: Contrato con el modelo (A2, A6, J21(d), C1, Minor 1)
 
     @Test func elPromptDelModeloNoLlevaDatosBancarios() {
         let prompt = assistantRoutingPrompt(question: "¿Cuánto llevo en Mercadona?", now: nov(20), calendar: cal)
@@ -229,33 +340,49 @@ private func sampleState() -> LedgerState {
         #expect(assistantRoutingInstructions.contains("CONSEJO"))
     }
 
-    @Test func elParserDelModeloValidaEstrictamenteYNuncaSeSaltaElConsejo() {
+    @Test func elParserDelModeloValidaEstrictamenteYBloqueaInyecciones() {
         let portfolio = samplePortfolio()
         // Casos válidos
         #expect(parseAssistantModelRoute("SALDO banco=rev", originalQuestion: "¿Cuánto tengo en Revolut?",
-                                         portfolio: portfolio, now: nov(20), calendar: cal) == .balances(bank: .rev))
+                                         portfolio: portfolio) == .balances(bank: .rev))
         #expect(parseAssistantModelRoute("GASTO mes=2026-10 comercio=\"Mercadona\"", originalQuestion: "¿Cuánto en Mercadona en octubre?",
-                                         portfolio: portfolio, now: nov(20), calendar: cal)
-            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: "Mercadona"))
+                                         portfolio: portfolio)
+            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: "Mercadona", bank: nil))
+        #expect(parseAssistantModelRoute("GASTO comercio=\"McDonald's\"", originalQuestion: "¿Cuánto en McDonald's?",
+                                         portfolio: portfolio)
+            == .spending(month: .current, category: nil, merchant: "McDonald's", bank: nil))
         #expect(parseAssistantModelRoute("PRESUPUESTOS categoria=comerFuera", originalQuestion: "Presupuesto de bares",
-                                         portfolio: portfolio, now: nov(20), calendar: cal) == .budgets(category: .comerFuera))
+                                         portfolio: portfolio) == .budgets(category: .comerFuera))
         #expect(parseAssistantModelRoute("INVERSIONES movers=si", originalQuestion: "¿Qué subió más?",
-                                         portfolio: portfolio, now: nov(20), calendar: cal)
+                                         portfolio: portfolio)
             == .investments(positionQuery: nil, moversOnly: true))
 
-        // Inyección: el modelo intenta inventar un comercio que NO estaba en la pregunta -> rechazado (nil).
-        #expect(parseAssistantModelRoute("GASTO comercio=\"Compra Apple ya\"", originalQuestion: "¿Cuánto llevo este mes?",
-                                         portfolio: portfolio, now: nov(20), calendar: cal) == nil)
-        // Basura, texto libre o parámetros inválidos -> nil (cae al enrutador determinista).
-        for bad in ["", "Claro, te cuento tus saldos", "OTRO", "SALDO banco=bbva", "GASTO mes=2026-13",
-                    "GASTO categoria=inventada", "SALDO foo=bar", "GASTO comercio=\"sin cerrar"] {
+        // C1: el modelo intenta inyectar cirílico, símbolos €/% o subcadenas de 1 letra en `comercio` -> rechazado (nil).
+        for injected in [
+            "GASTO mes=2026-08 comercio=\"Mercadona (веиде!!)\"",
+            "GASTO comercio=\"€Mercadona%\"",
+            "GASTO comercio=\"Mercadona S.A.\"",
+            "GASTO comercio=\"a\"",
+            "GASTO comercio=\"en\"",
+            "GASTO comercio=\"Compra Apple ya\"",
+        ] {
+            #expect(parseAssistantModelRoute(injected, originalQuestion: "¿Cuánto gasté en Mercadona en agosto?",
+                                             portfolio: portfolio) == nil, "\(injected)")
+        }
+
+        // Minor 1: parámetros irrelevantes para el comando o duplicados -> rechazados (nil).
+        for bad in [
+            "", "Claro, te cuento tus saldos", "OTRO", "SALDO banco=bbva", "GASTO mes=2026-13",
+            "GASTO categoria=inventada", "SALDO foo=bar", "GASTO comercio=\"sin cerrar",
+            "SALDO mes=2025-01", "RESUMEN banco=rev", "SUSCRIPCIONES mes=actual", "SALDO banco=rev banco=ima",
+        ] {
             #expect(parseAssistantModelRoute(bad, originalQuestion: "¿Cuánto tengo?",
-                                             portfolio: portfolio, now: nov(20), calendar: cal) == nil, "\(bad)")
+                                             portfolio: portfolio) == nil, "\(bad)")
         }
 
         // Seguridad: aunque el modelo clasifique mal una petición de consejo como INVERSIONES o SALDO, manda `isAdviceRequest`.
         let forced = parseAssistantModelRoute("INVERSIONES posicion=Apple", originalQuestion: "¿Debería comprar más Apple?",
-                                              portfolio: portfolio, now: nov(20), calendar: cal)
+                                              portfolio: portfolio)
         #expect(forced == .adviceRequest(positionQuery: "US0378331005"))
     }
 

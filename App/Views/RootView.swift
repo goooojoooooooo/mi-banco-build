@@ -7,6 +7,7 @@ import MiBancoCore
 struct RootView: View {
     let model: LedgerModel
     let portfolio: PortfolioModel
+    let accountBook: AccountBookModel
     /// Con el bloqueo delante, Inicio no suena ni habla aunque llegue un movimiento.
     var isLocked = false
     /// Sube al arrancar y al desbloquear: Inicio se monta por capas y la barra llega la última.
@@ -14,6 +15,7 @@ struct RootView: View {
     @State private var tab: AppTab = .home
     @State private var settingsFocus: BankID?
     @State private var settingsScroll: String?
+    @State private var openAccountsRequest = false
     /// La única hoja de la app: un movimiento, una posición, la hoja de compartir o la confirmación de restaurar.
     @State private var sheet: RootSheet?
     /// Único selector de archivos de la app (copia de seguridad o extracto de Trade Republic); se cierra al bloquear.
@@ -50,17 +52,22 @@ struct RootView: View {
         let warnings = model.snapshot.warningInsightIDs
         TabView(selection: $tab) {
             Tab("Inicio", systemImage: "house", value: AppTab.home) {
-                HomeView(model: model, portfolio: portfolio, isVisible: tab == .home && !isLocked,
+                HomeView(model: model, portfolio: portfolio, accountBook: accountBook,
+                         isVisible: tab == .home && !isLocked,
                          revealToken: revealToken, zoom: zoom,
                          detailOpen: sheet != nil,
                          openDetail: { openDetail($0, zooms: true) },
                          openPosition: openPosition,
+                         openMoveMoney: openMoveMoney,
+                         shareText: shareText,
                          openSettings: openSettings,
-                         openInvestmentsSettings: openInvestmentsSettings)
+                         openInvestmentsSettings: openInvestmentsSettings,
+                         openAccounts: openAccounts)
                     .id(restoreToken)
             }
             Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
-                SpendingView(model: model, isVisible: tab == .spending && !isLocked, openDetail: { openDetail($0) })
+                SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
+                             openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney)
             }
             Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                 AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) })
@@ -68,7 +75,8 @@ struct RootView: View {
             .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
             Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
                 SettingsScrollHost(scrollRequest: $settingsScroll) {
-                    SettingsView(model: model, portfolio: portfolio, focusRequest: $settingsFocus,
+                    SettingsView(model: model, portfolio: portfolio, accountBook: accountBook,
+                                 focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
                                  present: present,
                                  importBackup: { startImport(.backup) },
                                  importTradeRepublic: { startImport(.tradeRepublic) })
@@ -93,11 +101,13 @@ struct RootView: View {
                 .modifier(ZoomFromRow(route: route, namespace: zoom))
             case .position(let instrument):
                 PositionDetailSheet(portfolio: portfolio, instrument: instrument)
+            case .moveMoney(let request):
+                MoveMoneySheet(model: model, accountBook: accountBook, request: request)
             case .share(let share):
-                ShareSheet(url: share.url, onFinish: { sheet = nil })
+                ShareSheet(item: share, onFinish: { sheet = nil })
                     .ignoresSafeArea()
                     .presentationDetents([.medium, .large])
-                    .onDisappear { BackupService.remove(share.url) }
+                    .onDisappear { if let url = share.fileURL { BackupService.remove(url) } }
             case .restore(let preview):
                 RestoreConfirmView(preview: preview, restore: { try restoreBackup(preview.file) }, finished: finishRestore)
             }
@@ -181,7 +191,7 @@ struct RootView: View {
     /// y cerraría la hoja. El bloqueo sigue mandando (`gate.isLocked`). En Release es siempre `false`.
     private var demoKeepsSheet: Bool {
         #if DEBUG
-        DemoMode.isActive && (DemoMode.opensDetail || DemoMode.opensPosition)
+        DemoMode.isActive && (DemoMode.opensDetail || DemoMode.opensPosition || DemoMode.demoMoveStep != nil)
         #else
         false
         #endif
@@ -196,7 +206,7 @@ struct RootView: View {
 
     /// Hoja y selector de archivos fuera: al bloquear y al salir de primer plano.
     private func closeEverything() {
-        if case .share(let share) = sheet { BackupService.remove(share.url) }
+        if case .share(let share) = sheet, let url = share.fileURL { BackupService.remove(url) }
         gate.generation += 1
         routeTask?.cancel()
         routeTask = nil
@@ -215,7 +225,7 @@ struct RootView: View {
     private func present(_ item: RootSheet) {
         // `gate` es vivo; `isLocked` y `scenePhase` de esta copia de la vista pueden ser de antes del toque.
         guard gate.canPresent, !isLocked, scenePhase == .active else {
-            if case .share(let share) = item { BackupService.remove(share.url) }
+            if case .share(let share) = item, let url = share.fileURL { BackupService.remove(url) }
             return
         }
         sheet = item
@@ -300,6 +310,11 @@ struct RootView: View {
         tab = .settings
     }
 
+    private func openAccounts() {
+        openAccountsRequest = true
+        tab = .settings
+    }
+
     /// Nunca con el bloqueo delante ni con la app fuera de primer plano.
     private func openDetail(_ id: UUID, zooms: Bool = false) {
         guard gate.canPresent, !isLocked, isForeground, model.movement(id) != nil else { return }
@@ -309,6 +324,15 @@ struct RootView: View {
     private func openPosition(_ instrument: String) {
         guard gate.canPresent, !isLocked, isForeground, portfolio.positionValue(for: instrument) != nil else { return }
         sheet = .position(instrument)
+    }
+
+    private func openMoveMoney(_ request: MoveRequest) {
+        guard gate.canPresent, !isLocked, isForeground else { return }
+        sheet = .moveMoney(request)
+    }
+
+    private func shareText(_ text: String) {
+        present(.share(ShareItem(text: text)))
     }
 
     private func applyRoute() {
@@ -361,6 +385,13 @@ struct RootView: View {
                 try? await Task.sleep(for: .seconds(1.5))
                 if gate.canPresent { sheet = .restore(DemoMode.demoRestorePreview(currentCount: model.state.movements.count)) }
             }
+        } else if let moveStep = DemoMode.demoMoveStep {
+            Task {
+                try? await Task.sleep(for: .seconds(1.5))
+                if gate.canPresent {
+                    sheet = .moveMoney(MoveRequest(demoStep: moveStep))
+                }
+            }
         }
     }
     #endif
@@ -376,6 +407,7 @@ enum ImportKind {
 enum RootSheet: Identifiable {
     case movement(DetailRoute)
     case position(String)
+    case moveMoney(MoveRequest)
     case share(ShareItem)
     case restore(RestorePreview)
 
@@ -383,6 +415,7 @@ enum RootSheet: Identifiable {
         switch self {
         case .movement(let route): "movement-\(route.id)"
         case .position(let instrument): "position-\(instrument)"
+        case .moveMoney(let request): "move-\(request.id)"
         case .share(let item): "share-\(item.id)"
         case .restore(let preview): "restore-\(preview.id)"
         }

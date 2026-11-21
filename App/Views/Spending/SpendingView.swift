@@ -5,9 +5,11 @@ import MiBancoCore
 /// el mes anterior y la previsión; debajo, una fila por categoría. Todo sale de `model.snapshot` (las páginas ya vienen hechas).
 struct SpendingView: View {
     let model: LedgerModel
+    let accountBook: AccountBookModel
     var isVisible = false
     /// Abre el detalle de un movimiento (la hoja de `RootView`).
     var openDetail: (UUID) -> Void = { _ in }
+    var openMoveMoney: (MoveRequest) -> Void = { _ in }
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// El mes elegido (su inicio) y hacia dónde se fue, en un solo valor: cambian en la misma transacción.
@@ -113,6 +115,7 @@ struct SpendingView: View {
                 case .transfers: TransfersView(model: model, openDetail: openDetail)
                 case .subscriptions: SubscriptionsView(model: model)
                 case .hiddenSubscriptions: HiddenSubscriptionsView(model: model)
+                case .upcoming: UpcomingCalendarView(model: model, accountBook: accountBook, onMoveMoney: openMoveMoney)
                 }
             }
             // Deslizar en horizontal cambia de mes (umbral 60 pt, y más horizontal que vertical).
@@ -132,6 +135,8 @@ struct SpendingView: View {
             guard DemoMode.isActive else { return }
             if let category = DemoMode.openCategory, let current = model.snapshot.spendingMonths.last {
                 path = [.category(category, current)]
+            } else if DemoMode.opensUpcoming {
+                path = [.upcoming]
             } else if DemoMode.opensSubscriptions {
                 path = [.subscriptions]
             } else if DemoMode.opensBudgets {

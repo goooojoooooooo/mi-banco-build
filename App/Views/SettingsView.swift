@@ -6,8 +6,11 @@ import MiBancoCore
 struct SettingsView: View {
     let model: LedgerModel
     let portfolio: PortfolioModel
+    let accountBook: AccountBookModel
     /// Pedido desde la tarjeta de Inicio ("Editar saldo"): enfoca ese banco y se vacía.
     @Binding var focusRequest: BankID?
+    /// Pedido desde Inicio ("Añadir IBAN") o demo: abre «Cuentas y contactos».
+    @Binding var openAccountsRequest: Bool
     /// Copia de seguridad e importación: abren la hoja raíz y el selector de archivos único.
     var present: (RootSheet) -> Void = { _ in }
     var importBackup: () -> Void = {}
@@ -27,6 +30,7 @@ struct SettingsView: View {
     @State private var errors: [BankID: String] = [:]
     /// Solo los campos que el usuario ha editado se guardan; el resto sigue al modelo.
     @State private var dirty: Set<BankID> = []
+    @State private var showAccounts = false
     @FocusState private var focused: BankID?
 
     var body: some View {
@@ -38,6 +42,13 @@ struct SettingsView: View {
                                    error: errors[bank], saved: savedFlash.contains(bank), focused: $focused,
                                    onSubmit: { commit(bank) })
                     }
+                    NavigationLink {
+                        AccountsView(accountBook: accountBook)
+                    } label: {
+                        OptionLabel(title: "Cuentas y contactos", detail: "IBAN, colchón mínimo y destinatarios", systemImage: "building.columns")
+                    }
+                    .accessibilityIdentifier("settings-accounts")
+                    .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Saldos")
                 } footer: {
@@ -98,12 +109,22 @@ struct SettingsView: View {
             .listSectionSpacing(.compact)
             .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Ajustes")
+            .navigationDestination(isPresented: $showAccounts) {
+                AccountsView(accountBook: accountBook)
+            }
         }
         .onAppear {
             refreshUntouched()
             applyFocusRequest()
+            applyAccountsRequest()
+            #if DEBUG
+            if DemoMode.isActive && DemoMode.opensAccounts {
+                showAccounts = true
+            }
+            #endif
         }
         .onChange(of: focusRequest) { _, _ in applyFocusRequest() }
+        .onChange(of: openAccountsRequest) { _, _ in applyAccountsRequest() }
         // Un intent puede cambiar un saldo con Ajustes abierto: los campos sin tocar lo reflejan.
         .onChange(of: model.snapshot.balances) { _, _ in refreshUntouched() }
         .onChange(of: focused) { old, _ in
@@ -126,13 +147,19 @@ struct SettingsView: View {
         })
     }
 
-    /// "Diagnóstico: datos en grupo compartido · Versión 0.3.0 (3)"
+    /// "Diagnóstico: datos en grupo compartido · Versión 0.3.0 (3)\nAbrir bancos: Revolut sí · imagin no · Trade Republic sí"
     private var diagnostics: String {
         let place = SharedStore.location == .appGroup ? "grupo compartido" : "carpeta de la app"
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "Diagnóstico: datos en \(place) · Versión \(version) (\(build))"
+        return "Diagnóstico: datos en \(place) · Versión \(version) (\(build))\n\(BankApps.diagnosticsLine)"
+    }
+
+    private func applyAccountsRequest() {
+        guard openAccountsRequest else { return }
+        openAccountsRequest = false
+        showAccounts = true
     }
 
     private func applyFocusRequest() {

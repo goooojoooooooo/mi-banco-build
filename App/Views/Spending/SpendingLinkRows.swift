@@ -8,6 +8,9 @@ struct SpendingLinkRows: View {
     var body: some View {
         VStack(spacing: Theme.Space.gutter) {
             card {
+                link(.upcoming, "Próximos cobros", "Calendario de los próximos 14 días", "calendar.badge.clock", id: "gasto.proximos")
+            }
+            card {
                 link(.subscriptions, "Suscripciones", links.subscriptions, "repeat", id: "gasto.suscripciones")
             }
             card {

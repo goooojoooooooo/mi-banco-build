@@ -6,6 +6,7 @@ import MiBancoCore
 struct HomeView: View {
     let model: LedgerModel
     let portfolio: PortfolioModel
+    let accountBook: AccountBookModel
     /// false mientras se ve otra pestaña o con el bloqueo delante: la llegada no suena ni habla ni mueve nada.
     var isVisible = true
     /// Sube al arrancar (tras la marca) y al desbloquear: Inicio se monta por capas.
@@ -17,8 +18,11 @@ struct HomeView: View {
     var detailOpen = false
     let openDetail: (UUID) -> Void
     let openPosition: (String) -> Void
+    let openMoveMoney: (MoveRequest) -> Void
+    let shareText: (String) -> Void
     let openSettings: (BankID?) -> Void
     let openInvestmentsSettings: () -> Void
+    let openAccounts: () -> Void
 
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
@@ -42,6 +46,8 @@ struct HomeView: View {
     @State private var quietSelection = false
     /// Número del último cambio de lista pedido.
     @State private var listSwap = 0
+    @State private var toastText: String?
+    @State private var toastTask: Task<Void, Never>?
 
     var body: some View {
         let snapshot = model.snapshot
@@ -68,6 +74,30 @@ struct HomeView: View {
                             PositionRows(summary: summary, onOpen: openPosition)
                                 .opacity(listHidden ? 0 : 1)
                         } else {
+                            QuickActions(
+                                card: activeListCard,
+                                model: model,
+                                accountBook: accountBook,
+                                onMove: openMoveMoney,
+                                onCopyIBAN: showToast,
+                                onShareIBAN: shareText,
+                                onOpenAccounts: openAccounts
+                            )
+                            .opacity(listHidden ? 0 : 1)
+                            .staggeredEntrance(3, listIndex: 0)
+
+                            PendingMoveBanner(
+                                moves: visiblePendingMoves(for: activeListCard),
+                                states: model.pendingMoveStates,
+                                accountBook: accountBook,
+                                onDismiss: { id in
+                                    withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                                        model.removePendingMove(id)
+                                    }
+                                }
+                            )
+                            .opacity(listHidden ? 0 : 1)
+
                             WeekBlock(card: activeListCard, week: snapshot.weeks[activeListCard] ?? WeekSpend(), pace: snapshot.pace,
                                       balance: activeListCard.bank.flatMap { snapshot.balances[$0] })
                                 .opacity(listHidden ? 0 : 1)
@@ -115,6 +145,19 @@ struct HomeView: View {
                 .staggeredEntrance(0, rise: 0)
         }
         .background(Theme.canvas.ignoresSafeArea())
+        .overlay(alignment: .top) {
+            if let toastText {
+                Text(toastText)
+                    .titan(.meta)
+                    .foregroundStyle(Theme.label)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .background(Theme.raised, in: Capsule())
+                    .padding(.top, 58)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .accessibilityAddTraits(.isStaticText)
+            }
+        }
         .environment(\.entrance, entrance)
         .sensoryFeedback(Haptics.detent, trigger: detentTick)
         // Solo un movimiento que llega de verdad, con Inicio delante: un toque suave por un pago, éxito por un ingreso.
@@ -272,6 +315,21 @@ struct HomeView: View {
     private func deleteUnread(_ id: UUID) {
         withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
             try? model.deleteUnread(id)
+        }
+    }
+
+    private func visiblePendingMoves(for card: AccountCard) -> [PendingMove] {
+        guard let bank = card.bank else { return model.pendingMoves }
+        return model.pendingMoves.filter { $0.from == bank || $0.target == .own(bank) }
+    }
+
+    private func showToast(_ text: String) {
+        withAnimation(reduceMotion ? nil : Theme.Motion.quick) { toastText = text }
+        toastTask?.cancel()
+        toastTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.3)) { toastText = nil }
         }
     }
 

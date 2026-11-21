@@ -6,6 +6,7 @@ import UserNotifications
 struct MiBancoApp: App {
     @State private var model = LedgerModel()
     @State private var portfolio = PortfolioModel()
+    @State private var accountBook = AccountBookModel()
     @State private var logos = MerchantLogos()
     @State private var preferences = AppPreferences()
     @State private var locked = true
@@ -57,7 +58,8 @@ struct MiBancoApp: App {
     @ViewBuilder
     private var content: some View {
             ZStack {
-                RootView(model: model, portfolio: portfolio, isLocked: showsLock, revealToken: revealToken)
+                RootView(model: model, portfolio: portfolio, accountBook: accountBook,
+                         isLocked: showsLock, revealToken: revealToken)
                     .accessibilityHidden(showsLock)
                     .allowsHitTesting(!showsLock)
                 if showsLock {
@@ -117,6 +119,7 @@ struct MiBancoApp: App {
                 case .active:
                     model.reload()
                     portfolio.reload()
+                    accountBook.reload()
                     BankSync.refreshOnOpen() // tarea 10
                     Task { await portfolio.refreshPrices(force: false) }
                     Task { await LiveActivityController.endStale() }

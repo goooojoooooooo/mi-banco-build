@@ -10,10 +10,22 @@ struct RestorePreview: Identifiable, Sendable {
     var isPrevious = false
 }
 
-/// Un fichero temporal listo para la hoja de compartir.
-struct ShareItem: Identifiable {
+/// Un fichero temporal o un texto breve listo para la hoja de compartir.
+struct ShareItem: Identifiable, Sendable {
+    enum Payload: Sendable {
+        case file(URL)
+        case text(String)
+    }
+
     let id = UUID()
-    let url: URL
+    let payload: Payload
+
+    var fileURL: URL? {
+        if case .file(let url) = payload { url } else { nil }
+    }
+
+    init(url: URL) { self.payload = .file(url) }
+    init(text: String) { self.payload = .text(text) }
 }
 
 /// Copias y CSV: ficheros temporales con protección completa, que se borran al cerrar la hoja de compartir

@@ -27,11 +27,16 @@ final class LedgerModel {
     private(set) var arrival: Arrival?
     /// Se reconstruye solo cuando `state` cambia (ver `publish`).
     private(set) var snapshot = LedgerSnapshot()
+    /// Traspasos preparados con «Mover dinero» pendientes o recién confirmados (nunca llevan IBAN).
+    private(set) var pendingMoves: [PendingMove] = []
+    private(set) var pendingMoveStates: [UUID: MoveState] = [:]
     private let store: FileStore
     @ObservationIgnored private var observer: Task<Void, Never>?
     @ObservationIgnored private var syncObserver: Task<Void, Never>?
     /// Publicación aplazada de una llegada; cualquier publicación posterior la deja sin efecto.
     @ObservationIgnored private var staged: Task<Void, Never>?
+    @ObservationIgnored private var doneMoveTimers: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var resolvingMoves = false
     @ObservationIgnored private var generation = 0
     /// Presupuestos escritos que no se entienden («abc»): se quedan (solo en memoria) para enseñarlos con su error al
     /// volver a la pantalla, en vez de perderse sin decir nada.
@@ -67,9 +72,10 @@ final class LedgerModel {
 
     /// Si falla la lectura se conserva lo que ya se mostraba.
     func reload() {
-        guard let loaded = loadNext() else { return }
-        if loaded != state || !Calendar.current.isDateInToday(snapshot.day) {
+        if let loaded = loadNext(), (loaded != state || !Calendar.current.isDateInToday(snapshot.day)) {
             publish(loaded)
+        } else {
+            resolvePendingMoves()
         }
     }
 
@@ -96,6 +102,75 @@ final class LedgerModel {
         state = next
         snapshot = LedgerSnapshot(state: next)
         reschedule(next)
+        resolvePendingMoves()
+    }
+
+    func addPendingMove(_ move: PendingMove) {
+        PendingMoves.add(move)
+        resolvePendingMoves()
+    }
+
+    func removePendingMove(_ id: UUID) {
+        doneMoveTimers[id]?.cancel()
+        doneMoveTimers.removeValue(forKey: id)
+        PendingMoves.remove(id)
+        pendingMoves.removeAll { $0.id == id }
+        pendingMoveStates.removeValue(forKey: id)
+    }
+
+    /// Resuelve los traspasos pendientes contra `state.movements`: caducados fuera en silencio;
+    /// hechos en cuenta propia se marcan como traspaso propio y se retiran tras 6 s.
+    func resolvePendingMoves(now: Date = Date()) {
+        guard !resolvingMoves else { return }
+        resolvingMoves = true
+        defer { resolvingMoves = false }
+
+        let stored = PendingMoves.all()
+        var kept: [PendingMove] = []
+        var states: [UUID: MoveState] = [:]
+        var claimed = Set<UUID>()
+        var ownTransfersToMark: [UUID] = []
+        var removedExpired = false
+
+        for move in stored {
+            let resolved = moveState(move, movements: state.movements, now: now, claimed: claimed)
+            switch resolved {
+            case .expired:
+                removedExpired = true
+                doneMoveTimers[move.id]?.cancel()
+                doneMoveTimers.removeValue(forKey: move.id)
+            case .waiting:
+                kept.append(move)
+                states[move.id] = .waiting
+            case .done(let movementID):
+                claimed.insert(movementID)
+                kept.append(move)
+                states[move.id] = .done(movementID: movementID)
+                if case .own = move.target,
+                   let match = state.movements.first(where: { $0.id == movementID }),
+                   match.ownTransfer != true {
+                    ownTransfersToMark.append(movementID)
+                }
+                if doneMoveTimers[move.id] == nil {
+                    let moveID = move.id
+                    doneMoveTimers[moveID] = Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(6))
+                        guard !Task.isCancelled, let self else { return }
+                        self.removePendingMove(moveID)
+                    }
+                }
+            }
+        }
+
+        if removedExpired {
+            PendingMoves.save(kept)
+        }
+        pendingMoves = kept
+        pendingMoveStates = states
+
+        for movementID in ownTransfersToMark {
+            try? setOwnTransfer(true, for: movementID)
+        }
     }
 
     /// Resumen semanal y recordatorios de suscripciones: se rehacen con cada cambio del libro (nunca en la demo).
@@ -134,6 +209,7 @@ final class LedgerModel {
             }
             self.staged = nil
             self.reschedule(next)
+            self.resolvePendingMoves()
         }
     }
 

@@ -1,0 +1,500 @@
+import SwiftUI
+import MiBancoCore
+
+/// Ajustes › «Cuentas y contactos» (Plan 4b, tarea 8).
+/// Guarda IBAN propios, colchones mínimos y contactos únicamente en el Llavero (`AccountBookStore`).
+struct AccountsView: View {
+    let accountBook: AccountBookModel
+
+    @Environment(AppPreferences.self) private var preferences
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    @State private var editingIBANBank: BankID?
+    @State private var ibanDraft = ""
+    @State private var ibanError: String?
+    @State private var floorTexts: [BankID: String] = [:]
+    @State private var floorDirty: Set<BankID> = []
+    @State private var floorErrors: [BankID: String] = [:]
+    @State private var floorSaved: Set<BankID> = []
+    @State private var addingPayee = false
+    @State private var payeeName = ""
+    @State private var payeeIBAN = ""
+    @State private var payeePhone = ""
+    @State private var payeeError: String?
+    @State private var saveTick = 0
+    @State private var errorTick = 0
+    @GestureState private var revealedBank: BankID? = nil
+    @FocusState private var focusedField: Field?
+
+    private enum Field: Hashable {
+        case iban(BankID)
+        case floor(BankID)
+        case payeeName
+        case payeeIBAN
+        case payeePhone
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(BankID.allCases, id: \.self) { bank in
+                    bankSectionRow(bank)
+                }
+            } header: {
+                SettingsHeader("Tus cuentas")
+            } footer: {
+                SettingsFooter("Te avisaré antes de un cobro si esta cuenta baja de aquí. Los IBAN y contactos se guardan solo en el Llavero de este iPhone.")
+            }
+
+            Section {
+                ForEach(accountBook.book.payees) { payee in
+                    payeeRow(payee)
+                }
+                .onDelete(perform: deletePayees)
+
+                Button {
+                    withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
+                        addingPayee.toggle()
+                        payeeError = nil
+                    }
+                } label: {
+                    OptionLabel(title: "Añadir contacto", detail: "Con IBAN o móvil para Bizum", systemImage: "person.badge.plus")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .listRowBackground(Theme.grouped)
+                .listRowSeparatorTint(Theme.separator)
+
+                if addingPayee {
+                    addPayeeForm
+                        .listRowBackground(Theme.grouped)
+                        .listRowSeparatorTint(Theme.separator)
+                }
+            } header: {
+                SettingsHeader("Contactos")
+            } footer: {
+                SettingsFooter("Para mover dinero rápido sin volver a teclear un IBAN ni un número.")
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .scrollDismissesKeyboard(.interactively)
+        .listSectionSpacing(.compact)
+        .background(Theme.canvas.ignoresSafeArea())
+        .navigationTitle("Cuentas y contactos")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear(perform: loadFloorTexts)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { focusedField = nil }
+        }
+        .onChange(of: focusedField) { old, _ in
+            if case .floor(let bank) = old { commitFloor(bank) }
+        }
+        .onDisappear {
+            for bank in floorDirty { commitFloor(bank) }
+        }
+        .sensoryFeedback(Haptics.success, trigger: saveTick)
+        .sensoryFeedback(Haptics.error, trigger: errorTick)
+    }
+
+    // MARK: - Banco: IBAN + Colchón mínimo
+
+    @ViewBuilder
+    private func bankSectionRow(_ bank: BankID) -> some View {
+        let iban = accountBook.book.ibans[bank]
+        let isRevealed = revealedBank == bank && scenePhase == .active
+        let stacked = typeSize.isAccessibilitySize
+
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                BankLogo(bank: bank, size: 28)
+                Text(bank.displayName)
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                Spacer(minLength: 0)
+                Button(iban == nil ? "Añadir IBAN" : "Editar") {
+                    startEditingIBAN(bank)
+                }
+                .titan(.meta)
+                .foregroundStyle(Theme.label2)
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+            }
+
+            if let iban {
+                HStack(spacing: 10) {
+                    Text(isRevealed ? formatIBAN(iban) : maskedIBAN(iban))
+                        .titan(.subtitle)
+                        .foregroundStyle(isRevealed ? Theme.label : Theme.label2)
+                        .monospacedDigit()
+                        .lineLimit(isRevealed ? 2 : 1)
+                        .privacySensitive()
+                    Spacer(minLength: 8)
+                    Text("Ver")
+                        .titan(.meta)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Theme.label)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(Theme.raised, in: Capsule())
+                        .contentShape(Capsule())
+                        .gesture(
+                            DragGesture(minimumDistance: 0)
+                                .updating($revealedBank) { _, state, _ in
+                                    state = bank
+                                }
+                        )
+                        .accessibilityAddTraits(.isButton)
+                        .accessibilityLabel("Mantén pulsado para ver el IBAN de \(bank.displayName)")
+                }
+            } else {
+                Text("Sin IBAN guardado")
+                    .titan(.meta)
+                    .foregroundStyle(Theme.label3)
+            }
+
+            if editingIBANBank == bank {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField("IBAN de \(bank.displayName)", text: $ibanDraft)
+                        .titan(.body)
+                        .foregroundStyle(Theme.label)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .focused($focusedField, equals: .iban(bank))
+                        .submitLabel(.done)
+                        .onSubmit { commitIBAN(bank) }
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                        .accessibilityLabel("IBAN de \(bank.displayName)")
+                    if let ibanError {
+                        Text(ibanError)
+                            .titan(.meta)
+                            .foregroundStyle(Theme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    HStack(spacing: 10) {
+                        Button {
+                            commitIBAN(bank)
+                        } label: {
+                            Text("Guardar")
+                                .titan(.subtitle)
+                                .fontWeight(.semibold)
+                                .foregroundStyle(Theme.onTileSelected)
+                                .padding(.horizontal, 16)
+                                .frame(minHeight: 44)
+                                .background(Theme.tileSelected, in: Capsule())
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.pressable)
+                        Button {
+                            editingIBANBank = nil
+                            ibanError = nil
+                            focusedField = nil
+                        } label: {
+                            Text("Cancelar")
+                                .titan(.subtitle)
+                                .foregroundStyle(Theme.label2)
+                                .padding(.horizontal, 12)
+                                .frame(minHeight: 44)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            Rectangle().fill(Theme.separator).frame(height: 0.5)
+
+            let floorLayout = stacked
+                ? AnyLayout(VStackLayout(alignment: .leading, spacing: 6))
+                : AnyLayout(HStackLayout(spacing: 10))
+            floorLayout {
+                Text("Colchón mínimo")
+                    .titan(.subtitle)
+                    .foregroundStyle(Theme.label2)
+                if !stacked { Spacer(minLength: 8) }
+                HStack(spacing: 8) {
+                    if floorSaved.contains(bank) {
+                        DrawnCheck(lineWidth: 2, color: Theme.label)
+                            .frame(width: 16, height: 16)
+                            .transition(.opacity)
+                            .accessibilityLabel("Guardado")
+                    }
+                    let textVal = floorTexts[bank] ?? ""
+                    let isEditing = focusedField == .floor(bank)
+                    TextField("0,00 €", text: floorBinding(bank))
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.label)
+                        .multilineTextAlignment(stacked ? .leading : .trailing)
+                        .keyboardType(.numbersAndPunctuation)
+                        .submitLabel(.done)
+                        .focused($focusedField, equals: .floor(bank))
+                        .onSubmit { commitFloor(bank) }
+                        .padding(.horizontal, 10)
+                        .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 44)
+                        .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                        .privateField(editing: isEditing)
+                        .accessibilityLabel("Colchón mínimo de \(bank.displayName)")
+                        .accessibilityValue(preferences.privateMode && !isEditing && !textVal.isEmpty ? "importe oculto" : textVal)
+                }
+            }
+            if let err = floorErrors[bank] {
+                Text(err)
+                    .titan(.meta)
+                    .foregroundStyle(Theme.warning)
+            }
+        }
+        .padding(.vertical, 6)
+        .listRowBackground(Theme.grouped)
+        .listRowSeparatorTint(Theme.separator)
+    }
+
+    // MARK: - Contactos
+
+    private func payeeRow(_ payee: Payee) -> some View {
+        HStack(spacing: 12) {
+            PositionMonogramTile(name: payee.name, size: 30)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(payee.name)
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                if let iban = payee.iban {
+                    Text(maskedIBAN(iban))
+                        .titan(.meta)
+                        .foregroundStyle(Theme.label3)
+                }
+                if let phone = payee.phone {
+                    Text(phone)
+                        .titan(.meta)
+                        .foregroundStyle(Theme.label3)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .frame(minHeight: 52)
+        .listRowBackground(Theme.grouped)
+        .listRowSeparatorTint(Theme.separator)
+    }
+
+    private var addPayeeForm: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            TextField("Nombre", text: $payeeName)
+                .titan(.body)
+                .foregroundStyle(Theme.label)
+                .focused($focusedField, equals: .payeeName)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .accessibilityIdentifier("payeeNameField")
+
+            TextField("IBAN (opcional)", text: $payeeIBAN)
+                .titan(.body)
+                .foregroundStyle(Theme.label)
+                .textInputAutocapitalization(.characters)
+                .autocorrectionDisabled()
+                .focused($focusedField, equals: .payeeIBAN)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .accessibilityIdentifier("payeeIBANField")
+
+            TextField("Móvil español (opcional)", text: $payeePhone)
+                .titan(.body)
+                .foregroundStyle(Theme.label)
+                .keyboardType(.phonePad)
+                .focused($focusedField, equals: .payeePhone)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 44)
+                .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .accessibilityIdentifier("payeePhoneField")
+
+            if let payeeError {
+                Text(payeeError)
+                    .titan(.meta)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Button {
+                commitPayee()
+            } label: {
+                Text("Guardar contacto")
+                    .titan(.option)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.onTileSelected)
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .background(Theme.tileSelected, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+        }
+        .padding(.vertical, 6)
+    }
+
+    // MARK: - Acciones
+
+    private func loadFloorTexts() {
+        for bank in BankID.allCases {
+            if let cents = accountBook.book.floors[bank], cents > 0 {
+                floorTexts[bank] = formatEUR(cents)
+            } else {
+                floorTexts[bank] = ""
+            }
+        }
+    }
+
+    private func startEditingIBAN(_ bank: BankID) {
+        ibanDraft = accountBook.book.ibans[bank].map(formatIBAN) ?? ""
+        ibanError = nil
+        withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
+            editingIBANBank = bank
+        }
+        focusedField = .iban(bank)
+    }
+
+    private func commitIBAN(_ bank: BankID) {
+        focusedField = nil
+        let trimmed = ibanDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            do {
+                try accountBook.setIBAN(nil, for: bank)
+                editingIBANBank = nil
+                ibanError = nil
+                saveTick += 1
+            } catch {
+                ibanError = "No se pudo guardar en el Llavero."
+                errorTick += 1
+            }
+            return
+        }
+        guard isValidIBAN(trimmed) else {
+            ibanError = "Ese IBAN no es correcto: revisa los números."
+            errorTick += 1
+            return
+        }
+        do {
+            try accountBook.setIBAN(trimmed, for: bank)
+            editingIBANBank = nil
+            ibanError = nil
+            saveTick += 1
+        } catch {
+            ibanError = "No se pudo guardar en el Llavero."
+            errorTick += 1
+        }
+    }
+
+    private func floorBinding(_ bank: BankID) -> Binding<String> {
+        Binding(
+            get: { floorTexts[bank] ?? "" },
+            set: { new in
+                guard new != (floorTexts[bank] ?? "") else { return }
+                floorTexts[bank] = new
+                floorErrors[bank] = nil
+                floorDirty.insert(bank)
+            }
+        )
+    }
+
+    private func commitFloor(_ bank: BankID) {
+        guard floorDirty.contains(bank) else { return }
+        let raw = (floorTexts[bank] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty {
+            do {
+                try accountBook.setFloor(nil, for: bank)
+                floorDirty.remove(bank)
+                floorErrors[bank] = nil
+                flashFloorSaved(bank)
+            } catch {
+                floorErrors[bank] = "No se pudo guardar."
+                errorTick += 1
+            }
+            return
+        }
+        guard let cents = parseBalanceInput(raw), cents >= 0 else {
+            floorErrors[bank] = "Escribe un importe como 100,00"
+            errorTick += 1
+            return
+        }
+        do {
+            try accountBook.setFloor(cents > 0 ? cents : nil, for: bank)
+            floorDirty.remove(bank)
+            floorTexts[bank] = cents > 0 ? formatEUR(cents) : ""
+            floorErrors[bank] = nil
+            flashFloorSaved(bank)
+        } catch {
+            floorErrors[bank] = "No se pudo guardar."
+            errorTick += 1
+        }
+    }
+
+    private func flashFloorSaved(_ bank: BankID) {
+        saveTick += 1
+        withAnimation(reduceMotion ? nil : Theme.Motion.quick) { _ = floorSaved.insert(bank) }
+        Task {
+            try? await Task.sleep(for: .seconds(1.4))
+            withAnimation(.easeOut(duration: 0.3)) { _ = floorSaved.remove(bank) }
+        }
+    }
+
+    private func commitPayee() {
+        focusedField = nil
+        let trimmedName = payeeName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            payeeError = "Escribe el nombre del contacto."
+            errorTick += 1
+            return
+        }
+        let rawIBAN = payeeIBAN.trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawPhone = payeePhone.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !rawIBAN.isEmpty || !rawPhone.isEmpty else {
+            payeeError = "Escribe un IBAN o un número de móvil."
+            errorTick += 1
+            return
+        }
+        var cleanIBAN: String?
+        if !rawIBAN.isEmpty {
+            guard isValidIBAN(rawIBAN) else {
+                payeeError = "Ese IBAN no es correcto: revisa los números."
+                errorTick += 1
+                return
+            }
+            cleanIBAN = normalizeIBAN(rawIBAN)
+        }
+        var cleanPhone: String?
+        if !rawPhone.isEmpty {
+            guard let normalized = normalizeSpanishMobile(rawPhone) else {
+                payeeError = "Escribe un móvil español de 9 cifras."
+                errorTick += 1
+                return
+            }
+            cleanPhone = normalized
+        }
+        do {
+            try accountBook.addPayee(Payee(name: trimmedName, iban: cleanIBAN, phone: cleanPhone))
+            payeeName = ""
+            payeeIBAN = ""
+            payeePhone = ""
+            payeeError = nil
+            addingPayee = false
+            saveTick += 1
+        } catch {
+            payeeError = "No se pudo guardar en el Llavero."
+            errorTick += 1
+        }
+    }
+
+    private func deletePayees(at offsets: IndexSet) {
+        let targets = offsets.compactMap { idx in
+            idx < accountBook.book.payees.count ? accountBook.book.payees[idx].id : nil
+        }
+        for id in targets {
+            try? accountBook.deletePayee(id: id)
+        }
+    }
+}

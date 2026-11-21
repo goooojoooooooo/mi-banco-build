@@ -56,7 +56,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.mibanco.app.callback
             CFBundleURLSchemes: [mibanco]
-        LSApplicationQueriesSchemes: [traderepublic]
+        LSApplicationQueriesSchemes: [revolut, imagin, traderepublic, shortcuts]
         ALTAppGroups: [group.com.mibanco.shared]
         UIUserInterfaceStyle: Dark
         UILaunchScreen: {}

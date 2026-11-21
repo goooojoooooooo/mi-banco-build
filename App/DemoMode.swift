@@ -46,6 +46,23 @@ enum DemoMode {
     static var scrollsToInvestments: Bool { arguments.contains("-MiBancoDemoInvestmentsSettings") }
     static var asksPrices: Bool { arguments.contains("-MiBancoDemoAskPrices") }
     static var opensPosition: Bool { arguments.contains("-MiBancoDemoPosition") }
+    static var demoMoveStep: Int? { value(after: "-MiBancoDemoMove").flatMap(Int.init) }
+    static var opensAccounts: Bool { arguments.contains("-MiBancoDemoAccounts") }
+    static var opensUpcoming: Bool { arguments.contains("-MiBancoDemoUpcoming") }
+
+    /// Cuaderno de cuentas de demo: solo IBANs de ejemplo publicados (ES91, DE89, GB82) y un contacto inventado.
+    static func accountBook() -> AccountBook {
+        var book = AccountBook()
+        book.ibans = [
+            .rev: "GB82WEST12345698765432",
+            .ima: "ES9121000418450200051332",
+            .tr: "DE89370400440532013000",
+        ]
+        book.payees = [
+            Payee(name: "Ana (demo)", phone: "+34 612 345 678"),
+        ]
+        return book
+    }
 
     /// Solo carga cartera en demo cuando se pide alguna pantalla de inversiones: las capturas y pruebas previas no cambian.
     static var includesPortfolio: Bool {

@@ -53,6 +53,33 @@ import Testing
         }
     }
 
+    /// Al abrir la ayuda (G25): (arriba de la ayuda, su alto, desplazamiento, H, alto del contenido) → desplazamiento.
+    /// Los dos primeros son los marcos medidos en el iPhone de 393 pt (run 44918250217), donde no se movía nada.
+    @Test func abrirLaAyudaLaEnsena() {
+        let cases: [(top: Double, height: Double, offset: Double, visible: Double, content: Double, expected: Double)] = [
+            // Apple Pay de imagin 6 retomado: la ayuda (232,33) cabe; su final queda justo encima de los botones.
+            (402.33, 232.33, 0, 450.33, 690.66, 184.33),
+            // Revolut 19 nuevo: la ayuda nacía 8 pt bajo lo visible; queda entera, al final del contenido.
+            (458.33, 148.33, 0, 450.33, 606.66, 156.33),
+            // Más alta que lo visible: su primera línea arriba del todo.
+            (300, 600, 0, 450, 1500, 300),
+            // … sin pasar del final del contenido.
+            (300, 600, 0, 450, 700, 250),
+            // Ya se ve entera: no se mueve.
+            (100, 100, 0, 450, 900, 0),
+            // Su principio quedaba arriba, fuera de lo visible: baja hasta él.
+            (100, 100, 200, 450, 900, 100),
+            // Valores que no son números: se queda donde está.
+            (.nan, 100, 40, 450, 900, 40),
+            (100, 100, 40, 0, 900, 40),
+        ]
+        for c in cases {
+            let got = guideHelpScrollTarget(top: c.top, height: c.height, offset: c.offset, visible: c.visible,
+                                            content: c.content)
+            #expect(abs(got - c.expected) < 0.01, "top \(c.top), alto \(c.height), desde \(c.offset): \(got)")
+        }
+    }
+
     /// Lo que la regla garantiza: si lo imprescindible cabe, se ve entero sin deslizar (dibujo arriba: dibujo + T <= H;
     /// texto arriba: T <= H); el reinicio se ve si H − T − R >= 180; el dibujo nunca baja de 180 ni pasa de 395.
     @Test func loImprescindibleNuncaQuedaDebajo() {

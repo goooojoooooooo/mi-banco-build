@@ -2,11 +2,16 @@ name: screenshots
 run-name: screenshots ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
+        required: false
+        default: "namespace-profile-onyx"
 permissions:
   contents: read
 jobs:
   capturas:
-    runs-on: macos-15-intel
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -14,7 +19,7 @@ jobs:
         run: |
           ls -d /Applications/Xcode*.app
           CHOSEN=""
-          for app in "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)" /Applications/Xcode_16.4.app; do
+          for app in /Applications/Xcode_26.2.app $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
             [ -d "$app" ] || continue
             echo "Probando $app"
             if DEVELOPER_DIR="$app/Contents/Developer" xcrun simctl list runtimes available | grep -E "^iOS " ; then
@@ -32,8 +37,11 @@ jobs:
         run: |
           xcrun simctl list runtimes
           xcrun simctl list devicetypes | grep -i "iphone 1[67]" || true
-          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
-          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
+          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS .*com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9]+-[0-9]+$" | sort -V | tail -1 || true)
+          if [ -z "$RUNTIME_LINE" ]; then
+            RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
+          fi
+          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"

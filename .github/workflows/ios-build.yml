@@ -2,20 +2,25 @@ name: ios-build
 run-name: ios-build ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
+        required: false
+        default: "namespace-profile-onyx"
   push:
     tags: ['v*']
 permissions:
   contents: write
 jobs:
   build:
-    runs-on: macos-15-intel
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     steps:
       - uses: actions/checkout@v4
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
         run: |
           ls -d /Applications/Xcode*.app
           XCODE=/Applications/Xcode_26.2.app
-          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"; fi
           echo "Usando $XCODE"
           sudo xcode-select -s "$XCODE"
           xcodebuild -version

@@ -31,13 +31,11 @@ public struct GuideStepArrangement: Equatable, Sendable {
 ///     «¿No te sale esto?» cerrado, con sus separaciones y la separación al dibujo.
 ///   - restart: R, «Empezar desde el principio» con su separación cuando se ofrece; si no, 0.
 /// Si queda sitio para el dibujo mínimo (H − T >= 180), el dibujo va arriba con el alto que dejan T y R (entre 180 y
-/// 395). Si no, el texto va arriba y el dibujo, debajo a 180. Cualquier valor que no sea un número, H <= 0 o T < 0:
-/// texto arriba. R < 0 cuenta como 0.
+/// 395). Si no, el texto va arriba y el dibujo, debajo a 180. Cualquier valor que no sea un número, o H <= 0: texto arriba.
 public func guideStepArrangement(visible: Double, essentials: Double, restart: Double) -> GuideStepArrangement {
     let minimum = GuideStepArrangement.minDrawing
     let textFirst = GuideStepArrangement(order: .textFirst, drawing: minimum)
-    guard visible.isFinite, essentials.isFinite, restart.isFinite, visible > 0, essentials >= 0 else { return textFirst }
-    let restart = max(0, restart)
+    guard visible.isFinite, essentials.isFinite, restart.isFinite, visible > 0 else { return textFirst }
     guard visible - essentials >= minimum else { return textFirst }
     let drawing = min(GuideStepArrangement.maxDrawing, max(minimum, visible - essentials - restart))
     return GuideStepArrangement(order: .drawingFirst, drawing: drawing)

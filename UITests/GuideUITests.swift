@@ -289,6 +289,7 @@ final class GuideUITests: XCTestCase {
 
     /// Con el texto arriba (letra de accesibilidad), VoiceOver lee en el orden de la pantalla (G27): lo imprescindible,
     /// «Empezar desde el principio» y el dibujo al final.
+    @MainActor
     func testTextFirstReadsInScreenOrder() throws {
         launchResumed("rev", 19, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
         waitForStep(19, "No retomó rev en el paso 19")

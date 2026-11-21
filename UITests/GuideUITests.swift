@@ -209,11 +209,13 @@ final class GuideUITests: XCTestCase {
         // H: lo visible entre la cabecera y los botones fijos (que llevan 12 pt de margen encima de «Abrir Atajos»).
         let visible = open.frame.minY - 12 - top
         if text.frame.height <= visible {
-            XCTAssertTrue(eventually { text.frame.maxY <= open.frame.minY && text.frame.minY >= top - 1 },
+            // El deslizamiento llega cuando la ayuda ha terminado de abrirse (unos 0,85 s) y la app nunca queda quieta
+            // (el anillo que late): se espera más que en el resto, la condición es la misma.
+            XCTAssertTrue(eventually(12) { text.frame.maxY <= open.frame.minY && text.frame.minY >= top - 1 },
                           "La ayuda abierta no se ve entera sin deslizar (\(name)): ayuda \(text.frame), botón \(open.frame), arriba \(top)",
                           file: file, line: line)
         } else {
-            XCTAssertTrue(eventually { text.frame.minY >= top - 1 && text.frame.minY + 34 <= open.frame.minY },
+            XCTAssertTrue(eventually(12) { text.frame.minY >= top - 1 && text.frame.minY + 34 <= open.frame.minY },
                           "El principio de la ayuda no se ve sin deslizar (\(name)): ayuda \(text.frame), botón \(open.frame), arriba \(top)",
                           file: file, line: line)
             app.swipeUp()

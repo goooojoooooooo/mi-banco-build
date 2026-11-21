@@ -375,7 +375,11 @@ public func isAdviceRequest(_ question: String, portfolio: Portfolio? = nil) -> 
 
 private func isFactualTradeNoun(_ word: String, at i: Int, in list: [String]) -> Bool {
     if i > 0, factualNounPredecessors.contains(list[i - 1]) { return true }
-    if i == 0, i + 1 < list.count, ["de", "del", "en"].contains(list[i + 1]) { return true }
+    // J22: al inicio de frase solo «venta(s) de/del» y plural «compras de/del/en» («Compra de nuevo» es imperativo).
+    if i == 0, i + 1 < list.count {
+        if (word == "venta" || word == "ventas") && ["de", "del"].contains(list[i + 1]) { return true }
+        if word == "compras" && ["de", "del", "en"].contains(list[i + 1]) { return true }
+    }
     if word == "compras", i > 0, list[i - 1] == "que",
        i + 1 < list.count, ["hice", "he", "tengo", "hubo", "fueron", "pague", "hay"].contains(list[i + 1]) {
         return true
@@ -506,7 +510,8 @@ private let trailingTimePhrases = [
 ]
 
 private let merchantFillerWords: Set<String> = [
-    "que", "el", "la", "los", "las", "un", "una", "mi", "mis", "lo", "de", "del",
+    "que", "el", "la", "los", "las", "un", "una", "mi", "mis", "tu", "tus", "su", "sus",
+    "lo", "de", "del", "en", "con", "por", "para", "sin", "al", "y", "o", "a",
 ]
 
 /// Busca el texto exacto de una palabra de la pregunta cuya forma normalizada coincide con `target` (conserva mayúsculas).

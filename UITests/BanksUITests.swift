@@ -113,7 +113,10 @@ final class BanksUITests: XCTestCase {
         // antes dice «Actualizar» y no lleva la marca; después del toque pasa a «Actualizado» con la marca.
         XCTAssertFalse(refreshBtn.label.contains("Actualizado"), "U13: el botón ya decía Actualizado antes del toque: \(refreshBtn.label)")
         XCTAssertFalse(app.descendants(matching: .any)["bank-card-refreshed"].exists, "U13: la marca ya estaba antes del toque")
-        refreshBtn.tap()
+        // U80: con el carrusel en `.contain`, el elemento de accesibilidad de «Actualizar» ocupa la tarjeta entera
+        // (`{{32, 124}, {376, 236}}` en 45071172797) y `tap()` cae en su centro, que es el reverso (y le da la vuelta). Se toca
+        // donde está el botón: abajo a la derecha del reverso.
+        refreshBtn.coordinate(withNormalizedOffset: CGVector(dx: 0.82, dy: 0.82)).tap()
         // Mientras actualiza, el botón deja sitio a la rueda de progreso y vuelve con «Actualizado» unos 2 s: se espera al
         // botón con esa etiqueta (por consulta, porque en medio no existe).
         let refreshed = app.buttons.matching(

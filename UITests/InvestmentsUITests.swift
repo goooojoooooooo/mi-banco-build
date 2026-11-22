@@ -181,8 +181,8 @@ final class InvestmentsUITests: XCTestCase {
         let pctPred = NSPredicate(format: "label CONTAINS '%' OR value CONTAINS '%'")
         let appleEuro = appleRow.descendants(matching: .any).matching(euroPred)
         let applePct = appleRow.descendants(matching: .any).matching(pctPred)
-        XCTAssertEqual(appleEuro.count, 0, "La fila de Apple filtró € en privado: \(appleEuro.allElementsBoundByIndex.map(\.label))")
-        XCTAssertEqual(applePct.count, 0, "La fila de Apple filtró % en privado: \(applePct.allElementsBoundByIndex.map(\.label))")
+        XCTAssertEqual(appleEuro.count, 0, "La fila de Apple filtró € en privado: \(appleEuro.allElementsBoundByIndex.map { $0.label })")
+        XCTAssertEqual(applePct.count, 0, "La fila de Apple filtró % en privado: \(applePct.allElementsBoundByIndex.map { $0.label })")
         XCTAssertEqual(appleRow.label, "Apple, importe oculto", "La etiqueta de Apple en privado no coincide: \(appleRow.label)")
 
         appleRow.tap()

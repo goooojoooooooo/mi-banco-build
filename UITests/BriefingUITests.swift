@@ -313,8 +313,8 @@ final class BriefingUITests: XCTestCase {
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 5), "No se mostró el bloqueo al volver de segundo plano")
         XCTAssertEqual(app.pickerWheels.count, 0, "U33: quedaron ruedas de hora encima del bloqueo (\(app.pickerWheels.count))")
-        let hittablePickers = app.datePickers.allElementsBoundByIndex.filter(\.isHittable)
-            + app.pickerWheels.allElementsBoundByIndex.filter(\.isHittable)
+        let hittablePickers = app.datePickers.allElementsBoundByIndex.filter { $0.isHittable }
+            + app.pickerWheels.allElementsBoundByIndex.filter { $0.isHittable }
         XCTAssertEqual(hittablePickers.count, 0, "U33: quedó un selector de hora tocable encima del bloqueo")
     }
 }

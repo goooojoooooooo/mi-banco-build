@@ -50,7 +50,15 @@ struct AccountCardView: View {
                 onImportInvestments: onImportInvestments
             )
                 .contentShape(.rect(cornerRadius: Theme.Radius.card))
-                .onTapGesture(perform: onFlip)
+                .onTapGesture {
+                    // U80: un toque en un botón del reverso («Actualizar», «Renovar»…) no puede además dar la vuelta a la
+                    // tarjeta (se volvía al anverso y no se veía «Actualizado»). Se mira tras un turno, sea cual sea el orden
+                    // en que SwiftUI entregue el toque al botón y a este gesto.
+                    Task { @MainActor in
+                        await Task.yield()
+                        if !BackControlTap.justHappened { onFlip() }
+                    }
+                }
                 .modifier(FlipFace(angle: flipped ? 180 : 0, isBack: true))
         }
         .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.flip, value: flipped)
@@ -409,6 +417,7 @@ private struct CardBack: View {
             switch action {
             case .refresh:
                 Button {
+                    BackControlTap.mark()
                     refreshConnectedBank(bank)
                 } label: {
                     HStack(spacing: 8) {
@@ -462,7 +471,10 @@ private struct CardBack: View {
     }
 
     private func capsuleAction(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            BackControlTap.mark()
+            action()
+        } label: {
             Text(title)
                 .titan(.option)
                 .foregroundStyle(Theme.onTileSelected)
@@ -644,4 +656,12 @@ struct BankLogo: View {
         .clipShape(.rect(cornerRadius: size * 0.27, style: .continuous))
         .accessibilityHidden(true)
     }
+}
+
+/// Marca de «se acaba de tocar un botón del reverso» para que ese mismo toque no dé la vuelta a la tarjeta (U80).
+@MainActor
+enum BackControlTap {
+    private static var at: Date?
+    static func mark() { at = Date() }
+    static var justHappened: Bool { at.map { Date().timeIntervalSince($0) < 0.6 } ?? false }
 }

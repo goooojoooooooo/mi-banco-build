@@ -114,9 +114,12 @@ final class BanksUITests: XCTestCase {
         XCTAssertFalse(refreshBtn.label.contains("Actualizado"), "U13: el botón ya decía Actualizado antes del toque: \(refreshBtn.label)")
         XCTAssertFalse(app.descendants(matching: .any)["bank-card-refreshed"].exists, "U13: la marca ya estaba antes del toque")
         refreshBtn.tap()
-        let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Actualizado'"), object: refreshBtn)
-        XCTAssertEqual(XCTWaiter().wait(for: [done], timeout: 8), .completed,
-                       "U13: Actualizar no pasó a «Actualizado» tras el toque: \(refreshBtn.label)")
+        // Mientras actualiza, el botón deja sitio a la rueda de progreso y vuelve con «Actualizado» unos 2 s: se espera al
+        // botón con esa etiqueta (por consulta, porque en medio no existe).
+        let refreshed = app.buttons.matching(
+            NSPredicate(format: "identifier == 'bank-card-refresh' AND label CONTAINS 'Actualizado'")
+        ).firstMatch
+        XCTAssertTrue(refreshed.waitForExistence(timeout: 10), "U13: Actualizar no pasó a «Actualizado» tras el toque")
     }
 
     /// U45: Ajustes › Bancos calcula «Actualizado hace…» en vivo (240 min → «hace 4 h»).

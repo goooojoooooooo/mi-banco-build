@@ -726,7 +726,7 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         #expect(try #require(mixedLines.first) == nb("Este mes has movido 200,00 € entre tus cuentas (1 traspaso)."))
         #expect(mixedLines.contains("Además, 1 movimiento marcado como traspaso no tiene pareja:"))
 
-        // N7 (U6): mes pasado con patas sueltas dice «En octubre tuviste 2 movimientos marcados como traspaso sin pareja:».
+        // N7 (U6): mes concreto («en octubre») y mes pasado («el mes pasado») con patas sueltas.
         var octUnpaired = LedgerState()
         octUnpaired.movements = [
             Movement(bank: .ima, amountCents: -20_000, merchant: "Envío Revolut", kind: .payment, source: .bank,
@@ -734,9 +734,12 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
             Movement(bank: .rev, amountCents: 15_000, merchant: "Recarga imagin", kind: .income, source: .bank,
                      date: at(2026, 10, 17, 10), ownTransfer: true, bankRef: "o2", bankStatus: .booked),
         ]
-        let octAns = answerQuestion("¿Qué traspasos hice entre mis cuentas el mes pasado?", state: octUnpaired, portfolio: nil,
+        let octAns = answerQuestion("¿Qué traspasos hice entre mis cuentas en octubre?", state: octUnpaired, portfolio: nil,
                                     book: AccountBook(), now: nov(20, 10), calendar: cal)
         #expect(try #require(plainLines(octAns).first) == "En octubre tuviste 2 movimientos marcados como traspaso sin pareja:")
+        let prevAns = answerQuestion("¿Qué traspasos hice entre mis cuentas el mes pasado?", state: octUnpaired, portfolio: nil,
+                                     book: AccountBook(), now: nov(20, 10), calendar: cal)
+        #expect(try #require(plainLines(prevAns).first) == "El mes pasado tuviste 2 movimientos marcados como traspaso sin pareja:")
     }
 
     // MARK: N2 (U3) — El modelo no puede saltarse `.unsupportedPeriod`

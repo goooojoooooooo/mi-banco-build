@@ -209,7 +209,9 @@ final class BriefingModel {
         if isAdviceRequest(trimmed, portfolio: portfolio, knownMerchants: knownMerchants) {
             routedIntent = nil
         } else {
-            routedIntent = await writer.routeQuestion(trimmed, now: now, calendar: cal, portfolio: portfolio)
+            routedIntent = await writer.routeQuestion(
+                trimmed, now: now, calendar: cal, portfolio: portfolio, knownMerchants: knownMerchants
+            )
         }
 
         guard !Task.isCancelled, askGeneration == gen else { return }

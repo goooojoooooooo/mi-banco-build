@@ -347,7 +347,7 @@ private func shortfallCard(state: LedgerState, book: AccountBook, now: Date, cal
             id: id, topic: .shortfall, title: "Saldo justo para un cobro",
             parts: [.text(detail)],
             action: .moveMoney(from: nil, to: b, cents: nil))
-        return ScoredCard(card: card, basePriority: 68, isSevere: false)
+        return ScoredCard(card: card, basePriority: 100, isSevere: false)
     }
     return nil
 }

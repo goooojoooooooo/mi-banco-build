@@ -9,13 +9,13 @@ import FoundationModels
 /// una pregunta en una intención conocida con parámetros validados por el Core. Nada sale del iPhone.
 protocol BriefingWriter: Sendable {
     func openingChoice(for briefing: Briefing) async -> Int?
-    func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?) async -> AssistantIntent?
+    func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?, knownMerchants: Set<String>) async -> AssistantIntent?
 }
 
 /// Respaldo determinista sin modelo: el catálogo rota por día y las preguntas van al enrutador por reglas del Core.
 struct RuleBriefingWriter: BriefingWriter {
     func openingChoice(for briefing: Briefing) async -> Int? { nil }
-    func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?) async -> AssistantIntent? { nil }
+    func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?, knownMerchants: Set<String>) async -> AssistantIntent? { nil }
 }
 
 func makeDefaultBriefingWriter() -> any BriefingWriter {
@@ -56,9 +56,9 @@ struct ModelBriefingWriter: BriefingWriter {
         return MiBancoCore.openingChoice(from: raw, count: count)
     }
 
-    func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?) async -> AssistantIntent? {
-        // Barrera incondicional antes de tocar el modelo (A3, J21(d)).
-        guard !isAdviceRequest(question, portfolio: portfolio) else { return nil }
+    func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?, knownMerchants: Set<String>) async -> AssistantIntent? {
+        // Barrera incondicional antes de tocar el modelo (A3, J21(d), N8).
+        guard !isAdviceRequest(question, portfolio: portfolio, knownMerchants: knownMerchants) else { return nil }
         guard isModelReady() else { return nil }
         let prompt = assistantRoutingPrompt(question: question, now: now, calendar: calendar)
         guard let raw = await runPrompt(
@@ -69,7 +69,7 @@ struct ModelBriefingWriter: BriefingWriter {
         ) else {
             return nil
         }
-        return parseAssistantModelRoute(raw, originalQuestion: question, portfolio: portfolio)
+        return parseAssistantModelRoute(raw, originalQuestion: question, portfolio: portfolio, knownMerchants: knownMerchants)
     }
 
     private func isModelReady() -> Bool {

@@ -40,7 +40,11 @@ public func answerQuestion(_ question: String, state: LedgerState, portfolio: Po
     let resolved: AssistantIntent
     if let modelIntent, modelIntent != .unknown, modelIntent != .unsupportedPeriod,
        let sanitized = sanitizeModelIntent(modelIntent, originalQuestion: question, knownMerchants: knownMerchants) {
-        resolved = sanitized
+        let isPeriodSensitive: Bool = switch sanitized {
+        case .spending, .biggestPayments, .income, .ownTransfers: true
+        default: false
+        }
+        resolved = (isPeriodSensitive && questionHasUnsupportedPeriod(question)) ? .unsupportedPeriod : sanitized
     } else {
         resolved = routeAssistantQuestion(question, state: state, portfolio: portfolio, now: now, calendar: calendar)
     }

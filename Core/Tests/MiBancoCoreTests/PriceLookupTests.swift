@@ -208,30 +208,8 @@ private func json(_ s: String) -> Data { Data(s.utf8) }
     @Test func topeDuranteLaDescarga() async throws {
         let limit = 2_000_000
 
-        // 1. expectedLength > limit corta con 0 bytes entregados.
-        let zeroCounter = AtomicCounter()
-        let stream1 = AsyncStream<UInt8> { cont in
-            let task = Task {
-                for _ in 0..<100 {
-                    if Task.isCancelled { break }
-                    _ = zeroCounter.increment()
-                    cont.yield(0x41)
-                }
-                cont.finish()
-            }
-            cont.onTermination = { _ in task.cancel() }
-        }
-        var threwExpected = false
-        do {
-            _ = try await collectCapped(stream1, expectedLength: 3_000_000, limit: limit)
-        } catch {
-            threwExpected = true
-        }
-        #expect(threwExpected)
-        #expect(zeroCounter.value == 0)
-
-        // 2. Sin Content-Length conocido, un flujo de 3.000.000 bytes corta al pasar del tope (<= 2.000.001).
-        let streamCounter = AtomicCounter()
+        // U79 (A-M1): una secuencia perezosa que cuenta lo que se LEE (en `next()`), no lo que un productor ya metió en un
+        // búfer; así el «0 bytes» no depende de cuándo corra otra tarea.
         struct CountedBytes: AsyncSequence, Sendable {
             typealias Element = UInt8
             let total: Int
@@ -248,6 +226,20 @@ private func json(_ s: String) -> Data { Data(s.utf8) }
             }
             func makeAsyncIterator() -> Iterator { Iterator(remaining: total, counter: counter) }
         }
+
+        // 1. expectedLength > limit corta con 0 bytes leídos.
+        let zeroCounter = AtomicCounter()
+        var threwExpected = false
+        do {
+            _ = try await collectCapped(CountedBytes(total: 100, counter: zeroCounter), expectedLength: 3_000_000, limit: limit)
+        } catch {
+            threwExpected = true
+        }
+        #expect(threwExpected)
+        #expect(zeroCounter.value == 0)
+
+        // 2. Sin Content-Length conocido, un flujo de 3.000.000 bytes corta al pasar del tope (<= 2.000.001).
+        let streamCounter = AtomicCounter()
         var threwOver = false
         do {
             _ = try await collectCapped(CountedBytes(total: 3_000_000, counter: streamCounter),

@@ -405,4 +405,16 @@ private func portfolioWithFixture() throws -> Portfolio {
         #expect(portfolioImportMessage(.notTradeRepublic) == "Ese fichero no parece la exportación de Trade Republic.")
         #expect(portfolioImportMessage(.saveFailed) == "No se pudo guardar. Inténtalo de nuevo.")
     }
+
+    /// U79 (A-M2): las fichas de las posiciones vuelven a dos letras, como la lista de Cartera; sin signos.
+    @Test func inicialesDePosicion() {
+        #expect(positionInitials(for: "Apple") == "AP")
+        #expect(positionInitials(for: "Amazon") == "AM")
+        #expect(positionInitials(for: "Allianz") == "AL")
+        #expect(positionInitials(for: "iShares Core MSCI World (Acc)") == "IC")
+        #expect(positionInitials(for: "(Acc) Ethereum") == "AE")
+        #expect(positionInitials(for: "ETH") == "ET")
+        #expect(positionInitials(for: "3M") == "3M")
+        #expect(positionInitials(for: "") == "")
+    }
 }

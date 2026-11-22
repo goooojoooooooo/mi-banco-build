@@ -12,4 +12,21 @@ jobs:
       - name: Presentaciones solo en RootView (U55)
         run: |
           if grep -rnE '\.(confirmationDialog|fileImporter|alert|popover|fullScreenCover|sheet)\(' App --include='*.swift' | grep -v '^App/Views/RootView.swift:'; then echo "Presentación fuera de RootView"; exit 1; fi
+      - name: Ningún control que se presente solo fuera de RootView (U55, U78 B-M6)
+        run: |
+          # Un DatePicker sin `.datePickerStyle(.wheel)` (compacto en un Form) y un Picker sin estilo en línea abren su propia
+          # ventana; `Menu` y `.pickerStyle(.menu)` también. Ninguno puede quedar por encima del bloqueo.
+          bad=0
+          if grep -rnE '(^|[^A-Za-z.])Menu[[:space:]]*[({]|pickerStyle\(\.menu\)' App --include='*.swift'; then echo "Menu o Picker de menú"; bad=1; fi
+          for f in $(grep -rlE 'DatePicker\(|[^A-Za-z]Picker\(' App --include='*.swift'); do
+            awk -v f="$f" '
+              /DatePicker\(/ { start = NR; kind = "date" }
+              /[^A-Za-z]Picker\(/ && !/DatePicker\(/ { start = NR; kind = "picker" }
+              start && kind == "date" && /datePickerStyle\(\.wheel\)/ { start = 0 }
+              start && kind == "picker" && /pickerStyle\(\.(segmented|wheel|inline)\)/ { start = 0 }
+              start && NR - start > 8 { print f ":" start ": " kind " sin estilo en línea"; bad = 1; start = 0 }
+              END { if (start) { print f ":" start ": " kind " sin estilo en línea"; bad = 1 } exit bad }
+            ' "$f" || bad=1
+          done
+          exit $bad
       - run: swift test --package-path Core

@@ -359,7 +359,13 @@ struct HomeView: View {
             quietSelection = false
         }
         if DemoMode.startsFlipped {
-            flipped = selection ?? .all
+            // U80: tras el cambio de tarjeta de arriba, porque el carrusel deshace el volteo al cambiar de tarjeta
+            // (`CardCarousel.onChange(of: selection)`) y la captura `reverso-revolut` salía con el anverso.
+            let target = selection ?? .all
+            Task {
+                try? await Task.sleep(for: .milliseconds(900))
+                flipped = target
+            }
         }
         // `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente por el mismo camino que un toque en el segmentado.
         if DemoMode.switchesCard {

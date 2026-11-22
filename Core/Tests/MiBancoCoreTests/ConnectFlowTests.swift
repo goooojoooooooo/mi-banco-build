@@ -323,6 +323,43 @@ private func flow(in phase: ConnectPhase) -> ConnectFlow {
         #expect(hangLog.items.contains("ledger"))
     }
 
+    /// U78 (B-M9): «Desconectar» sigue el mismo orden que «Olvidar»: primero lo local (sesión del Llavero y enlace del
+    /// libro), después avisa al banco. Con la red colgada, lo local ya está borrado.
+    @Test func desconectarBorraLoLocalAntesQueLaRed() async {
+        let log = OrderLog()
+        await disconnectBankPlan(
+            readSessionID: { log.append("read"); return "s1" },
+            deleteLocal: { log.append("local") },
+            unlinkLedger: { log.append("ledger") },
+            deleteRemote: { id in log.append("remote:\(id)") }
+        )
+        #expect(log.items == ["read", "local", "ledger", "remote:s1"])
+
+        // Sin sesión guardada no se llama a la red, pero lo local se borra igual.
+        let noSession = OrderLog()
+        await disconnectBankPlan(
+            readSessionID: { nil },
+            deleteLocal: { noSession.append("local") },
+            unlinkLedger: { noSession.append("ledger") },
+            deleteRemote: { _ in noSession.append("remote") }
+        )
+        #expect(noSession.items == ["local", "ledger"])
+
+        let hangLog = OrderLog()
+        let task = Task {
+            await disconnectBankPlan(
+                readSessionID: { "s-hang" },
+                deleteLocal: { hangLog.append("local") },
+                unlinkLedger: { hangLog.append("ledger") },
+                deleteRemote: { _ in try? await Task.sleep(for: .seconds(60)) }
+            )
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        task.cancel()
+        await task.value
+        #expect(hangLog.items == ["local", "ledger"])
+    }
+
     @Test func mensajeDeErrorDeCredenciales() {
         #expect(bankingCredentialMessage(.invalidKey)
             == "No es una clave válida. Elige el archivo .pem de Enable Banking.")

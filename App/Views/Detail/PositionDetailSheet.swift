@@ -438,6 +438,14 @@ private struct PositionDetailContent: View {
                         .accessibilityLabel("Precio a mano en euros")
                         .accessibilityValue(maskedValue)
                         .accessibilityIdentifier("manualPriceField")
+                        // El teclado decimal no tiene tecla de volver: «Hecho» solo quita el foco, no guarda (U75).
+                        .toolbar {
+                            ToolbarItemGroup(placement: .keyboard) {
+                                Spacer()
+                                Button("Hecho") { priceFocused = false }
+                                    .accessibilityIdentifier("manualPriceKeyboardDone")
+                            }
+                        }
 
                     if priceSaved {
                         DrawnCheck(lineWidth: 2, color: Theme.label)

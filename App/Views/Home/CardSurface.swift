@@ -74,9 +74,12 @@ struct CardSurface: View {
 }
 
 /// Cepillado casi invisible: una línea vertical de 1 px cada 3 px. Se dibuja una vez por tamaño.
+/// U77: en el hilo principal (`rendersAsynchronously: false`). Con `true`, SwiftUI ejecuta este cierre en
+/// `com.apple.SwiftUI.AsyncRenderer`, y en Swift 6 hereda `@MainActor` del `body`: es el sospechoso del cierre intermitente al
+/// arrancar (ejecución 44972452792). Coste: el grano se dibuja en el hilo principal (unas decenas de rectángulos por tarjeta).
 private struct BrushedGrain: View {
     var body: some View {
-        Canvas(opaque: false, rendersAsynchronously: true) { context, size in
+        Canvas(opaque: false, rendersAsynchronously: false) { context, size in
             var path = Path()
             var x: CGFloat = 0
             while x < size.width {

@@ -564,7 +564,10 @@ struct RootView: View {
     }
 
     private func openManualBriefing() {
-        guard gate.canPresent, !isLocked, isForeground, !importing, sheet == nil else { return }
+        // U76 (B-M1): la misma guarda que `considerBriefing` (U58): nunca encima de la bienvenida ni de una conexión a medias,
+        // tampoco cuando se entra por el aviso de la mañana.
+        guard gate.canPresent, !isLocked, isForeground, !importing, sheet == nil, !model.needsOnboarding,
+              !BankConnector.shared.isActive else { return }
         let now = Date()
         let rec = briefing.manualRecord(now: now)
         let isFirst = briefing.record == nil

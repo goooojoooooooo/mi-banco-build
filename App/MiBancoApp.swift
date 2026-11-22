@@ -10,9 +10,10 @@ struct MiBancoApp: App {
     }
 
     var body: some Scene {
-        // U62: `WindowGroup` envuelve su cierre en un `LazyView` interno que `SwiftUICore` puede reevaluar en
-        // `com.apple.SwiftUI.AsyncRenderer` al cambiar `@State` del `App` (p. ej. al terminar `LaunchCurtain`), disparando
-        // `_swift_task_checkIsolatedSwift` en Swift 6. Mantener `MiBancoApp` sin `@State` evita reevaluar `LazyView`.
+        // U62 (hipótesis, sin pila que la demuestre; ver ejecución 44972452792 y U77): `WindowGroup` envuelve su cierre en un
+        // `LazyView` interno que SwiftUI podría reevaluar en `com.apple.SwiftUI.AsyncRenderer` al cambiar `@State` del `App`
+        // (p. ej. al terminar `LaunchCurtain`) y disparar `_swift_task_checkIsolatedSwift` en Swift 6. Por si acaso,
+        // `MiBancoApp` no tiene `@State`; el otro sospechoso, el `Canvas` asíncrono de `CardSurface`, ya dibuja en el principal.
         WindowGroup {
             AppShellView()
         }

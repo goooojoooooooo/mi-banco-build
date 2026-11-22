@@ -297,7 +297,11 @@ final class MotionGalleryTests: XCTestCase {
     /// Tinta de una franja de la pantalla (en puntos): píxeles del verde de los ingresos (#30D158), píxeles casi blancos
     /// y dónde empieza y acaba (x, en puntos) lo verde. Se mide sobre la captura de la pantalla, no del elemento: el
     /// marco de un elemento puede ser mayor que lo que se ve.
-    private struct Ink { var green = 0, white = 0, greenMinX = CGFloat.infinity, greenMaxX = -CGFloat.infinity }
+    private struct Ink {
+        var green = 0, white = 0, greenMinX = CGFloat.infinity, greenMaxX = -CGFloat.infinity
+        /// El borde derecho (x, en puntos) de cualquier tinta clara.
+        var inkMaxX = -CGFloat.infinity
+    }
 
     private func ink(in band: CGRect) -> Ink {
         let shot = XCUIScreen.main.screenshot().image
@@ -327,6 +331,7 @@ final class MotionGalleryTests: XCTestCase {
                 out.greenMaxX = max(out.greenMaxX, x)
             }
             if r > 225, g > 225, b > 225 { out.white += 1 }
+            if max(r, g, b) > 150 { out.inkMaxX = max(out.inkMaxX, (px.minX + CGFloat((i / 4) % width)) / scale) }
         }
         return out
     }
@@ -363,6 +368,22 @@ final class MotionGalleryTests: XCTestCase {
         let expenseInk = ink(in: amountBand(rightOf: expense))
         XCTAssertGreaterThan(expenseInk.white, 40, "El gasto no sale en blanco: \(expenseInk)")
         XCTAssertEqual(expenseInk.green, 0, "El gasto tiene tinta verde: \(expenseInk)")
+    }
+
+    /// B-2 sin efectos a tamaño normal: los importes de una columna acaban en el mismo borde derecho, dentro del margen
+    /// de 20 pt. (Con el marco centrado y medido a mano cada fila acababa en un sitio: 422,7 y 425,3 pt de 440.)
+    func testPlainRowsShareTheirRightEdge() throws {
+        launchRows()
+        let window = app.windows.firstMatch.frame
+        let edges = ["Café", "Nómina", "Saldo"].map { name -> CGFloat in
+            let title = app.staticTexts[name]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            return ink(in: amountBand(rightOf: title)).inkMaxX
+        }
+        XCTAssertLessThanOrEqual((edges.max() ?? 0) - (edges.min() ?? 0), 1.5, "Bordes derechos distintos: \(edges)")
+        for edge in edges {
+            XCTAssertLessThanOrEqual(edge, window.maxX - 19, "Un importe se sale del margen: \(edges)")
+        }
     }
 
     /// B-1: oculto, el ingreso conserva el color («+•••,•• €» en verde, como en el prototipo).

@@ -305,16 +305,23 @@ struct RollingDigits: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
         } else {
-            view
-                .fixedSize()
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
-                // Centrado en su marco y encogido desde el centro: cabe justo en el ancho que le den.
-                .scaleEffect(fitScale)
-                .frame(
-                    minWidth: idealWidth > 0 ? idealWidth * Self.minFit : nil,
-                    idealWidth: idealWidth > 0 ? idealWidth : nil,
-                    maxWidth: idealWidth > 0 ? idealWidth : nil)
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
+            // Si cabe, exactamente como antes (`fixedSize`, sin marcos ni medidas en medio: el borde derecho de una
+            // columna de importes queda alineado). Solo si no cabe, la versión que se encoge, pegada a la derecha.
+            ViewThatFits(in: .horizontal) {
+                view
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
+                view
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
+                    .scaleEffect(fitScale, anchor: .trailing)
+                    .frame(
+                        minWidth: idealWidth > 0 ? idealWidth * Self.minFit : nil,
+                        idealWidth: idealWidth > 0 ? idealWidth : nil,
+                        maxWidth: idealWidth > 0 ? idealWidth : nil,
+                        alignment: .trailing)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
+            }
         }
     }
 

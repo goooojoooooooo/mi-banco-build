@@ -1444,6 +1444,22 @@ public func routeAssistantQuestion(_ question: String, state: LedgerState, portf
         return .adviceRequest(positionQuery: positionQuery)
     }
 
+    return routeAssistantQuestionWithoutAdviceGate(question, state: state, portfolio: portfolio, now: now, calendar: calendar)
+}
+
+/// U69(a): resuelve la intención factual subyacente sin el freno de `isAdviceRequest`, para que la negativa nunca sustituya
+/// a los datos reales que el dueño preguntó.
+func routeAssistantQuestionWithoutAdviceGate(_ question: String, state: LedgerState, portfolio: Portfolio?,
+                                             now: Date, calendar: Calendar) -> AssistantIntent {
+    let trimmed = compatNormalized(question).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return .unknown }
+
+    let rawFolded = foldedQuery(trimmed)
+    let tokens = rawFolded.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    guard !tokens.isEmpty else { return .unknown }
+    let joined = " " + tokens.joined(separator: " ") + " "
+    let positionQuery = extractPositionQuery(tokens: tokens, joined: joined, portfolio: portfolio)
+
     let bank = extractBank(tokens: tokens, joined: joined)
     let month = extractMonth(tokens: tokens, joined: joined, rawFolded: rawFolded, now: now, calendar: calendar)
     let unsupportedPeriod = hasUnsupportedPeriodCue(tokens: tokens, joined: joined)

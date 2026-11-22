@@ -4,6 +4,12 @@ import Foundation
 public let investmentAdviceRefusal =
     "No puedo decirte qué comprar, vender o cuánto invertir: eso solo puede hacerlo un asesor financiero autorizado. Sí puedo contarte cómo van tus inversiones."
 
+/// Nota fija que encabeza toda respuesta de inversiones y la tarjeta «Movimiento en inversiones» cuando no va delante `investmentAdviceRefusal` (U69).
+public let investmentDataOnlyNote = "Solo te enseño tus datos; no te digo qué comprar ni vender."
+
+/// Id de la línea que lleva `investmentDataOnlyNote` en las respuestas del asistente.
+let investmentDataOnlyLineID = "inv-data-only"
+
 private func folded(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         .replacingOccurrences(of: "\u{00A0}", with: " ")

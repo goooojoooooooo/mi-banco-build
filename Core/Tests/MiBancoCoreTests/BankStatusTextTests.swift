@@ -165,4 +165,18 @@ private func link(validUntil: Date) -> BankLinkInfo {
                                        setAt: earlierDay, bank: .rev, now: nowEvening, calendar: madrid)
             == "Viene del extracto de Revolut del 17 nov.")
     }
+
+    /// U45 (M2 de la re-revisión): la misma conexión, dibujada a otra hora, da otra línea: la hora no se guarda con el texto.
+    @Test func horaDeActualizadoSigueAlReloj() {
+        var l = link(validUntil: at(2027, 5, 19))
+        let t0 = at(2026, 11, 20, 8)
+        l.lastSuccessAt = t0
+        func primary(_ when: Date) -> String {
+            bankStatusLines(bank: .rev, link: l, estimated: false, canConnect: true, now: when, calendar: madrid).primary
+        }
+        #expect(primary(t0.addingTimeInterval(5 * 60)) == "Actualizado hace 5 min · exacto")
+        #expect(primary(t0.addingTimeInterval(59 * 60)) == "Actualizado hace 59 min · exacto")
+        #expect(primary(t0.addingTimeInterval(60 * 60)) == "Actualizado hace 1 h · exacto")
+        #expect(primary(t0.addingTimeInterval(4 * 3600)) == "Actualizado hace 4 h · exacto")
+    }
 }

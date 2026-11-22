@@ -524,8 +524,9 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
             }
             if up { phrase("lo que más subió", dayMovers[best]) }
             if down { phrase("lo que más bajó", dayMovers[worst]) }
+            // U69(b): toda tarjeta «Movimiento en inversiones» empieza por `investmentDataOnlyNote`.
             return InterestCard(id: id, topic: .portfolioMover, title: "Movimiento en inversiones",
-                                parts: parts, action: .openInvestments)
+                                parts: [.text(investmentDataOnlyNote + " ")] + parts, action: .openInvestments)
         }
     }
 
@@ -536,7 +537,7 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
         let when = isToday ? "hoy" : "en la última sesión (\(cardWeekdayNames[((calendar.component(.weekday, from: day) - 1) % 7 + 7) % 7]))"
         return InterestCard(
             id: id, topic: .portfolioMover, title: "Movimiento en inversiones",
-            parts: [.text("\(clippedName(only.name)) \(when): "), .percentTenths(only.tenths), .text(".")],
+            parts: [.text("\(investmentDataOnlyNote) \(clippedName(only.name)) \(when): "), .percentTenths(only.tenths), .text(".")],
             action: .openInvestments)
     }
     return nil

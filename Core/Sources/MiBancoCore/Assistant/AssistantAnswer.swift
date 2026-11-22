@@ -41,8 +41,12 @@ public func answerQuestion(_ question: String, state: LedgerState, portfolio: Po
                                        briefingInput: precomputedBriefing, now: now, calendar: calendar)
         let underlying = routeAssistantQuestionWithoutAdviceGate(question, state: state, portfolio: portfolio,
                                                                  now: now, calendar: calendar)
+        let hasOpenPortfolio = portfolio.flatMap { portfolioSummary($0, now: now, calendar: calendar) } != nil
         switch underlying {
         case .unknown, .adviceRequest:
+            return baseRefusal
+        case .investments where !hasOpenPortfolio:
+            // Sin cartera abierta no hay datos de inversiones que enseñar: la negativa literal sola y sus fichas (Minor 5).
             return baseRefusal
         default:
             let factualAns = answerIntent(underlying, state: state, portfolio: portfolio, book: book,

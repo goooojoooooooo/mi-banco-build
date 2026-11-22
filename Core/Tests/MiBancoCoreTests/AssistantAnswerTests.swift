@@ -884,7 +884,13 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                 let data = ans.lines.filter { $0.id != "advice-refusal" && $0.id != "inv-data-only" }
                 let underlying = routeAssistantQuestionWithoutAdviceGate(q, state: fx.state, portfolio: portfolio,
                                                                          now: fx.now, calendar: cal)
-                if underlying == .unknown {
+                let hasOpenPortfolio = portfolio.flatMap { portfolioSummary($0, now: fx.now, calendar: cal) } != nil
+                let investmentsWithoutPortfolio: Bool = {
+                    if case .investments = underlying { return !hasOpenPortfolio }
+                    return false
+                }()
+                if underlying == .unknown || (ans.isAdviceRefusal && investmentsWithoutPortfolio) {
+                    // Sin intención, o inversiones sin cartera: la negativa (Minor 5) con sus fichas.
                     if ans.isAdviceRefusal {
                         #expect(!data.isEmpty || !ans.chips.isEmpty, "[\(tag)] \(q): la negativa sola, sin datos ni fichas")
                     }

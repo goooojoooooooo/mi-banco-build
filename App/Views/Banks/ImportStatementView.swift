@@ -87,10 +87,7 @@ struct ImportStatementView: View {
                         .accessibilityIdentifier("import-latest-balance")
                     }
                     if !hasNewOrLinked && canApply {
-                        Text(statementZeroNewNote(
-                            addsPeriod: preview.report.addsPeriod,
-                            adoptsBalance: preview.report.adoptsBalance
-                        ))
+                        Text(statementZeroNewNote(preview.report))
                         .titan(.meta)
                         .foregroundStyle(Theme.label2)
                         .fixedSize(horizontal: false, vertical: true)

@@ -196,6 +196,7 @@ final class MotionGalleryTests: XCTestCase {
         launchGallery()
         tap("gallery.eye")
         XCTAssertTrue(labelled("importe oculto").waitForExistence(timeout: 30), "El ojo no ocultó el importe")
+        XCTAssertTrue(waitUntil { amountLabel() == "importe oculto" }, "Queda un importe a la vista: \(amountLabel())")
         tap("gallery.eye")
         tap("gallery.pay")
         XCTAssertTrue(waitUntil(8) { amountLabel() == "3.769,95 euros" }, "Se perdió el pago: \(amountLabel())")
@@ -301,6 +302,8 @@ final class MotionGalleryTests: XCTestCase {
         var green = 0, white = 0, greenMinX = CGFloat.infinity, greenMaxX = -CGFloat.infinity
         /// El borde derecho (x, en puntos) de cualquier tinta clara.
         var inkMaxX = -CGFloat.infinity
+        /// El borde derecho (x, en puntos) de la tinta gris de los títulos (`Theme.label2`), sin contar el verde.
+        var greyMaxX = -CGFloat.infinity
     }
 
     private func ink(in band: CGRect) -> Ink {
@@ -332,6 +335,9 @@ final class MotionGalleryTests: XCTestCase {
             }
             if r > 225, g > 225, b > 225 { out.white += 1 }
             if max(r, g, b) > 150 { out.inkMaxX = max(out.inkMaxX, (px.minX + CGFloat((i / 4) % width)) / scale) }
+            if max(r, g, b) > 90, abs(r - g) < 25, abs(g - b) < 25 {
+                out.greyMaxX = max(out.greyMaxX, (px.minX + CGFloat((i / 4) % width)) / scale)
+            }
         }
         return out
     }
@@ -412,8 +418,65 @@ final class MotionGalleryTests: XCTestCase {
         let row = CGRect(x: window.minX, y: title.frame.minY, width: window.width, height: title.frame.height)
         let rowInk = ink(in: row)
         XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
-        XCTAssertGreaterThanOrEqual(rowInk.greenMinX, title.frame.maxX, "El importe pisa el título: \(rowInk), \(title.frame)")
-        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 3, "El importe llega al borde (cortado): \(rowInk)")
+        // K18: al menos 8 pt de tinta a tinta entre el título y el importe (el `Spacer` pide 12; en `db9d6c8` quedaban 6,7).
+        XCTAssertGreaterThanOrEqual(rowInk.greenMinX - rowInk.greyMaxX, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 19, "El importe se sale del margen: \(rowInk)")
+    }
+
+    /// K18: con el texto más grande, un título largo («Nómina de noviembre») y un importe largo («+12.345,67 €»): el
+    /// importe encoge lo que haga falta, queda entero dentro del margen derecho y separado del título al menos 8 pt.
+    func testLongPlainRowKeepsItsGapAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let title = app.staticTexts["Nómina de noviembre"]
+        revealWhole(title)
+        let window = app.windows.firstMatch.frame
+        let row = CGRect(x: window.minX, y: title.frame.minY, width: window.width, height: title.frame.height)
+        let rowInk = ink(in: row)
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        XCTAssertGreaterThanOrEqual(rowInk.greenMinX - rowInk.greyMaxX, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 19, "El importe se sale del margen: \(rowInk)")
+        XCTAssertEqual(any("gallery.row.long").label, "12.345,67 euros")
+    }
+
+    /// K19 / K20: el elemento de VoiceOver de un importe mide su línea, no la de las tiras «0…9,0» de cada dígito (que
+    /// se dibujan desplazadas y hacían el marco de 16 líneas: 325 pt a tamaño normal y 693 pt con el texto más grande).
+    private func assertAmountFrameIsOneLine(_ extra: [String]) {
+        launchRows(extra)
+        let title = app.staticTexts["Nómina"]
+        revealWhole(title)
+        let amount = any("gallery.row.income").frame
+        let line = title.frame.height
+        XCTAssertLessThanOrEqual(amount.height, line * 1.6, "Marco del importe: \(amount), una línea: \(line)")
+        XCTAssertLessThan(abs(amount.midY - title.frame.midY), line, "Marco del importe fuera de su fila: \(amount), \(title.frame)")
+    }
+
+    func testRowAmountAccessibilityFrameIsOneLine() throws {
+        assertAmountFrameIsOneLine([])
+    }
+
+    func testRowAmountAccessibilityFrameIsOneLineAtLargestText() throws {
+        assertAmountFrameIsOneLine(Self.hugeText)
+    }
+
+    /// K19: una fila que es un botón y lleva un importe recibe el toque en toda su forma visible (título e importe) y
+    /// no lo roba a las filas de al lado.
+    func testRowButtonTakesTapsOnlyOnItsRow() throws {
+        launchRows()
+        let button = app.buttons["gallery.row.button"]
+        revealWhole(button)
+        let frame = button.frame
+        XCTAssertLessThanOrEqual(frame.height, 70, "El botón de la fila mide \(frame)")
+        XCTAssertEqual(button.value as? String, "0")
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        func tapAt(_ x: CGFloat, _ y: CGFloat) { origin.withOffset(CGVector(dx: x, dy: y)).tap() }
+        tapAt(frame.minX + 20, frame.midY)
+        XCTAssertTrue(waitUntil { (button.value as? String) == "1" }, "El título de la fila no recibe el toque")
+        tapAt(frame.maxX - 20, frame.midY)
+        XCTAssertTrue(waitUntil { (button.value as? String) == "2" }, "El importe de la fila no recibe el toque")
+        tapAt(frame.maxX - 20, frame.minY - 20)
+        tapAt(frame.maxX - 20, frame.maxY + 20)
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(button.value as? String, "2", "Un toque fuera de la fila cayó en ella")
     }
 
     /// B-4: sin preferencias, el ojo guardado se observa en vivo. Con el ojo abierto se ve el importe; si se cierra lo

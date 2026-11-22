@@ -60,6 +60,7 @@ struct MotionGallery: View {
     @State private var stepsDone = false
     @State private var period = 1
     @State private var localLevel = AppPreferences.defaultMotionLevel
+    @State private var rowTaps = 0
 
     private var motion: MotionContext {
         var m = baseMotion
@@ -191,6 +192,18 @@ struct MotionGallery: View {
                 rowAmount("Café", cents: -480, sign: false, color: Theme.label, id: "gallery.row.expense")
                 rowAmount("Nómina", cents: 125_000, sign: true, color: Theme.income, id: "gallery.row.income")
                 rowAmount("Saldo", cents: 6_120, sign: false, color: Theme.label, id: "gallery.row.plain")
+                // Título e importe largos: con el texto más grande, el importe tiene que encoger de verdad (K18).
+                rowAmount("Nómina de noviembre", cents: 1_234_567, sign: true, color: Theme.income, id: "gallery.row.long")
+                // Una fila que es un botón: el toque cae en toda su forma visible y en nada más (K19).
+                Button {
+                    rowTaps += 1
+                } label: {
+                    rowAmount("Ahorro", cents: 50_000, sign: false, color: Theme.label, id: "gallery.row.buttonAmount")
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("gallery.row.button")
+                .accessibilityValue("\(rowTaps)")
             }
         }
     }

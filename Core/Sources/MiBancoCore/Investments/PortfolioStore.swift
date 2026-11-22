@@ -48,6 +48,37 @@ public final class PortfolioStore: Sendable {
         return try? JSONDecoder().decode(Portfolio.self, from: data)
     }
 
+    /// Promociona una copia temporal a su nombre definitivo sustituyendo de forma atómica (U57).
+    public func promoteCopy(from tempName: String, to finalName: String) throws {
+        let source = copyURL(named: tempName)
+        let target = copyURL(named: finalName)
+        #if canImport(Darwin)
+        var result: Result<Void, Error>?
+        var coordinationError: NSError?
+        NSFileCoordinator().coordinate(writingItemAt: target, options: .forReplacing, error: &coordinationError) { url in
+            result = Result {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    _ = try FileManager.default.replaceItemAt(url, withItemAt: source)
+                } else {
+                    try FileManager.default.moveItem(at: source, to: url)
+                }
+            }
+        }
+        if let coordinationError { throw coordinationError }
+        try result!.get()
+        #else
+        if FileManager.default.fileExists(atPath: target.path) {
+            try FileManager.default.removeItem(at: target)
+        }
+        try FileManager.default.moveItem(at: source, to: target)
+        #endif
+    }
+
+    /// Borra una copia temporal si existe (U57).
+    public func removeCopy(named name: String) {
+        try? FileManager.default.removeItem(at: copyURL(named: name))
+    }
+
     private func write(_ p: Portfolio, to url: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var options: Data.WritingOptions = [.atomic]

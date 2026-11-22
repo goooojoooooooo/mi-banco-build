@@ -9,4 +9,7 @@ jobs:
       - name: Ningún trabajo en macos-15-intel
         run: |
           if grep -nE '^[[:space:]]*runs-on:.*macos-15-intel|default:[[:space:]]*"?macos-15-intel' .github/workflows/*.yml; then echo "Hay un trabajo en macos-15-intel"; exit 1; fi
+      - name: Presentaciones solo en RootView (U55)
+        run: |
+          if grep -rnE '\.(confirmationDialog|fileImporter|alert|popover|fullScreenCover|sheet)\(' App --include='*.swift' | grep -v '^App/Views/RootView.swift:'; then echo "Presentación fuera de RootView"; exit 1; fi
       - run: swift test --package-path Core

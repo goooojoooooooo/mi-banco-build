@@ -20,8 +20,10 @@ enum BankingCredentialsError: Error, Equatable {
             "Esta clave está protegida con contraseña. Vuelve a crear la app en Enable Banking con «generar en el navegador»."
         case .demo:
             "En modo de prueba no se conecta con bancos reales."
+        case .keychain:
+            bankingCredentialMessage(.keychain)
         default:
-            "No es una clave válida. Elige el archivo .pem de Enable Banking."
+            bankingCredentialMessage(.invalidKey)
         }
     }
 }
@@ -76,6 +78,9 @@ enum BankingCredentials {
     }
 
     static var isReady: Bool {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.banksConnected }
+        #endif
         guard let id = try? KeychainVault.data(for: .appID), !id.isEmpty,
               let key = try? KeychainVault.data(for: .privateKey), !key.isEmpty else { return false }
         return true
@@ -94,32 +99,48 @@ enum BankingCredentials {
             now: { Date() })
     }
 
-    /// Mejor esfuerzo: cierra las sesiones en el banco, borra todo el Llavero y deja los saldos del banco como
-    /// manuales con el mismo valor. Los fallos no se propagan: desconectar nunca debe quedarse a medias.
+    /// Orden estricto (U43): primero lee los ids de sesión, borra TODO el Llavero y desvincula el libro en el iPhone,
+    /// devuelve la UI a su estado normal, y SOLO DESPUÉS intenta cerrar las sesiones remotas (mejor esfuerzo).
     static func forgetEverything() async {
         #if DEBUG
         if DemoMode.isActive { return }
         #endif
         await MainActor.run {
-            BankConnector.shared.resetForForgetEverything()
+            BankConnector.shared.isForgetting = true
         }
-        if let client = try? client() {
-            for bank in BankID.allCases {
-                if let session = try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)) {
-                    try? await client.deleteSession(id: session.sessionID)
+        let remoteClient = try? client()
+        await forgetEverythingPlan(
+            readSessionIDs: {
+                BankID.allCases.compactMap { bank in
+                    (try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)))?.sessionID
+                }
+            },
+            deleteLocal: {
+                await MainActor.run {
+                    BankConnector.shared.resetForForgetEverything()
+                }
+                try? KeychainVault.deleteAll()
+            },
+            unlinkLedger: {
+                _ = try? SharedStore.make().update { ledger in
+                    for bank in BankID.allCases {
+                        ledger.setLink(bank, nil)
+                        if let balance = ledger.state.balances[bank], balance.origin == .bank {
+                            ledger.adoptBalance(bank, cents: balance.cents, at: balance.setAt, origin: .manual)
+                        }
+                    }
+                }
+                await BankReminders.reschedule(links: [:])
+                NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
+                await MainActor.run {
+                    BankConnector.shared.isForgetting = false
+                }
+            },
+            deleteRemote: { sessionID in
+                if let remoteClient {
+                    try? await remoteClient.deleteSession(id: sessionID)
                 }
             }
-        }
-        try? KeychainVault.deleteAll()
-        _ = try? SharedStore.make().update { ledger in
-            for bank in BankID.allCases {
-                ledger.setLink(bank, nil)
-                if let balance = ledger.state.balances[bank], balance.origin == .bank {
-                    ledger.adoptBalance(bank, cents: balance.cents, at: balance.setAt, origin: .manual)
-                }
-            }
-        }
-        await BankReminders.reschedule(links: [:])
-        NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
+        )
     }
 }

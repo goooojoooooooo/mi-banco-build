@@ -164,8 +164,8 @@ struct LedgerSnapshot: Sendable {
     var categories: [UUID: SpendingCategory] = [:]
     /// Ids de los traspasos entre tus cuentas (pares detectados y marcados a mano), calculados una sola vez.
     var ownTransfers: Set<UUID> = []
-    /// Líneas de estado de cada banco (Ajustes › Bancos y reverso de la tarjeta) y capturados sin confirmar (Plan 2, tarea 11).
-    var bankLines: [BankID: BankStatusLines] = [:]
+    /// Capturados sin confirmar por el banco tras el margen de cobertura (Plan 2, tarea 11).
+    /// Las líneas de estado de cada banco se calculan en vivo al dibujar (U45).
     var unconfirmed: Set<UUID> = []
     /// Día en que se calculó; al cambiar de día hay que recalcular aunque el estado no cambie.
     var day = Date.distantPast
@@ -180,14 +180,6 @@ struct LedgerSnapshot: Sendable {
                 balances[bank] = BalanceInfo(cents: b.cents, estimated: b.estimated, setAt: base.setAt, fromBank: base.fromBank,
                                              origin: base.origin)
             }
-            bankLines[bank] = bankStatusLines(
-                bank: bank,
-                link: state.links[bank],
-                estimated: balances[bank]?.estimated,
-                canConnect: canConnectBank(bank, cachedList: cachedASPSPs),
-                now: now,
-                calendar: DateText.madridCalendar
-            )
         }
         total = ledger.total()
         let unconfirmedSet = unconfirmedCaptureIDs(in: state, now: now)

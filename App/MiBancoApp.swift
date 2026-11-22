@@ -4,6 +4,26 @@ import UserNotifications
 
 @main
 struct MiBancoApp: App {
+    init() {
+        // Antes de terminar el arranque: así un toque en un aviso que abre la app en frío también llega al router.
+        UNUserNotificationCenter.current().delegate = ForegroundPresenter.shared
+    }
+
+    var body: some Scene {
+        // U62: `WindowGroup` envuelve su cierre en un `LazyView` interno que `SwiftUICore` puede reevaluar en
+        // `com.apple.SwiftUI.AsyncRenderer` al cambiar `@State` del `App` (p. ej. al terminar `LaunchCurtain`), disparando
+        // `_swift_task_checkIsolatedSwift` en Swift 6. Mantener `MiBancoApp` sin `@State` evita reevaluar `LazyView`.
+        WindowGroup {
+            AppShellView()
+        }
+        // Actualización de bancos en segundo plano (tarea 10): mejor esfuerzo, la decide el sistema.
+        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
+            await BackgroundRefresh.run()
+        }
+    }
+}
+
+private struct AppShellView: View {
     @State private var model = LedgerModel()
     @State private var portfolio = PortfolioModel()
     @State private var accountBook = AccountBookModel()
@@ -19,11 +39,6 @@ struct MiBancoApp: App {
     @AppStorage("lockEnabled") private var lockEnabled = true
     @Environment(\.scenePhase) private var scenePhase
 
-    init() {
-        // Antes de terminar el arranque: así un toque en un aviso que abre la app en frío también llega al router.
-        UNUserNotificationCenter.current().delegate = ForegroundPresenter.shared
-    }
-
     private var showsLock: Bool {
         #if DEBUG
         if DemoMode.isActive { return DemoMode.holdsLock && locked }
@@ -38,23 +53,17 @@ struct MiBancoApp: App {
         return lockEnabled && scenePhase != .active
     }
 
-    var body: some Scene {
-        WindowGroup {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-MiBancoSelfTest") {
-                BankingSelfTestView()
-                    .preferredColorScheme(.dark)
-            } else {
-                content
-            }
-            #else
+    var body: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-MiBancoSelfTest") {
+            BankingSelfTestView()
+                .preferredColorScheme(.dark)
+        } else {
             content
-            #endif
         }
-        // Actualización de bancos en segundo plano (tarea 10): mejor esfuerzo, la decide el sistema.
-        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
-            await BackgroundRefresh.run()
-        }
+        #else
+        content
+        #endif
     }
 
     @ViewBuilder

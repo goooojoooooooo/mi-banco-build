@@ -2,11 +2,13 @@ import SwiftUI
 import MiBancoCore
 
 /// Ajustes › Asistente (A4): un interruptor por cada uno de los seis temas de «Te puede interesar».
-/// Se guarda solo en este iPhone (`AssistantPreferencesStore`); nunca sale del dispositivo ni entra en copias de seguridad.
+/// Se guarda en el contenedor del App Group (`AssistantPreferencesStore`, entra en las copias del iPhone):
+/// guarda temas, pesos e ids de tarjeta (con nombres de comercio normalizados), sin importes (U61).
 struct AssistantSettingsSection: View {
     let briefing: BriefingModel
 
     static let scrollID = "settings-assistant-section"
+    @State private var errorTick = 0
 
     var body: some View {
         Section {
@@ -18,6 +20,7 @@ struct AssistantSettingsSection: View {
         } footer: {
             SettingsFooter("Elige qué temas puede enseñarte Onyx en «Te puede interesar». Todo se calcula en tu iPhone; tus preguntas no se guardan.")
         }
+        .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
 
     @ViewBuilder
@@ -45,7 +48,9 @@ struct AssistantSettingsSection: View {
         Binding(
             get: { briefing.isTopicEnabled(topic) },
             set: { enabled in
-                briefing.setTopicEnabled(enabled, for: topic)
+                if !briefing.setTopicEnabled(enabled, for: topic) {
+                    errorTick += 1
+                }
             }
         )
     }

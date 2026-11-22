@@ -96,6 +96,14 @@ final class BriefingUITests: XCTestCase {
             "La hoja del resumen no se cerró al pulsar Vale"
         )
 
+        // U35 #3: tras «Vale», salir y volver a la app NO vuelve a abrir el resumen automático en 5 s.
+        Thread.sleep(forTimeInterval: 2.0)
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+        XCTAssertFalse(doneButton.waitForExistence(timeout: 5), "U35: el resumen volvió a abrirse solo el mismo día")
+
         let reopenButton = app.buttons["Tu resumen"]
         XCTAssertTrue(reopenButton.waitForExistence(timeout: 8), "Falta el botón «Tu resumen» en la barra de Inicio")
         reopenButton.tap()
@@ -103,8 +111,7 @@ final class BriefingUITests: XCTestCase {
         XCTAssertTrue(doneButton.waitForExistence(timeout: 8), "El resumen no se volvió a abrir desde «Tu resumen»")
     }
 
-    /// Review Focus 3: con el modo privado activo, el contenido tapado («•••») aparece y ningún elemento expone «€» ni «%»,
-    /// tampoco tras hacer una pregunta en «Pregúntame».
+    /// Review Focus 3 + U36: con modo privado activo, ninguna etiqueta expone «€», «%», cifras `,dd` ni «•».
     func testBriefingPrivateHidesAmounts() throws {
         launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoShortfall", "-MiBancoDemoPrivate"])
 
@@ -114,14 +121,15 @@ final class BriefingUITests: XCTestCase {
         let sheet = app.scrollViews["briefing-scroll"]
         XCTAssertTrue(sheet.waitForExistence(timeout: 8), "Falta el contenedor del resumen")
 
-        let masked = sheet.staticTexts.matching(NSPredicate(format: "label CONTAINS '•••'")).firstMatch
-        XCTAssertTrue(masked.waitForExistence(timeout: 8), "Las líneas tapadas («•••») del resumen no aparecieron")
+        let spokenMasked = sheet.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'importe oculto'"))
+            .firstMatch
+        XCTAssertTrue(spokenMasked.waitForExistence(timeout: 8), "U36: falta «importe oculto» en las etiquetas de VoiceOver")
 
-        let euroElements = sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
-        XCTAssertEqual(euroElements.count, 0, "El resumen expuso '€' en modo privado")
-
-        let percentElements = sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%'"))
-        XCTAssertEqual(percentElements.count, 0, "El resumen expuso '%' en modo privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'")).count, 0, "El resumen expuso '€' en modo privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%'")).count, 0, "El resumen expuso '%' en modo privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES '.*[0-9]+,[0-9]{2}.*'")).count, 0, "U36: el resumen expuso cifras con decimales en privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '•'")).count, 0, "U36: ninguna etiqueta de VoiceOver debe contener '•'")
 
         let tipButton = element("briefing-tip-action")
         scrollInBriefingSheet(to: tipButton)
@@ -137,8 +145,10 @@ final class BriefingUITests: XCTestCase {
         scrollInBriefingSheet(to: answerCard)
         XCTAssertTrue(answerCard.waitForExistence(timeout: 8), "No apareció la respuesta del asistente en modo privado")
 
-        XCTAssertEqual(euroElements.count, 0, "La respuesta del asistente expuso '€' en modo privado")
-        XCTAssertEqual(percentElements.count, 0, "La respuesta del asistente expuso '%' en modo privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'")).count, 0, "La respuesta del asistente expuso '€' en modo privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%'")).count, 0, "La respuesta del asistente expuso '%' en modo privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES '.*[0-9]+,[0-9]{2}.*'")).count, 0, "U36: la respuesta expuso cifras en privado")
+        XCTAssertEqual(sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '•'")).count, 0, "U36: la respuesta expuso '•' en VoiceOver")
     }
 
     /// Tocar la acción del consejo de falta de saldo abre «Mover dinero» con el importe ya rellenado.
@@ -199,11 +209,12 @@ final class BriefingUITests: XCTestCase {
         scrollInBriefingSheet(to: questionField)
         XCTAssertTrue(questionField.waitForExistence(timeout: 8), "Falta el campo «Pregúntame algo de tu dinero…»")
         questionField.tap()
-        questionField.typeText("¿Debo comprar Apple?\n")
+        // U34 #1: sin `\n`, se exige tocar `assistant-send` habilitado.
+        questionField.typeText("¿Debo comprar Apple?")
         let sendButton = element("assistant-send")
-        if sendButton.exists && sendButton.isEnabled && sendButton.isHittable {
-            sendButton.tap()
-        }
+        XCTAssertTrue(sendButton.waitForExistence(timeout: 5), "U34: falta assistant-send")
+        XCTAssertTrue(sendButton.isEnabled, "U34: assistant-send debe estar activo antes de tocarlo")
+        sendButton.tap()
 
         let refusal = app.staticTexts.matching(
             NSPredicate(format: "label CONTAINS 'asesor financiero autorizado'")
@@ -253,6 +264,11 @@ final class BriefingUITests: XCTestCase {
         let morningRule = element("alert-rule-morningBriefing")
         scrollTo(morningRule)
         XCTAssertTrue(morningRule.waitForExistence(timeout: 10), "Falta la regla «Resumen cada mañana» en Avisos")
+        // U41: comprobar el subtítulo nuevo del aviso de la mañana.
+        XCTAssertTrue(
+            app.staticTexts["A las 08:30, si aún no has visto el resumen."].waitForExistence(timeout: 5),
+            "U41: falta el subtítulo actualizado de Resumen cada mañana"
+        )
         let morningTime = element("morning-briefing-time")
         scrollTo(morningTime)
         XCTAssertTrue(morningTime.waitForExistence(timeout: 6), "Falta el selector de hora de «Resumen cada mañana»")
@@ -316,5 +332,197 @@ final class BriefingUITests: XCTestCase {
         let hittablePickers = app.datePickers.allElementsBoundByIndex.filter { $0.isHittable }
             + app.pickerWheels.allElementsBoundByIndex.filter { $0.isHittable }
         XCTAssertEqual(hittablePickers.count, 0, "U33: quedó un selector de hora tocable encima del bloqueo")
+    }
+
+    /// U33: cambiar la hora en la rueda en línea actualiza el subtítulo de «Resumen cada mañana».
+    func testMorningTimeChangesSubtitle() throws {
+        launch(["-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules"])
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 15), "Avisos no apareció")
+
+        let morningTime = element("morning-briefing-time")
+        scrollTo(morningTime)
+        XCTAssertTrue(morningTime.waitForExistence(timeout: 8), "Falta morning-briefing-time")
+        morningTime.tap()
+
+        let hourWheel = app.pickerWheels.element(boundBy: 0)
+        XCTAssertTrue(hourWheel.waitForExistence(timeout: 6), "U33: no apareció la rueda de hora")
+        hourWheel.adjust(toPickerWheelValue: "09")
+
+        XCTAssertTrue(
+            app.staticTexts["A las 09:30, si aún no has visto el resumen."].waitForExistence(timeout: 8),
+            "U33/U41: el subtítulo no se actualizó a las 09:30"
+        )
+    }
+
+    /// U34 #1: escribir sin `\n` y tocar `assistant-send` devuelve la tarjeta de respuesta.
+    func testAssistantSendButton() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let field = element("assistant-question-field")
+        scrollInBriefingSheet(to: field)
+        XCTAssertTrue(field.waitForExistence(timeout: 8))
+        field.tap()
+        field.typeText("¿Cuánto tengo?")
+
+        let send = element("assistant-send")
+        XCTAssertTrue(send.waitForExistence(timeout: 5))
+        XCTAssertTrue(send.isEnabled, "U34: assistant-send debe estar habilitado")
+        send.tap()
+
+        let answerCard = element("assistant-answer-card")
+        scrollInBriefingSheet(to: answerCard)
+        XCTAssertTrue(answerCard.waitForExistence(timeout: 8), "U34: falta assistant-answer-card")
+        let totalLine = answerCard.staticTexts.matching(NSPredicate(format: "label CONTAINS 'En total tienes'")).firstMatch
+        XCTAssertTrue(totalLine.waitForExistence(timeout: 6), "U34: la respuesta no contiene «En total tienes»")
+    }
+
+    /// U34 #2 + U38: «Me interesa» lleva el título en su etiqueta y queda seleccionado sin quitar la tarjeta.
+    func testInterestedMarksCard() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let likeBtn = app.buttons["Me interesa: Cambio en una suscripción"]
+        scrollInBriefingSheet(to: likeBtn)
+        XCTAssertTrue(likeBtn.waitForExistence(timeout: 8), "U34/U38: falta «Me interesa: Cambio en una suscripción»")
+        likeBtn.tap()
+
+        XCTAssertTrue(waitFor(NSPredicate(format: "selected == true"), likeBtn, timeout: 6), "U34: Me interesa no quedó seleccionado")
+        XCTAssertTrue(likeBtn.exists, "U34: la tarjeta debe permanecer tras Me interesa")
+    }
+
+    /// U34 #3: tocar `briefing-close` cierra la hoja del resumen.
+    func testBriefingCloseButton() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        let done = element("briefing-done")
+        XCTAssertTrue(done.waitForExistence(timeout: 12))
+
+        let close = element("briefing-close")
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "U34: falta briefing-close")
+        close.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), done, timeout: 8), "U34: briefing-close no cerró el resumen")
+    }
+
+    /// U34 #4: tocar la acción de presupuestos del resumen selecciona la pestaña Gasto y abre Presupuestos.
+    func testBriefingLineActionOpensBudgets() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let tipAction = element("briefing-tip-action")
+        scrollInBriefingSheet(to: tipAction)
+        XCTAssertTrue(tipAction.waitForExistence(timeout: 8), "U34: falta la acción de presupuestos del resumen")
+        tipAction.tap()
+
+        XCTAssertTrue(app.tabBars.buttons["Gasto"].waitForExistence(timeout: 8))
+        XCTAssertTrue(
+            waitFor(NSPredicate(format: "selected == true"), app.tabBars.buttons["Gasto"], timeout: 8),
+            "U34: la pestaña Gasto no quedó seleccionada"
+        )
+    }
+
+    /// U34 #5: tocar la cabecera de la tarjeta `subscriptionPriceChange` abre el detalle del movimiento de Spotify.
+    func testInterestCardHeaderOpensAction() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let cardOpen = element("card-open-subscriptionPriceChange")
+        scrollInBriefingSheet(to: cardOpen)
+        XCTAssertTrue(cardOpen.waitForExistence(timeout: 8), "U34: falta card-open-subscriptionPriceChange")
+        cardOpen.tap()
+
+        XCTAssertTrue(
+            app.staticTexts["Spotify"].waitForExistence(timeout: 10),
+            "U34: tocar la cabecera de la tarjeta no abrió el detalle de Spotify"
+        )
+    }
+
+    /// U34 #6: preguntar por inversiones y tocar `answer-line-inv-value` cierra la hoja y enseña Apple.
+    func testAnswerLineActionOpensInvestments() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let field = element("assistant-question-field")
+        scrollInBriefingSheet(to: field)
+        field.tap()
+        field.typeText("¿Cómo van mis inversiones?")
+        element("assistant-send").tap()
+
+        let invLine = element("answer-line-inv-value")
+        scrollInBriefingSheet(to: invLine)
+        XCTAssertTrue(invLine.waitForExistence(timeout: 8), "U34: falta answer-line-inv-value")
+        invLine.tap()
+
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), element("briefing-done"), timeout: 8), "U34: no se cerró el resumen")
+        let apple = app.buttons["Apple"]
+        scrollTo(apple)
+        XCTAssertTrue(apple.waitForExistence(timeout: 10), "U34: no se abrió Cartera con Apple")
+    }
+
+    /// U35 #1: el resumen nunca aparece encima del bloqueo; aparece tras desbloquear.
+    func testBriefingNeverAboveLock() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoBriefing", "quiet"])
+
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 8), "U35: falta la pantalla de bloqueo")
+        XCTAssertFalse(element("briefing-done").exists, "U35: el resumen subió encima del bloqueo")
+
+        XCTAssertTrue(element("briefing-done").waitForExistence(timeout: 16), "U35: el resumen no apareció tras desbloquear")
+    }
+
+    /// U35 #2: «Escuchar» se para al pasar a segundo plano y vuelve a decir «Escuchar» al volver.
+    func testListenStopsOnBackground() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let listen = app.buttons["Escuchar"]
+        XCTAssertTrue(listen.waitForExistence(timeout: 8))
+        listen.tap()
+        XCTAssertTrue(app.buttons["Parar"].waitForExistence(timeout: 6), "U35: no cambió a Parar")
+
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.0)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
+
+        XCTAssertTrue(listen.waitForExistence(timeout: 8), "U35: la voz no se paró al salir a segundo plano")
+    }
+
+    /// U35 #4: apagar «Cambios en suscripciones» en Ajustes › Asistente oculta su tarjeta al abrir «Tu resumen».
+    func testAssistantTopicSwitchHidesCards() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAssistantSettings"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 15))
+
+        let subTopic = element("assistant-topic-subscriptionPriceChange")
+        scrollTo(subTopic)
+        XCTAssertTrue(subTopic.waitForExistence(timeout: 10))
+        subTopic.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == '0'"), subTopic, timeout: 6))
+
+        app.tabBars.buttons["Inicio"].tap()
+        let openBriefing = app.buttons["Tu resumen"]
+        XCTAssertTrue(openBriefing.waitForExistence(timeout: 8))
+        openBriefing.tap()
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 8))
+
+        XCTAssertFalse(element("card-dislike-subscriptionPriceChange").exists, "U35: la tarjeta apareció con su tema apagado")
+    }
+
+    /// U37: entrar por la ruta del aviso de la mañana abre el resumen aunque hoy ya se hubiera visto.
+    func testBriefingRouteOpensEvenIfSeen() throws {
+        launch(["-MiBancoDemoRoute", "briefing"])
+        XCTAssertTrue(element("briefing-done").waitForExistence(timeout: 12), "U37: la ruta del aviso de la mañana no abrió el resumen")
+    }
+
+    /// U39: si falla guardar preferencias, «No me interesa» conserva la tarjeta en pantalla.
+    func testDislikeKeepsCardWhenSaveFails() throws {
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrefsFail"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let subDislike = element("card-dislike-subscriptionPriceChange")
+        scrollInBriefingSheet(to: subDislike)
+        XCTAssertTrue(subDislike.waitForExistence(timeout: 8))
+        subDislike.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        XCTAssertTrue(subDislike.exists, "U39: la tarjeta desapareció aunque falló el guardado de preferencias")
     }
 }

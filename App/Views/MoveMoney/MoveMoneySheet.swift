@@ -200,7 +200,7 @@ struct MoveMoneySheet: View {
                                 selectPayee(payee)
                             } label: {
                                 HStack(spacing: 14) {
-                                    PositionMonogramTile(name: payee.name, size: 32)
+                                    ContactMonogramTile(name: payee.name, size: 32)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(payee.name)
                                             .titan(.option)
@@ -209,6 +209,7 @@ struct MoveMoneySheet: View {
                                             .titan(.meta)
                                             .foregroundStyle(Theme.label3)
                                             .privacySensitive()
+                                            .accessibilityLabel(payeeSpokenSubtitle(payee))
                                     }
                                     Spacer(minLength: 0)
                                     Image(systemName: "chevron.right")
@@ -281,7 +282,7 @@ struct MoveMoneySheet: View {
             Text("IBAN de \(bank.displayName)")
                 .titan(.option)
                 .foregroundStyle(Theme.label)
-            TextField("ES00 0000 0000 0000 0000 0000", text: $inlineIBAN)
+            TextField("Pega o escribe el IBAN", text: $inlineIBAN)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
                 .textInputAutocapitalization(.characters)
@@ -294,6 +295,7 @@ struct MoveMoneySheet: View {
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
                 .privacySensitive()
                 .accessibilityLabel("IBAN de \(bank.displayName)")
+                .accessibilityIdentifier("move-inline-iban-field")
             Text("Se guarda solo en este iPhone.")
                 .titan(.meta)
                 .foregroundStyle(Theme.label3)
@@ -331,6 +333,7 @@ struct MoveMoneySheet: View {
                 .padding(.horizontal, 12)
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
+                .accessibilityIdentifier("move-inline-payee-name")
             TextField("IBAN (opcional)", text: $newPayeeIBAN)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
@@ -343,6 +346,7 @@ struct MoveMoneySheet: View {
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
                 .privacySensitive()
+                .accessibilityIdentifier("move-inline-payee-iban")
             TextField("Móvil para Bizum (opcional)", text: $newPayeePhone)
                 .titan(.body)
                 .foregroundStyle(Theme.label)
@@ -354,6 +358,7 @@ struct MoveMoneySheet: View {
                 .frame(minHeight: 44)
                 .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
                 .privacySensitive()
+                .accessibilityIdentifier("move-inline-payee-phone")
             Text("Se guarda solo en este iPhone.")
                 .titan(.meta)
                 .foregroundStyle(Theme.label3)
@@ -386,8 +391,9 @@ struct MoveMoneySheet: View {
         let hidden = preferences.privateMode
         let choices = sourceChoices(for: amount.cents)
         let activeFrom = resolvedFrom(among: choices)
-        let unsupportedPhoneFromTR = activeFrom == .tr && targetPasteKind == .phone
-        let canConfirm = amount.cents > 0 && activeFrom != nil && chosenTarget != nil && targetPasteKind != nil && !unsupportedPhoneFromTR
+        let isPayeeTarget: Bool = if case .payee = chosenTarget { true } else { false }
+        let unsupportedFromTR = activeFrom == .tr && isPayeeTarget
+        let canConfirm = amount.cents > 0 && activeFrom != nil && chosenTarget != nil && targetPasteKind != nil && !unsupportedFromTR
 
         return ScrollView {
             VStack(spacing: 18) {
@@ -398,20 +404,21 @@ struct MoveMoneySheet: View {
                         .padding(.top, 4)
                 }
 
-                Text(amount.formattedEUR)
+                Text(amount.typedText)
                     .font(.system(size: amountSize, weight: .semibold))
                     .tracking(-amountSize * 0.03)
                     .monospacedDigit()
                     .foregroundStyle(amount.cents > 0 ? Theme.label : Theme.label3)
                     .contentTransition(.numericText())
-                    .animation(reduceMotion ? nil : Theme.Motion.morph, value: amount.cents)
+                    .animation(reduceMotion ? nil : Theme.Motion.morph, value: amount.typedText)
                     .lineLimit(1)
                     .minimumScaleFactor(0.55)
                     .frame(maxWidth: .infinity)
                     .blur(radius: hidden ? 14 : 0, opaque: false)
                     .opacity(hidden ? 0.75 : 1)
                     .privacySensitive()
-                    .accessibilityLabel(hidden ? "importe oculto" : amount.formattedEUR)
+                    .accessibilityLabel(hidden ? "importe oculto" : amount.typedText)
+                    .accessibilityIdentifier("move-amount-display")
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Desde")
@@ -426,14 +433,25 @@ struct MoveMoneySheet: View {
                                 sourceChip(choice: choice, selected: activeFrom == choice.option.bank, hidden: hidden)
                             }
                         }
+                        .padding(.trailing, 24)
                     }
                     .scrollIndicators(.hidden)
+                    .overlay(alignment: .trailing) {
+                        LinearGradient(
+                            colors: [.clear, Theme.canvas],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: 24)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    }
                 }
 
                 AmountKeypad(amount: $amount)
 
-                if unsupportedPhoneFromTR {
-                    Text(bankTransferHint(from: .tr, kind: .phone, amountCents: amount.cents))
+                if unsupportedFromTR {
+                    Text("Desde Trade Republic solo puedes enviar dinero a tu cuenta de referencia. Elige otro banco.")
                         .titan(.subtitle)
                         .foregroundStyle(Theme.warning)
                         .multilineTextAlignment(.center)
@@ -452,9 +470,11 @@ struct MoveMoneySheet: View {
                     .accessibilityIdentifier("move-slide")
                     .padding(.top, 4)
                 } else {
-                    Text("Escribe un importe para preparar el traspaso.")
+                    Text(emptyConfirmMessage(activeFrom: activeFrom, isPayeeTarget: isPayeeTarget))
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 16)
                 }
@@ -466,21 +486,26 @@ struct MoveMoneySheet: View {
         .accessibilityIdentifier("move-money-scroll")
     }
 
+    private func emptyConfirmMessage(activeFrom: BankID?, isPayeeTarget: Bool) -> String {
+        guard let target = chosenTarget else {
+            return "Elige a dónde va el dinero."
+        }
+        if targetPasteKind == nil {
+            return "Falta el IBAN de \(accountBook.displayName(for: target))."
+        }
+        if activeFrom == nil {
+            return "Elige desde qué banco."
+        }
+        return isPayeeTarget
+            ? "Escribe un importe para preparar el pago."
+            : "Escribe un importe para preparar el traspaso."
+    }
+
     private func sourceChip(choice: SourceChoice, selected: Bool, hidden: Bool) -> some View {
         let option = choice.option
-        let prefix = option.isEstimated ? "≈\u{00A0}" : ""
-        let detail: String
-        let spokenDetail: String
-        if !choice.hasKnownBalance {
-            detail = "sin saldo"
-            spokenDetail = "sin saldo"
-        } else if option.fits {
-            detail = "te quedarían \(prefix)\(formatEUR(option.leftAfterCents))"
-            spokenDetail = hidden ? "importe oculto" : "te quedarían \(spokenAmount(option.leftAfterCents, hidden: false))"
-        } else {
-            detail = "no llega"
-            spokenDetail = "no llega"
-        }
+        let detail = payOptionDetail(option, hasKnownBalance: choice.hasKnownBalance)
+        let spokenDetail = payOptionSpokenDetail(option, hasKnownBalance: choice.hasKnownBalance, hidden: hidden)
+        let hasSensitiveAmount = choice.hasKnownBalance && option.balanceAfterCents >= 0
 
         return Button {
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
@@ -501,20 +526,27 @@ struct MoveMoneySheet: View {
                         } else if option.fits {
                             Text(detail)
                                 .foregroundStyle(selected ? Theme.onTileSelected.opacity(0.7) : Theme.label2)
-                                .privateAmount()
-                                .accessibilityLabel(hidden ? "importe oculto" : detail)
+                                .privateAmount(spoken: spokenDetail)
                         } else {
-                            HStack(spacing: 4) {
+                            HStack(alignment: .top, spacing: 4) {
                                 Image(systemName: "exclamationmark.triangle.fill")
                                     .font(.system(size: 10, weight: .semibold))
+                                    .padding(.top, 2)
                                     .accessibilityHidden(true)
-                                Text(detail)
+                                if hasSensitiveAmount {
+                                    Text(detail)
+                                        .privateAmount(spoken: spokenDetail)
+                                } else {
+                                    Text(detail)
+                                }
                             }
                             .foregroundStyle(selected ? Theme.onTileSelected : Theme.warning)
                         }
                     }
                     .titan(.caption)
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.horizontal, 14)
@@ -530,6 +562,7 @@ struct MoveMoneySheet: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(option.bank.displayName), \(spokenDetail)")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : [.isButton])
+        .accessibilityIdentifier("move-from-\(option.bank.rawValue)")
     }
 
     // MARK: - Paso 3: Listo
@@ -547,9 +580,9 @@ struct MoveMoneySheet: View {
             VStack(spacing: 20) {
                 ZStack {
                     Circle()
-                        .fill(Theme.income.opacity(0.16))
+                        .fill(Theme.label.opacity(0.12))
                         .frame(width: 72, height: 72)
-                    DrawnCheck(lineWidth: 3, color: Theme.income)
+                    DrawnCheck(lineWidth: 3, color: Theme.label)
                         .frame(width: 30, height: 30)
                 }
                 .padding(.top, 28)
@@ -700,7 +733,7 @@ struct MoveMoneySheet: View {
                 step = .amount
             }
         } catch {
-            inlineIBANError = "No se pudo guardar en el Llavero. Inténtalo de nuevo."
+            inlineIBANError = "No se pudo guardar. Inténtalo de nuevo."
             errorTick += 1
         }
     }
@@ -759,14 +792,20 @@ struct MoveMoneySheet: View {
                 step = .amount
             }
         } catch {
-            newPayeeError = "No se pudo guardar el contacto. Inténtalo de nuevo."
+            newPayeeError = "No se pudo guardar. Inténtalo de nuevo."
             errorTick += 1
         }
     }
 
     private func payeeSubtitle(_ payee: Payee) -> String {
         if let iban = payee.iban { return maskedIBAN(iban) }
-        if let phone = payee.phone { return phone }
+        if let phone = payee.phone { return maskedPhone(phone) }
+        return "Sin datos"
+    }
+
+    private func payeeSpokenSubtitle(_ payee: Payee) -> String {
+        if let iban = payee.iban { return maskedIBAN(iban) }
+        if let phone = payee.phone { return spokenMaskedPhone(phone) }
         return "Sin datos"
     }
 
@@ -809,7 +848,8 @@ struct MoveMoneySheet: View {
         if let chosenFrom, choices.contains(where: { $0.option.bank == chosenFrom }) {
             return chosenFrom
         }
-        if targetPasteKind == .phone {
+        let isPayeeTarget: Bool = if case .payee = chosenTarget { true } else { false }
+        if targetPasteKind == .phone || isPayeeTarget {
             if let nonTRFit = choices.first(where: { $0.hasKnownBalance && $0.option.fits && $0.option.bank != .tr }) {
                 return nonTRFit.option.bank
             }
@@ -822,6 +862,7 @@ struct MoveMoneySheet: View {
     }
 
     private func prepareTransfer(from: BankID, target: MoveTarget, cents: Int) {
+        let isPayeeTarget: Bool = if case .payee = target { true } else { false }
         let clipboardValue: String?
         let kind: PasteKind
         switch target {
@@ -840,7 +881,7 @@ struct MoveMoneySheet: View {
                 kind = .iban
             }
         }
-        guard !(from == .tr && kind == .phone), let value = clipboardValue else {
+        guard !(from == .tr && isPayeeTarget), let value = clipboardValue else {
             slideAttempt += 1
             errorTick += 1
             return

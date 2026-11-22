@@ -27,9 +27,13 @@ struct ImportPreview: Equatable, Hashable, Sendable, Identifiable {
     let statement: ParsedStatement
     let report: ReconcileReport
     var tradeRepublicRows: [TradeRepublicRow] = []
+    var tradeRepublicInvestmentsFailed: Bool = false
 
     static func == (a: ImportPreview, b: ImportPreview) -> Bool {
-        a.statement == b.statement && a.report == b.report && a.tradeRepublicRows == b.tradeRepublicRows
+        a.statement == b.statement
+            && a.report == b.report
+            && a.tradeRepublicRows == b.tradeRepublicRows
+            && a.tradeRepublicInvestmentsFailed == b.tradeRepublicInvestmentsFailed
     }
 
     func hash(into hasher: inout Hasher) {
@@ -60,30 +64,22 @@ final class LedgerModel {
     private static let onboardingDoneKey = "onboardingDone"
     /// Una vez arrancada la bienvenida de primera ejecución, sigue activa durante los 3 pasos aunque el paso 1 guarde saldos.
     private(set) var onboardingSessionActive = false
-    private(set) var demoOnboardingFinished = false
+    /// false si la lectura inicial del libro falló (U56): se reevalúa en el primer `reload()` que lea bien.
+    @ObservationIgnored private var startupLoadSucceeded = false
     #if DEBUG
     /// Demo: lo que "escribiría el intent en el almacén"; `reload` lo recoge como si lo leyera de disco.
     @ObservationIgnored private var demoIncoming: LedgerState?
     #endif
 
+    /// Tanto en demo como en Release la bienvenida sigue únicamente `onboardingSessionActive` (U48, U56).
     var needsOnboarding: Bool {
-        #if DEBUG
-        if DemoMode.isActive {
-            return DemoMode.onboardingStep != nil && !demoOnboardingFinished
-        }
-        #endif
-        return onboardingSessionActive || (
-            !UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
-                && state.balances.isEmpty
-                && state.movements.isEmpty
-        )
+        onboardingSessionActive
     }
 
     func finishOnboarding() {
         onboardingSessionActive = false
         #if DEBUG
         if DemoMode.isActive {
-            demoOnboardingFinished = true
             publish(state)
             return
         }
@@ -96,23 +92,21 @@ final class LedgerModel {
         store = SharedStore.make()
         #if DEBUG
         if DemoMode.isActive {
-            state = DemoMode.state()
-            snapshot = LedgerSnapshot(state: state, cachedASPSPs: BankConnector.shared.cachedASPSPs)
-        }
-        #endif
-        reload()
-        #if DEBUG
-        if DemoMode.isActive {
-            onboardingSessionActive = DemoMode.onboardingStep != nil
+            let demoState = DemoMode.state()
+            state = demoState
+            snapshot = LedgerSnapshot(state: demoState, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            let decision = onboardingDecision(
+                load: .success(demoState),
+                onboardingDone: DemoMode.onboardingStep == nil
+            )
+            startupLoadSucceeded = true
+            onboardingSessionActive = decision.startSession
+            resolvePendingMoves()
         } else {
-            onboardingSessionActive = !UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
-                && state.balances.isEmpty
-                && state.movements.isEmpty
+            loadInitialFromStore()
         }
         #else
-        onboardingSessionActive = !UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
-            && state.balances.isEmpty
-            && state.movements.isEmpty
+        loadInitialFromStore()
         #endif
         observer = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .ledgerDidChange) {
@@ -129,13 +123,42 @@ final class LedgerModel {
         }
     }
 
+    private func loadInitialFromStore() {
+        let result = Result { try store.load() }
+        let done = UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+        let decision = onboardingDecision(load: result, onboardingDone: done)
+        if case .success(let loaded) = result {
+            startupLoadSucceeded = true
+            state = loaded
+            snapshot = LedgerSnapshot(state: loaded, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            if decision.markDone {
+                UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+            }
+        } else {
+            startupLoadSucceeded = false
+        }
+        onboardingSessionActive = decision.startSession
+        resolvePendingMoves()
+    }
+
     /// Si falla la lectura se conserva lo que ya se mostraba.
     func reload() {
-        if let loaded = loadNext(), (loaded != state || !Calendar.current.isDateInToday(snapshot.day)) {
-            publish(loaded)
-        } else {
-            resolvePendingMoves()
+        if let loaded = loadNext() {
+            if !startupLoadSucceeded {
+                startupLoadSucceeded = true
+                let done = UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+                let decision = onboardingDecision(load: .success(loaded), onboardingDone: done)
+                if decision.markDone {
+                    UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+                }
+                onboardingSessionActive = decision.startSession
+            }
+            if loaded != state || !Calendar.current.isDateInToday(snapshot.day) {
+                publish(loaded)
+                return
+            }
         }
+        resolvePendingMoves()
     }
 
     /// Tras una consulta a un banco o cambio de lista ASPSP: rehace el snapshot sin `arrival`.
@@ -217,8 +240,14 @@ final class LedgerModel {
                 }
                 if doneMoveTimers[move.id] == nil {
                     let moveID = move.id
+                    let holdSeconds: Int = {
+                        #if DEBUG
+                        if DemoMode.isActive && DemoMode.demoPendingMode == "done" { return 30 }
+                        #endif
+                        return 6
+                    }()
                     doneMoveTimers[moveID] = Task { [weak self] in
-                        try? await Task.sleep(for: .seconds(6))
+                        try? await Task.sleep(for: .seconds(holdSeconds))
                         guard !Task.isCancelled, let self else { return }
                         let anim: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.quick
                         withAnimation(anim) {
@@ -368,12 +397,25 @@ final class LedgerModel {
         let statement = try parseStatement(data, expected: bank, now: now, calendar: cal)
         let report = Ledger(state: state).previewImport(statement, now: now, calendar: cal)
         let trRows: [TradeRepublicRow]
-        if bank == .tr, let table = try? CSVTable.parse(data), let rows = try? parseTradeRepublicExport(table, calendar: cal) {
-            trRows = rows
+        let trInvestmentsFailed: Bool
+        if bank == .tr {
+            if let table = try? CSVTable.parse(data), let rows = try? parseTradeRepublicExport(table, calendar: cal) {
+                trRows = rows
+                trInvestmentsFailed = false
+            } else {
+                trRows = []
+                trInvestmentsFailed = true
+            }
         } else {
             trRows = []
+            trInvestmentsFailed = false
         }
-        return ImportPreview(statement: statement, report: report, tradeRepublicRows: trRows)
+        return ImportPreview(
+            statement: statement,
+            report: report,
+            tradeRepublicRows: trRows,
+            tradeRepublicInvestmentsFailed: trInvestmentsFailed
+        )
     }
 
     @discardableResult

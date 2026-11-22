@@ -128,6 +128,15 @@ final class InvestmentsUITests: XCTestCase {
         XCTAssertTrue(invLabel.waitForExistence(timeout: 10), "No se ve Inversiones")
         XCTAssertTrue(countLabel.waitForExistence(timeout: 10), "No se ve 3 posiciones")
 
+        // U14: la tarjeta dice «desde la compra» y no usa el formato viejo «(viernes)».
+        let sinceBuy = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'desde la compra'"))
+            .firstMatch
+        XCTAssertTrue(sinceBuy.waitForExistence(timeout: 5), "U14: la tarjeta de inversiones debe mostrar «desde la compra»")
+        let oldParenFriday = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS '(viernes)'"))
+        XCTAssertEqual(oldParenFriday.count, 0, "U14: no debe quedar el formato viejo «(viernes)»")
+
         let appleRow = app.buttons["Apple"]
         scrollTo(appleRow)
         XCTAssertTrue(appleRow.waitForExistence(timeout: 10), "No se ve la fila de Apple")
@@ -207,14 +216,154 @@ final class InvestmentsUITests: XCTestCase {
 
         let field = app.textFields["manualPriceField"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), "No apareció el campo de precio a mano")
-        // Al guardar el precio actual, el campo pierde el foco y su valor de accesibilidad debe quedar oculto.
-        let save = app.buttons["Guardar"]
-        XCTAssertTrue(save.waitForExistence(timeout: 5), "Falta el botón Guardar")
-        save.tap()
-        if field.exists {
+        // U12 + U19: en modo privado el campo abre sin foco y su valor de accesibilidad debe ser «importe oculto».
+        XCTAssertEqual(field.value as? String, "importe oculto", "U12/U19: el campo en privado debe abrir como importe oculto")
+
+        // Al enfocarlo y luego quitar el foco sin guardar, vuelve a «importe oculto».
+        field.tap()
+        let titleText = app.staticTexts["Apple"]
+        if titleText.exists && titleText.isHittable {
+            titleText.tap()
+        } else {
+            app.buttons["Guardar"].tap()
+        }
+        if field.waitForExistence(timeout: 2) {
             let valueText = (field.value as? String) ?? ""
-            XCTAssertFalse(valueText.contains("200"), "El campo sin foco filtró el precio a VoiceOver: \(valueText)")
+            XCTAssertEqual(valueText, "importe oculto", "U12/U19: el campo sin foco filtró el precio a VoiceOver: \(valueText)")
         }
         close.tap()
+    }
+
+    /// U9: el campo de precio a mano abre sin punto de miles («3000,00»), borrar «,00» guarda 3.000 € y no 3 €.
+    func testManualPriceThousands() throws {
+        launch(["-MiBancoDemoCard", "inv"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+
+        let ethRow = app.buttons["Ethereum"]
+        scrollTo(ethRow)
+        XCTAssertTrue(ethRow.waitForExistence(timeout: 10), "No se ve la fila de Ethereum")
+        ethRow.tap()
+
+        let manualButton = app.buttons["Poner precio a mano"]
+        scrollTo(manualButton)
+        XCTAssertTrue(manualButton.waitForExistence(timeout: 8), "Falta Poner precio a mano")
+        manualButton.tap()
+
+        let field = app.textFields["manualPriceField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Falta el campo manualPriceField")
+        XCTAssertEqual(field.value as? String, "3000,00", "U9: el campo debe rellenarse sin punto de miles («3000,00»)")
+
+        field.tap()
+        // Borra ",00" (dos ⌫ y la coma) → queda "3000".
+        field.typeText("\u{8}\u{8}\u{8}")
+        let save = app.buttons["Guardar"]
+        XCTAssertTrue(save.waitForExistence(timeout: 5), "Falta Guardar")
+        save.tap()
+
+        let priceRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Precio:' AND label CONTAINS '3.000,00' AND label CONTAINS 'a mano'"))
+            .firstMatch
+        XCTAssertTrue(priceRow.waitForExistence(timeout: 8), "U9: la fila Precio debe mostrar 3.000,00 € · a mano")
+
+        let wrongTinyValue = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == '0,03 euros' OR label CONTAINS '0,03'"))
+        XCTAssertEqual(wrongTinyValue.count, 0, "U9: el valor de Ethereum se corrompió a 0,03 €")
+    }
+
+    /// U13 #1: tocar la tarjeta Inversiones la voltea y «Importar de nuevo» lleva a Ajustes › Inversiones.
+    func testInvestmentsCardBackImportAgain() throws {
+        launch(["-MiBancoDemoCard", "inv"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+
+        let card = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Inversiones' AND label CONTAINS '3 posiciones'"))
+            .firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "Falta la tarjeta Inversiones")
+        card.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+
+        let importAgain = app.buttons["Importar de nuevo"]
+        XCTAssertTrue(importAgain.waitForExistence(timeout: 8), "U13: no apareció Importar de nuevo en el reverso")
+        importAgain.tap()
+
+        let importRow = element("investments-import")
+        scrollTo(importRow)
+        XCTAssertTrue(importRow.waitForExistence(timeout: 10), "U13: Importar de nuevo no abrió Ajustes › Inversiones")
+    }
+
+    /// U13 #2: el segmento «Cartera» cambia a la lista de posiciones de inversión.
+    func testCarteraSegmentSelectsInvestments() throws {
+        launch(["-MiBancoDemoPortfolio", "-MiBancoDemoCard", "todo"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+
+        let carteraSegment = app.buttons["Cartera"]
+        XCTAssertTrue(carteraSegment.waitForExistence(timeout: 10), "U13: falta el segmento Cartera")
+        carteraSegment.tap()
+
+        let appleRow = app.buttons["Apple"]
+        scrollTo(appleRow)
+        XCTAssertTrue(appleRow.waitForExistence(timeout: 10), "U13: tocar Cartera no mostró Apple")
+    }
+
+    /// U13 #3: guardar un precio a mano y luego borrarlo devuelve la fila Precio a «mercado».
+    func testManualPriceSaveAndClear() throws {
+        launch(["-MiBancoDemoCard", "inv"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+
+        let appleRow = app.buttons["Apple"]
+        scrollTo(appleRow)
+        XCTAssertTrue(appleRow.waitForExistence(timeout: 10), "No se ve Apple")
+        appleRow.tap()
+
+        let manualButton = app.buttons["Poner precio a mano"]
+        scrollTo(manualButton)
+        XCTAssertTrue(manualButton.waitForExistence(timeout: 8), "Falta Poner precio a mano")
+        manualButton.tap()
+
+        let field = app.textFields["manualPriceField"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Falta manualPriceField")
+        field.tap()
+        let current = (field.value as? String) ?? ""
+        if !current.isEmpty {
+            field.typeText(String(repeating: "\u{8}", count: current.count + 2))
+        }
+        field.typeText("250")
+        app.buttons["Guardar"].tap()
+
+        let manualRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Precio:' AND label CONTAINS '250,00' AND label CONTAINS 'a mano'"))
+            .firstMatch
+        XCTAssertTrue(manualRow.waitForExistence(timeout: 8), "U13: no se guardó el precio manual 250,00")
+
+        // Esperar a que se cierre el editor y volver a abrirlo para borrar el precio manual.
+        Thread.sleep(forTimeInterval: 1.2)
+        scrollTo(manualButton)
+        manualButton.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "No reabrió manualPriceField")
+        field.tap()
+        let savedText = (field.value as? String) ?? ""
+        field.typeText(String(repeating: "\u{8}", count: max(savedText.count + 2, 10)))
+        app.buttons["Guardar"].tap()
+
+        let marketRow = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'Precio:' AND label CONTAINS 'mercado'"))
+            .firstMatch
+        XCTAssertTrue(marketRow.waitForExistence(timeout: 8), "U13: vaciar el precio a mano no volvió a mercado")
+    }
+
+    /// U17: el último resumen de importación en Ajustes › Inversiones desaparece al cambiar de pestaña y volver.
+    func testImportFeedbackClearsOnLeave() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoInvestmentsSettings", "-MiBancoDemoImportFeedback"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 15), "Ajustes no aparece")
+
+        let feedback = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'operaciones nuevas'")).firstMatch
+        scrollTo(feedback)
+        XCTAssertTrue(feedback.waitForExistence(timeout: 10), "U17: no se mostró el resumen de importación de demo")
+
+        app.tabBars.buttons["Inicio"].tap()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 8), "No cambió a Inicio")
+        app.tabBars.buttons["Ajustes"].tap()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No volvió a Ajustes")
+
+        XCTAssertFalse(feedback.waitForExistence(timeout: 2), "U17: el resumen de importación no se limpió al salir")
     }
 }

@@ -70,6 +70,23 @@ private struct PrivateAmount: ViewModifier {
     }
 }
 
+/// Un importe con etiqueta explícita (U8): oculta visualmente en modo privado y sustituye la etiqueta por «importe oculto»
+/// en el propio texto, sin ocultar el nodo (así VoiceOver lee «importe oculto» y XCUITest nunca ve «€» ni «%»).
+private struct PrivateAmountSpoken: ViewModifier {
+    let spoken: String
+    let radius: CGFloat
+    @Environment(AppPreferences.self) private var preferences
+
+    func body(content: Content) -> some View {
+        let hidden = preferences.privateMode
+        content
+            .blur(radius: hidden ? radius : 0, opaque: false)
+            .opacity(hidden ? 0.75 : 1)
+            .privacySensitive()
+            .accessibilityLabel(hidden ? "importe oculto" : spoken)
+    }
+}
+
 /// Un campo editable con un importe (saldos, umbrales): con el modo privado se difumina solo mientras no se edita,
 /// y nunca se oculta a VoiceOver (tiene que poder encontrarse y editarse).
 private struct PrivateField: ViewModifier {
@@ -88,6 +105,11 @@ private struct PrivateField: ViewModifier {
 extension View {
     /// `radius`: 9 para importes de fila, más para las cifras grandes.
     func privateAmount(radius: CGFloat = 9) -> some View { modifier(PrivateAmount(radius: radius)) }
+
+    /// Variante U8 con etiqueta hablada explícita («importe oculto» cuando el ojo está cerrado).
+    func privateAmount(spoken: String, radius: CGFloat = 9) -> some View {
+        modifier(PrivateAmountSpoken(spoken: spoken, radius: radius))
+    }
 
     /// Para campos de texto con importe: ver `PrivateField`.
     func privateField(editing: Bool) -> some View { modifier(PrivateField(editing: editing)) }

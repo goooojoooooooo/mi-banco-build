@@ -10,7 +10,7 @@ struct InvestmentsSection: View {
     static let scrollID = "inversiones"
 
     private static let pricesExplanation =
-        "Para saber cuánto valen tus inversiones, Mi Banco pregunta a Yahoo Finance el precio de cada valor usando solo su código (ISIN). No envía cuántas acciones tienes, ni importes, ni tu nombre. Si lo apagas, puedes poner los precios a mano."
+        "Para saber cuánto valen tus inversiones, Mi Banco pregunta a Yahoo Finance el precio de cada valor usando solo su código. No envía cuántas acciones tienes, ni importes, ni tu nombre. Si lo apagas, puedes poner los precios a mano."
 
     private static let exportHint =
         "Cómo exportar: en Trade Republic, Perfil › Extractos › Exportar transacciones › Guardar en Archivos. Si ya importaste el extracto en Bancos, tus inversiones ya están."
@@ -18,6 +18,7 @@ struct InvestmentsSection: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.scenePhase) private var scenePhase
     @State private var successTick = 0
     @State private var errorTick = 0
 
@@ -72,7 +73,7 @@ struct InvestmentsSection: View {
             Toggle(isOn: pricesBinding) {
                 OptionLabel(
                     title: "Precios de tus inversiones",
-                    detail: portfolio.isRefreshingPrices ? "Actualizando precios…" : "Solo envía el código (ISIN) a Yahoo Finance",
+                    detail: portfolio.isRefreshingPrices ? "Actualizando precios…" : "Solo envía el código de cada valor a Yahoo Finance, nunca cuánto tienes.",
                     systemImage: "chart.line.uptrend.xyaxis"
                 )
             }
@@ -100,6 +101,10 @@ struct InvestmentsSection: View {
         }
         .sensoryFeedback(.success, trigger: successTick)
         .sensoryFeedback(.error, trigger: errorTick)
+        .onDisappear { portfolio.clearImportFeedback() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { portfolio.clearImportFeedback() }
+        }
     }
 
     private var statusText: String {

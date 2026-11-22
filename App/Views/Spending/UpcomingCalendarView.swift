@@ -10,14 +10,29 @@ struct UpcomingCalendarView: View {
     let onMoveMoney: (MoveRequest) -> Void
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(MerchantLogos.self) private var logos
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    private enum CalendarBlock: Identifiable {
+        case day(UpcomingDay)
+        case quietSpan(first: Date, nextActive: Date?)
+
+        var id: String {
+            switch self {
+            case .day(let day): "day-\(day.day.timeIntervalSince1970)"
+            case .quietSpan(let first, _): "quiet-\(first.timeIntervalSince1970)"
+            }
+        }
+    }
 
     var body: some View {
         let now = Date()
         let cal = DateText.madridCalendar
         let days = upcomingCalendar(state: model.state, book: accountBook.book, now: now, calendar: cal)
-        let firstBelow = firstBelowFloorDays(days)
+        let topUps = calendarTopUps(days: days, floors: accountBook.book.floors)
+        let topUpsByDay = Dictionary(grouping: topUps, by: \.firstDay)
         let hasAnyActivity = days.contains { !$0.isEmpty || !($0.belowFloor.isEmpty) }
+        let blocks = buildBlocks(days: days)
 
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
@@ -41,8 +56,13 @@ struct UpcomingCalendarView: View {
                     .padding(18)
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
                 } else {
-                    ForEach(days, id: \.day) { day in
-                        daySection(day, allDays: days, firstBelow: firstBelow, now: now, calendar: cal)
+                    ForEach(blocks) { block in
+                        switch block {
+                        case .day(let day):
+                            daySection(day, allDays: days, topUps: topUpsByDay[day.day] ?? [], now: now, calendar: cal)
+                        case .quietSpan(let first, let nextActive):
+                            quietSpanRow(first: first, nextActive: nextActive, now: now, calendar: cal)
+                        }
                     }
                 }
             }
@@ -56,19 +76,58 @@ struct UpcomingCalendarView: View {
         .navigationBarTitleDisplayMode(.inline)
     }
 
+    private func buildBlocks(days: [UpcomingDay]) -> [CalendarBlock] {
+        var result: [CalendarBlock] = []
+        var quietStart: Date?
+        for day in days {
+            let isQuiet = day.isEmpty && day.belowFloor.isEmpty
+            if isQuiet {
+                if quietStart == nil { quietStart = day.day }
+            } else {
+                if let start = quietStart {
+                    result.append(.quietSpan(first: start, nextActive: day.day))
+                    quietStart = nil
+                }
+                result.append(.day(day))
+            }
+        }
+        if let start = quietStart {
+            result.append(.quietSpan(first: start, nextActive: nil))
+        }
+        return result
+    }
+
+    private func quietSpanRow(first: Date, nextActive: Date?, now: Date, calendar: Calendar) -> some View {
+        let text: String
+        if let next = nextActive {
+            if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now),
+               calendar.isDate(next, inSameDayAs: tomorrow) {
+                text = "Sin cobros hasta mañana"
+            } else {
+                let weekday = DateText.madridWeekday(next)
+                let dayNumber = calendar.component(.day, from: next)
+                text = "Sin cobros hasta el \(weekday) \(dayNumber)"
+            }
+        } else {
+            text = "Sin cobros el resto de los 14 días"
+        }
+        return Text(text)
+            .titan(.meta)
+            .foregroundStyle(Theme.label3)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+    }
+
     private func daySection(
         _ day: UpcomingDay,
         allDays: [UpcomingDay],
-        firstBelow: [BankID: Date],
+        topUps: [CalendarTopUp],
         now: Date,
         calendar: Calendar
     ) -> some View {
         let hidden = preferences.privateMode
         let title = dayHeading(day.day, now: now, calendar: calendar)
-        let warningBanks = BankID.allCases.filter { bank in
-            firstBelow[bank] == day.day
-                || (day.belowFloor.contains(bank) && day.charges.contains { $0.bank == bank })
-        }
         let hasWarning = !day.belowFloor.isEmpty
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -104,9 +163,9 @@ struct UpcomingCalendarView: View {
                     }
                 }
 
-                ForEach(warningBanks, id: \.self) { bank in
+                ForEach(topUps, id: \.bank) { topUp in
                     Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 16)
-                    shortfallActionButton(bank: bank, day: day, allDays: allDays, hidden: hidden)
+                    shortfallRow(topUp: topUp, day: day, allDays: allDays, hidden: hidden)
                 }
 
                 if !day.balanceAfter.isEmpty && (!day.isEmpty || hasWarning) {
@@ -123,10 +182,12 @@ struct UpcomingCalendarView: View {
 
     private func chargeRow(_ charge: UpcomingCharge, calendar: Calendar, divided: Bool, hidden: Bool) -> some View {
         let overdue = overdueNote(charge, calendar: calendar)
+        let domain = merchantDomain(for: charge.name)
+        let logo = logos.image(merchant: charge.name, domain: domain, isShop: true)
         let spoken = "\(charge.name), \(charge.bank.displayName), \(spokenAmount(charge.cents, hidden: hidden))"
             + (overdue.map { ", \($0)" } ?? "")
         return HStack(spacing: 12) {
-            BankLogo(bank: charge.bank, size: 28)
+            MerchantTile(image: logo, symbol: "repeat", size: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(charge.name)
                     .titan(.option)
@@ -145,8 +206,7 @@ struct UpcomingCalendarView: View {
             Text("\u{2212}\(formatEUR(charge.cents))")
                 .titan(.option)
                 .foregroundStyle(Theme.label)
-                .privateAmount()
-                .accessibilityLabel(hidden ? "importe oculto" : "\u{2212}\(formatEUR(charge.cents))")
+                .privateAmount(spoken: "\u{2212}\(formatEUR(charge.cents))")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -191,20 +251,64 @@ struct UpcomingCalendarView: View {
         .accessibilityLabel(spoken)
     }
 
-    private func shortfallActionButton(bank: BankID, day: UpcomingDay, allDays: [UpcomingDay], hidden: Bool) -> some View {
-        let floor = accountBook.book.floors[bank] ?? 0
-        let projected = day.balanceAfter[bank] ?? 0
-        let missing = max(0, floor - projected)
-        let suggestedCents = missing > 0 ? ((missing + 999) / 1_000 * 1_000) : 0
-        let suggestedFrom = suggestedSource(for: bank, amountCents: suggestedCents, upTo: day.day, allDays: allDays)
+    @ViewBuilder
+    private func shortfallRow(topUp: CalendarTopUp, day: UpcomingDay, allDays: [UpcomingDay], hidden: Bool) -> some View {
+        let bank = topUp.bank
+        if let waiting = waitingPendingMove(to: bank) {
+            let shown = hidden
+                ? "Ya tienes preparado un traspaso a \(bank.displayName)."
+                : "Ya tienes preparado un traspaso de \(formatEUR(waiting.amountCents)) a \(bank.displayName)."
+            let spoken = hidden
+                ? "Ya tienes preparado un traspaso a \(bank.displayName)."
+                : "Ya tienes preparado un traspaso de \(spokenAmount(waiting.amountCents, hidden: false)) a \(bank.displayName)."
+            HStack(spacing: 10) {
+                Image(systemName: "clock")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.label2)
+                    .accessibilityHidden(true)
+                Text(shown)
+                    .titan(.subtitle)
+                    .foregroundStyle(Theme.label2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .privacySensitive()
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(minHeight: 48)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spoken)
+        } else {
+            shortfallActionButton(topUp: topUp, day: day, allDays: allDays, hidden: hidden)
+        }
+    }
 
+    private func waitingPendingMove(to bank: BankID) -> PendingMove? {
+        model.pendingMoves.first { move in
+            guard move.target == .own(bank) else { return false }
+            if case .done = model.pendingMoveStates[move.id] { return false }
+            return true
+        }
+    }
+
+    private func shortfallActionButton(topUp: CalendarTopUp, day: UpcomingDay, allDays: [UpcomingDay], hidden: Bool) -> some View {
+        let bank = topUp.bank
+        let suggestedCents = topUp.suggestedCents
+        let estimated = day.estimatedBanks.contains(bank) || (model.snapshot.balances[bank]?.estimated == true)
+        let suggestedFrom = suggestedSource(for: bank, amountCents: suggestedCents, allDays: allDays)
+
+        let approx = estimated ? "≈ " : ""
         let title = suggestedCents > 0
-            ? "Pasar \(formatEUR(suggestedCents)) a \(bank.displayName)"
+            ? "Pasar \(approx)\(formatEUR(suggestedCents)) a \(bank.displayName)"
             : "Mover dinero a \(bank.displayName)"
         let shownTitle = hidden ? maskingAmounts(title) : title
-        let spokenTitle = hidden
-            ? "Mover dinero a \(bank.displayName), saldo previsto por debajo del mínimo"
-            : "\(title), saldo previsto por debajo del mínimo"
+        let spokenTitle: String = {
+            if hidden || suggestedCents <= 0 {
+                return "Mover dinero a \(bank.displayName), saldo previsto por debajo del mínimo"
+            }
+            let spokenApprox = estimated ? "aproximadamente " : ""
+            return "Pasar \(spokenApprox)\(spokenAmount(suggestedCents, hidden: false)) a \(bank.displayName), saldo previsto por debajo del mínimo"
+        }()
 
         return Button {
             onMoveMoney(MoveRequest(
@@ -295,7 +399,7 @@ struct UpcomingCalendarView: View {
         return "\(weekday), \(DateText.madridDay(date))"
     }
 
-    private func suggestedSource(for destination: BankID, amountCents: Int, upTo day: Date, allDays: [UpcomingDay]) -> BankID? {
+    private func suggestedSource(for destination: BankID, amountCents: Int, allDays: [UpcomingDay]) -> BankID? {
         guard amountCents > 0 else { return nil }
         var balances: [BankID: Int] = [:]
         var estimated = Set<BankID>()
@@ -305,12 +409,13 @@ struct UpcomingCalendarView: View {
                 if info.estimated { estimated.insert(bank) }
             }
         }
-        let chargesUpToDay = allDays.filter { $0.day <= day }.flatMap(\.charges)
+        // Misma ventana de 7 días que usa `MoveMoneySheet` para que el origen sugerido nunca salga «no llega» en la hoja (U21).
+        let charges = Array(allDays.prefix(7).flatMap(\.charges))
         return whereToPay(
             amountCents: amountCents,
             balances: balances,
             floors: accountBook.book.floors,
-            upcoming: chargesUpToDay,
+            upcoming: charges,
             included: Set(BankID.allCases.filter { $0 != destination }),
             estimated: estimated
         ).first(where: \.fits)?.bank

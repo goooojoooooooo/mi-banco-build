@@ -7,7 +7,6 @@ struct AccountCardView: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
     var links: [BankID: BankLinkInfo] = [:]
-    var bankLines: [BankID: BankStatusLines] = [:]
     let total: Int?
     let monthSpent: Int
     var portfolioSummary: PortfolioSummary? = nil
@@ -42,7 +41,6 @@ struct AccountCardView: View {
                 card: card,
                 balances: balances,
                 links: links,
-                bankLines: bankLines,
                 monthSpent: monthSpent,
                 portfolioSummary: portfolioSummary,
                 portfolioLastImport: portfolioLastImport,
@@ -153,27 +151,42 @@ private struct CardFront: View {
                         " (\(formatPercentTenths($0, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")))"
                     } ?? ""
                     let session = PositionFormatting.sessionPhrase(changeDay: changeDay)
-                    Text("\(eur) \(session)\(pct)")
+                    let line = "\(eur)\(pct) \(session)"
+                    Text(line)
                         .titan(.subtitle)
                         .fontWeight(.medium)
                         .foregroundStyle(todayCents > 0 ? Theme.income : secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .privateAmount()
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .privateAmount(spoken: line)
                 }
                 if let gainCents = summary.gainCents {
                     let eur = formatSignedEUR(gainCents).replacingOccurrences(of: "-", with: "\u{2212}")
                     let pct = summary.gainTenths.map {
                         " (\(formatPercentTenths($0, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")))"
                     } ?? ""
-                    let partial = summary.missingPrices > 0 ? " (de las que tienen precio)" : ""
-                    Text("\(eur) desde la compra\(pct)\(partial)")
+                    let hasMissingPrices = summary.missingPrices > 0
+                    let hasIncompleteCost = summary.positions.contains { $0.position.costIncomplete }
+                    let partial: String = {
+                        switch (hasMissingPrices, hasIncompleteCost) {
+                        case (true, true): return ", de las que tienen precio y coste"
+                        case (true, false): return ", de las que tienen precio"
+                        case (false, true): return ", de las que tienen coste"
+                        case (false, false): return ""
+                        }
+                    }()
+                    let line = "\(eur)\(pct) desde la compra\(partial)"
+                    Text(line)
                         .titan(.meta)
                         .foregroundStyle(secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.8)
-                        .privateAmount()
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .privateAmount(spoken: line)
                 }
+                let hasMixedTimes: Bool = {
+                    guard let oldest = summary.oldestPriceAt, let newest = summary.pricedAt else { return false }
+                    return Int(oldest.timeIntervalSince1970 / 60) != Int(newest.timeIntervalSince1970 / 60)
+                }()
                 if summary.missingPrices > 0 {
                     let missingText = summary.missingPrices == 1
                         ? "Falta el precio de 1 posición"
@@ -181,6 +194,9 @@ private struct CardFront: View {
                     let suffix: String = {
                         if summary.hasStalePrice, let oldest = summary.oldestPriceAt {
                             return " · precio antiguo del \(DateText.madridDay(oldest))"
+                        }
+                        if hasMixedTimes, let oldest = summary.oldestPriceAt {
+                            return " · \(PositionFormatting.oldestPriceTimestamp(oldest))"
                         }
                         if let pricedAt = summary.pricedAt {
                             let pricedCount = max(0, summary.positions.count - summary.missingPrices)
@@ -191,12 +207,17 @@ private struct CardFront: View {
                     Text(missingText + suffix)
                         .titan(.caption)
                         .foregroundStyle(Theme.warning)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if summary.hasStalePrice, let oldest = summary.oldestPriceAt ?? summary.pricedAt {
                     Text("Precio antiguo (del \(DateText.madridDay(oldest)))")
                         .titan(.caption)
                         .foregroundStyle(Theme.warning)
+                        .lineLimit(1)
+                } else if hasMixedTimes, let oldest = summary.oldestPriceAt {
+                    Text(PositionFormatting.oldestPriceTimestamp(oldest))
+                        .titan(.caption)
+                        .foregroundStyle(secondary)
                         .lineLimit(1)
                 } else if let pricedAt = summary.pricedAt {
                     let timestamp = PositionFormatting.priceTimestamp(pricedAt, plural: summary.positions.count != 1)
@@ -288,7 +309,6 @@ private struct CardBack: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
     let links: [BankID: BankLinkInfo]
-    let bankLines: [BankID: BankStatusLines]
     let monthSpent: Int
     let portfolioSummary: PortfolioSummary?
     let portfolioLastImport: Date?
@@ -305,70 +325,85 @@ private struct CardBack: View {
     private var secondary: Color { contrast == .increased ? Theme.card2High : Theme.card2 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 10) {
-                if card == .investments {
-                    Text("Inversiones").titan(.cardTitle)
-                } else if let bank = card.bank {
-                    BankLogo(bank: bank, size: 30)
-                    Text(bank.displayName).titan(.cardTitle)
-                } else {
-                    Text("Tus tres cuentas").titan(.cardTitle)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(secondary)
-                    .accessibilityHidden(true)
-            }
-            .frame(minHeight: 32)
-
-            if card == .investments {
-                investmentsBackBody
-            } else {
-                Text(title)
-                    .titan(.cardTitle)
-                    .padding(.top, 14)
-                Text(explanation)
-                    .titan(.subtitle)
-                    .foregroundStyle(secondary)
-                    .contentTransition(.numericText())
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-
-                if let secondaryExplanation {
-                    Text(secondaryExplanation)
-                        .titan(.meta)
-                        .foregroundStyle(secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 2)
-                }
-
-                Spacer(minLength: 16)
-
-                HStack(alignment: .bottom, spacing: Theme.Space.row) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Gastado este mes").titan(.meta).foregroundStyle(secondary)
-                        CountingAmount(cents: monthSpent, revealed: flipped)
-                            .titan(.cardTitle)
-                            .privateAmount()
+        TimelineView(.everyMinute) { timeline in
+            let liveLines = liveBankStatus(now: timeline.date)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 10) {
+                    if card == .investments {
+                        Text("Inversiones").titan(.cardTitle)
+                    } else if let bank = card.bank {
+                        BankLogo(bank: bank, size: 30)
+                        Text(bank.displayName).titan(.cardTitle)
+                    } else {
+                        Text("Tus tres cuentas").titan(.cardTitle)
                     }
                     Spacer(minLength: 0)
-                    trailingActionButton
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(secondary)
+                        .accessibilityHidden(true)
+                }
+                .frame(minHeight: 32)
+
+                if card == .investments {
+                    investmentsBackBody
+                } else {
+                    Text(title)
+                        .titan(.cardTitle)
+                        .padding(.top, 14)
+                    Text(explanation(liveLines: liveLines))
+                        .titan(.subtitle)
+                        .foregroundStyle(secondary)
+                        .contentTransition(.numericText())
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+
+                    if let secondaryText = secondaryExplanation(liveLines: liveLines) {
+                        Text(secondaryText)
+                            .titan(.meta)
+                            .foregroundStyle(secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 2)
+                    }
+
+                    Spacer(minLength: 16)
+
+                    HStack(alignment: .bottom, spacing: Theme.Space.row) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Gastado este mes").titan(.meta).foregroundStyle(secondary)
+                            CountingAmount(cents: monthSpent, revealed: flipped)
+                                .titan(.cardTitle)
+                                .privateAmount()
+                        }
+                        Spacer(minLength: 0)
+                        trailingActionButton(liveLines: liveLines)
+                    }
                 }
             }
+            .foregroundStyle(Theme.label)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 20)
+            .frame(maxWidth: .infinity, minHeight: CarouselMetrics.minHeight, maxHeight: .infinity, alignment: .topLeading)
+            .background(CardSurface(material: card.material, moves: false))
         }
-        .foregroundStyle(Theme.label)
-        .padding(.horizontal, 22)
-        .padding(.vertical, 20)
-        .frame(maxWidth: .infinity, minHeight: CarouselMetrics.minHeight, maxHeight: .infinity, alignment: .topLeading)
-        .background(CardSurface(material: card.material, moves: false))
+    }
+
+    private func liveBankStatus(now: Date) -> BankStatusLines? {
+        guard let bank = card.bank, let link = links[bank] else { return nil }
+        return bankStatusLines(
+            bank: bank,
+            link: link,
+            estimated: balances[bank]?.estimated,
+            canConnect: BankConnector.shared.canConnect(bank),
+            now: now,
+            calendar: DateText.madridCalendar
+        )
     }
 
     @ViewBuilder
-    private var trailingActionButton: some View {
+    private func trailingActionButton(liveLines: BankStatusLines?) -> some View {
         if let bank = card.bank, links[bank] != nil {
-            let action = bankLines[bank]?.action
+            let action = liveLines?.action
             let isSyncing = refreshing || BankSyncStatus.shared.running.contains(bank)
             switch action {
             case .refresh:
@@ -384,8 +419,10 @@ private struct CardBack: View {
                             DrawnCheck(lineWidth: 2, color: Theme.onTileSelected)
                                 .frame(width: 14, height: 14)
                                 .transition(.opacity)
+                                .accessibilityLabel("Actualizado")
+                                .accessibilityIdentifier("bank-card-refreshed")
                         }
-                        Text("Actualizar")
+                        Text(refreshedCheck ? "Actualizado" : "Actualizar")
                             .titan(.option)
                             .foregroundStyle(Theme.onTileSelected)
                     }
@@ -396,6 +433,7 @@ private struct CardBack: View {
                 }
                 .buttonStyle(.pressable)
                 .disabled(isSyncing)
+                .accessibilityIdentifier("bank-card-refresh")
 
             case .renew:
                 capsuleAction("Renovar") { onOpenBank(bank) }
@@ -442,7 +480,7 @@ private struct CardBack: View {
             _ = await BankSync.shared.refresh(trigger: .manual, only: bank)
             refreshing = false
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) { refreshedCheck = true }
-            try? await Task.sleep(for: .seconds(1.2))
+            try? await Task.sleep(for: .seconds(2.0))
             withAnimation(.easeOut(duration: 0.25)) { refreshedCheck = false }
         }
     }
@@ -486,6 +524,7 @@ private struct CardBack: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.pressable)
+            .accessibilityHint("Abre Ajustes, Inversiones")
         }
     }
 
@@ -495,7 +534,7 @@ private struct CardBack: View {
         return info.estimated ? "Saldo estimado" : "Saldo exacto"
     }
 
-    private var explanation: String {
+    private func explanation(liveLines: BankStatusLines?) -> String {
         guard let bank = card.bank else {
             let known = BankID.allCases.filter { balances[$0] != nil }
             guard !known.isEmpty else {
@@ -546,16 +585,16 @@ private struct CardBack: View {
             if refreshing || BankSyncStatus.shared.running.contains(bank) {
                 return "Conectado · actualizando…"
             }
-            if let primary = bankLines[bank]?.primary {
+            if let primary = liveLines?.primary {
                 return primary
             }
         }
         return DateText.balanceExplanation(balances[bank], bank: bank)
     }
 
-    private var secondaryExplanation: String? {
+    private func secondaryExplanation(liveLines: BankStatusLines?) -> String? {
         guard let bank = card.bank, links[bank] != nil else { return nil }
-        return bankLines[bank]?.secondary
+        return liveLines?.secondary
     }
 
     private func spanishJoin(_ names: [String]) -> String {

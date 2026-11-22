@@ -339,6 +339,7 @@ struct HomeView: View {
 
     private func showToast(_ text: String) {
         withAnimation(reduceMotion ? nil : Theme.Motion.quick) { toastText = text }
+        AccessibilityNotification.Announcement(text).post()
         toastTask?.cancel()
         toastTask = Task {
             try? await Task.sleep(for: .seconds(3))

@@ -59,6 +59,32 @@ enum DemoMode {
     static var opensStatementImport: Bool { arguments.contains("-MiBancoDemoImport") }
     static var startsFlipped: Bool { arguments.contains("-MiBancoDemoFlip") }
     static var onboardingStep: Int? { value(after: "-MiBancoDemoOnboarding").flatMap(Int.init) }
+    /// Argumentos DEBUG de la ronda U0–U67 (solo en memoria).
+    static var showsImportFeedback: Bool { arguments.contains("-MiBancoDemoImportFeedback") }
+    static var forcesPortfolio: Bool { arguments.contains("-MiBancoDemoPortfolio") }
+    static var setsDemoFloor: Bool { arguments.contains("-MiBancoDemoFloor") }
+    static var demoPendingMode: String? {
+        guard arguments.contains("-MiBancoDemoPending") else { return nil }
+        return value(after: "-MiBancoDemoPending") == "done" ? "done" : "waiting"
+    }
+    static var omittedIBANBank: BankID? { value(after: "-MiBancoDemoNoIban").flatMap(BankID.init(rawValue:)) }
+    static var keychainFailCount: Int { arguments.contains("-MiBancoDemoKeychainFails") ? 2 : 0 }
+    static var demoRoute: String? { value(after: "-MiBancoDemoRoute") }
+    static var prefsFail: Bool { arguments.contains("-MiBancoDemoPrefsFail") }
+    static var bankSyncAgoMinutes: Int? { value(after: "-MiBancoDemoBankSyncAgo").flatMap(Int.init) }
+    static var demoGuideKey: Bool { arguments.contains("-MiBancoDemoGuideKey") }
+    static var demoConnectPhase: (phase: String, bank: BankID)? {
+        let args = arguments
+        guard let i = args.firstIndex(of: "-MiBancoDemoConnectPhase"),
+              i + 2 < args.count,
+              let bank = BankID(rawValue: args[i + 2]) else { return nil }
+        return (args[i + 1], bank)
+    }
+
+    static func initialPendingMoves(now: Date = Date()) -> [PendingMove] {
+        guard demoPendingMode != nil else { return [] }
+        return [PendingMove(from: .ima, target: .own(.rev), amountCents: 20_000, createdAt: now.addingTimeInterval(-600))]
+    }
 
     /// Extracto sintético de Revolut (muestra de la Tarea 6 con fechas desplazadas ~40 días atrás para que nada enlace
     /// y el resumen sea exactamente «3 movimientos nuevos, 3 filas ignoradas», con saldo 327,70 €).
@@ -93,6 +119,13 @@ enum DemoMode {
             .ima: "ES9121000418450200051332",
             .tr: "DE89370400440532013000",
         ]
+        if let omitted = omittedIBANBank {
+            book.ibans.removeValue(forKey: omitted)
+        }
+        if setsDemoFloor {
+            // Saldo de demo de Revolut (340,20 €) + 1,00 € para provocar un día bajo el mínimo (U24).
+            book.floors[.rev] = 34_120
+        }
         book.payees = [
             Payee(name: "Ana (demo)", phone: "+34 612 345 678"),
         ]
@@ -101,7 +134,8 @@ enum DemoMode {
 
     /// Solo carga cartera en demo cuando se pide alguna pantalla de inversiones o el resumen movido: las capturas previas no cambian.
     static var includesPortfolio: Bool {
-        scrollsToInvestments || asksPrices || opensPosition || initialCard == .investments || briefingMode == .busy
+        forcesPortfolio || showsImportFeedback || scrollsToInvestments || asksPrices || opensPosition
+            || initialCard == .investments || briefingMode == .busy
     }
 
     /// Entradas del resumen de demo (`-MiBancoDemoBriefing busy|quiet`, con `-MiBancoDemoShortfall` opcional):
@@ -403,6 +437,13 @@ enum DemoMode {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.
             movements.append(movement(.ima, -3_900, "Tesla", day(0).addingTimeInterval(-120)))
         }
+        if demoPendingMode == "done" {
+            // Salida reciente de 200,00 € desde imagin para que `moveState` marque el traspaso pendiente como `.done` (U24/U25).
+            movements.append(Movement(
+                bank: .ima, amountCents: -20_000, merchant: "Transferencia a Revolut", kind: .payment,
+                source: .notification, date: now.addingTimeInterval(-120), isShop: false
+            ))
+        }
 
         var links: [BankID: BankLinkInfo] = [:]
         if banksConnected {
@@ -411,12 +452,13 @@ enum DemoMode {
                 ?? now.addingTimeInterval(180 * 86_400)
             let imaValid = madrid.date(byAdding: .day, value: 9, to: madrid.startOfDay(for: now))?.addingTimeInterval(12 * 3600)
                 ?? now.addingTimeInterval(9 * 86_400)
+            let revSyncAgo = Double(bankSyncAgoMinutes ?? 5) * 60
             var revLink = BankLinkInfo(
                 connectedAt: now.addingTimeInterval(-30 * 86_400),
                 consentValidUntil: revValid
             )
-            revLink.lastAttemptAt = now.addingTimeInterval(-5 * 60)
-            revLink.lastSuccessAt = now.addingTimeInterval(-5 * 60)
+            revLink.lastAttemptAt = now.addingTimeInterval(-revSyncAgo)
+            revLink.lastSuccessAt = now.addingTimeInterval(-revSyncAgo)
             revLink.historyLoaded = true
             links[.rev] = revLink
 

@@ -21,6 +21,8 @@ final class BankConnector {
     private var flow = ConnectFlow()
     /// Lista de bancos de Enable Banking, solo en memoria.
     private(set) var cachedASPSPs: [EBASPSP]?
+    /// true mientras «Olvidar clave y conexiones» borra lo local (U43).
+    var isForgetting = false
 
     // La dirección del banco y la hoja web viven solo en memoria.
     @ObservationIgnored private var authURL: URL?
@@ -33,8 +35,47 @@ final class BankConnector {
 
     /// Un intento a medias que ya caducó no sirve para nada: se borra al arrancar.
     private init() {
+        #if DEBUG
+        if DemoMode.isActive {
+            if let spec = DemoMode.demoConnectPhase {
+                applyDemoPhase(spec.phase, bank: spec.bank)
+            }
+            return
+        }
+        #endif
         if let pending = loadPending(), pending.isExpired(now: Date()) { deletePending() }
     }
+
+    #if DEBUG
+    private func applyDemoPhase(_ name: String, bank: BankID) {
+        switch name {
+        case "opening":
+            _ = flow.handle(.start(bank))
+        case "waitingForBank":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.webOpened(bank))
+        case "finishing":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.webOpened(bank))
+            _ = flow.handle(.callback(.valid(bank)))
+        case "needsResume":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.webOpened(bank))
+            _ = flow.handle(.cancel)
+        case "failed":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.failed(bank, ConnectMessage.tooSlow))
+        case "chooseASPSP":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.needsChoice(bank, [
+                EBASPSP(name: "Revolut", country: "ES"),
+                EBASPSP(name: "imaginBank", country: "ES"),
+            ]))
+        default:
+            break
+        }
+    }
+    #endif
 
     var phase: ConnectPhase { flow.phase }
 
@@ -57,7 +98,11 @@ final class BankConnector {
 
     func connect(_ bank: BankID, aspsp: EBASPSP? = nil) async {
         #if DEBUG
-        if DemoMode.isActive { return }
+        if DemoMode.isActive {
+            guard !isActive else { return }
+            _ = flow.handle(.start(bank))
+            return
+        }
         #endif
         guard !isActive else { return }
         // Un intento anterior (de este banco u otro) ya no puede contestar a este: se borra ANTES del primer `await`.
@@ -144,12 +189,17 @@ final class BankConnector {
         }
     }
 
-    /// Cancelación explícita: cierra la hoja web y deja el trámite en `needsResume`.
+    /// Cancelación explícita: cierra la hoja web; en `.opening` vuelve a reposo y en `.waitingForBank` pasa a `.needsResume` (U50).
     func cancelWebSession() {
         run(flow.handle(.cancel))
     }
 
-    /// Abandona cualquier trámite en curso y vuelve a `.idle` (para «Olvidar clave y conexiones»).
+    /// Sale de `.needsResume` o `.failed` («Dejarlo» o al salir de la pantalla, U50).
+    func resetTransientPhase() {
+        run(flow.handle(.reset))
+    }
+
+    /// Abandona cualquier trámite en curso desde CUALQUIER fase y vuelve a `.idle` (U42: «Olvidar clave y conexiones»).
     func resetForForgetEverything() {
         attempt = UUID()
         authURL = nil
@@ -157,7 +207,7 @@ final class BankConnector {
         closeWebSession()
         deletePending()
         cachedASPSPs = nil
-        run(flow.handle(.reset))
+        run(flow.handle(.forgetAll))
     }
 
     /// Cambios de escena. El bloqueo no se mira: solo cuánto tiempo se ha estado fuera.
@@ -172,6 +222,9 @@ final class BankConnector {
     // MARK: - La vuelta del banco
 
     func handle(url: URL, fromWebSession: Bool = false) async {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         // Solo `mibanco://cb`: lo demás se ignora sin ruido.
         guard isBankCallbackURL(url) else { return }
 
@@ -319,7 +372,10 @@ final class BankConnector {
     }
 
     private func loadPending() -> PendingAuth? {
-        (try? KeychainVault.codable(PendingAuth.self, for: .pendingAuth)) ?? nil
+        #if DEBUG
+        if DemoMode.isActive { return nil }
+        #endif
+        return (try? KeychainVault.codable(PendingAuth.self, for: .pendingAuth)) ?? nil
     }
 
     private func pendingCheck() -> PendingCheck {
@@ -328,6 +384,9 @@ final class BankConnector {
     }
 
     private func deletePending() {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         try? KeychainVault.delete(.pendingAuth)
     }
 

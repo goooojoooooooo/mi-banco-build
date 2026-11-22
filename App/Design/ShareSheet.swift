@@ -13,6 +13,9 @@ struct ShareSheet: UIViewControllerRepresentable {
         case .text(let text): [text]
         }
         let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        if case .text = item.payload {
+            controller.excludedActivityTypes = [.copyToPasteboard]
+        }
         controller.completionWithItemsHandler = { _, _, _, _ in onFinish() }
         return controller
     }

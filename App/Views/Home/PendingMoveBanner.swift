@@ -26,15 +26,20 @@ struct PendingMoveBanner: View {
         let targetName = accountBook.displayName(for: move.target)
         let isDone: Bool = if case .done = state { true } else { false }
         let hidden = preferences.privateMode
-        let spokenPrefix = isDone ? "Hecho" : "Esperando"
-        let spoken = "\(spokenPrefix): \(spokenAmount(move.amountCents, hidden: hidden)) de \(move.from.displayName) a \(targetName)"
-        let prefixColor = isDone ? Theme.income : Theme.label2
+        let spoken: String = isDone
+            ? "He visto salir \(spokenAmount(move.amountCents, hidden: hidden)) de \(move.from.displayName) para \(targetName)"
+            : "Esperando: \(spokenAmount(move.amountCents, hidden: hidden)) de \(move.from.displayName) a \(targetName)"
         let amountText = hidden ? "•••" : formatEUR(move.amountCents)
-        let sentence: LocalizedStringKey = "\(Text(isDone ? "Hecho: " : "Esperando: ").foregroundStyle(prefixColor))\(Text(amountText).foregroundStyle(Theme.label))\(Text(" de \(move.from.displayName) a \(targetName)").foregroundStyle(Theme.label2))"
+        let sentence: LocalizedStringKey = isDone
+            ? "\(Text("He visto salir ").foregroundStyle(Theme.label2))\(Text(amountText).foregroundStyle(Theme.label))\(Text(" de \(move.from.displayName) para \(targetName)").foregroundStyle(Theme.label2))"
+            : "\(Text("Esperando: ").foregroundStyle(Theme.label2))\(Text(amountText).foregroundStyle(Theme.label))\(Text(" de \(move.from.displayName) a \(targetName)").foregroundStyle(Theme.label2))"
+        let dismissLabel = hidden
+            ? "Quitar el traspaso a \(targetName)"
+            : "Quitar el traspaso de \(spokenAmount(move.amountCents, hidden: false)) a \(targetName)"
 
         return HStack(spacing: 12) {
             if isDone {
-                DrawnCheck(lineWidth: 2.2, color: Theme.income)
+                DrawnCheck(lineWidth: 2.2, color: Theme.label)
                     .frame(width: 18, height: 18)
             } else {
                 Image(systemName: "clock")
@@ -63,6 +68,7 @@ struct PendingMoveBanner: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(dismissLabel)
             }
         }
         .padding(.horizontal, 14)

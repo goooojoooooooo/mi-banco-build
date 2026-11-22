@@ -103,6 +103,7 @@ struct RootView: View {
                                          focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
                                          openBankRequest: $openBankRequest,
                                          present: present,
+                                         requestImport: startImport,
                                          importBackup: { startImport(.backup) },
                                          importTradeRepublic: { startImport(.tradeRepublic) })
                         }
@@ -147,6 +148,31 @@ struct RootView: View {
                     .onDisappear { if let url = share.fileURL { BackupService.remove(url) } }
             case .restore(let preview):
                 RestoreConfirmView(preview: preview, restore: { try restoreBackup(preview.file) }, finished: finishRestore)
+            case .confirmDisconnect(let bank):
+                BankConfirmSheet(
+                    title: "Desconectar \(bank.displayName)",
+                    message: "Se dejan de leer sus movimientos. Lo que ya tienes se queda.",
+                    confirmTitle: "Desconectar",
+                    onConfirm: {
+                        sheet = nil
+                        Task { await BankConnector.shared.disconnect(bank) }
+                    },
+                    onCancel: { sheet = nil }
+                )
+            case .confirmForget:
+                BankConfirmSheet(
+                    title: "Olvidar clave y conexiones",
+                    message: "Se borran la clave de Enable Banking y las sesiones de este iPhone. Tus movimientos se quedan.",
+                    confirmTitle: "Olvidar clave y conexiones",
+                    onConfirm: {
+                        sheet = nil
+                        Task {
+                            await BankingCredentials.forgetEverything()
+                            model.reload()
+                        }
+                    },
+                    onCancel: { sheet = nil }
+                )
             }
         }
         // Único selector de archivos de la app: se cierra como la hoja (nunca queda encima del bloqueo).
@@ -182,6 +208,11 @@ struct RootView: View {
         .onChange(of: revealToken) { _, _ in
             guard !isLocked else { return }
             scheduleBriefingCheck(delay: reduceMotion ? .milliseconds(300) : .milliseconds(1_300))
+        }
+        .onChange(of: BankConnector.shared.isActive) { old, active in
+            if old && !active && !isLocked && scenePhase == .active {
+                scheduleBriefingCheck(delay: .milliseconds(600))
+            }
         }
         // Red de seguridad: si por cualquier camino sube una hoja (o el selector) con el bloqueo puesto o fuera de
         // primer plano, se cierra al instante y se borra el fichero temporal.
@@ -246,6 +277,8 @@ struct RootView: View {
         switch importKind {
         case .backup: [.json]
         case .tradeRepublic: [.commaSeparatedText, .plainText]
+        case .statement: [.commaSeparatedText, .plainText, .data]
+        case .bankKey: [UTType(filenameExtension: "pem") ?? .data, .data]
         }
     }
 
@@ -263,6 +296,7 @@ struct RootView: View {
         speaker.stop()
         sheet = nil
         importing = false
+        importKind = .backup
     }
 
     /// Las hojas nuevas (compartir, restaurar) nunca suben con el bloqueo delante ni fuera de primer plano.
@@ -283,8 +317,10 @@ struct RootView: View {
     }
 
     private func handleImport(_ result: Result<URL, Error>) {
+        let kind = importKind
+        importKind = .backup
         guard gate.canPresent, !isLocked, scenePhase == .active, case .success(let url) = result else { return }
-        switch importKind {
+        switch kind {
         case .backup:
             do {
                 sheet = .restore(try BackupService.preview(url, current: model.state))
@@ -307,22 +343,60 @@ struct RootView: View {
                     if preferences.pricesEnabled {
                         await portfolio.refreshPrices(force: true)
                     }
+                } catch let error as PortfolioImportError {
+                    guard gate.generation == generation, gate.canPresent else { return }
+                    portfolio.recordImportError(portfolioImportMessage(error.failure))
                 } catch {
                     guard gate.generation == generation, gate.canPresent else { return }
-                    portfolio.recordImportError("Ese fichero no parece la exportación de Trade Republic.")
+                    portfolio.recordImportError(portfolioImportMessage(.notTradeRepublic))
                 }
             }
+        case .statement(_, let onPick):
+            onPick(.success(url))
+        case .bankKey(let onPick):
+            onPick(.success(url))
         }
     }
 
     private func restoreBackup(_ file: BackupFile) throws {
-        // Guardamos la copia previa de la cartera ANTES de tocar el libro: así «Volver a lo de antes» nunca la pierde.
+        // Guardamos la copia temporal de la cartera y solo la promocionamos tras restaurar bien el libro (U57).
+        var tempSaveError: Error?
+        var ledgerError: Error?
         do {
-            try portfolio.saveSafetyCopy()
+            try restorePortfolioSafetyCopyPlan(
+                saveTemp: {
+                    do {
+                        try portfolio.saveTempSafetyCopy()
+                    } catch {
+                        tempSaveError = error
+                        throw error
+                    }
+                },
+                restoreLedger: {
+                    do {
+                        try model.restore(file)
+                    } catch {
+                        ledgerError = error
+                        throw error
+                    }
+                },
+                promoteTemp: {
+                    try portfolio.promoteTempSafetyCopy()
+                },
+                removeTemp: {
+                    portfolio.removeTempSafetyCopy()
+                }
+            )
         } catch {
-            throw RestoreError.safetyCopyFailed
+            if tempSaveError != nil {
+                throw RestoreError.safetyCopyFailed
+            }
+            if let ledgerError {
+                throw ledgerError
+            }
+            // El libro ya se escribió en disco: nunca decir al usuario que sus datos no han cambiado.
+            throw RestoreError.reloadFailed
         }
-        try model.restore(file)
         let nextPortfolio = portfolioAfterRestore(current: portfolio.portfolio, backup: file)
         if nextPortfolio != portfolio.portfolio {
             do {
@@ -409,7 +483,7 @@ struct RootView: View {
         case .briefing:
             suppressBriefingForActivation = false
             tab = .home
-            scheduleBriefingCheck(delay: .milliseconds(350))
+            scheduleBriefingRouteOpen()
         case .bank(let bank):
             suppressBriefingForActivation = true
             briefingTask?.cancel()
@@ -453,8 +527,23 @@ struct RootView: View {
         rescheduleMorningReminder()
     }
 
+    /// Al tocar el aviso de la mañana, abre el resumen incluso si hoy ya se vio (U37).
+    private func scheduleBriefingRouteOpen() {
+        briefingTask?.cancel()
+        let gen = gate.generation
+        briefingTask = Task {
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, gate.generation == gen else { return }
+            considerBriefing()
+            if sheet == nil {
+                openManualBriefing()
+            }
+        }
+    }
+
     private func considerBriefing() {
         guard gate.canPresent, !isLocked, isForeground, !model.needsOnboarding, sheet == nil, !importing,
+              !BankConnector.shared.isActive,
               router.pending == nil, routeTask == nil, !suppressBriefingForActivation else { return }
         let now = Date()
         guard let due = briefing.dueRecord(now: now) else { return }
@@ -570,18 +659,26 @@ struct RootView: View {
                     sheet = .moveMoney(MoveRequest(demoStep: moveStep))
                 }
             }
+        } else if DemoMode.demoRoute == "briefing" {
+            // Simula entrar por el aviso de la mañana con el resumen de hoy ya visto (U37).
+            let now = Date()
+            briefing.markShown(BriefingRecord(shownAt: now, since: now))
+            router.pending = AlertRoute(destination: .briefing, movementID: nil)
+            applyRoute()
         }
     }
     #endif
 }
 
-/// Qué fichero está eligiendo el selector único de archivos de `RootView`.
+/// Qué fichero está eligiendo el selector único de archivos de `RootView` (U55).
 enum ImportKind {
     case backup
     case tradeRepublic
+    case statement(BankID, onPick: (Result<URL, Error>) -> Void)
+    case bankKey(onPick: (Result<URL, Error>) -> Void)
 }
 
-/// Lo que puede enseñar la única hoja de la app. `RootView` es su único dueño.
+/// Lo que puede enseñar la única hoja de la app. `RootView` es su único dueño (U55).
 enum RootSheet: Identifiable {
     case movement(DetailRoute)
     case position(String)
@@ -589,6 +686,8 @@ enum RootSheet: Identifiable {
     case briefing(BriefingRecord)
     case share(ShareItem)
     case restore(RestorePreview)
+    case confirmDisconnect(BankID)
+    case confirmForget
 
     var id: String {
         switch self {
@@ -598,7 +697,72 @@ enum RootSheet: Identifiable {
         case .briefing(let record): "briefing-\(record.shownAt.timeIntervalSince1970)"
         case .share(let item): "share-\(item.id)"
         case .restore(let preview): "restore-\(preview.id)"
+        case .confirmDisconnect(let bank): "confirm-disconnect-\(bank.rawValue)"
+        case .confirmForget: "confirm-forget"
         }
+    }
+}
+
+/// Confirmación en hoja media de `RootView` para desconectar un banco u olvidar clave y conexiones (U55).
+/// Vive en la única hoja de la app: se cierra al bloquear o salir y ningún resumen puede subir encima.
+private struct BankConfirmSheet: View {
+    let title: String
+    let message: String
+    let confirmTitle: String
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title)
+                    .titan(.sheetTitle)
+                    .foregroundStyle(Theme.label)
+                    .accessibilityAddTraits(.isHeader)
+                Text(message)
+                    .titan(.callout)
+                    .foregroundStyle(Theme.label2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.top, 12)
+
+            VStack(spacing: 10) {
+                Button(role: .destructive, action: onConfirm) {
+                    Text(confirmTitle)
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.canvas)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                        .background(Theme.warning, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+
+                Button(role: .cancel, action: onCancel) {
+                    Text("Cancelar")
+                        .titan(.option)
+                        .foregroundStyle(Theme.label)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Theme.raised, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Theme.Space.gutter)
+        .padding(.vertical, 16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.canvas.ignoresSafeArea())
+        .overlay {
+            if scenePhase != .active {
+                Theme.canvas.ignoresSafeArea().accessibilityHidden(true)
+            }
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
     }
 }
 

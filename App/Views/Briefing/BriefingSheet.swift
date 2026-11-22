@@ -29,6 +29,7 @@ struct BriefingSheet: View {
     @State private var questionDraft = ""
     @State private var askTask: Task<Void, Never>?
     @State private var feedbackTick = 0
+    @State private var errorTick = 0
     @FocusState private var questionFocused: Bool
 
     private var demoKeepsVisible: Bool {
@@ -122,6 +123,7 @@ struct BriefingSheet: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .sensoryFeedback(Haptics.detent, trigger: feedbackTick)
+        .sensoryFeedback(Haptics.error, trigger: errorTick)
         .onAppear {
             briefingModel.setSheetVisible(true)
             startEntrance()
@@ -366,20 +368,21 @@ struct BriefingSheet: View {
                     interestCardHeaderAndBody(card, hasChevron: true)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("card-open-\(card.topic.rawValue)")
             } else {
                 interestCardHeaderAndBody(card, hasChevron: false)
             }
 
             actionsLayout {
                 Button {
-                    feedbackTick += 1
-                    briefingModel.recordCardFeedback(
+                    let saved = briefingModel.recordCardFeedback(
                         .interested,
                         for: card,
                         state: model.state,
                         portfolio: portfolio.portfolioForBackup,
                         book: accountBook.book
                     )
+                    if saved { feedbackTick += 1 } else { errorTick += 1 }
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: liked ? "hand.thumbsup.fill" : "hand.thumbsup")
@@ -395,19 +398,20 @@ struct BriefingSheet: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
+                .accessibilityLabel("Me interesa: \(card.title)")
                 .accessibilityAddTraits(liked ? [.isSelected] : [])
                 .accessibilityIdentifier("card-like-\(card.topic.rawValue)")
 
                 Button {
-                    feedbackTick += 1
                     withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
-                        briefingModel.recordCardFeedback(
+                        let saved = briefingModel.recordCardFeedback(
                             .notInterested,
                             for: card,
                             state: model.state,
                             portfolio: portfolio.portfolioForBackup,
                             book: accountBook.book
                         )
+                        if saved { feedbackTick += 1 } else { errorTick += 1 }
                     }
                 } label: {
                     HStack(spacing: 6) {
@@ -424,6 +428,7 @@ struct BriefingSheet: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
+                .accessibilityLabel("No me interesa: \(card.title)")
                 .accessibilityIdentifier("card-dislike-\(card.topic.rawValue)")
             }
         }
@@ -462,6 +467,8 @@ struct BriefingSheet: View {
                 TextField("Pregúntame algo de tu dinero…", text: $questionDraft)
                     .titan(.body)
                     .foregroundStyle(Theme.label)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.sentences)
                     .focused($questionFocused)
                     .submitLabel(.send)
                     .onSubmit { submitQuestion(scrollProxy: scrollProxy) }
@@ -516,7 +523,7 @@ struct BriefingSheet: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .tint(Theme.label2)
-                    Text("Onyx está mirando tus datos…")
+                    Text("Estoy mirando tus datos…")
                         .titan(.callout)
                         .foregroundStyle(Theme.label2)
                 }
@@ -649,6 +656,7 @@ struct BriefingSheet: View {
         questionFocused = false
         speaker.stop()
         askTask?.cancel()
+        AccessibilityNotification.Announcement("Estoy mirando tus datos…").post()
         askTask = Task {
             await briefingModel.ask(
                 question,
@@ -657,6 +665,10 @@ struct BriefingSheet: View {
                 book: accountBook.book
             )
             guard !Task.isCancelled else { return }
+            if let first = briefingModel.lastAnswer?.lines.first {
+                let spoken = BriefingLineView.accessibleText(for: first.parts, hidden: preferences.privateMode)
+                AccessibilityNotification.Announcement(spoken).post()
+            }
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
                 scrollProxy.scrollTo("assistant-answer-anchor", anchor: .bottom)
             }
@@ -694,7 +706,7 @@ extension AssistantTopic {
 
     var settingsDetail: String {
         switch self {
-        case .unusualPayment: "Si un pago es mucho mayor de lo habitual en esa tienda"
+        case .unusualPayment: "Si un pago es mucho mayor de lo habitual en ese comercio"
         case .subscriptionPriceChange: "Si te suben o te bajan una cuota fija"
         case .budgetClose: "Cuando un presupuesto llega al 80 % o se pasa"
         case .shortfall: "Si un próximo cobro deja una cuenta justa o corta"

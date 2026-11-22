@@ -1,24 +1,26 @@
 import MiBancoCore
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// Pantalla de un banco dentro de Ajustes › Bancos (Plan 2, tareas 11 y 12; R20, R41, R42, R43).
+/// Pantalla de un banco dentro de Ajustes › Bancos (Plan 2, tareas 11 y 12; R20, R41, R42, R43, U43, U50, U55).
 /// Permite conectar o renovar con Enable Banking, actualizar ahora, importar extractos CSV o desconectar.
+/// Confirmaciones y selector de archivos pasan por `RootView` (regla de una sola hoja).
 struct BankLinkView: View {
     let model: LedgerModel
     var portfolio: PortfolioModel? = nil
     let bank: BankID
+    var present: (RootSheet) -> Void = { _ in }
+    var requestImport: (ImportKind) -> Void = { _ in }
 
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    @State private var importingStatement = false
     @State private var importPreview: ImportPreview?
     @State private var importError: String?
-    @State private var confirmingDisconnect = false
-    @State private var confirmingForgetAll = false
     @State private var errorTick = 0
+    #if DEBUG
+    @State private var didShowDemoImport = false
+    #endif
 
     private static let maxStatementBytes = 10 * 1024 * 1024
 
@@ -33,22 +35,23 @@ struct BankLinkView: View {
         connector.canConnect(bank)
     }
 
-    private var statusLines: BankStatusLines {
-        if syncStatus.running.contains(bank) {
-            return BankStatusLines(
-                primary: "Conectado · actualizando…",
-                secondary: model.snapshot.bankLines[bank]?.secondary,
-                action: nil
-            )
-        }
-        return bankStatusLines(
+    private func statusLines(now: Date) -> BankStatusLines {
+        let computed = bankStatusLines(
             bank: bank,
             link: link,
             estimated: model.snapshot.balances[bank]?.estimated,
             canConnect: canConnect,
-            now: Date(),
+            now: now,
             calendar: DateText.madridCalendar
         )
+        if syncStatus.running.contains(bank) {
+            return BankStatusLines(
+                primary: "Conectado · actualizando…",
+                secondary: computed.secondary,
+                action: nil
+            )
+        }
+        return computed
     }
 
     private var isWaitingOnThisBank: Bool {
@@ -94,104 +97,122 @@ struct BankLinkView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        BankLogo(bank: bank, size: 36)
-                        Text(bank.displayName)
-                            .titan(.cardTitle)
+        TimelineView(.everyMinute) { timeline in
+            let lines = statusLines(now: timeline.date)
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 12) {
+                            BankLogo(bank: bank, size: 36)
+                            Text(bank.displayName)
+                                .titan(.cardTitle)
+                                .foregroundStyle(Theme.label)
+                        }
+
+                        Text(lines.primary)
+                            .titan(.sheetTitle)
                             .foregroundStyle(Theme.label)
-                    }
-
-                    Text(statusLines.primary)
-                        .titan(.sheetTitle)
-                        .foregroundStyle(Theme.label)
-                        .contentTransition(.numericText())
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.top, 4)
-
-                    if let secondary = statusLines.secondary {
-                        Text(secondary)
-                            .titan(.subtitle)
-                            .foregroundStyle(Theme.label2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    if bank == .tr && !canConnect {
-                        Text("Trade Republic no se puede conectar gratis. Exporta su extracto en su app (Perfil › Extractos › Exportar transacciones) e impórtalo aquí.")
-                            .titan(.subtitle)
-                            .foregroundStyle(Theme.label2)
+                            .contentTransition(.numericText())
                             .fixedSize(horizontal: false, vertical: true)
                             .padding(.top, 4)
-                    }
-                }
-                .padding(.vertical, 8)
-                .listRowBackground(Theme.grouped)
 
-                phaseRows
-                actionRows
-            }
-
-            if let importError {
-                Section {
-                    Text(importError)
-                        .titan(.meta)
-                        .foregroundStyle(Theme.warning)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .listRowBackground(Theme.grouped)
-                }
-            }
-
-            if canConnect || link != nil {
-                Section {
-                    Text("Primera actualización: últimos 12 meses (lo que dé el banco)")
-                        .titan(.subtitle)
-                        .foregroundStyle(Theme.label2)
-                        .listRowBackground(Theme.grouped)
-                } header: {
-                    SettingsHeader("Historial")
-                }
-            }
-
-            if link != nil || showsForgetEverything {
-                Section {
-                    if link != nil {
-                        Button(role: .destructive) {
-                            guard gate?.canPresent == true, scenePhase == .active else { return }
-                            confirmingDisconnect = true
-                        } label: {
-                            Text("Desconectar")
-                                .titan(.option)
-                                .foregroundStyle(Theme.warning)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .contentShape(Rectangle())
+                        if let secondary = lines.secondary {
+                            Text(secondary)
+                                .titan(.subtitle)
+                                .foregroundStyle(Theme.label2)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Theme.grouped)
-                        .listRowSeparatorTint(Theme.separator)
-                    }
 
-                    if showsForgetEverything {
-                        Button(role: .destructive) {
-                            guard gate?.canPresent == true, scenePhase == .active else { return }
-                            confirmingForgetAll = true
-                        } label: {
-                            Text("Olvidar clave y conexiones")
-                                .titan(.option)
-                                .foregroundStyle(Theme.warning)
-                                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                                .contentShape(Rectangle())
+                        if bank == .tr && !canConnect {
+                            Text("Trade Republic no se puede conectar gratis. Exporta su extracto en su app (Perfil › Extractos › Exportar transacciones) e impórtalo aquí.")
+                                .titan(.subtitle)
+                                .foregroundStyle(Theme.label2)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 4)
                         }
-                        .buttonStyle(.plain)
-                        .listRowBackground(Theme.grouped)
-                        .listRowSeparatorTint(Theme.separator)
+                    }
+                    .padding(.vertical, 8)
+                    .listRowBackground(Theme.grouped)
+
+                    phaseRows
+                    actionRows(lines: lines)
+                }
+
+                if let importError {
+                    Section {
+                        Text(importError)
+                            .titan(.meta)
+                            .foregroundStyle(Theme.warning)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .listRowBackground(Theme.grouped)
+                    }
+                }
+
+                if canConnect || link != nil {
+                    Section {
+                        Text("Primera actualización: últimos 12 meses (lo que dé el banco)")
+                            .titan(.subtitle)
+                            .foregroundStyle(Theme.label2)
+                            .listRowBackground(Theme.grouped)
+                    } header: {
+                        SettingsHeader("Historial")
+                    }
+                }
+
+                if link != nil || showsForgetEverything || connector.isForgetting {
+                    Section {
+                        if connector.isForgetting {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .tint(Theme.label)
+                                Text("Borrando…")
+                                    .titan(.option)
+                                    .foregroundStyle(Theme.label2)
+                            }
+                            .frame(minHeight: 44)
+                            .listRowBackground(Theme.grouped)
+                            .listRowSeparatorTint(Theme.separator)
+                        }
+
+                        if link != nil {
+                            Button(role: .destructive) {
+                                guard gate?.canPresent == true, scenePhase == .active, !connector.isForgetting else { return }
+                                present(.confirmDisconnect(bank))
+                            } label: {
+                                Text("Desconectar")
+                                    .titan(.option)
+                                    .foregroundStyle(connector.isForgetting ? Theme.label3 : Theme.warning)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(connector.isForgetting)
+                            .listRowBackground(Theme.grouped)
+                            .listRowSeparatorTint(Theme.separator)
+                        }
+
+                        if showsForgetEverything {
+                            Button(role: .destructive) {
+                                guard gate?.canPresent == true, scenePhase == .active, !connector.isForgetting else { return }
+                                present(.confirmForget)
+                            } label: {
+                                Text("Olvidar clave y conexiones")
+                                    .titan(.option)
+                                    .foregroundStyle(connector.isForgetting ? Theme.label3 : Theme.warning)
+                                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(connector.isForgetting)
+                            .listRowBackground(Theme.grouped)
+                            .listRowSeparatorTint(Theme.separator)
+                        }
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.canvas.ignoresSafeArea())
         }
-        .scrollContentBackground(.hidden)
-        .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle(bank.displayName)
         .navigationBarTitleDisplayMode(.inline)
         .navigationDestination(item: $importPreview) { preview in
@@ -199,66 +220,16 @@ struct BankLinkView: View {
                 importPreview = nil
             }
         }
-        .fileImporter(
-            isPresented: $importingStatement,
-            allowedContentTypes: [.commaSeparatedText, .plainText, .data]
-        ) { result in
-            handleStatementFile(result)
-        }
-        .confirmationDialog(
-            "Desconectar \(bank.displayName)",
-            isPresented: $confirmingDisconnect,
-            titleVisibility: .visible
-        ) {
-            Button("Desconectar", role: .destructive) {
-                Task { await connector.disconnect(bank) }
+        .onDisappear {
+            if failedMessageForThisBank != nil {
+                connector.resetTransientPhase()
             }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("Se dejan de leer sus movimientos. Lo que ya tienes se queda.")
-        }
-        .confirmationDialog(
-            "Olvidar clave y conexiones",
-            isPresented: $confirmingForgetAll,
-            titleVisibility: .visible
-        ) {
-            Button("Olvidar clave y conexiones", role: .destructive) {
-                Task {
-                    await BankingCredentials.forgetEverything()
-                    model.reload()
-                }
-            }
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text("Se borran la clave de Enable Banking y las sesiones de este iPhone. Tus movimientos se quedan.")
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active {
-                importingStatement = false
-                confirmingDisconnect = false
-                confirmingForgetAll = false
-            }
-        }
-        .onChange(of: gate?.isLocked) { _, locked in
-            if locked == true {
-                importingStatement = false
-                confirmingDisconnect = false
-                confirmingForgetAll = false
-            }
-        }
-        .onChange(of: importingStatement) { _, on in
-            if on && (gate?.canPresent != true || scenePhase != .active) { importingStatement = false }
-        }
-        .onChange(of: confirmingDisconnect) { _, on in
-            if on && (gate?.canPresent != true || scenePhase != .active) { confirmingDisconnect = false }
-        }
-        .onChange(of: confirmingForgetAll) { _, on in
-            if on && (gate?.canPresent != true || scenePhase != .active) { confirmingForgetAll = false }
         }
         .sensoryFeedback(Haptics.error, trigger: errorTick)
         #if DEBUG
         .onAppear {
-            if DemoMode.isActive && DemoMode.opensStatementImport && importPreview == nil {
+            if DemoMode.isActive && DemoMode.opensStatementImport && !didShowDemoImport && importPreview == nil {
+                didShowDemoImport = true
                 importPreview = try? model.previewImport(DemoMode.sampleRevolutStatementData(), bank: .rev)
             }
         }
@@ -326,6 +297,17 @@ struct BankLinkView: View {
                     }
                     .buttonStyle(.pressable)
                 }
+
+                Button {
+                    connector.resetTransientPhase()
+                } label: {
+                    Text("Dejarlo")
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label2)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(.vertical, 6)
             .listRowBackground(Theme.grouped)
@@ -348,6 +330,17 @@ struct BankLinkView: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
+
+                Button {
+                    connector.resetTransientPhase()
+                } label: {
+                    Text("Dejarlo")
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label2)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
             .padding(.vertical, 6)
             .listRowBackground(Theme.grouped)
@@ -366,9 +359,9 @@ struct BankLinkView: View {
     }
 
     @ViewBuilder
-    private var actionRows: some View {
+    private func actionRows(lines: BankStatusLines) -> some View {
         if !isWaitingOnThisBank && !needsResumeForThisBank && failedMessageForThisBank == nil && aspspChoicesForThisBank == nil {
-            switch statusLines.action {
+            switch lines.action {
             case .connect:
                 Button {
                     Task { await connector.connect(bank) }
@@ -376,6 +369,7 @@ struct BankLinkView: View {
                     actionCapsule("Conectar \(bank.displayName)", prominent: true)
                 }
                 .buttonStyle(.pressable)
+                .disabled(connector.isForgetting)
                 .listRowBackground(Theme.grouped)
 
             case .renew:
@@ -385,6 +379,7 @@ struct BankLinkView: View {
                     actionCapsule("Renovar conexión", prominent: true)
                 }
                 .buttonStyle(.pressable)
+                .disabled(connector.isForgetting)
                 .listRowBackground(Theme.grouped)
 
             case .refresh:
@@ -394,7 +389,7 @@ struct BankLinkView: View {
                     actionCapsule("Actualizar ahora", prominent: true)
                 }
                 .buttonStyle(.pressable)
-                .disabled(syncStatus.running.contains(bank))
+                .disabled(syncStatus.running.contains(bank) || connector.isForgetting)
                 .listRowBackground(Theme.grouped)
 
             case .importStatement, .editBalance, nil:
@@ -405,9 +400,11 @@ struct BankLinkView: View {
         Button {
             guard gate?.canPresent == true, scenePhase == .active else { return }
             importError = nil
-            importingStatement = true
+            requestImport(.statement(bank) { result in
+                handleStatementFile(result)
+            })
         } label: {
-            actionCapsule("Importar extracto", prominent: statusLines.action == .importStatement)
+            actionCapsule("Importar extracto", prominent: lines.action == .importStatement)
         }
         .buttonStyle(.pressable)
         .accessibilityIdentifier("bank-import-statement")
@@ -463,7 +460,7 @@ struct BankLinkView: View {
             case .tooLarge:
                 "Este archivo es demasiado grande (máx. 10 MB)."
             case .unreadable:
-                "No reconocemos este archivo. Usa el CSV que exporta tu banco."
+                "No reconozco este archivo. Usa el CSV que exporta tu banco."
             }
         }
     }
@@ -491,7 +488,7 @@ struct BankLinkView: View {
         case .wrongBank(let detected):
             return "Este extracto es de \(detected.displayName). Impórtalo desde su banco."
         case .unknownFormat, .empty, .unreadable:
-            return "No reconocemos este archivo. Usa el CSV que exporta tu banco."
+            return "No reconozco este archivo. Usa el CSV que exporta tu banco."
         }
     }
 }

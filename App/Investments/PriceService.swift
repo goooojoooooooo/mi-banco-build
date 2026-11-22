@@ -23,6 +23,8 @@ struct PriceService: Sendable {
         config.urlCache = nil
         config.timeoutIntervalForRequest = 10
         config.timeoutIntervalForResource = 10
+        // U16: cabeceras genéricas, sin nombre/versión de la app ni idioma del iPhone.
+        config.httpAdditionalHeaders = ["User-Agent": "Mozilla/5.0", "Accept-Language": "en"]
         return URLSession(configuration: config)
     }()
 
@@ -34,7 +36,7 @@ struct PriceService: Sendable {
 
     /// Busca el precio actual en euros de un instrumento y devuelve el símbolo resuelto junto con su cotización.
     /// Prueba primero el símbolo ya recordado, luego el símbolo cripto si procede y por último la búsqueda por ISIN.
-    /// Ante un error de red, cancelación o 429 detiene enseguida la búsqueda para no saturar ni agotar el refresco.
+    /// Solo sale de este iPhone un código validado por `yahooQueryTerm` (U16).
     func quote(for instrument: String, assetClass: String?, knownSymbol: String?) async -> (symbol: String, quote: Quote)? {
         #if DEBUG
         if DemoMode.isActive { return nil }
@@ -44,10 +46,11 @@ struct PriceService: Sendable {
         var tried = Set<String>()
 
         do {
-            if let known = knownSymbol, !known.isEmpty {
-                tried.insert(known)
-                if let q = try await fetchChart(symbol: known) {
-                    return (known, q)
+            if let known = knownSymbol, !known.isEmpty,
+               let safeKnown = yahooQueryTerm(for: instrument, assetClass: assetClass, rememberedSymbol: known) {
+                tried.insert(safeKnown)
+                if let q = try await fetchChart(symbol: safeKnown) {
+                    return (safeKnown, q)
                 }
             }
 
@@ -58,21 +61,24 @@ struct PriceService: Sendable {
                 }
             }
 
-            if isISIN(instrument), let searchURL = yahooSearchURL(isin: instrument) {
+            if isISIN(instrument), let safeISIN = yahooQueryTerm(for: instrument),
+               let searchURL = yahooSearchURL(isin: safeISIN) {
                 guard !Task.isCancelled else { return nil }
                 if let data = try await fetchPayload(from: searchURL) {
                     let candidates = preferredSymbols(yahooSearchCandidates(data)).prefix(Self.maxCandidates)
                     for candidate in candidates {
                         guard !Task.isCancelled else { return nil }
-                        guard tried.insert(candidate).inserted else { continue }
-                        if let q = try await fetchChart(symbol: candidate) {
-                            return (candidate, q)
+                        guard let safeCandidate = yahooQueryTerm(for: candidate),
+                              tried.insert(safeCandidate).inserted else { continue }
+                        if let q = try await fetchChart(symbol: safeCandidate) {
+                            return (safeCandidate, q)
                         }
                     }
                 }
-            } else if tried.insert(instrument).inserted {
-                if let q = try await fetchChart(symbol: instrument) {
-                    return (instrument, q)
+            } else if let safeTerm = yahooQueryTerm(for: instrument, assetClass: assetClass),
+                      tried.insert(safeTerm).inserted {
+                if let q = try await fetchChart(symbol: safeTerm) {
+                    return (safeTerm, q)
                 }
             }
         } catch {
@@ -113,16 +119,21 @@ struct PriceService: Sendable {
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.httpShouldHandleCookies = false
         request.timeoutInterval = 10
-        let (data, response) = try await session.data(for: request)
+        let (bytes, response) = try await session.bytes(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw FetchFailure.transport
         }
         if http.statusCode == 404 {
             throw FetchFailure.notFound
         }
-        guard (200...299).contains(http.statusCode), data.count <= maxResponseBytes else {
+        guard (200...299).contains(http.statusCode) else {
             throw FetchFailure.transport
         }
-        return data
+        do {
+            // U10: corta la descarga en cuanto supera `maxResponseBytes`, antes de acumularla entera en memoria.
+            return try await collectCapped(bytes, expectedLength: response.expectedContentLength, limit: maxResponseBytes)
+        } catch {
+            throw FetchFailure.transport
+        }
     }
 }

@@ -13,10 +13,18 @@ struct AccountBookStore {
     private final class DemoBox: @unchecked Sendable {
         private let lock = NSLock()
         private var stored: AccountBook?
+        private var failuresRemaining: Int?
 
-        func load() -> AccountBook {
+        func loadThrowing() throws -> AccountBook {
             lock.lock()
             defer { lock.unlock() }
+            if failuresRemaining == nil {
+                failuresRemaining = DemoMode.keychainFailCount
+            }
+            if let rem = failuresRemaining, rem > 0 {
+                failuresRemaining = rem - 1
+                throw KeychainError.status(errSecInteractionNotAllowed)
+            }
             if let stored { return stored }
             let initial = DemoMode.accountBook()
             stored = initial
@@ -41,7 +49,7 @@ struct AccountBookStore {
     /// (p. ej. `errSecInteractionNotAllowed`), para que `reload()` nunca borre el estado en memoria por un fallo transitorio.
     static func loadThrowing() throws -> AccountBook {
         #if DEBUG
-        if DemoMode.isActive { return demo.load() }
+        if DemoMode.isActive { return try demo.loadThrowing() }
         #endif
         var request = baseQuery()
         request[kSecReturnData] = true
@@ -102,18 +110,37 @@ struct AccountBookStore {
 @MainActor @Observable
 final class AccountBookModel {
     private(set) var book: AccountBook
+    @ObservationIgnored private var loadFailed = false
 
     init() {
-        self.book = AccountBookStore.load()
+        do {
+            self.book = try AccountBookStore.loadThrowing()
+            self.loadFailed = false
+        } catch {
+            self.book = AccountBook()
+            self.loadFailed = true
+        }
     }
 
     func reload() {
         guard let loaded = try? AccountBookStore.loadThrowing() else { return }
+        loadFailed = false
         if loaded != book { book = loaded }
     }
 
+    /// Si la lectura inicial falló, exige leer del Llavero antes de escribir para nunca pisar datos del dueño con un cuaderno vacío (U28).
+    private func baseBookForWrite() throws -> AccountBook {
+        if loadFailed {
+            let loaded = try AccountBookStore.loadThrowing()
+            loadFailed = false
+            book = loaded
+            return loaded
+        }
+        return book
+    }
+
     func setIBAN(_ raw: String?, for bank: BankID) throws {
-        var next = book
+        var next = try baseBookForWrite()
         if let raw {
             let clean = normalizeIBAN(raw)
             if clean.isEmpty {
@@ -129,7 +156,7 @@ final class AccountBookModel {
     }
 
     func setFloor(_ cents: Int?, for bank: BankID) throws {
-        var next = book
+        var next = try baseBookForWrite()
         if let cents, cents > 0 {
             next.floors[bank] = cents
         } else {
@@ -140,14 +167,14 @@ final class AccountBookModel {
     }
 
     func addPayee(_ payee: Payee) throws {
-        var next = book
+        var next = try baseBookForWrite()
         next.payees.append(payee)
         try AccountBookStore.save(next)
         book = next
     }
 
     func deletePayee(id: UUID) throws {
-        var next = book
+        var next = try baseBookForWrite()
         next.payees.removeAll { $0.id == id }
         try AccountBookStore.save(next)
         book = next

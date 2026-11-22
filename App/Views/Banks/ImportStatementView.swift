@@ -34,14 +34,9 @@ struct ImportStatementView: View {
             || (bank == .tr && !preview.tradeRepublicRows.isEmpty)
     }
 
-    private var tradesCount: Int {
-        preview.statement.records.filter(\.excludedFromSpending).count
-    }
-
     private var dateRangeText: String? {
         guard let first = preview.statement.firstDate, let last = preview.statement.lastDate else { return nil }
-        let cal = DateText.madridCalendar
-        return "Del \(shortSpanishDate(first, calendar: cal, withYear: false)) al \(shortSpanishDate(last, calendar: cal, withYear: false))"
+        return statementRangeText(first: first, last: last, now: Date(), calendar: DateText.madridCalendar)
     }
 
     var body: some View {
@@ -66,12 +61,6 @@ struct ImportStatementView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel(importSummary(preview.report))
                         .accessibilityIdentifier("import-summary")
-
-                    if tradesCount > 0 {
-                        Text(tradesCount == 1 ? "1 operación de inversión" : "\(tradesCount) operaciones de inversión")
-                            .titan(.subtitle)
-                            .foregroundStyle(Theme.label2)
-                    }
 
                     if let range = dateRangeText {
                         Text(range)
@@ -98,11 +87,18 @@ struct ImportStatementView: View {
                         .accessibilityIdentifier("import-latest-balance")
                     }
                     if !hasNewOrLinked && canApply {
-                        Text(preview.statement.latestBalance != nil
-                             ? "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto y el saldo del extracto."
-                             : "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto.")
+                        Text(statementZeroNewNote(
+                            addsPeriod: preview.report.addsPeriod,
+                            adoptsBalance: preview.report.adoptsBalance
+                        ))
+                        .titan(.meta)
+                        .foregroundStyle(Theme.label2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if preview.tradeRepublicInvestmentsFailed {
+                        Text("No pude leer las operaciones de inversión de este fichero; los movimientos sí.")
                             .titan(.meta)
-                            .foregroundStyle(Theme.label2)
+                            .foregroundStyle(Theme.warning)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -176,24 +172,31 @@ struct ImportStatementView: View {
         guard canApply, !applied else { return }
         do {
             _ = try model.applyImport(preview)
-            if bank == .tr, !preview.tradeRepublicRows.isEmpty, let portfolio {
+        } catch {
+            errorText = "No se pudo guardar el extracto. Inténtalo de nuevo."
+            errorTick += 1
+            return
+        }
+        if bank == .tr, !preview.tradeRepublicRows.isEmpty, let portfolio {
+            do {
                 try portfolio.mergeRows(preview.tradeRepublicRows)
                 if preferences.pricesEnabled {
                     Task { await portfolio.refreshPrices(force: true) }
                 }
+            } catch {
+                errorText = "Extracto guardado. La cartera no se pudo actualizar: impórtalo otra vez desde Ajustes › Inversiones."
+                errorTick += 1
+                return
             }
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
-                applied = true
-            }
-            successTick += 1
-            Task {
-                try? await Task.sleep(for: .milliseconds(320))
-                onFinished()
-                dismiss()
-            }
-        } catch {
-            errorText = "No se pudo guardar el extracto. Inténtalo de nuevo."
-            errorTick += 1
+        }
+        withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+            applied = true
+        }
+        successTick += 1
+        Task {
+            try? await Task.sleep(for: .milliseconds(320))
+            onFinished()
+            dismiss()
         }
     }
 }

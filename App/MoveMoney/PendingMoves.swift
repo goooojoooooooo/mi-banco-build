@@ -35,17 +35,23 @@ enum PendingMoves {
     #if DEBUG
     private final class DemoBox: @unchecked Sendable {
         private let lock = NSLock()
+        private var seeded = false
         private var items: [PendingMove] = []
 
         func all() -> [PendingMove] {
             lock.lock()
             defer { lock.unlock() }
+            if !seeded {
+                seeded = true
+                items = DemoMode.initialPendingMoves()
+            }
             return items
         }
 
         func set(_ next: [PendingMove]) {
             lock.lock()
             defer { lock.unlock() }
+            seeded = true
             items = next
         }
     }
@@ -57,11 +63,10 @@ enum PendingMoves {
         #if DEBUG
         if DemoMode.isActive { return demo.all() }
         #endif
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? JSONDecoder().decode([PendingMove].self, from: data) else {
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
             return []
         }
-        return decoded
+        return decodePendingMoves(data)
     }
 
     static func add(_ move: PendingMove) {

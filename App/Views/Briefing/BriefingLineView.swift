@@ -25,7 +25,7 @@ struct BriefingLineView: View {
         let label = Self.accessibleText(for: parts, hidden: hidden)
         Group {
             if hidden {
-                Text(label)
+                Text(Self.maskedVisualText(for: parts))
                     .foregroundStyle(color)
             } else if countsFirstAmount, !reduceMotion, !snapCountImmediately, let firstCents = firstAmountCents {
                 AnimatedBriefingSentence(
@@ -62,16 +62,19 @@ struct BriefingLineView: View {
         }
     }
 
-    static func accessibleText(for parts: [BriefingPart], hidden: Bool) -> String {
-        guard hidden else { return render(parts, .plain) }
-        var masked = render(parts, .masked)
-        // Defensa extra: ningún porcentaje incrustado en un aviso de texto libre puede colarse en modo privado.
-        masked = masked.replacingOccurrences(
-            of: "[+\\-\u{2212}]?[0-9]+(?:[.,][0-9]+)?[ \u{00A0}]?%",
+    /// Texto pintado en modo privado: conserva «•••» y oculta cualquier importe o porcentaje incrustado en texto libre.
+    static func maskedVisualText(for parts: [BriefingPart]) -> String {
+        render(parts, .masked).replacingOccurrences(
+            of: "[+\\-\u{2212}]?[0-9][0-9.,]*[ \u{00A0}\u{202F}]*(?:€|%)",
             with: "•••",
             options: .regularExpression
         )
-        return masked.replacingOccurrences(of: "€", with: "").replacingOccurrences(of: "%", with: "")
+    }
+
+    /// Etiqueta hablada para VoiceOver: en privado sustituye importes, porcentajes y «•••» por «importe oculto» (U36).
+    static func accessibleText(for parts: [BriefingPart], hidden: Bool) -> String {
+        guard hidden else { return render(parts, .plain) }
+        return privateSpokenText(render(parts, .masked))
     }
 
     static func attributed(parts: [BriefingPart], overrideFirstAmount: Int?, baseColor: Color) -> AttributedString {

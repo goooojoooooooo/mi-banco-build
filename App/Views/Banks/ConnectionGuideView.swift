@@ -1,10 +1,10 @@
 import MiBancoCore
 import SwiftUI
-import UniformTypeIdentifiers
 
-/// Guía en 4 pasos para dar de alta Enable Banking y traer la clave `.pem` (Plan 2, tarea 11).
+/// Guía en 4 pasos para dar de alta Enable Banking y traer la clave `.pem` (Plan 2, tarea 11; U55, U59).
 struct ConnectionGuideView: View {
     let model: LedgerModel
+    var requestImport: (ImportKind) -> Void = { _ in }
 
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
@@ -14,7 +14,6 @@ struct ConnectionGuideView: View {
     @State private var step = 1
     @State private var movingForward = true
     @State private var urlCopied = false
-    @State private var choosingPEM = false
     @State private var pickedDER: Data?
     @State private var appIDText = ""
     @State private var errorText: String?
@@ -70,12 +69,6 @@ struct ConnectionGuideView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Preparar conexión")
         .navigationBarTitleDisplayMode(.inline)
-        .fileImporter(
-            isPresented: $choosingPEM,
-            allowedContentTypes: [UTType(filenameExtension: "pem") ?? .data, .data]
-        ) { result in
-            handleKeyImport(result)
-        }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 clearSensitiveState()
@@ -86,9 +79,14 @@ struct ConnectionGuideView: View {
                 clearSensitiveState()
             }
         }
-        .onChange(of: choosingPEM) { _, on in
-            if on && (gate?.canPresent != true || scenePhase != .active) { choosingPEM = false }
+        #if DEBUG
+        .onAppear {
+            if DemoMode.isActive && DemoMode.demoGuideKey && pickedDER == nil && !keySaved {
+                pickedDER = Data([0x01])
+                appIDText = "11111111-1111-4111-8111-111111111111"
+            }
         }
+        #endif
         .sensoryFeedback(Haptics.success, trigger: saveTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
@@ -213,7 +211,9 @@ struct ConnectionGuideView: View {
             Button {
                 guard gate?.canPresent == true, scenePhase == .active else { return }
                 errorText = nil
-                choosingPEM = true
+                requestImport(.bankKey { result in
+                    handleKeyImport(result)
+                })
             } label: {
                 if keySaved {
                     secondaryButtonLabel("Elegir otra clave")
@@ -222,6 +222,12 @@ struct ConnectionGuideView: View {
                 }
             }
             .buttonStyle(.pressable)
+
+            Text("Si sales de la app antes de guardar, tendrás que elegir la clave otra vez: no la guardo hasta que toques «Guardar».")
+                .titan(.meta)
+                .foregroundStyle(Theme.label3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
 
             if pickedDER != nil {
                 VStack(alignment: .leading, spacing: 8) {
@@ -429,7 +435,6 @@ struct ConnectionGuideView: View {
     }
 
     private func clearSensitiveState() {
-        choosingPEM = false
         idFocused = false
         pickedDER = nil
         appIDText = ""
@@ -464,10 +469,20 @@ struct ConnectionGuideView: View {
         guard let der = pickedDER else { return }
         let trimmed = appIDText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isValidApplicationID(trimmed) else {
-            errorText = "El ID de la app debe tener formato UUID (como el nombre del archivo .pem)."
+            errorText = "Ese ID no parece correcto. Suele ser el nombre del archivo .pem, sin «.pem»."
             errorTick += 1
             return
         }
+        #if DEBUG
+        if DemoMode.isActive && DemoMode.demoGuideKey {
+            pickedDER = nil
+            appIDText = ""
+            errorText = nil
+            keySaved = true
+            saveTick += 1
+            return
+        }
+        #endif
         do {
             try BankingCredentials.save(appID: trimmed, pkcs1DER: der)
             pickedDER = nil

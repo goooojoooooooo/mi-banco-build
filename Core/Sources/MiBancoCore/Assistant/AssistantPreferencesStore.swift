@@ -1,6 +1,7 @@
 import Foundation
 
-/// `assistant-preferences.json` en la carpeta indicada (solo en este dispositivo, fuera de copias de seguridad).
+/// `assistant-preferences.json` en la carpeta indicada (contenedor del App Group; entra en las copias del iPhone).
+/// Guarda temas, pesos e ids de tarjeta (con nombres de comercio normalizados), sin importes (U61).
 /// Mismo patrón que `PortfolioStore` y `FileStore`: escritura atómica, protección de fichero y coordinación en Darwin.
 public final class AssistantPreferencesStore: Sendable {
     public let directory: URL

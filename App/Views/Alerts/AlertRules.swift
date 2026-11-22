@@ -167,20 +167,38 @@ enum AlertRule: Sendable {
 }
 
 /// Selector de hora del aviso matinal («Resumen cada mañana»), siempre en hora de Madrid.
+/// Despliega una rueda en línea (nunca una ventana presentada de UIKit) y se pliega sola al bloquear o salir (U33).
 private struct MorningTimeRow: View {
     let minutes: Int
     let save: (Int) throws -> Void
 
+    @State private var expanded = false
     @State private var errorTick = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
+
+    private var validMinutes: Int {
+        (0..<1_440).contains(minutes) ? minutes : defaultMorningBriefingMinutes
+    }
+
+    private var formattedTime: String {
+        String(format: "%02d:%02d", validMinutes / 60, validMinutes % 60)
+    }
+
+    private var canShowWheel: Bool {
+        expanded && scenePhase == .active && gate?.isLocked != true
+    }
 
     private var timeBinding: Binding<Date> {
         Binding(
-            get: { Self.date(fromMinutes: minutes) },
+            get: { Self.date(fromMinutes: validMinutes) },
             set: { newDate in
+                guard scenePhase == .active, gate?.isLocked != true else { return }
                 let cal = DateText.madridCalendar
                 let comps = cal.dateComponents([.hour, .minute], from: newDate)
                 let total = (comps.hour ?? 8) * 60 + (comps.minute ?? 30)
-                guard total != minutes else { return }
+                guard total != validMinutes else { return }
                 do {
                     try save(total)
                 } catch {
@@ -191,23 +209,56 @@ private struct MorningTimeRow: View {
     }
 
     var body: some View {
-        HStack(spacing: Theme.Space.row) {
-            Text("Hora del resumen")
-                .titan(.subtitle)
-                .foregroundStyle(Theme.label2)
-            Spacer(minLength: Theme.Space.small)
-            DatePicker("Hora del resumen", selection: timeBinding, displayedComponents: .hourAndMinute)
-                .labelsHidden()
-                .datePickerStyle(.compact)
-                .environment(\.calendar, DateText.madridCalendar)
-                .environment(\.timeZone, DateText.madridCalendar.timeZone)
-                .accessibilityLabel("Hora del resumen")
-                .accessibilityIdentifier("morning-briefing-time")
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                guard scenePhase == .active, gate?.isLocked != true else { return }
+                withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: Theme.Space.row) {
+                    Text("Hora del resumen")
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label2)
+                    Spacer(minLength: Theme.Space.small)
+                    Text(formattedTime)
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.label)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Theme.raised, in: Capsule())
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Hora del resumen, \(formattedTime)")
+            .accessibilityIdentifier("morning-briefing-time")
+
+            if canShowWheel {
+                DatePicker("Hora del resumen", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .datePickerStyle(.wheel)
+                    .environment(\.calendar, DateText.madridCalendar)
+                    .environment(\.timeZone, DateText.madridCalendar.timeZone)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("morning-briefing-wheel")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(.leading, 60)
         .padding(.trailing, 16)
         .padding(.bottom, 10)
-        .frame(minHeight: 44)
+        .animation(reduceMotion ? nil : Theme.Motion.quick, value: canShowWheel)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { expanded = false }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { expanded = false }
+        }
         .sensoryFeedback(.error, trigger: errorTick)
     }
 

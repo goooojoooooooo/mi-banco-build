@@ -56,8 +56,8 @@ final class BriefingModel {
     func dueRecord(now: Date = Date()) -> BriefingRecord? {
         #if DEBUG
         if DemoMode.isActive {
-            guard DemoMode.briefingMode != nil, record == nil else { return nil }
-            return BriefingRecord(shownAt: now, since: now.addingTimeInterval(-86_400))
+            guard DemoMode.briefingMode != nil else { return nil }
+            return BriefingSchedule.due(previous: record, now: now, calendar: DateText.madridCalendar)
         }
         #endif
         return BriefingSchedule.due(previous: record, now: now, calendar: DateText.madridCalendar)
@@ -202,8 +202,11 @@ final class BriefingModel {
         lastQuestion = trimmed
         isAnswering = true
 
+        let knownMerchants = Set(
+            state.movements.flatMap { [$0.merchant, $0.bankMerchant].compactMap { $0 }.map(normalizeMerchant) }
+        )
         let routedIntent: AssistantIntent?
-        if isAdviceRequest(trimmed, portfolio: portfolio) {
+        if isAdviceRequest(trimmed, portfolio: portfolio, knownMerchants: knownMerchants) {
             routedIntent = nil
         } else {
             routedIntent = await writer.routeQuestion(trimmed, now: now, calendar: cal, portfolio: portfolio)
@@ -231,39 +234,62 @@ final class BriefingModel {
         assistantPreferences.feedback(for: cardID)
     }
 
+    @discardableResult
     func recordCardFeedback(_ feedback: CardFeedback, for card: InterestCard,
                             state: LedgerState, portfolio: Portfolio?, book: AccountBook,
-                            now: Date = Date()) {
-        assistantPreferences.recordFeedback(feedback, for: card, now: now)
+                            now: Date = Date()) -> Bool {
         #if DEBUG
-        if !DemoMode.isActive {
-            _ = try? preferencesStore.update { $0.recordFeedback(feedback, for: card, now: now) }
+        if DemoMode.isActive {
+            if DemoMode.prefsFail { return false }
+            assistantPreferences.recordFeedback(feedback, for: card, now: now)
+            cards = interestCards(
+                state: state, portfolio: portfolio, book: book, now: now,
+                calendar: DateText.madridCalendar, preferences: assistantPreferences
+            )
+            return true
         }
-        #else
-        _ = try? preferencesStore.update { $0.recordFeedback(feedback, for: card, now: now) }
         #endif
+        guard let updated = try? preferencesStore.update({ current -> AssistantPreferences in
+            current.recordFeedback(feedback, for: card, now: now)
+            return current
+        }) else {
+            return false
+        }
+        assistantPreferences = updated
         cards = interestCards(
             state: state, portfolio: portfolio, book: book, now: now,
             calendar: DateText.madridCalendar, preferences: assistantPreferences
         )
+        return true
     }
 
     func isTopicEnabled(_ topic: AssistantTopic) -> Bool {
         assistantPreferences.isEnabled(topic)
     }
 
-    func setTopicEnabled(_ enabled: Bool, for topic: AssistantTopic) {
-        assistantPreferences.setEnabled(enabled, for: topic)
+    @discardableResult
+    func setTopicEnabled(_ enabled: Bool, for topic: AssistantTopic) -> Bool {
         #if DEBUG
-        if !DemoMode.isActive {
-            _ = try? preferencesStore.update { $0.setEnabled(enabled, for: topic) }
+        if DemoMode.isActive {
+            if DemoMode.prefsFail { return false }
+            assistantPreferences.setEnabled(enabled, for: topic)
+            if !enabled {
+                cards.removeAll { $0.topic == topic }
+            }
+            return true
         }
-        #else
-        _ = try? preferencesStore.update { $0.setEnabled(enabled, for: topic) }
         #endif
+        guard let updated = try? preferencesStore.update({ current -> AssistantPreferences in
+            current.setEnabled(enabled, for: topic)
+            return current
+        }) else {
+            return false
+        }
+        assistantPreferences = updated
         if !enabled {
             cards.removeAll { $0.topic == topic }
         }
+        return true
     }
 
     private nonisolated static func loadStoredRecord() -> BriefingRecord? {

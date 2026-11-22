@@ -18,6 +18,9 @@ enum MorningBriefingNotifier {
     fileprivate static func apply(settings: AlertSettings, shownToday: Bool, now: Date) async {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
+        if !settings.morningBriefing || shownToday {
+            center.removeDeliveredNotifications(withIdentifiers: identifiers)
+        }
         guard settings.morningBriefing else { return }
 
         let calendar = DateText.madridCalendar

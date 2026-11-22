@@ -47,9 +47,22 @@ struct QuickActions: View {
                     }
                 }
             }
-            .padding(.horizontal, Theme.Space.gutter)
+            .padding(.leading, Theme.Space.gutter)
+            .padding(.trailing, Theme.Space.gutter + 16)
         }
         .scrollIndicators(.hidden)
+        .overlay(alignment: .trailing) {
+            if card.bank != nil {
+                LinearGradient(
+                    colors: [.clear, Theme.canvas],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 28)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        }
         .padding(.top, 8)
         .sensoryFeedback(Haptics.success, trigger: copyTick)
     }

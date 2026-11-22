@@ -71,7 +71,7 @@ private struct PositionRowView: View {
                             .foregroundStyle(Theme.label)
                             .lineLimit(1)
                             .fixedSize()
-                            .privateAmount()
+                            .privateAmount(spoken: spokenAmount(cents, hidden: false))
                     } else {
                         Text("Sin precio")
                             .titan(.subtitle)
@@ -80,12 +80,13 @@ private struct PositionRowView: View {
                             .fixedSize()
                     }
                     if let gainCents = value.gainCents {
-                        Text(gainLabel(cents: gainCents, tenths: value.gainTenths))
+                        let gainText = gainLabel(cents: gainCents, tenths: value.gainTenths)
+                        Text(gainText)
                             .titan(.meta)
                             .foregroundStyle(gainCents > 0 ? Theme.income : Theme.label2)
                             .lineLimit(1)
                             .fixedSize()
-                            .privateAmount()
+                            .privateAmount(spoken: gainText)
                     }
                 }
                 .padding(.leading, stacked ? tileSize + 14 : 0)
@@ -118,12 +119,13 @@ private struct PositionRowView: View {
             : AnyLayout(HStackLayout(spacing: 4))
         sessionLayout {
             Text(shares)
-                .privateAmount()
+                .privateAmount(spoken: shares)
             if let tenths = PositionFormatting.todayTenths(for: value), let day = positionChangeDay {
                 if !stacked { Text("·") }
-                Text("\(formatPercentTenths(tenths, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")) \(PositionFormatting.sessionShortLabel(changeDay: day))")
+                let sessionText = "\(formatPercentTenths(tenths, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")) \(PositionFormatting.sessionShortLabel(changeDay: day))"
+                Text(sessionText)
                     .foregroundStyle(tenths > 0 ? Theme.income : Theme.label3)
-                    .privateAmount()
+                    .privateAmount(spoken: sessionText)
             }
         }
         .titan(.subtitle)
@@ -166,23 +168,56 @@ private struct PositionRowView: View {
 struct PositionMonogramTile: View {
     let name: String
     var size: CGFloat = 40
+    /// En hojas de detalle (fondo `#1C1C1E`), una ficha redonda con relieve visible evita que el monograma parezca suelto (U66).
+    var circular: Bool = false
 
     var body: some View {
         Text(initials)
             .font(.system(size: size * 0.38, weight: .semibold))
             .foregroundStyle(Theme.monogram)
             .frame(width: size, height: size)
-            .background(Theme.raised, in: RoundedRectangle(cornerRadius: size > 48 ? Theme.Radius.logoLarge : Theme.Radius.logo, style: .continuous))
+            .background {
+                if circular {
+                    Circle()
+                        .fill(Color.white.opacity(0.10))
+                        .overlay(Circle().strokeBorder(Theme.separator, lineWidth: 0.5))
+                } else {
+                    RoundedRectangle(cornerRadius: size > 48 ? Theme.Radius.logoLarge : Theme.Radius.logo, style: .continuous)
+                        .fill(Theme.raised)
+                }
+            }
             .accessibilityHidden(true)
     }
 
     private var initials: String {
-        let words = name.split(whereSeparator: { $0.isWhitespace }).filter { !$0.isEmpty }
-        if words.count >= 2, let a = words[0].first, let b = words[1].first {
-            return "\(a)\(b)".uppercased()
+        if let letters = contactInitials(for: name) {
+            return letters
         }
-        let letters = name.filter { $0.isLetter || $0.isNumber }
-        return String(letters.prefix(2)).uppercased()
+        let alnum = name.filter { $0.isLetter || $0.isNumber }
+        return String(alnum.prefix(2)).uppercased()
+    }
+}
+
+/// Ficha de monograma para contactos (U63): solo letras; si el nombre no tiene letras, muestra un glifo neutro de persona.
+struct ContactMonogramTile: View {
+    let name: String
+    var size: CGFloat = 40
+
+    var body: some View {
+        Group {
+            if let letters = contactInitials(for: name) {
+                Text(letters)
+                    .font(.system(size: size * 0.38, weight: .semibold))
+                    .foregroundStyle(Theme.monogram)
+            } else {
+                Image(systemName: "person.fill")
+                    .font(.system(size: size * 0.42, weight: .semibold))
+                    .foregroundStyle(Theme.monogram)
+            }
+        }
+        .frame(width: size, height: size)
+        .background(Theme.raised, in: RoundedRectangle(cornerRadius: size > 48 ? Theme.Radius.logoLarge : Theme.Radius.logo, style: .continuous))
+        .accessibilityHidden(true)
     }
 }
 
@@ -198,16 +233,16 @@ enum PositionFormatting {
         return change < 0 ? -q : q
     }
 
-    /// "hoy" si `changeDay` cae en hoy (Madrid); si no, el día de la semana ("viernes") según J10.
+    /// "hoy" si `changeDay` cae en hoy (Madrid); si no, "el viernes" (U14).
     static func sessionShortLabel(changeDay: Date, now: Date = Date()) -> String {
         if DateText.madridCalendar.isDate(changeDay, inSameDayAs: now) { return "hoy" }
-        return DateText.madridWeekday(changeDay)
+        return "el \(DateText.madridWeekday(changeDay))"
     }
 
-    /// "hoy" o "en la última sesión (viernes)" (J10).
+    /// "hoy" o "en la última sesión, el viernes" (U14).
     static func sessionPhrase(changeDay: Date, now: Date = Date()) -> String {
         if DateText.madridCalendar.isDate(changeDay, inSameDayAs: now) { return "hoy" }
-        return "en la última sesión (\(DateText.madridWeekday(changeDay)))"
+        return "en la última sesión, el \(DateText.madridWeekday(changeDay))"
     }
 
     /// "precios de las 17:35", "precio de ayer, 17:35" o "precios del 17 nov" (hora de Madrid).
@@ -222,5 +257,18 @@ enum PositionFormatting {
         }
         let day = DateText.madridDay(date)
         return plural ? "precios del \(day)" : "precio del \(day)"
+    }
+
+    /// "precio más antiguo de las 09:00", "precio más antiguo de ayer, 09:00" o "precio más antiguo del 17 nov" (U14).
+    static func oldestPriceTimestamp(_ date: Date, now: Date = Date()) -> String {
+        let time = DateText.madridTime(date)
+        if DateText.madridCalendar.isDate(date, inSameDayAs: now) {
+            return "precio más antiguo de las \(time)"
+        }
+        if let yesterday = DateText.madridCalendar.date(byAdding: .day, value: -1, to: now),
+           DateText.madridCalendar.isDate(date, inSameDayAs: yesterday) {
+            return "precio más antiguo de ayer, \(time)"
+        }
+        return "precio más antiguo del \(DateText.madridDay(date))"
     }
 }

@@ -14,8 +14,9 @@ struct SettingsView: View {
     @Binding var openAccountsRequest: Bool
     /// Pedido desde un aviso de consentimiento, el resumen o el reverso de una tarjeta: abre ese banco en «Bancos».
     @Binding var openBankRequest: BankID?
-    /// Copia de seguridad e importación: abren la hoja raíz y el selector de archivos único.
+    /// Copia de seguridad e importación: abren la hoja raíz y el selector de archivos único (U55).
     var present: (RootSheet) -> Void = { _ in }
+    var requestImport: (ImportKind) -> Void = { _ in }
     var importBackup: () -> Void = {}
     var importTradeRepublic: () -> Void = {}
 
@@ -48,77 +49,86 @@ struct SettingsView: View {
         return !BankingCredentials.isReady
     }
 
-    private func bankPrimaryStatus(for bank: BankID) -> String {
+    private func bankPrimaryStatus(for bank: BankID, now: Date) -> String {
         if BankSyncStatus.shared.running.contains(bank) {
             return "Conectado · actualizando…"
         }
-        return model.snapshot.bankLines[bank]?.primary ?? "Sin conectar"
+        return bankStatusLines(
+            bank: bank,
+            link: model.state.links[bank],
+            estimated: model.snapshot.balances[bank]?.estimated,
+            canConnect: BankConnector.shared.canConnect(bank),
+            now: now,
+            calendar: DateText.madridCalendar
+        ).primary
     }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    ForEach(BankID.allCases, id: \.self) { bank in
-                        Button {
-                            pushedBank = bank
-                        } label: {
-                            HStack(spacing: 14) {
-                                BankLogo(bank: bank, size: 30)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(bank.displayName)
-                                        .titan(.option)
-                                        .foregroundStyle(Theme.label)
-                                    Text(bankPrimaryStatus(for: bank))
-                                        .titan(.meta)
-                                        .foregroundStyle(Theme.label3)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Theme.passive)
-                                    .accessibilityHidden(true)
-                            }
-                            .padding(.vertical, 4)
-                            .frame(minHeight: 52)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("settings-bank-\(bank.rawValue)")
-                        .listRowBackground(Theme.grouped)
-                        .listRowSeparatorTint(Theme.separator)
-                    }
-                    if showsPrepareConnectionRow {
-                        Button {
-                            showConnectionGuide = true
-                        } label: {
-                            HStack(spacing: Theme.Space.row) {
-                                OptionLabel(title: "Preparar conexión", detail: "Una vez, unos 15 minutos", systemImage: "key")
+            TimelineView(.everyMinute) { timeline in
+                let now = timeline.date
+                Form {
+                    Section {
+                        ForEach(BankID.allCases, id: \.self) { bank in
+                            Button {
+                                pushedBank = bank
+                            } label: {
+                                HStack(spacing: 14) {
+                                    BankLogo(bank: bank, size: 30)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(bank.displayName)
+                                            .titan(.option)
+                                            .foregroundStyle(Theme.label)
+                                        Text(bankPrimaryStatus(for: bank, now: now))
+                                            .titan(.meta)
+                                            .foregroundStyle(Theme.label3)
+                                    }
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Theme.passive)
-                                    .accessibilityHidden(true)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Theme.passive)
+                                        .accessibilityHidden(true)
+                                }
+                                .padding(.vertical, 4)
+                                .frame(minHeight: 52)
+                                .contentShape(Rectangle())
                             }
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings-bank-\(bank.rawValue)")
+                            .listRowBackground(Theme.grouped)
+                            .listRowSeparatorTint(Theme.separator)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("settings-prepare-connection")
-                        .listRowBackground(Theme.grouped)
-                        .listRowSeparatorTint(Theme.separator)
+                        if showsPrepareConnectionRow {
+                            Button {
+                                showConnectionGuide = true
+                            } label: {
+                                HStack(spacing: Theme.Space.row) {
+                                    OptionLabel(title: "Preparar conexión", detail: "Una vez, unos 15 minutos", systemImage: "key")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Theme.passive)
+                                        .accessibilityHidden(true)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings-prepare-connection")
+                            .listRowBackground(Theme.grouped)
+                            .listRowSeparatorTint(Theme.separator)
+                        }
+                    } header: {
+                        SettingsHeader("Bancos")
+                    } footer: {
+                        SettingsFooter("Mi Banco habla con tu banco a través de Enable Banking, desde este iPhone. Tu clave no sale de aquí.")
                     }
-                } header: {
-                    SettingsHeader("Bancos")
-                } footer: {
-                    SettingsFooter("Mi Banco habla con tu banco a través de Enable Banking, desde este iPhone. Tu clave no sale de aquí.")
-                }
 
-                Section {
-                    ForEach(BankID.allCases, id: \.self) { bank in
-                        BalanceRow(bank: bank, info: model.snapshot.balances[bank], link: model.state.links[bank],
-                                   text: binding(bank), error: errors[bank], saved: savedFlash.contains(bank),
-                                   focused: $focused, onSubmit: { commit(bank) })
-                    }
+                    Section {
+                        ForEach(BankID.allCases, id: \.self) { bank in
+                            BalanceRow(bank: bank, info: model.snapshot.balances[bank], link: model.state.links[bank],
+                                       now: now, text: binding(bank), error: errors[bank], saved: savedFlash.contains(bank),
+                                       focused: $focused, onSubmit: { commit(bank) })
+                        }
                     Button {
                         showAccounts = true
                     } label: {
@@ -194,20 +204,21 @@ struct SettingsView: View {
                             .foregroundStyle(Theme.label3)
                     }
                 }
+                }
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+                .listSectionSpacing(.compact)
+                .background(Theme.canvas.ignoresSafeArea())
             }
-            .scrollContentBackground(.hidden)
-            .scrollDismissesKeyboard(.interactively)
-            .listSectionSpacing(.compact)
-            .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Ajustes")
             .navigationDestination(isPresented: $showAccounts) {
                 AccountsView(accountBook: accountBook)
             }
             .navigationDestination(item: $pushedBank) { bank in
-                BankLinkView(model: model, portfolio: portfolio, bank: bank)
+                BankLinkView(model: model, portfolio: portfolio, bank: bank, present: present, requestImport: requestImport)
             }
             .navigationDestination(isPresented: $showConnectionGuide) {
-                ConnectionGuideView(model: model)
+                ConnectionGuideView(model: model, requestImport: requestImport)
             }
         }
         .onAppear {
@@ -367,6 +378,7 @@ private struct BalanceRow: View {
     let bank: BankID
     let info: BalanceInfo?
     var link: BankLinkInfo? = nil
+    var now: Date = Date()
     @Binding var text: String
     let error: String?
     let saved: Bool
@@ -454,12 +466,15 @@ private struct BalanceRow: View {
     }
 
     private var status: String {
-        if let link {
+        if link != nil {
             guard let info else { return "Sin saldo todavía" }
-            let kind = info.estimated ? "estimado" : "exacto"
-            let date = link.lastSuccessAt ?? info.setAt
-            let rel = relativeUpdated(date, now: Date(), calendar: DateText.madridCalendar)
-            return "\(kind) · \(rel)"
+            return connectedBalanceRowStatus(
+                estimated: info.estimated,
+                origin: info.origin,
+                setAt: info.setAt,
+                now: now,
+                calendar: DateText.madridCalendar
+            )
         }
         guard let info else { return "Sin saldo todavía" }
         let calendar = Calendar.current

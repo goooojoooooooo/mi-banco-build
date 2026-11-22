@@ -44,7 +44,7 @@ struct CardCarousel: View {
                 ForEach(cards, id: \.self) { card in
                     AccountCardView(
                         card: card, balances: snapshot.balances,
-                        links: links, bankLines: snapshot.bankLines,
+                        links: links,
                         total: snapshot.total,
                         monthSpent: snapshot.monthSpent[card] ?? 0,
                         portfolioSummary: portfolioSummary,
@@ -138,12 +138,20 @@ struct CardCarousel: View {
             @unknown default: break
             }
         }
-        .accessibilityAction(named: flipped == current ? "Ver el saldo" : "Ver detalles de la cuenta") { tap(current) }
+        .accessibilityAction(named: flipAccessibilityActionTitle) { tap(current) }
         .accessibilityAction(named: primaryAccessibilityActionTitle) {
             if current == .investments {
                 onImportInvestments()
-            } else if let bank = current.bank, links[bank] != nil {
-                switch snapshot.bankLines[bank]?.action {
+            } else if let bank = current.bank, let link = links[bank] {
+                let status = bankStatusLines(
+                    bank: bank,
+                    link: link,
+                    estimated: snapshot.balances[bank]?.estimated,
+                    canConnect: BankConnector.shared.canConnect(bank),
+                    now: Date(),
+                    calendar: DateText.madridCalendar
+                )
+                switch status.action {
                 case .refresh:
                     Task { _ = await BankSync.shared.refresh(trigger: .manual, only: bank) }
                 case .renew:
@@ -157,6 +165,13 @@ struct CardCarousel: View {
         }
     }
 
+    private var flipAccessibilityActionTitle: String {
+        if current == .investments {
+            return flipped == current ? "Ver el valor" : "Ver detalles"
+        }
+        return flipped == current ? "Ver el saldo" : "Ver detalles de la cuenta"
+    }
+
     private var primaryAccessibilityActionTitle: String {
         switch current {
         case .all:
@@ -164,8 +179,16 @@ struct CardCarousel: View {
         case .investments:
             return "Importar de nuevo"
         case .rev, .ima, .tr:
-            if let bank = current.bank, links[bank] != nil {
-                switch snapshot.bankLines[bank]?.action {
+            if let bank = current.bank, let link = links[bank] {
+                let status = bankStatusLines(
+                    bank: bank,
+                    link: link,
+                    estimated: snapshot.balances[bank]?.estimated,
+                    canConnect: BankConnector.shared.canConnect(bank),
+                    now: Date(),
+                    calendar: DateText.madridCalendar
+                )
+                switch status.action {
                 case .refresh: return "Actualizar"
                 case .renew: return "Renovar"
                 case .connect, .importStatement, .editBalance, nil: return "Editar saldo"
@@ -210,10 +233,19 @@ struct CardCarousel: View {
         let hidden = preferences.privateMode
         let position = "\(current.index(in: cards) + 1) de \(cards.count)"
         if current == .investments {
-            let value = portfolioSummary?.valueCents.map { spokenAmount($0, hidden: hidden) } ?? "sin precio"
+            let missing = portfolioSummary?.missingPrices ?? 0
+            let value: String
+            if hidden {
+                value = "importe oculto"
+            } else if let cents = portfolioSummary?.valueCents {
+                value = (missing > 0 ? "al menos " : "") + spokenAmount(cents, hidden: false)
+            } else {
+                value = "sin precio"
+            }
             let count = portfolioSummary?.positions.count ?? 0
             let positionsText = count == 1 ? "1 posición" : "\(count) posiciones"
-            return "Inversiones, \(value), \(positionsText), \(position)"
+            let missingPart = missing > 0 ? ", falta el precio de \(missing)" : ""
+            return "Inversiones, \(value), \(positionsText)\(missingPart), \(position)"
         }
         guard let bank = current.bank else {
             let total = snapshot.total.map { spokenAmount($0, hidden: hidden) } ?? "sin saldo"

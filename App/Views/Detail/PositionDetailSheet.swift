@@ -93,7 +93,7 @@ private struct PositionDetailContent: View {
         ScrollView {
             VStack(spacing: 18) {
                 VStack(spacing: 0) {
-                    PositionMonogramTile(name: value.position.name, size: tileSize)
+                    PositionMonogramTile(name: value.position.name, size: tileSize, circular: true)
                     Text(value.position.name)
                         .titan(.sheetTitle)
                         .foregroundStyle(Theme.label)
@@ -114,10 +114,9 @@ private struct PositionDetailContent: View {
                             .foregroundStyle(Theme.label)
                             .lineLimit(1)
                             .minimumScaleFactor(0.5)
-                            .privateAmount(radius: 14)
+                            .privateAmount(spoken: spokenAmount(cents, hidden: false), radius: 14)
                             .padding(.top, 10)
                             .staggeredEntrance(6, rise: 10)
-                            .accessibilityLabel(spokenAmount(cents, hidden: hidden))
                     } else {
                         Text("Sin precio")
                             .titan(.sheetTitle)
@@ -151,6 +150,7 @@ private struct PositionDetailContent: View {
                         spoken: value.priceEUR == nil
                             ? "Precio: Sin precio"
                             : (hidden ? "Precio: importe oculto" : "Precio: \(priceSummaryText)"),
+                        tint: isPriceStale ? Theme.warning : Theme.label,
                         divided: true,
                         isSensitive: value.priceEUR != nil
                     )
@@ -269,17 +269,30 @@ private struct PositionDetailContent: View {
         return formatUnitPriceEUR(avg)
     }
 
+    private var isPriceStale: Bool {
+        guard value.priceEUR != nil else { return false }
+        let timestamp: Date?
+        switch value.origin {
+        case .market(let date): timestamp = date
+        case .manual(let date): timestamp = date
+        case .none: timestamp = nil
+        }
+        guard let timestamp else { return false }
+        return Date().timeIntervalSince(timestamp) > 4 * 86_400
+    }
+
     private var priceSummaryText: String {
         guard let price = value.priceEUR else { return "Sin precio" }
         let formatted = formatUnitPriceEUR(price)
+        let staleSuffix = isPriceStale ? " · antiguo" : ""
         switch value.origin {
         case .market(let date):
             let when = DateText.madridCalendar.isDate(date, inSameDayAs: Date())
                 ? DateText.madridTime(date)
                 : DateText.madridDay(date)
-            return "\(formatted) · mercado, \(when)"
+            return "\(formatted) · mercado, \(when)\(staleSuffix)"
         case .manual(let date):
-            return "\(formatted) · a mano, \(DateText.madridDay(date))"
+            return "\(formatted) · a mano, \(DateText.madridDay(date))\(staleSuffix)"
         case .none:
             return formatted
         }
@@ -327,7 +340,7 @@ private struct PositionDetailContent: View {
                         .fontWeight(.medium)
                         .foregroundStyle(tint)
                         .multilineTextAlignment(stacked ? .leading : .trailing)
-                        .privateAmount()
+                        .privateAmount(spoken: text)
                 } else {
                     Text(text)
                         .fontWeight(.medium)
@@ -355,6 +368,8 @@ private struct PositionDetailContent: View {
         let kind: String
         if op.acquired {
             kind = "Recibido"
+        } else if op.disposed {
+            kind = "Salida"
         } else {
             kind = op.shares >= 0 ? "Compra" : "Venta"
         }
@@ -375,7 +390,7 @@ private struct PositionDetailContent: View {
                     .foregroundStyle(Theme.label)
                 Text(shares)
                     .foregroundStyle(Theme.label2)
-                    .privateAmount()
+                    .privateAmount(spoken: shares)
                 Text("· \(day)")
                     .foregroundStyle(Theme.label2)
             }
@@ -383,7 +398,7 @@ private struct PositionDetailContent: View {
             if let amount {
                 Text(amount)
                     .foregroundStyle(Theme.label)
-                    .privateAmount()
+                    .privateAmount(spoken: spokenAmount(abs(op.cashCents), hidden: false))
             }
         }
         .titan(.subtitle)
@@ -460,13 +475,15 @@ private struct PositionDetailContent: View {
         saveCloseTask = nil
         priceSaved = false
         if let current = value.priceEUR {
-            priceText = formatUnitPriceEUR(current).replacingOccurrences(of: "\u{00A0}€", with: "")
+            priceText = formatUnitPriceEUR(current)
+                .replacingOccurrences(of: "\u{00A0}€", with: "")
+                .replacingOccurrences(of: ".", with: "")
         } else {
             priceText = ""
         }
         priceError = nil
         editingPrice = true
-        priceFocused = true
+        priceFocused = !preferences.privateMode
     }
 
     private func commitManualPrice() {
@@ -480,7 +497,7 @@ private struct PositionDetailContent: View {
             clearManualPrice()
             return
         }
-        guard let parsed = parseDecimal(trimmed), parsed > 0, parsed <= 1_000_000_000 else {
+        guard let parsed = parseManualPriceES(trimmed), parsed > 0, parsed <= 1_000_000_000 else {
             priceError = "Escribe un precio válido, por ejemplo 110,50."
             errorTick += 1
             return

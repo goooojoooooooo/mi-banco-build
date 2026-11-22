@@ -9,7 +9,20 @@ extension Notification.Name {
 
 enum PortfolioImportError: Error, Sendable {
     case tooLarge
+    case empty
     case unreadable
+    case notTradeRepublic
+    case saveFailed
+
+    var failure: PortfolioImportFailure {
+        switch self {
+        case .tooLarge: .tooLarge
+        case .empty: .empty
+        case .unreadable: .unreadable
+        case .notTradeRepublic: .notTradeRepublic
+        case .saveFailed: .saveFailed
+        }
+    }
 }
 
 /// Estado observable de la cartera de inversiones (Plan 4b, tareas 6–7).
@@ -18,6 +31,7 @@ enum PortfolioImportError: Error, Sendable {
 final class PortfolioModel {
     nonisolated static let maxImportBytes = 10 * 1024 * 1024
     nonisolated static let safetyCopyName = "portfolio-antes-de-restaurar.json"
+    nonisolated static let tempSafetyCopyName = "portfolio-antes-de-restaurar.tmp.json"
 
     private(set) var portfolio: Portfolio
     private(set) var summary: PortfolioSummary?
@@ -34,6 +48,7 @@ final class PortfolioModel {
     @ObservationIgnored private var observer: Task<Void, Never>?
     #if DEBUG
     @ObservationIgnored private var demoSafetyCopy: Portfolio?
+    @ObservationIgnored private var demoTempSafetyCopy: Portfolio?
     #endif
 
     var hasPositions: Bool { summary != nil }
@@ -57,6 +72,9 @@ final class PortfolioModel {
             let initial = DemoMode.includesPortfolio ? DemoMode.portfolio(now: now) : Portfolio()
             self.portfolio = initial
             self.summary = portfolioSummary(initial, now: now, calendar: DateText.madridCalendar)
+            if DemoMode.showsImportFeedback {
+                self.lastImport = ImportSummary(added: 3, alreadyThere: 1, ignoredRows: 0, unreadableRows: 0)
+            }
             return
         }
         #endif
@@ -96,14 +114,29 @@ final class PortfolioModel {
     nonisolated static func readTradeRepublicRows(from url: URL) throws -> [TradeRepublicRow] {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
-              size > 0, size <= maxImportBytes else {
-            throw PortfolioImportError.tooLarge
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
+            if size == 0 { throw PortfolioImportError.empty }
+            if size > maxImportBytes { throw PortfolioImportError.tooLarge }
         }
-        let data = try Data(contentsOf: url)
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw PortfolioImportError.unreadable
+        }
+        if data.isEmpty { throw PortfolioImportError.empty }
         guard data.count <= maxImportBytes else { throw PortfolioImportError.tooLarge }
-        let table = try CSVTable.parse(data)
-        return try parseTradeRepublicExport(table)
+        let table: CSVTable
+        do {
+            table = try CSVTable.parse(data)
+        } catch {
+            throw PortfolioImportError.unreadable
+        }
+        do {
+            return try parseTradeRepublicExport(table)
+        } catch {
+            throw PortfolioImportError.notTradeRepublic
+        }
     }
 
     /// Incorpora filas ya leídas de Trade Republic (llamado también desde el importador de extractos del Plan 2).
@@ -124,9 +157,14 @@ final class PortfolioModel {
             return result
         }
         #endif
-        let (result, updated) = try store.update { current -> (ImportSummary, Portfolio) in
-            let summary = current.merge(extract, now: now)
-            return (summary, current)
+        let (result, updated): (ImportSummary, Portfolio)
+        do {
+            (result, updated) = try store.update { current -> (ImportSummary, Portfolio) in
+                let summary = current.merge(extract, now: now)
+                return (summary, current)
+            }
+        } catch {
+            throw PortfolioImportError.saveFailed
         }
         portfolio = updated
         summaryDay = DateText.madridCalendar.startOfDay(for: now)
@@ -135,22 +173,6 @@ final class PortfolioModel {
         lastImportError = nil
         importFeedbackToken += 1
         return result
-    }
-
-    /// Versión síncrona de importación directa desde URL.
-    @discardableResult
-    func importCSV(from url: URL) throws -> ImportSummary {
-        let rows = try Self.readTradeRepublicRows(from: url)
-        return try mergeRows(rows)
-    }
-
-    /// Lectura y análisis CSV fuera del actor principal; la fusión y el refresco de vistas ocurren en `@MainActor`.
-    @discardableResult
-    func importCSVAsync(from url: URL) async throws -> ImportSummary {
-        let rows = try await Task.detached(priority: .userInitiated) {
-            try Self.readTradeRepublicRows(from: url)
-        }.value
-        return try mergeRows(rows)
     }
 
     func recordImportError(_ message: String) {
@@ -296,6 +318,40 @@ final class PortfolioModel {
         summary = portfolioSummary(updated, now: now, calendar: DateText.madridCalendar)
     }
 
+    /// Guarda una copia temporal antes de restaurar; solo se promociona cuando libro y cartera se reemplazan bien (U57).
+    func saveTempSafetyCopy() throws {
+        #if DEBUG
+        if DemoMode.isActive {
+            demoTempSafetyCopy = portfolio
+            return
+        }
+        #endif
+        try store.saveCopy(portfolio, named: Self.tempSafetyCopyName)
+    }
+
+    /// Promociona la copia temporal a copia definitiva (para «Volver a lo de antes»).
+    func promoteTempSafetyCopy() throws {
+        #if DEBUG
+        if DemoMode.isActive {
+            demoSafetyCopy = demoTempSafetyCopy
+            demoTempSafetyCopy = nil
+            return
+        }
+        #endif
+        try store.promoteCopy(from: Self.tempSafetyCopyName, to: Self.safetyCopyName)
+    }
+
+    /// Borra la copia temporal cuando una restauración falla antes de terminar.
+    func removeTempSafetyCopy() {
+        #if DEBUG
+        if DemoMode.isActive {
+            demoTempSafetyCopy = nil
+            return
+        }
+        #endif
+        store.removeCopy(named: Self.tempSafetyCopyName)
+    }
+
     /// Guarda una copia de seguridad de la cartera actual antes de restaurar una copia (para «Volver a lo de antes»).
     func saveSafetyCopy() throws {
         #if DEBUG
@@ -315,7 +371,7 @@ final class PortfolioModel {
         return store.loadCopy(named: Self.safetyCopyName)
     }
 
-    /// Sustituye la cartera entera (restauración de copia de seguridad).
+    /// Sustituye la cartera entera (restauración de copia de seguridad), bajo el mismo bloqueo que las demás escrituras (U18).
     func replace(with next: Portfolio) throws {
         let now = Date()
         #if DEBUG
@@ -328,10 +384,13 @@ final class PortfolioModel {
             return
         }
         #endif
-        try store.save(next)
-        portfolio = next
+        let updated = try store.update { current -> Portfolio in
+            current = next
+            return current
+        }
+        portfolio = updated
         summaryDay = DateText.madridCalendar.startOfDay(for: now)
-        summary = portfolioSummary(next, now: now, calendar: DateText.madridCalendar)
+        summary = portfolioSummary(updated, now: now, calendar: DateText.madridCalendar)
         lastImport = nil
         lastImportError = nil
     }

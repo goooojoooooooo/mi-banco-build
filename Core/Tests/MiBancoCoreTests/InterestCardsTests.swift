@@ -433,4 +433,28 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
         let exceeded = exceededCards.first { $0.topic == .budgetClose }
         #expect(exceeded?.title == "Presupuesto superado")
     }
+
+    @Test func saldoJustoPorEncimaDePresupuestoCercaDelLimiteEnNormal() throws {
+        // N5 (U4): dentro del nivel NORMAL, «Saldo justo para un cobro» conserva base 100 (> 70 de presupuesto cerca del límite).
+        var state = LedgerState()
+        state.balances[.rev] = ManualBalance(cents: 10_000, setAt: nov(20, 8), origin: .bank)
+        state.budgets.monthlyCents = 10_000
+        state.movements = [
+            // 85 € gastados de 100 € -> «Presupuesto cerca del límite» (NORMAL, base 70).
+            Movement(bank: .rev, amountCents: -8_500, merchant: "Mercadona", kind: .payment, source: .bank,
+                     date: nov(10, 12), isShop: true, bankRef: "m1", bankStatus: .booked),
+            // Suscripción a 10 días (fuera de los 7 días de GRAVE, dentro de 14 días -> «Saldo justo para un cobro», NORMAL).
+            Movement(bank: .rev, amountCents: -3_000, merchant: "Gimnasio", kind: .payment, source: .bank,
+                     date: at(2026, 9, 30, 12), isShop: true, bankRef: "g1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -3_000, merchant: "Gimnasio", kind: .payment, source: .bank,
+                     date: at(2026, 10, 30, 12), isShop: true, bankRef: "g2", bankStatus: .booked),
+        ]
+        var book = AccountBook()
+        book.floors[.rev] = 8_000
+        let cards = interestCards(state: state, portfolio: nil, book: book, now: nov(20, 10), calendar: cal)
+        let titles = cards.map(\.title)
+        let idxSaldo = try #require(titles.firstIndex(of: "Saldo justo para un cobro"))
+        let idxBudget = try #require(titles.firstIndex(of: "Presupuesto cerca del límite"))
+        #expect(idxSaldo < idxBudget, "Orden esperado: Saldo justo antes que Presupuesto cerca del límite; salió \(titles)")
+    }
 }

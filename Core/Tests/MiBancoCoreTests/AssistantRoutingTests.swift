@@ -693,4 +693,139 @@ private func sampleState() -> LedgerState {
         // El modelo no puede emitir `.unsupportedPeriod`.
         #expect(parseAssistantModelRoute("PERIODO_NO_SOPORTADO", originalQuestion: "¿Cuánto gasté hoy?", portfolio: nil) == nil)
     }
+
+    // MARK: Re-revisión U1–U7 (N1–N4)
+
+    @Test func u1ReRevisionPositivosYNegativosSinRegresiones() {
+        let state = sampleState()
+        let known = ledgerMerchantKeys(in: state)
+        let shouldRefuse = [
+            // 2a.1–3: activo al principio de la frase y elección «X o Y»
+            "¿Nvidia está barata?",
+            "¿Tesla es rentable?",
+            "Nvidia worth it?",
+            "¿Nvidia subirá?",
+            "¿Tesla va a subir?",
+            "¿Tesla o Nvidia?",
+            "¿Apple o Microsoft?",
+            // 2a.4: condicionales merecería/valdría
+            "¿Merecería la pena Nvidia?",
+            "¿Valdría la pena Tesla?",
+            // 2a.5: dígitos y «mil euros»
+            "¿En qué meto 1.000 €?",
+            "¿Dónde pongo 1000 €?",
+            "¿Qué hago con mil euros?",
+            // 2a.6: mantengo/promedio/me quedo con/sigo
+            "¿Mantengo Nvidia?",
+            "¿Promedio Nvidia?",
+            "¿Hago bien en mantener Tesla?",
+            "¿Me quedo con Tesla?",
+            "¿Sigo en Tesla?",
+            "¿Sigo con Nvidia?",
+            // 2a.7: oro con decisión o predicción
+            "¿Meto mis ahorros en oro?",
+            "¿Paso mis ahorros a oro?",
+            "¿Me pongo en oro?",
+            "¿Meto todo en oro?",
+            "¿Cuánto meto en oro?",
+            "¿Subirá el oro?",
+            "¿Va a subir el oro?",
+            // 2a.8: opinión sobre un activo sin cartera
+            "¿Qué opinas de Nvidia?",
+            "¿Qué piensas de Tesla?",
+            "¿Qué te parece Nvidia?",
+            // 2a.9: vocabulario financiero cotidiano
+            "¿Contrato un plan de pensiones?",
+            "¿Cuánto debería meter en el plan de pensiones?",
+            "¿Shorteo Tesla?",
+            "¿Hago trading con Tesla?",
+            "¿Qué hago con la herencia?",
+            "¿Qué hago con la paga extra?",
+            "¿Compensa el oro?",
+            "¿Me suscribo a letras del Tesoro?",
+            "¿Renuevo el depósito?",
+        ]
+        for portfolio in [samplePortfolio() as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            for q in shouldRefuse {
+                #expect(isAdviceRequest(q, portfolio: portfolio, knownMerchants: known), "[\(tag)] debía rechazar: \(q)")
+            }
+        }
+
+        let mustAllow = [
+            // 2b: preguntas corrientes de cartera e inversiones
+            "¿Qué acciones tengo?",
+            "¿Qué posiciones tengo?",
+            "¿Cuántas posiciones tengo?",
+            "¿Qué ETFs tengo?",
+            "¿Qué fondos tengo?",
+            "¿Cuántas acciones de Apple tengo?",
+            "¿Tengo acciones de Apple?",
+            "¿Cuál es mi cartera?",
+            "Mi cartera",
+            "Cartera",
+            "Inversiones",
+            "Mis inversiones",
+            "Resumen de mi cartera",
+            "Valor de mi cartera",
+            "¿Qué tal van mis acciones?",
+            "¿Cuál es mi posición en Apple?",
+            "¿Cuál es la rentabilidad de mi cartera?",
+            "Dividendos",
+            "¿Qué dividendos me tocan?",
+            "¿Cuándo cobro el dividendo de Apple?",
+            "¿Cuántos dividendos he cobrado este año?",
+            "¿Cuánto he cobrado en dividendos?",
+            "¿Cuándo es la próxima aportación?",
+            "¿A qué precio compré Apple?",
+            "¿A cuánto cotiza Apple?",
+            "¿Cuál es la cotización de Apple?",
+            "¿Cuánto ha caído Apple?",
+            "¿Qué tal va Apple?",
+            "¿Cuánto me ha dado Apple?",
+            // 2b: verbos de gasto (cobró, pagó, cuesta, pago de cuota)
+            "¿Cuánto me cobró el broker?",
+            "¿Cuánto me cobró Trade Republic por el ETF?",
+            "¿Cuánto me cuesta el ETF de comisión?",
+            "¿Cuánto me pagó Apple de dividendo?",
+            "¿Cuánto me cobró la academia Bitcoin Escuela?",
+            "¿Cuánto pago de cuota en Fondo Social?",
+            // 2b: «entró» en pasado + sustantivo «aumento» / adjetivo «líquido»
+            "¿Cuánto me entró de Wallapop?",
+            "¿Cuánto me entró de Hacienda?",
+            "¿Cuándo entró la nómina de Acme?",
+            "¿Cuánto fue el aumento de la factura de Iberdrola?",
+            "¿Cuánto dinero líquido tengo en ING?",
+            // 2b: imperfecto de comprar/vender
+            "¿Cuánto compraba en Mercadona antes?",
+            "¿Cuánto vendía en Wallapop?",
+            // 2b: «compre» sin tilde y «Compras» corto
+            "¿Qué compre el finde?",
+            "¿Qué compre esta mañana?",
+            "¿Dónde compre las zapatillas?",
+            "Compras ayer",
+            "Compras hoy",
+            "Compras esta semana",
+        ]
+        for portfolio in [samplePortfolio() as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            for q in mustAllow {
+                #expect(!isAdviceRequest(q, portfolio: portfolio, knownMerchants: known), "[\(tag)] falso positivo: \(q)")
+            }
+        }
+    }
+
+    @Test func u3ComparacionConAnoPasadoYDiaNoPisaComercioMasLargo() {
+        var state = sampleState()
+        state.movements.append(
+            Movement(bank: .rev, amountCents: -1_800, merchant: "DIA Market", kind: .payment, source: .bank,
+                     date: nov(12, 10), isShop: true, bankRef: "dia-n4", bankStatus: .booked)
+        )
+        // N3: «¿Gasté más en octubre que el año pasado?» habla de octubre de 2026, no de 2025.
+        #expect(routeAssistantQuestion("¿Gasté más en octubre que el año pasado?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .specific(year: 2026, month: 10), category: nil, merchant: nil, bank: nil))
+        // N4: con DIA en el libro, «Mercadona» gana a «Dia» por longitud.
+        #expect(routeAssistantQuestion("¿Cuánto gasté en Mercadona el Dia 5?", state: state, portfolio: nil, now: nov(20), calendar: cal)
+            == .spending(month: .current, category: nil, merchant: "Mercadona", bank: nil))
+    }
 }

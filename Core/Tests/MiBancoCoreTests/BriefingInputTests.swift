@@ -645,5 +645,19 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         let excludedMorning = input(withExcluded, since: nov(19, 10), now: nov(20, 8, 30))
         #expect(excludedMorning.upcoming.filter { $0.name == "Netflix" }.count == 1)
         #expect(excludedMorning.payments.filter { $0.name == "Netflix" }.isEmpty)
+
+        // Caso 3 (N6): fila de hoy con hora futura (NO `dayOnly`) consultada antes de esa hora -> `movementCounts` NO la cuenta
+        // como cobrada todavía y la suscripción sigue apareciendo en `upcoming`.
+        var futureToday = LedgerState()
+        futureToday.movements = [
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                     date: date(9, 20, 12), isShop: true, bankRef: "f1", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                     date: date(10, 20, 12), isShop: true, bankRef: "f2", bankStatus: .booked),
+            Movement(bank: .rev, amountCents: -1_999, merchant: "Netflix", kind: .payment, source: .notification,
+                     date: nov(20, 14, 0), isShop: true, dayOnly: false),
+        ]
+        let beforeHour = input(futureToday, since: nov(19, 10), now: nov(20, 8, 30))
+        #expect(beforeHour.upcoming.filter { $0.name == "Netflix" }.count == 1)
     }
 }

@@ -177,10 +177,8 @@ final class InvestmentsUITests: XCTestCase {
         let appleRow = app.buttons["Apple"]
         scrollTo(appleRow)
         XCTAssertTrue(appleRow.waitForExistence(timeout: 10), "No se ve la fila de Apple en privado")
-        let euroPred = NSPredicate(format: "label CONTAINS '€' OR value CONTAINS '€'")
-        let pctPred = NSPredicate(format: "label CONTAINS '%' OR value CONTAINS '%'")
-        let appleEuro = appleRow.descendants(matching: .any).matching(euroPred)
-        let applePct = appleRow.descendants(matching: .any).matching(pctPred)
+        let appleEuro = appleRow.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€' OR value CONTAINS '€'"))
+        let applePct = appleRow.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%' OR value CONTAINS '%'"))
         XCTAssertEqual(appleEuro.count, 0, "La fila de Apple filtró € en privado: \(appleEuro.allElementsBoundByIndex.map { $0.label })")
         XCTAssertEqual(applePct.count, 0, "La fila de Apple filtró % en privado: \(applePct.allElementsBoundByIndex.map { $0.label })")
         XCTAssertEqual(appleRow.label, "Apple, importe oculto", "La etiqueta de Apple en privado no coincide: \(appleRow.label)")
@@ -190,8 +188,8 @@ final class InvestmentsUITests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja de posición en privado")
         let scroll = app.scrollViews["position-scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 8), "Falta position-scroll en la hoja de posición")
-        let euroInside = scroll.descendants(matching: .any).matching(euroPred)
-        let pctInside = scroll.descendants(matching: .any).matching(pctPred)
+        let euroInside = scroll.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€' OR value CONTAINS '€'"))
+        let pctInside = scroll.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '%' OR value CONTAINS '%'"))
         let allAppEuro = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '€'"))
         XCTAssertEqual(
             euroInside.count, 0,

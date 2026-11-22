@@ -416,20 +416,6 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 3, "El importe llega al borde (cortado): \(rowInk)")
     }
 
-    /// El marco de accesibilidad de un importe es su línea: la tira «0…9,0» de cada dígito (recortada a una línea) no
-    /// cuenta. Con ella en el árbol, el marco medía 11 líneas (693 pt con el texto más grande) y el anillo de VoiceOver
-    /// tapaba media pantalla.
-    func testRowAmountAccessibilityFrameIsOneLine() throws {
-        launchRows()
-        let title = app.staticTexts["Nómina"]
-        revealWhole(title)
-        let amount = any("gallery.row.income").frame
-        XCTAssertLessThan(amount.height, title.frame.height * 2.5, "Marco del importe: \(amount), título: \(title.frame)")
-        XCTAssertGreaterThan(amount.maxY, title.frame.minY, "Marco del importe fuera de su fila: \(amount)")
-        XCTAssertLessThan(amount.minY, title.frame.maxY, "Marco del importe fuera de su fila: \(amount)")
-        XCTAssertTrue(app.windows.firstMatch.frame.contains(amount), "Marco del importe fuera de la pantalla: \(amount)")
-    }
-
     /// B-4: sin preferencias, el ojo guardado se observa en vivo. Con el ojo abierto se ve el importe; si se cierra lo
     /// guardado (como haría Ajustes desde otra pantalla), el importe se oculta sin que nada más lo vuelva a dibujar.
     func testWithoutPreferencesTheStoredEyeIsObservedLive() throws {

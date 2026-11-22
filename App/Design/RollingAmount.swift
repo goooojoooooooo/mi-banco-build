@@ -107,14 +107,8 @@ struct RollingDigits: View {
             // Antes de empezar a contar (tarjeta vecina aún sin ver) no se enseña un 0 falso.
             .opacity(value == nil && drawnNow == .real && !hidden && countsUp && !motion.reduce ? 0 : 1)
             .privacySensitive()
-            // VoiceOver lee una capa transparente del tamaño del importe, no el dibujo: el elemento que agrupa el dibujo
-            // tomaba el marco de las tiras «0…9,0» (11 líneas de alto, aunque se vea una) y el anillo tapaba la pantalla.
-            .accessibilityHidden(true)
-            .overlay {
-                Color.clear
-                    .accessibilityElement()
-                    .accessibilityLabel(spokenAmount(cents, hidden: hidden))
-            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenAmount(cents, hidden: hidden))
             .onAppear(perform: start)
             .task(id: planID) { await finishRoll() }
             .onChange(of: hidden) { _, nowHidden in

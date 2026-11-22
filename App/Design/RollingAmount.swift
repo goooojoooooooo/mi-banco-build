@@ -23,15 +23,19 @@ struct RollingAmount: View {
     var revealed = true
     var style: AmountStyle = .plain(sign: false)
 
-    /// Opcional: sin preferencias (extensión, vista previa) no se cierra la app, y el ojo se lee de lo guardado: nunca
-    /// se enseña un importe que el dueño tiene oculto.
+    /// Opcional: sin preferencias (una vista previa, una hoja o ventana que no las recibe) no se cierra la app, y el ojo
+    /// se lee de lo guardado y se observa en vivo: si el dueño lo cierra desde otro sitio, este importe se oculta al
+    /// momento. En una extensión `UserDefaults.standard` es el de la extensión (el ojo no está en un App Group), así que
+    /// ahí no se sabe: quien dibuje un importe fuera de la app usa `RollingDigits` y le pasa `hidden` de una fuente real.
     @Environment(AppPreferences.self) private var preferences: AppPreferences?
+    /// El ojo guardado (misma clave y mismo almacén que `AppPreferences`; en la demo, el suyo propio sembrado al arrancar).
+    @AppStorage(AppPreferences.privateModeKey, store: AppPreferences.privateModeStore) private var storedPrivateMode = false
     @Environment(\.motion) private var motion
     @Environment(\.entrance) private var entrance
 
     var body: some View {
         RollingDigits(
-            cents: cents, style: style, hidden: preferences?.privateMode ?? AppPreferences.storedPrivateMode, countsUp: countsUp,
+            cents: cents, style: style, hidden: preferences?.privateMode ?? storedPrivateMode, countsUp: countsUp,
             revealed: revealed, motion: motion,
             restartToken: entrance.token, restartsOnToken: entrance.active && entrance.scope == .assembly)
     }
@@ -231,10 +235,11 @@ struct RollingDigits: View {
         return (small ? cents : euros) * min(heroScale, 1.35)
     }
 
-    /// Solo la cifra protagonista cambia el color; en una línea simple se hereda del entorno (verde de un ingreso, etc.).
-    private func glyphStyle(_ small: Bool) -> AnyShapeStyle {
+    /// Solo los céntimos de la cifra protagonista traen su color; lo demás (nil) se dibuja con el del sitio donde se
+    /// coloca (el verde de un ingreso, etc.): `.foregroundStyle(.foreground)` no hereda, pisa el del llamante.
+    private func glyphStyle(_ small: Bool) -> AnyShapeStyle? {
         if small, case .hero(_, _, let c) = style { return AnyShapeStyle(c) }
-        return AnyShapeStyle(.foreground)
+        return nil
     }
 
     private func blurRadius(_ small: Bool) -> CGFloat {
@@ -264,17 +269,17 @@ struct RollingDigits: View {
                     let speed = usesPlan && motion.richEffects ? DigitRoll.speed(plan[d], at: t, overshoot: overshoot) : 0
                     DigitCell(position: pos, blur: max(blurAll, min(1, speed / 16) * 0.85), blurRadius: blurRadius(g.small))
                         .cellFont(font(g.small))
-                        .foregroundStyle(glyphStyle(g.small))
+                        .cellStyle(glyphStyle(g.small))
                 } else if let dot = g.dot {
                     // La máscara es el «•» de la propia tipografía, en la fuente de su celda (grande en euros, pequeña
                     // en céntimos), con el avance del propio glifo.
                     BulletCell(visible: dotVisible(dot))
                         .cellFont(font(g.small))
-                        .foregroundStyle(glyphStyle(g.small))
+                        .cellStyle(glyphStyle(g.small))
                 } else {
                     Text(String(g.char))
                         .cellFont(font(g.small))
-                        .foregroundStyle(glyphStyle(g.small))
+                        .cellStyle(glyphStyle(g.small))
                 }
             }
         }
@@ -287,7 +292,10 @@ struct RollingDigits: View {
         reveal.drawn == .dots ? index < popped : true
     }
 
-    /// Los importes protagonistas se encogen hasta un 60 % si no caben (como `minimumScaleFactor(0.6)`).
+    /// Si no cabe, el importe se encoge entero (hasta la mitad, como `minimumScaleFactor(0.5)`), nunca celda a celda.
+    /// - El protagonista ocupa todo el ancho y se encoge hacia la izquierda.
+    /// - Una línea (`.plain`) pide su ancho natural y acepta hasta la mitad: en una fila con el texto más grande deja
+    ///   sitio al título (con `fixedSize()` se quedaba con ~310 pt y al título le quedaban 31).
     @ViewBuilder private func fitted<V: View>(_ view: V) -> some View {
         if heroEuros != nil {
             view
@@ -297,13 +305,25 @@ struct RollingDigits: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
         } else {
-            view.fixedSize()
+            view
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
+                // Centrado en su marco y encogido desde el centro: cabe justo en el ancho que le den.
+                .scaleEffect(fitScale)
+                .frame(
+                    minWidth: idealWidth > 0 ? idealWidth * Self.minFit : nil,
+                    idealWidth: idealWidth > 0 ? idealWidth : nil,
+                    maxWidth: idealWidth > 0 ? idealWidth : nil)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
         }
     }
 
+    /// Lo más que se encoge un importe que no cabe.
+    private static let minFit: CGFloat = 0.5
+
     private var fitScale: CGFloat {
         guard idealWidth > 0, availableWidth > 0 else { return 1 }
-        return min(1, max(0.5, availableWidth / idealWidth))
+        return min(1, max(Self.minFit, availableWidth / idealWidth))
     }
 
     // MARK: Estados
@@ -311,7 +331,7 @@ struct RollingDigits: View {
     private func digitCount(_ value: Int) -> Int { max(3, String(abs(value)).count) }
 
     private func start() {
-        // Oculto desde el principio: no hay nada que contar; al mostrar, `toggle` rueda hasta la cifra real.
+        // Oculto desde el principio: no hay nada que contar; al mostrar, el barajado del ojo rueda hasta la cifra real.
         guard !hidden, value == nil, revealed else { return }
         if countsUp, !motion.reduce {
             value = 0
@@ -476,20 +496,29 @@ private struct BulletCell: View {
     }
 }
 
-/// `.font(nil)` no significa «hereda»: la tipografía solo se aplica si el estilo trae una propia.
+/// `.font(nil)` y `.foregroundStyle(.foreground)` no significan «hereda»: la tipografía y el color solo se aplican si
+/// el estilo trae uno propio.
 private extension View {
     @ViewBuilder func cellFont(_ font: Font?) -> some View {
         if let font { self.font(font) } else { self }
     }
+
+    @ViewBuilder func cellStyle(_ style: AnyShapeStyle?) -> some View {
+        if let style { self.foregroundStyle(style) } else { self }
+    }
 }
 
-/// Con Reducir movimiento, el cambio de lo que se dibuja (cifra ↔ puntos) se funde por sí solo.
+/// Con Reducir movimiento, el cambio de lo que se dibuja (cifra ↔ puntos) se funde por sí solo. Sin `if/else` (cambiar
+/// Reducir movimiento no rehace el importe entero) y sin `.animation(nil)` (sin Reducir, la animación de quien llama
+/// sigue intacta).
 private struct ReduceFade: ViewModifier {
     let reduce: Bool
     let fade: Animation
     let value: AmountReveal.Drawn
 
-    @ViewBuilder func body(content: Content) -> some View {
-        if reduce { content.animation(fade, value: value) } else { content }
+    func body(content: Content) -> some View {
+        content.transaction(value: value) { transaction in
+            if reduce { transaction.animation = fade }
+        }
     }
 }

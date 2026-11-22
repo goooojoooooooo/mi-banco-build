@@ -151,7 +151,9 @@ jobs:
           # Tamaño de texto más grande de accesibilidad: nada se recorta ni se pisa.
           shot motion-galeria-texto-grande 10 -MiBancoMotionGallery -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           shot motion-galeria-controles-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage botones -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
-          shot motion-galeria-segmentado-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage segmentado -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          # Filas con el texto más grande: el importe se encoge y el título cabe. (La de «segmentado» salía igual que «pasos»:
+          # las dos anclas quedan a menos de una pantalla del final; el segmentado ya está entero en «controles».)
+          shot motion-galeria-filas-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage filas -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           shot motion-galeria-pasos-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage pasos -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           ls -l out
       - uses: actions/upload-artifact@v4

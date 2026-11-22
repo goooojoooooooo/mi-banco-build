@@ -95,6 +95,19 @@ public enum MotionMath {
         return min(1, max(0, fraction))
     }
 
+    /// La fracción limpia con la que se decide todo lo demás de una barra: lo que no es un número finito (gasto /
+    /// presupuesto 0, 0 / 0) es 0, igual que en `percent` y `unit`.
+    public static func finite(_ fraction: Double) -> Double {
+        fraction.isFinite ? fraction : 0
+    }
+
+    /// Si una barra está pasada de su aviso (`warnAt`; nil = nunca avisa). Lee la fracción limpia: una barra que enseña
+    /// «0 %» porque el presupuesto es 0 no se pone en ámbar, no parpadea y no vibra.
+    public static func isOver(_ fraction: Double, warnAt: Double?) -> Bool {
+        guard let warnAt else { return false }
+        return finite(fraction) >= warnAt
+    }
+
     /// Lo que usa un cambio de color u opacidad con Reducir movimiento: mismo tiempo, nunca rebota.
     public static func calm(_ spec: SpringSpec) -> SpringSpec {
         SpringSpec(response: spec.response, dampingFraction: 1)

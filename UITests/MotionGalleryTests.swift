@@ -189,11 +189,13 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil { amountLabel() == "3.769,95 euros" }, "Al mostrar no salió el importe actual: \(amountLabel())")
     }
 
-    /// Un pago que llega mientras el ojo está cambiando no se pierde.
-    func testChangeDuringEyeToggleIsNotLost() throws {
+    /// Prueba de toques: ojo, ojo, pago, y la etiqueta dice el importe con el pago. No prueba un cambio DURANTE el
+    /// barajado (`tap()` espera a que la app esté quieta y la etiqueta sale de `cents`, no de lo dibujado): eso lo
+    /// prueba `AmountRevealTests` en Core. La primera espera es larga porque es la prueba del arranque más frío.
+    func testEyeTapsThenPaymentUpdateTheLabel() throws {
         launchGallery()
         tap("gallery.eye")
-        XCTAssertTrue(waitUntil { amountLabel() == "importe oculto" })
+        XCTAssertTrue(labelled("importe oculto").waitForExistence(timeout: 30), "El ojo no ocultó el importe")
         tap("gallery.eye")
         tap("gallery.pay")
         XCTAssertTrue(waitUntil(8) { amountLabel() == "3.769,95 euros" }, "Se perdió el pago: \(amountLabel())")
@@ -278,7 +280,8 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil(8) { amountLabel() == "3.774,75 euros" }, "No se ve el importe: \(amountLabel())")
     }
 
-    /// K14: las filas `.plain` de la galería existen con su importe (VoiceOver lee el importe, no el signo de la maqueta).
+    /// Las filas `.plain` de la galería existen con su importe (VoiceOver lee el importe, no el signo de la maqueta). Lee
+    /// solo etiquetas: no prueba la tipografía de K14 (eso lo enseña la captura) ni el color (`testPlainIncome…`).
     func testPlainRowsShowTheirAmounts() throws {
         launchGallery()
         for (id, label) in [("gallery.row.expense", "-4,80 euros"), ("gallery.row.income", "1.250,00 euros"),
@@ -287,5 +290,101 @@ final class MotionGalleryTests: XCTestCase {
             XCTAssertTrue(row.waitForExistence(timeout: 5), "No existe \(id)")
             XCTAssertEqual(row.label, label, "\(id)")
         }
+    }
+
+    // MARK: Bloqueos antes de la fase B
+
+    /// Cuántos píxeles de lo que se ve del elemento son del verde de los ingresos (#30D158) y cuántos casi blancos.
+    private func ink(of element: XCUIElement) -> (green: Int, white: Int) {
+        guard let image = element.screenshot().image.cgImage else { return (0, 0) }
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return (0, 0) }
+        var green = 0, white = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+            if g > 150, r < 120, b < 160, g - r > 70 { green += 1 }
+            if r > 225, g > 225, b > 225 { white += 1 }
+        }
+        return (green, white)
+    }
+
+    /// B-1: una fila `.plain` se dibuja con el color de quien la coloca: el ingreso sale verde (`Theme.income`), no
+    /// blanco. Con `.foregroundStyle(.foreground)` en cada celda, todos sus píxeles eran blancos (255, 255, 255).
+    func testPlainIncomeKeepsTheCallerColour() throws {
+        launchGallery()
+        let income = any("gallery.row.income")
+        revealWhole(income)
+        let incomeInk = ink(of: income)
+        XCTAssertGreaterThan(incomeInk.green, 40, "El ingreso no sale en verde: \(incomeInk)")
+        XCTAssertLessThan(incomeInk.white, max(1, incomeInk.green / 10), "El ingreso tiene tinta blanca: \(incomeInk)")
+        // Control: el gasto pide blanco y sale blanco.
+        let expenseInk = ink(of: any("gallery.row.expense"))
+        XCTAssertGreaterThan(expenseInk.white, 40, "El gasto no sale en blanco: \(expenseInk)")
+        XCTAssertEqual(expenseInk.green, 0, "El gasto tiene tinta verde: \(expenseInk)")
+    }
+
+    /// B-1: oculto, el ingreso conserva el color («+•••,•• €» en verde, como en el prototipo).
+    func testHiddenPlainIncomeKeepsTheCallerColour() throws {
+        launchGallery(["-MiBancoDemoPrivate"])
+        let income = any("gallery.row.income")
+        revealWhole(income)
+        XCTAssertEqual(income.label, "importe oculto")
+        let incomeInk = ink(of: income)
+        XCTAssertGreaterThan(incomeInk.green, 20, "El ingreso oculto no sale en verde: \(incomeInk)")
+        XCTAssertLessThan(incomeInk.white, max(1, incomeInk.green / 10), "El ingreso oculto tiene tinta blanca: \(incomeInk)")
+    }
+
+    /// B-2: con el texto más grande, el importe de una fila se encoge y deja sitio al título: «Nómina» cabe en una línea
+    /// y no se pisan. Con `fixedSize()` el importe pedía ~310 pt y el título se partía en varias líneas.
+    func testPlainRowLeavesRoomForTheTitleAtLargestText() throws {
+        launchGallery(Self.hugeText)
+        let amount = any("gallery.row.income")
+        let title = app.staticTexts["Nómina"]
+        revealWhole(amount)
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch.frame
+        XCTAssertTrue(window.contains(amount.frame), "El importe se sale de la pantalla: \(amount.frame)")
+        XCTAssertLessThanOrEqual(title.frame.maxX, amount.frame.minX + 1, "Título e importe se pisan: \(title.frame) \(amount.frame)")
+        XCTAssertLessThan(title.frame.height, amount.frame.height * 1.5,
+                          "El título se parte en varias líneas: \(title.frame) junto a \(amount.frame)")
+    }
+
+    /// B-4: sin preferencias, el ojo guardado se observa en vivo. Con el ojo abierto se ve el importe; si se cierra lo
+    /// guardado (como haría Ajustes desde otra pantalla), el importe se oculta sin que nada más lo vuelva a dibujar.
+    func testWithoutPreferencesTheStoredEyeIsObservedLive() throws {
+        launchGallery(["-MiBancoMotionGalleryNoPrefs"])
+        XCTAssertTrue(waitUntil(8) { amountLabel() == "3.774,75 euros" }, "No se ve el importe: \(amountLabel())")
+        tap("gallery.storedEye.close")
+        XCTAssertTrue(labelled("importe oculto").waitForExistence(timeout: 10), "El importe no se ocultó al cerrar el ojo guardado")
+        XCTAssertTrue(waitUntil { moneyLabelCount() == 0 }, "Sigue habiendo una cifra real con el ojo cerrado")
+    }
+
+    /// B2 (K9): un hermano `Spacer` en un hueco de 300 pt no estira el botón que se transforma.
+    func testMorphingButtonIsNotStretchedBySpacer() throws {
+        launchGallery()
+        let button = app.buttons["Probar en hueco"]
+        revealWhole(button)
+        XCTAssertLessThan(button.frame.height, 60, "Mide \(button.frame.height) pt")
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44)
+    }
+
+    /// Ajustes › Animaciones arranca en «Expresivo» (lo que aprobó el dueño): sin nada guardado, el nivel de las
+    /// preferencias es `AppPreferences.defaultMotionLevel` y la galería lo enseña elegido.
+    func testMotionLevelStartsExpressive() throws {
+        launchGallery()
+        let expressive = app.buttons["Expresivo"]
+        XCTAssertTrue(expressive.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil { expressive.isSelected }, "«Expresivo» no es el nivel de partida")
+        XCTAssertFalse(app.buttons["Equilibrado"].isSelected)
+        XCTAssertFalse(app.buttons["Sutil"].isSelected)
     }
 }

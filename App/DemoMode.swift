@@ -11,7 +11,8 @@ import MiBancoCore
 /// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores),
 /// `-MiBancoDemoAlertsGuide <rev|tr|wallet|wallet-rev|wallet-tr> <paso>` (wallet = Apple Pay de imagin; con `-MiBancoDemoScreen ajustes`,
 /// abre la guía de avisos en ese paso contando desde 1; con paso 0 solo abre la lista de guías).
-/// En la demo nada se escribe en el almacén ni en UserDefaults (salvo `-MiBancoDemoPersistGuide`): los cambios viven en memoria.
+/// En la demo nada se escribe en el almacén ni en UserDefaults (salvo `-MiBancoDemoPersistGuide`, y el ojo, que va a un
+/// dominio propio de la demo que se siembra en cada arranque: `AppPreferences.privateModeStore`): los cambios viven en memoria.
 enum DemoMode {
     enum Screen { case home, spending, alerts, settings }
 

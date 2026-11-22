@@ -20,6 +20,26 @@ import Testing
         #expect(MotionMath.unit(1.7) == 1)
     }
 
+    /// B1: con presupuesto 0 (gasto 50 / 0 = +∞) la barra enseña «0 %» y está vacía; el aviso lee la MISMA fracción
+    /// limpia, así que no se pone en ámbar ni vibra. (Con la fracción cruda, ∞ >= 0,9 avisaba.)
+    @Test func isOverReadsTheCleanFraction() {
+        #expect(MotionMath.isOver(.infinity, warnAt: 0.9) == false)
+        #expect(MotionMath.isOver(-.infinity, warnAt: 0.9) == false)
+        #expect(MotionMath.isOver(.nan, warnAt: 0.9) == false)
+        #expect(MotionMath.isOver(0.89, warnAt: 0.9) == false)
+        #expect(MotionMath.isOver(0.9, warnAt: 0.9) == true)
+        #expect(MotionMath.isOver(1.2, warnAt: 0.9) == true)
+        #expect(MotionMath.isOver(5, warnAt: nil) == false)
+        #expect(MotionMath.finite(.infinity) == 0)
+        #expect(MotionMath.finite(.nan) == 0)
+        #expect(MotionMath.finite(0.45) == 0.45)
+        // Una sola regla: lo que avisa nunca dice menos que el aviso, y lo que dice 0 % nunca avisa.
+        for value in [Double.nan, .infinity, -.infinity, -0.2, 0, 0.45, 0.9, 0.95, 1, 1.2, 1e12] {
+            if MotionMath.isOver(value, warnAt: 0.9) { #expect(MotionMath.percent(value) >= 90) }
+            if MotionMath.percent(value) == 0 { #expect(MotionMath.isOver(value, warnAt: 0.9) == false) }
+        }
+    }
+
     private func near(_ a: Double, _ b: Double, _ tol: Double = 0.0005) -> Bool { abs(a - b) <= tol }
 
     @Test func balancedIsIdentity() {

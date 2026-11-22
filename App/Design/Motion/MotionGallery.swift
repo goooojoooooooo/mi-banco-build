@@ -4,7 +4,7 @@ import MiBancoCore
 
 /// Galería de movimiento solo para compilaciones DEBUG: enseña, sobre negro, cada pieza del kit sin enlazarla a ninguna
 /// pantalla. Se abre con `-MiBancoMotionGallery` (junto a `-MiBancoDemo`, para que nada toque datos ni UserDefaults).
-/// `-MiBancoMotionGalleryPage cifras|controles|botones|segmentado|pasos` baja hasta esa parte; `-MiBancoMotionReduce` la abre con
+/// `-MiBancoMotionGalleryPage cifras|filas|controles|botones|segmentado|pasos` baja hasta esa parte; `-MiBancoMotionReduce` la abre con
 /// Reducir movimiento simulado; `-MiBancoMotionGalleryNoPrefs` la monta FUERA del entorno de preferencias (como lo haría
 /// una hoja o una ventana nueva que se olvidase de ellas). Datos inventados.
 enum MotionGalleryLaunch {
@@ -13,7 +13,7 @@ enum MotionGalleryLaunch {
     static var startsReduced: Bool { arguments.contains("-MiBancoMotionReduce") }
     /// Sin `AppPreferences` en el entorno de la galería.
     static var withoutPreferences: Bool { arguments.contains("-MiBancoMotionGalleryNoPrefs") }
-    /// Hasta dónde baja al abrir: «controles», «pasos» (o nada).
+    /// Hasta dónde baja al abrir: una de las seis anclas de arriba (o nada).
     static var page: String? {
         guard let i = arguments.firstIndex(of: "-MiBancoMotionGalleryPage"), i + 1 < arguments.count else { return nil }
         return arguments[i + 1]
@@ -86,6 +86,7 @@ struct MotionGallery: View {
                     markSection
                     Color.clear.frame(height: 1).id("cifras")
                     amountSection
+                    Color.clear.frame(height: 1).id("filas")
                     rowsSection
                     Color.clear.frame(height: 1).id("controles")
                     glassSection
@@ -171,6 +172,12 @@ struct MotionGallery: View {
                 if let preferences {
                     chip("Ojo", id: "gallery.eye") {
                         withAnimation(motion.fade) { preferences.privateMode.toggle() }
+                    }
+                } else {
+                    // Cierra el ojo guardado sin tocar el estado de la galería (como Ajustes desde otra pantalla): el
+                    // importe sin preferencias lo observa en vivo.
+                    chip("Cerrar ojo guardado", id: "gallery.storedEye.close") {
+                        AppPreferences.privateModeStore.set(true, forKey: AppPreferences.privateModeKey)
                     }
                 }
             }
@@ -262,6 +269,12 @@ struct MotionGallery: View {
                 try? await Task.sleep(for: .milliseconds(500))
                 return false
             }
+            // Un hueco alto con un `Spacer` hermano: el botón conserva su alto (K9).
+            VStack(spacing: 0) {
+                MorphingButton(title: "Probar en hueco", doneTitle: "Enviado") { true }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 200)
         }
     }
 

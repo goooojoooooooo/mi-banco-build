@@ -6,24 +6,27 @@ import MiBancoCore
 /// Ajustes son el mismo estado) se guarda en UserDefaults; cambiarlo dentro de `withAnimation` anima cada importe.
 @MainActor @Observable
 final class AppPreferences {
-    static let privateModeKey = "privateMode"
+    nonisolated static let privateModeKey = "privateMode"
 
-    /// El modo privado guardado (con la misma clave y el mismo ajuste de la demo que lee `init`): para quien no tiene las
-    /// preferencias en el entorno y aun así nunca debe enseñar un importe que el dueño tiene oculto.
-    static var storedPrivateMode: Bool {
+    /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arrancar
+    /// con `-MiBancoDemoPrivate`, para que la demo nunca toque el ojo del dueño y, aun así, quien observe lo guardado
+    /// (`RollingAmount` sin preferencias) lo vea cambiar en vivo.
+    nonisolated(unsafe) static let privateModeStore: UserDefaults = {
         #if DEBUG
-        if DemoMode.isActive { return DemoMode.startsPrivate }
+        if DemoMode.isActive, let demo = UserDefaults(suiteName: "MiBancoDemoPreferences") {
+            demo.set(DemoMode.startsPrivate, forKey: privateModeKey)
+            return demo
+        }
         #endif
-        return UserDefaults.standard.bool(forKey: privateModeKey)
-    }
+        return .standard
+    }()
+
+    /// El modo privado guardado (la misma clave y el mismo almacén que lee `init`): para quien no tiene las preferencias
+    /// en el entorno y aun así nunca debe enseñar un importe que el dueño tiene oculto.
+    static var storedPrivateMode: Bool { privateModeStore.bool(forKey: privateModeKey) }
 
     var privateMode: Bool {
-        didSet {
-            #if DEBUG
-            if DemoMode.isActive { return }
-            #endif
-            UserDefaults.standard.set(privateMode, forKey: Self.privateModeKey)
-        }
+        didSet { Self.privateModeStore.set(privateMode, forKey: Self.privateModeKey) }
     }
 
     static let motionLevelKey = "motionLevel"

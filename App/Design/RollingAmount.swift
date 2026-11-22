@@ -467,6 +467,9 @@ private struct DigitCell: View {
                 .visualEffect { content, proxy in
                     content.offset(y: -CGFloat(place) * proxy.size.height / 11)
                 }
+                // Las 11 cifras de la tira no son para VoiceOver (el importe se lee entero en `spokenAmount`) y, si
+                // estuvieran en el árbol, el marco del importe sería 11 líneas de alto en vez de una.
+                .accessibilityHidden(true)
             }
             .clipped()
             .mask(

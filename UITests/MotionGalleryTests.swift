@@ -294,9 +294,18 @@ final class MotionGalleryTests: XCTestCase {
 
     // MARK: Bloqueos antes de la fase B
 
-    /// Cuántos píxeles de lo que se ve del elemento son del verde de los ingresos (#30D158) y cuántos casi blancos.
-    private func ink(of element: XCUIElement) -> (green: Int, white: Int) {
-        guard let image = element.screenshot().image.cgImage else { return (0, 0) }
+    /// Tinta de una franja de la pantalla (en puntos): píxeles del verde de los ingresos (#30D158), píxeles casi blancos
+    /// y dónde empieza y acaba (x, en puntos) lo verde. Se mide sobre la captura de la pantalla, no del elemento: el
+    /// marco de un elemento puede ser mayor que lo que se ve.
+    private struct Ink { var green = 0, white = 0, greenMinX = CGFloat.infinity, greenMaxX = -CGFloat.infinity }
+
+    private func ink(in band: CGRect) -> Ink {
+        let shot = XCUIScreen.main.screenshot().image
+        let scale = shot.scale
+        guard let full = shot.cgImage else { return Ink() }
+        let px = CGRect(x: band.minX * scale, y: band.minY * scale, width: band.width * scale, height: band.height * scale)
+            .integral.intersection(CGRect(x: 0, y: 0, width: full.width, height: full.height))
+        guard !px.isEmpty, let image = full.cropping(to: px) else { return Ink() }
         let width = image.width, height = image.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
         let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
@@ -307,55 +316,97 @@ final class MotionGalleryTests: XCTestCase {
             context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
             return true
         }
-        guard drawn else { return (0, 0) }
-        var green = 0, white = 0
+        guard drawn else { return Ink() }
+        var out = Ink()
         for i in stride(from: 0, to: pixels.count, by: 4) {
             let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
-            if g > 150, r < 120, b < 160, g - r > 70 { green += 1 }
-            if r > 225, g > 225, b > 225 { white += 1 }
+            if g > 150, r < 120, b < 160, g - r > 70 {
+                out.green += 1
+                let x = (px.minX + CGFloat((i / 4) % width)) / scale
+                out.greenMinX = min(out.greenMinX, x)
+                out.greenMaxX = max(out.greenMaxX, x)
+            }
+            if r > 225, g > 225, b > 225 { out.white += 1 }
         }
-        return (green, white)
+        return out
+    }
+
+    /// La franja del importe de una fila: a la derecha del título, a su altura (las filas centran título e importe).
+    private func amountBand(rightOf title: XCUIElement, halfHeight: CGFloat = 14) -> CGRect {
+        let window = app.windows.firstMatch.frame
+        let t = title.frame
+        return CGRect(x: t.maxX, y: t.midY - halfHeight, width: window.maxX - t.maxX, height: halfHeight * 2)
+    }
+
+    /// Abre la galería bajada hasta «Filas» (debajo de la barra de estado, sin barridos) y espera a que llegue.
+    private func launchRows(_ extra: [String] = []) {
+        launchGallery(["-MiBancoMotionGalleryPage", "filas"] + extra)
+        let title = app.staticTexts["Nómina"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch.frame
+        _ = waitUntil { title.frame.minY < window.midY }
+        Thread.sleep(forTimeInterval: 0.5)
     }
 
     /// B-1: una fila `.plain` se dibuja con el color de quien la coloca: el ingreso sale verde (`Theme.income`), no
     /// blanco. Con `.foregroundStyle(.foreground)` en cada celda, todos sus píxeles eran blancos (255, 255, 255).
     func testPlainIncomeKeepsTheCallerColour() throws {
-        launchGallery()
-        let income = any("gallery.row.income")
+        launchRows()
+        let income = app.staticTexts["Nómina"]
         revealWhole(income)
-        let incomeInk = ink(of: income)
+        let incomeInk = ink(in: amountBand(rightOf: income))
         XCTAssertGreaterThan(incomeInk.green, 40, "El ingreso no sale en verde: \(incomeInk)")
         XCTAssertLessThan(incomeInk.white, max(1, incomeInk.green / 10), "El ingreso tiene tinta blanca: \(incomeInk)")
         // Control: el gasto pide blanco y sale blanco.
-        let expenseInk = ink(of: any("gallery.row.expense"))
+        let expense = app.staticTexts["Café"]
+        revealWhole(expense)
+        let expenseInk = ink(in: amountBand(rightOf: expense))
         XCTAssertGreaterThan(expenseInk.white, 40, "El gasto no sale en blanco: \(expenseInk)")
         XCTAssertEqual(expenseInk.green, 0, "El gasto tiene tinta verde: \(expenseInk)")
     }
 
     /// B-1: oculto, el ingreso conserva el color («+•••,•• €» en verde, como en el prototipo).
     func testHiddenPlainIncomeKeepsTheCallerColour() throws {
-        launchGallery(["-MiBancoDemoPrivate"])
-        let income = any("gallery.row.income")
+        launchRows(["-MiBancoDemoPrivate"])
+        XCTAssertEqual(any("gallery.row.income").label, "importe oculto")
+        let income = app.staticTexts["Nómina"]
         revealWhole(income)
-        XCTAssertEqual(income.label, "importe oculto")
-        let incomeInk = ink(of: income)
+        let incomeInk = ink(in: amountBand(rightOf: income))
         XCTAssertGreaterThan(incomeInk.green, 20, "El ingreso oculto no sale en verde: \(incomeInk)")
         XCTAssertLessThan(incomeInk.white, max(1, incomeInk.green / 10), "El ingreso oculto tiene tinta blanca: \(incomeInk)")
     }
 
     /// B-2: con el texto más grande, el importe de una fila se encoge y deja sitio al título: «Nómina» cabe en una línea
-    /// y no se pisan. Con `fixedSize()` el importe pedía ~310 pt y el título se partía en varias líneas.
+    /// (tan alta como «Café», cuya fila sí cabe) y el importe, entero, va a su derecha sin tocar el borde. Con
+    /// `fixedSize()` el importe pedía ~310 pt y el título se partía en varias líneas.
     func testPlainRowLeavesRoomForTheTitleAtLargestText() throws {
-        launchGallery(Self.hugeText)
-        let amount = any("gallery.row.income")
+        launchRows(Self.hugeText)
         let title = app.staticTexts["Nómina"]
-        revealWhole(amount)
-        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let reference = app.staticTexts["Café"]
+        revealWhole(title)
+        XCTAssertTrue(reference.exists)
+        XCTAssertEqual(title.frame.height, reference.frame.height, accuracy: 2,
+                       "«Nómina» se parte en varias líneas: \(title.frame) frente a «Café» \(reference.frame)")
         let window = app.windows.firstMatch.frame
-        XCTAssertTrue(window.contains(amount.frame), "El importe se sale de la pantalla: \(amount.frame)")
-        XCTAssertLessThanOrEqual(title.frame.maxX, amount.frame.minX + 1, "Título e importe se pisan: \(title.frame) \(amount.frame)")
-        XCTAssertLessThan(title.frame.height, amount.frame.height * 1.5,
-                          "El título se parte en varias líneas: \(title.frame) junto a \(amount.frame)")
+        let row = CGRect(x: window.minX, y: title.frame.minY, width: window.width, height: title.frame.height)
+        let rowInk = ink(in: row)
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        XCTAssertGreaterThanOrEqual(rowInk.greenMinX, title.frame.maxX, "El importe pisa el título: \(rowInk), \(title.frame)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 3, "El importe llega al borde (cortado): \(rowInk)")
+    }
+
+    /// El marco de accesibilidad de un importe es su línea: la tira «0…9,0» de cada dígito (recortada a una línea) no
+    /// cuenta. Con ella en el árbol, el marco medía 11 líneas (693 pt con el texto más grande) y el anillo de VoiceOver
+    /// tapaba media pantalla.
+    func testRowAmountAccessibilityFrameIsOneLine() throws {
+        launchRows()
+        let title = app.staticTexts["Nómina"]
+        revealWhole(title)
+        let amount = any("gallery.row.income").frame
+        XCTAssertLessThan(amount.height, title.frame.height * 2.5, "Marco del importe: \(amount), título: \(title.frame)")
+        XCTAssertGreaterThan(amount.maxY, title.frame.minY, "Marco del importe fuera de su fila: \(amount)")
+        XCTAssertLessThan(amount.minY, title.frame.maxY, "Marco del importe fuera de su fila: \(amount)")
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(amount), "Marco del importe fuera de la pantalla: \(amount)")
     }
 
     /// B-4: sin preferencias, el ojo guardado se observa en vivo. Con el ojo abierto se ve el importe; si se cierra lo

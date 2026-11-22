@@ -245,7 +245,7 @@ final class MoveMoneyUITests: XCTestCase {
         let copied = app.staticTexts["IBAN de Revolut copiado"]
         XCTAssertTrue(dragSlide(slider, until: copied), "No llegó al paso 3 en modo privado")
         // U79 (A-M3): dentro de la hoja del paso 3, no en el primer `ScrollView` que salga (podría ser el de Inicio).
-        let step3Sheet = app.scrollViews["move-money-scroll"]
+        let step3Sheet = app.scrollViews["move-ready-scroll"]
         XCTAssertTrue(step3Sheet.waitForExistence(timeout: 5), "Falta el contenedor del paso 3")
         XCTAssertTrue(step3Sheet.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'En imagin:' OR label BEGINSWITH 'En Revolut:'"))
             .firstMatch.waitForExistence(timeout: 5), "U24: la pista del paso 3 no está dentro de la hoja")
@@ -301,7 +301,10 @@ final class MoveMoneyUITests: XCTestCase {
         launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoUpcoming", "-MiBancoDemoFloor"])
         XCTAssertTrue(app.navigationBars["Próximos cobros"].waitForExistence(timeout: 15), "No se abrió Próximos cobros")
 
-        let topUps = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Pasar ' AND label CONTAINS 'a Revolut'"))
+        // El botón real lleva la etiqueta hablada (`… a Revolut, saldo previsto por debajo del mínimo`); su texto interior no
+        // cuenta como otro botón.
+        let topUps = app.buttons.matching(NSPredicate(
+            format: "label BEGINSWITH 'Pasar ' AND label CONTAINS 'a Revolut' AND label ENDSWITH 'saldo previsto por debajo del mínimo'"))
         XCTAssertTrue(topUps.firstMatch.waitForExistence(timeout: 10), "U21/U24: falta el botón Pasar X a Revolut")
         XCTAssertEqual(topUps.count, 1, "U21: debe existir exactamente un botón Pasar X por banco, encontrados: \(topUps.count)")
         topUps.firstMatch.tap()
@@ -517,7 +520,7 @@ final class MoveMoneyUITests: XCTestCase {
         XCTAssertTrue(dragSlide(slider, until: phoneCopied), "No llegó al paso 3")
         // U79 (A-M3): la pista se busca DENTRO de la hoja (Inicio, debajo, también dice «Revolut») y con la frase exacta de
         // `bankTransferHint(from: .rev, kind: .phone, …)`.
-        let readySheet = app.scrollViews["move-money-scroll"]
+        let readySheet = app.scrollViews["move-ready-scroll"]
         XCTAssertTrue(readySheet.waitForExistence(timeout: 5), "Falta el contenedor del paso 3")
         let revHint = readySheet.staticTexts.matching(
             NSPredicate(format: "label BEGINSWITH %@", "En Revolut: Pagos → Enviar → pega el número y pon ")

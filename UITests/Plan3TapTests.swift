@@ -223,7 +223,8 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Escribe un importe como 120,00"].waitForExistence(timeout: 5),
                       "El importe mal escrito se perdió al volver")
 
-        field.tap()
+        // Al final del texto (un toque en medio deja letras detrás del cursor y el borrado no las quita).
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "100\n")
         XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].waitForExistence(timeout: 2))
         // Guardado: al salir y volver, el campo enseña el límite (formateado) y no hay error.

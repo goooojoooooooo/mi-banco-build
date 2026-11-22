@@ -638,6 +638,7 @@ struct MoveMoneySheet: View {
             .padding(.bottom, 32)
         }
         .scrollIndicators(.hidden)
+        .accessibilityIdentifier("move-ready-scroll")
     }
 
     // MARK: - Lógica

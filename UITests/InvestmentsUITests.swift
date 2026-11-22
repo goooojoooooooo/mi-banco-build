@@ -273,7 +273,8 @@ final class InvestmentsUITests: XCTestCase {
 
     /// U13 #1: tocar la tarjeta Inversiones la voltea y «Importar de nuevo» lleva a Ajustes › Inversiones.
     func testInvestmentsCardBackImportAgain() throws {
-        launch(["-MiBancoDemoCard", "inv"])
+        // `-MiBancoDemoCardElements` (DEBUG): el reverso de la tarjeta queda a la vista de XCUITest (U80).
+        launch(["-MiBancoDemoCard", "inv", "-MiBancoDemoCardElements"])
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
 
         let card = app.descendants(matching: .any)
@@ -360,9 +361,10 @@ final class InvestmentsUITests: XCTestCase {
         scrollTo(feedback)
         XCTAssertTrue(feedback.waitForExistence(timeout: 10), "U17: no se mostró el resumen de importación de demo")
 
-        app.tabBars.buttons["Inicio"].tap()
+        // Las pestañas se pulsan en su icono, como en `TapSmokeTests` (un `tap()` al centro del botón cae a veces en la vecina).
+        app.tabBars.buttons["Inicio"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 8), "No cambió a Inicio")
-        app.tabBars.buttons["Ajustes"].tap()
+        app.tabBars.buttons["Ajustes"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No volvió a Ajustes")
 
         XCTAssertFalse(feedback.waitForExistence(timeout: 2), "U17: el resumen de importación no se limpió al salir")

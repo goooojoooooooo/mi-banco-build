@@ -13,16 +13,19 @@ struct AccountBookStore {
     private final class DemoBox: @unchecked Sendable {
         private let lock = NSLock()
         private var stored: AccountBook?
-        private var failuresRemaining: Int?
+        /// `-MiBancoDemoKeychainFails`: el Llavero falla en TODA lectura (arranque y cada vuelta a primer plano) hasta la
+        /// primera lectura para escribir, que también falla; desde ahí lee bien. Así la prueba de U28 no depende de cuántas
+        /// veces se active la escena antes de tocar «Guardar» (A-D1).
+        private var failing: Bool?
 
-        func loadThrowing() throws -> AccountBook {
+        func loadThrowing(forWrite: Bool) throws -> AccountBook {
             lock.lock()
             defer { lock.unlock() }
-            if failuresRemaining == nil {
-                failuresRemaining = DemoMode.keychainFailCount
+            if failing == nil {
+                failing = DemoMode.keychainFailCount > 0
             }
-            if let rem = failuresRemaining, rem > 0 {
-                failuresRemaining = rem - 1
+            if failing == true {
+                if forWrite { failing = false }
                 throw KeychainError.status(errSecInteractionNotAllowed)
             }
             if let stored { return stored }
@@ -47,9 +50,9 @@ struct AccountBookStore {
 
     /// Lectura que distingue ausencia real (`errSecItemNotFound` → libro vacío) de un error temporal del Llavero
     /// (p. ej. `errSecInteractionNotAllowed`), para que `reload()` nunca borre el estado en memoria por un fallo transitorio.
-    static func loadThrowing() throws -> AccountBook {
+    static func loadThrowing(forWrite: Bool = false) throws -> AccountBook {
         #if DEBUG
-        if DemoMode.isActive { return try demo.loadThrowing() }
+        if DemoMode.isActive { return try demo.loadThrowing(forWrite: forWrite) }
         #endif
         var request = baseQuery()
         request[kSecReturnData] = true
@@ -131,7 +134,7 @@ final class AccountBookModel {
     /// Si la lectura inicial falló, exige leer del Llavero antes de escribir para nunca pisar datos del dueño con un cuaderno vacío (U28).
     private func baseBookForWrite() throws -> AccountBook {
         if loadFailed {
-            let loaded = try AccountBookStore.loadThrowing()
+            let loaded = try AccountBookStore.loadThrowing(forWrite: true)
             loadFailed = false
             book = loaded
             return loaded

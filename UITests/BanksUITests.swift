@@ -97,7 +97,8 @@ final class BanksUITests: XCTestCase {
 
     /// U13 #4: en el reverso de la tarjeta de Revolut conectado, tocar «Actualizar» muestra confirmación visual.
     func testConnectedBankBackRefresh() {
-        let app = launch(["-MiBancoDemoBanks", "-MiBancoDemoCard", "rev"])
+        // `-MiBancoDemoCardElements` (DEBUG): el reverso de la tarjeta queda a la vista de XCUITest (U80).
+        let app = launch(["-MiBancoDemoBanks", "-MiBancoDemoCard", "rev", "-MiBancoDemoCardElements"])
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15))
 
         let card = app.descendants(matching: .any)
@@ -183,8 +184,12 @@ final class BanksUITests: XCTestCase {
 
         let choose = app.buttons["Elegir Revolut en la lista"]
         XCTAssertTrue(choose.waitForExistence(timeout: 8), "U49: falta Elegir Revolut en la lista")
+        XCTAssertFalse(app.navigationBars["Elegir Revolut"].exists, "U49: el selector ya estaba abierto antes del toque")
         choose.tap()
-        XCTAssertTrue(app.searchFields.firstMatch.waitForExistence(timeout: 8), "U49: no apareció el buscador de ASPSPPickerView")
+        // U80: con dos bancos en la lista `ASPSPPickerView` no enseña buscador: se afirma su pantalla y su lista.
+        XCTAssertTrue(app.navigationBars["Elegir Revolut"].waitForExistence(timeout: 8), "U49: no se abrió ASPSPPickerView")
+        XCTAssertTrue(app.staticTexts["Elige tu banco en la lista"].exists, "U49: falta la lista de ASPSPPickerView")
+        XCTAssertTrue(app.buttons["imaginBank"].exists, "U49: la lista de ASPSPPickerView no enseña los bancos")
     }
 
     /// U49 #4 + U55: confirmaciones «Desconectar» y «Olvidar clave y conexiones» con «Cancelar».

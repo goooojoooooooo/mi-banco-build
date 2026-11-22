@@ -65,8 +65,10 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            TimelineView(.everyMinute) { timeline in
-                let now = timeline.date
+            // `timeline.date` es el comienzo del minuto (hasta 59 s antes de ahora): «hace 4 min» cuando ya son 5. Se dibuja con
+            // la hora de verdad y el `TimelineView` solo marca cuándo volver a dibujar (U80).
+            TimelineView(.everyMinute) { _ in
+                let now = Date()
                 Form {
                     Section {
                         ForEach(BankID.allCases, id: \.self) { bank in

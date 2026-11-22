@@ -81,6 +81,10 @@ enum DemoMode {
     /// U76: entrar por el aviso de la mañana (`-MiBancoDemoRoute briefing`) a los N segundos del arranque, para probar que la
     /// ruta del aviso no abre el resumen encima de una confirmación ni de una conexión.
     static var demoRouteDelaySeconds: Double? { value(after: "-MiBancoDemoRouteAfter").flatMap(Double.init) }
+    /// U80: el carrusel de tarjetas deja ver sus botones a XCUITest (para VoiceOver sigue siendo un solo elemento).
+    static var exposesCardElements: Bool { isActive && arguments.contains("-MiBancoDemoCardElements") }
+    /// U80 (U35.1): segundos que dura el bloqueo de demo (`-MiBancoDemoLock`); 4 si no se dice.
+    static var lockSeconds: Double { value(after: "-MiBancoDemoLockSeconds").flatMap(Double.init) ?? 4 }
     static var demoGuideKey: Bool { arguments.contains("-MiBancoDemoGuideKey") }
     static var demoConnectPhase: (phase: String, bank: BankID)? {
         let args = arguments

@@ -11,7 +11,6 @@ struct ImportStatementView: View {
     let preview: ImportPreview
     var onFinished: () -> Void = {}
 
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppPreferences.self) private var preferences
 
@@ -131,8 +130,9 @@ struct ImportStatementView: View {
                     .accessibilityIdentifier("import-confirm")
 
                     Button {
+                        // U80 (U49.6): `onFinished` quita la vista de la pila (`navigationDestination(item:)`); un `dismiss()`
+                        // más sacaba también la pantalla del banco y dejaba en Ajustes.
                         onFinished()
-                        dismiss()
                     } label: {
                         Text("Cancelar")
                             .titan(.option)
@@ -193,7 +193,6 @@ struct ImportStatementView: View {
         Task {
             try? await Task.sleep(for: .milliseconds(320))
             onFinished()
-            dismiss()
         }
     }
 }

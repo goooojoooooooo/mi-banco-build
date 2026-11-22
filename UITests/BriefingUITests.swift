@@ -165,7 +165,8 @@ final class BriefingUITests: XCTestCase {
 
         XCTAssertTrue(app.navigationBars["Mover dinero"].waitForExistence(timeout: 10), "No se abrió la hoja Mover dinero")
         XCTAssertTrue(
-            app.staticTexts["10,00\(nbsp)€"].waitForExistence(timeout: 8),
+            // U26: el teclado enseña lo tecleado sin decimales que nadie escribió: «10 €».
+            app.staticTexts["10\(nbsp)€"].waitForExistence(timeout: 8),
             "Mover dinero no llegó con 10,00 € pre-rellenado"
         )
     }
@@ -346,7 +347,7 @@ final class BriefingUITests: XCTestCase {
 
         let hourWheel = app.pickerWheels.element(boundBy: 0)
         XCTAssertTrue(hourWheel.waitForExistence(timeout: 6), "U33: no apareció la rueda de hora")
-        hourWheel.adjust(toPickerWheelValue: "09")
+        hourWheel.adjust(toPickerWheelValue: "9")
 
         XCTAssertTrue(
             app.staticTexts["A las 09:30, si aún no has visto el resumen."].waitForExistence(timeout: 8),
@@ -482,7 +483,8 @@ final class BriefingUITests: XCTestCase {
 
     /// U35 #1: el resumen nunca aparece encima del bloqueo; aparece tras desbloquear.
     func testBriefingNeverAboveLock() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoBriefing", "quiet"])
+        // `-MiBancoDemoLockSeconds 12` (DEBUG): el bloqueo de demo dura 12 s, no 4: el arranque de la prueba ya gasta ~9 s.
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "12", "-MiBancoDemoBriefing", "quiet"])
 
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 8), "U35: falta la pantalla de bloqueo")
@@ -491,7 +493,7 @@ final class BriefingUITests: XCTestCase {
         while unlock.exists {
             XCTAssertFalse(element("briefing-done").exists, "U35: el resumen subió encima del bloqueo")
             lockChecks += 1
-            if lockChecks > 60 { break }
+            if lockChecks > 80 { break }
             Thread.sleep(forTimeInterval: 0.25)
         }
         XCTAssertGreaterThan(lockChecks, 0, "U35: no se llegó a mirar con el bloqueo delante")

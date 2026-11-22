@@ -128,7 +128,7 @@ struct CardCarousel: View {
                 releaseTarget(token)
             }
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: Self.cardChildrenBehavior)
         .accessibilityLabel(spokenLabel)
         .accessibilityHint("Desliza hacia arriba o hacia abajo para cambiar de cuenta")
         .accessibilityAdjustableAction { direction in
@@ -229,6 +229,15 @@ struct CardCarousel: View {
         withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { selection = cards[next] }
     }
 
+    /// Para VoiceOver el carrusel es UN elemento ajustable con acciones con nombre. Solo en la demo de pruebas
+    /// (`-MiBancoDemoCardElements`, DEBUG) deja ver los botones del reverso para que XCUITest los toque de verdad (U80).
+    private static var cardChildrenBehavior: AccessibilityChildBehavior {
+        #if DEBUG
+        if DemoMode.exposesCardElements { return .contain }
+        #endif
+        return .ignore
+    }
+
     private var spokenLabel: String {
         let hidden = preferences.privateMode
         let position = "\(current.index(in: cards) + 1) de \(cards.count)"
@@ -245,7 +254,14 @@ struct CardCarousel: View {
             let count = portfolioSummary?.positions.count ?? 0
             let positionsText = count == 1 ? "1 posición" : "\(count) posiciones"
             let missingPart = missing > 0 ? ", falta el precio de \(missing)" : ""
-            return "Inversiones, \(value), \(positionsText)\(missingPart), \(position)"
+            // U80 (U14): lo mismo que dice la tarjeta, «… desde la compra», también para VoiceOver (con el ojo cerrado, oculto).
+            let gainPart: String = {
+                guard let gain = portfolioSummary?.gainCents else { return "" }
+                if hidden { return ", importe oculto desde la compra" }
+                let kind = gain >= 0 ? "ganancia de" : "pérdida de"
+                return ", \(kind) \(spokenAmount(abs(gain), hidden: false)) desde la compra"
+            }()
+            return "Inversiones, \(value), \(positionsText)\(gainPart)\(missingPart), \(position)"
         }
         guard let bank = current.bank else {
             let total = snapshot.total.map { spokenAmount($0, hidden: hidden) } ?? "sin saldo"

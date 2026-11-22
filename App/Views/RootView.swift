@@ -42,6 +42,9 @@ struct RootView: View {
     @State private var briefingActionTask: Task<Void, Never>?
     /// Si se entró tocando un aviso de movimiento o de Avisos, el aviso gana y el resumen espera a la siguiente activación.
     @State private var suppressBriefingForActivation = false
+    /// U80 (U37): el dueño tocó el aviso de la mañana y el resumen aún no se ha podido abrir (arranque en frío, bloqueo,
+    /// una conexión a medias…). La siguiente comprobación del resumen lo abre; una comprobación posterior no lo pierde.
+    @State private var briefingRouteWaiting = false
     /// Hoja de un movimiento abierta desde Avisos o desde un aviso tocado.
     private var detail: DetailRoute? {
         get { if case .movement(let route) = sheet { route } else { nil } }
@@ -471,20 +474,24 @@ struct RootView: View {
         router.pending = nil
         switch route.destination {
         case .home:
+            briefingRouteWaiting = false
             suppressBriefingForActivation = true
             briefingTask?.cancel()
             briefingTask = nil
             tab = .home
         case .alerts:
+            briefingRouteWaiting = false
             suppressBriefingForActivation = true
             briefingTask?.cancel()
             briefingTask = nil
             tab = .alerts
         case .briefing:
             suppressBriefingForActivation = false
+            briefingRouteWaiting = true
             tab = .home
             scheduleBriefingRouteOpen()
         case .bank(let bank):
+            briefingRouteWaiting = false
             suppressBriefingForActivation = true
             briefingTask?.cancel()
             briefingTask = nil
@@ -512,6 +519,9 @@ struct RootView: View {
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, gate.generation == gen else { return }
             considerBriefing()
+            if briefingRouteWaiting && sheet == nil {
+                openManualBriefing()
+            }
         }
     }
 
@@ -581,6 +591,7 @@ struct RootView: View {
             now: now
         )
         briefing.markShown(rec)
+        briefingRouteWaiting = false
         sheet = .briefing(rec)
         rescheduleMorningReminder()
     }

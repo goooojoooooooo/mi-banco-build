@@ -325,8 +325,9 @@ private struct CardBack: View {
     private var secondary: Color { contrast == .increased ? Theme.card2High : Theme.card2 }
 
     var body: some View {
-        TimelineView(.everyMinute) { timeline in
-            let liveLines = liveBankStatus(now: timeline.date)
+        // Hora de verdad al dibujar; `TimelineView` solo marca el redibujo de cada minuto (U80).
+        TimelineView(.everyMinute) { _ in
+            let liveLines = liveBankStatus(now: Date())
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
                     if card == .investments {

@@ -241,6 +241,23 @@ public func forgetEverythingPlan(
     }
 }
 
+/// Secuencia de «Desconectar» un banco (U78, B-M9): el mismo orden que «Olvidar». Primero lee la sesión, borra la sesión del
+/// Llavero y el enlace del libro en el iPhone, y SOLO DESPUÉS avisa al banco (mejor esfuerzo; con la red colgada lo local ya
+/// no está).
+public func disconnectBankPlan(
+    readSessionID: @Sendable () async -> String?,
+    deleteLocal: @Sendable () async -> Void,
+    unlinkLedger: @Sendable () async -> Void,
+    deleteRemote: @Sendable (String) async -> Void
+) async {
+    let id = await readSessionID()
+    await deleteLocal()
+    await unlinkLedger()
+    if let id, !Task.isCancelled {
+        await deleteRemote(id)
+    }
+}
+
 /// Error al guardar las credenciales de Enable Banking (U53).
 public enum BankingCredentialErrorKind: Equatable, Sendable {
     case invalidKey, keychain

@@ -340,19 +340,34 @@ final class BankConnector {
         // Un trámite de este banco (también uno que está terminando) se abandona: `attempt` cambia y `finish` se retira.
         attempt = UUID()
         run(flow.handle(.disconnected(bank)))
-        if let session = try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)),
-           let client = try? BankingCredentials.client() {
-            try? await client.deleteSession(id: session.sessionID)
-        }
-        try? KeychainVault.delete(KeychainVault.session(for: bank))
-        _ = try? SharedStore.make().update { ledger in
-            ledger.setLink(bank, nil)
-            if let balance = ledger.state.balances[bank], balance.origin == .bank {
-                ledger.adoptBalance(bank, cents: balance.cents, at: balance.setAt, origin: .manual)
+        // U78 (B-M9): como «Olvidar», lo local primero (sesión del Llavero y enlace del libro) y el aviso al banco al final.
+        // El cliente se crea antes de borrar nada, para poder avisar al banco aunque luego falte algo.
+        let remoteClient = try? BankingCredentials.client()
+        await disconnectBankPlan(
+            readSessionID: {
+                (try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)))?.sessionID
+            },
+            deleteLocal: {
+                try? KeychainVault.delete(KeychainVault.session(for: bank))
+            },
+            unlinkLedger: {
+                _ = try? SharedStore.make().update { ledger in
+                    ledger.setLink(bank, nil)
+                    if let balance = ledger.state.balances[bank], balance.origin == .bank {
+                        ledger.adoptBalance(bank, cents: balance.cents, at: balance.setAt, origin: .manual)
+                    }
+                }
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
+                    NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
+                }
+            },
+            deleteRemote: { sessionID in
+                if let remoteClient {
+                    try? await remoteClient.deleteSession(id: sessionID)
+                }
             }
-        }
-        NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
-        NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
+        )
     }
 
     // MARK: - Interno

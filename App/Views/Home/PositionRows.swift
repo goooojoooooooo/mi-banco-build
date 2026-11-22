@@ -189,13 +189,8 @@ struct PositionMonogramTile: View {
             .accessibilityHidden(true)
     }
 
-    private var initials: String {
-        if let letters = contactInitials(for: name) {
-            return letters
-        }
-        let alnum = name.filter { $0.isLetter || $0.isNumber }
-        return String(alnum.prefix(2)).uppercased()
-    }
+    /// U79 (A-M2): dos letras, como la lista de Cartera (`contactInitials` es solo para contactos, U63).
+    private var initials: String { positionInitials(for: name) }
 }
 
 /// Ficha de monograma para contactos (U63): solo letras; si el nombre no tiene letras, muestra un glifo neutro de persona.

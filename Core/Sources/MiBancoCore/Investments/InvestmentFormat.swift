@@ -114,3 +114,16 @@ public func portfolioImportMessage(_ failure: PortfolioImportFailure) -> String 
     case .saveFailed: return "No se pudo guardar. Inténtalo de nuevo."
     }
 }
+
+/// Iniciales de la ficha de una posición (U79, A-M2): dos letras, como la lista de Cartera. Con dos palabras o más, la primera
+/// letra de cada una de las dos primeras («iShares Core…» → «IC»); con una, sus dos primeras («Apple» → «AP»). Los signos no
+/// cuentan.
+public func positionInitials(for name: String) -> String {
+    let words = name.split(whereSeparator: \.isWhitespace)
+        .map { $0.filter { $0.isLetter || $0.isNumber } }
+        .filter { !$0.isEmpty }
+    if words.count >= 2, let a = words[0].first, let b = words[1].first {
+        return "\(a)\(b)".uppercased()
+    }
+    return String((words.first ?? "").prefix(2)).uppercased()
+}

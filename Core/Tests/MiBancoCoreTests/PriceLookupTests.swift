@@ -257,6 +257,19 @@ private func json(_ s: String) -> Data { Data(s.utf8) }
         #expect(smallCounter.value == 128)
     }
 
+    /// U79 (A-M4): un fichero se lee con tope aunque no se sepa su tamaño: nunca más de `limit + 1` bytes.
+    @Test func ficheroLocalConTope() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("tope-\(UUID().uuidString).csv")
+        try Data(repeating: 0x41, count: 3_000).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+        #expect(try readFileCapped(url, limit: 1_000).count == 1_001)
+        #expect(try readFileCapped(url, limit: 5_000).count == 3_000)
+        let empty = FileManager.default.temporaryDirectory.appendingPathComponent("vacio-\(UUID().uuidString).csv")
+        try Data().write(to: empty)
+        defer { try? FileManager.default.removeItem(at: empty) }
+        #expect(try readFileCapped(empty, limit: 1_000).isEmpty)
+    }
+
     @Test func queSaleAYahoo() {
         #expect(yahooQueryTerm(for: "US0378331005") == "US0378331005")
         #expect(yahooQueryTerm(for: "ETH") == "ETH-EUR")

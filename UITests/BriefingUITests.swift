@@ -420,6 +420,28 @@ final class BriefingUITests: XCTestCase {
         )
     }
 
+    /// U78 (U34 #4, B-M3): tocar una FILA del resumen con acción (`briefing-line-<id>`), no el consejo. El resumen `busy` no
+    /// tiene fila de presupuestos (los presupuestos solo salen en el consejo, probado arriba); su fila con acción es el aviso
+    /// «La conexión con Revolut caduca el 30 nov» (`attention-1`), que lleva a Ajustes › Revolut.
+    func testBriefingRowActionOpensBank() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+        XCTAssertFalse(app.buttons["bank-import-statement"].exists, "U34: la pantalla del banco ya estaba abierta antes del toque")
+
+        let row = element("briefing-line-attention-1")
+        scrollInBriefingSheet(to: row)
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "U34: falta la fila briefing-line-attention-1")
+        XCTAssertTrue(row.label.contains("Revolut"), "U34: la fila con acción no es la de Revolut: \(row.label)")
+        row.tap()
+
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), element("briefing-done"), timeout: 8),
+                      "U34: tocar la fila no cerró el resumen")
+        XCTAssertTrue(waitFor(NSPredicate(format: "selected == true"), app.tabBars.buttons["Ajustes"], timeout: 8),
+                      "U34: tocar la fila no llevó a Ajustes")
+        XCTAssertTrue(app.buttons["bank-import-statement"].waitForExistence(timeout: 10),
+                      "U34: tocar la fila no abrió la pantalla de Revolut")
+    }
+
     /// U34 #5: tocar la cabecera de la tarjeta `subscriptionPriceChange` abre el detalle del movimiento de Spotify.
     func testInterestCardHeaderOpensAction() throws {
         launch(["-MiBancoDemoBriefing", "busy"])
@@ -464,7 +486,15 @@ final class BriefingUITests: XCTestCase {
 
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 8), "U35: falta la pantalla de bloqueo")
-        XCTAssertFalse(element("briefing-done").exists, "U35: el resumen subió encima del bloqueo")
+        // U78 (U35 #1, B-M4): se mira MIENTRAS dure el bloqueo, no una sola vez al verlo.
+        var lockChecks = 0
+        while unlock.exists {
+            XCTAssertFalse(element("briefing-done").exists, "U35: el resumen subió encima del bloqueo")
+            lockChecks += 1
+            if lockChecks > 60 { break }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        XCTAssertGreaterThan(lockChecks, 0, "U35: no se llegó a mirar con el bloqueo delante")
 
         XCTAssertTrue(element("briefing-done").waitForExistence(timeout: 16), "U35: el resumen no apareció tras desbloquear")
     }

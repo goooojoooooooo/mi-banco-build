@@ -663,8 +663,16 @@ struct RootView: View {
             // Simula entrar por el aviso de la mañana con el resumen de hoy ya visto (U37).
             let now = Date()
             briefing.markShown(BriefingRecord(shownAt: now, since: now))
-            router.pending = AlertRoute(destination: .briefing, movementID: nil)
-            applyRoute()
+            if let delay = DemoMode.demoRouteDelaySeconds {
+                // U76: el toque del aviso llega N segundos después (con una confirmación o una conexión ya abiertas).
+                Task {
+                    try? await Task.sleep(for: .seconds(delay))
+                    router.pending = AlertRoute(destination: .briefing, movementID: nil)
+                }
+            } else {
+                router.pending = AlertRoute(destination: .briefing, movementID: nil)
+                applyRoute()
+            }
         }
     }
     #endif

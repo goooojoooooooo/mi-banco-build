@@ -256,6 +256,14 @@ public enum CappedDownloadError: Error, Equatable, Sendable {
     case tooLarge
 }
 
+/// Lee un fichero local con tope (U79, A-M4): como mucho `limit + 1` bytes, aunque no se sepa su tamaño. Quien llama mira si
+/// pasa de `limit`; así nunca se carga entero un fichero enorme.
+public func readFileCapped(_ url: URL, limit: Int) throws -> Data {
+    let handle = try FileHandle(forReadingFrom: url)
+    defer { try? handle.close() }
+    return try handle.read(upToCount: limit + 1) ?? Data()
+}
+
 /// Lee bytes aplicando un tope de tamaño MIENTRAS descarga (U10).
 public func collectCapped<S: AsyncSequence>(
     _ bytes: S, expectedLength: Int64, limit: Int

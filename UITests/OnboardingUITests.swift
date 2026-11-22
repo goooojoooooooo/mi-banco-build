@@ -60,6 +60,35 @@ final class OnboardingUITests: XCTestCase {
             app.buttons["Vale"].waitForExistence(timeout: 5),
             "U48: no debe aparecer un resumen tras terminar la bienvenida"
         )
+
+        // U74 (B-I4): tras «Empezar» no se mira el resumen hasta la próxima activación. Se sale y se vuelve: eso dispara la
+        // comprobación del resumen (`scenePhase` → `considerBriefing`). Sin `markOnboardingCompleted()` el resumen de hoy
+        // seguiría pendiente y saldría aquí; con él se da por visto. La bienvenida tampoco vuelve.
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 1.5)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 10), "U48: al volver debe seguir Inicio")
+        XCTAssertFalse(app.buttons["Vale"].waitForExistence(timeout: 6),
+                       "U48: al volver a la app salió el resumen: la bienvenida no lo marcó como visto")
+        XCTAssertFalse(app.staticTexts["Tus saldos"].exists, "U48: la bienvenida volvió a salir al volver a la app")
+        XCTAssertFalse(app.buttons["onboarding-finish"].exists, "U48: la bienvenida volvió a salir al volver a la app")
+    }
+
+    /// U74 (B-I4), caso de control: con el mismo resumen de demo pendiente y SIN pasar por la bienvenida, la app sí enseña
+    /// el resumen. Si este no sale, la prueba de arriba no demostraría nada.
+    func testPendingBriefingShowsWithoutOnboarding() {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "-MiBancoDemo", "-MiBancoDemoBriefing", "quiet", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES",
+        ]
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for name in ["Permitir", "Allow"] {
+            let b = springboard.alerts.buttons[name]
+            if b.waitForExistence(timeout: 2) { b.tap(); break }
+        }
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 15), "Control: el resumen pendiente debe salir al arrancar")
     }
 
     /// U49 #7: botones «Saltar», «Empezar la guía», «Conectar ahora» e interruptor «Bloquear con Face ID».
@@ -94,10 +123,12 @@ final class OnboardingUITests: XCTestCase {
         let step3App = launchStep("3")
         let faceID = step3App.switches.firstMatch
         XCTAssertTrue(faceID.waitForExistence(timeout: 15), "U49: falta el interruptor Bloquear con Face ID")
-        let before = faceID.value as? String
+        let before = (faceID.value as? String) ?? ""
         faceID.tap()
-        let after = faceID.value as? String
-        XCTAssertNotEqual(before, after, "U49: tocar Bloquear con Face ID debe cambiar su valor")
+        // B-M11: se espera a que el valor cambie en vez de leerlo justo después del toque.
+        let changed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value != %@", before), object: faceID)
+        XCTAssertEqual(XCTWaiter().wait(for: [changed], timeout: 5), .completed,
+                       "U49: tocar Bloquear con Face ID debe cambiar su valor (antes \(before))")
 
         let connectNow = step3App.buttons["onboarding-connect-now"]
         XCTAssertTrue(connectNow.waitForExistence(timeout: 5), "U49: falta Conectar ahora")

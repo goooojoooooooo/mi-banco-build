@@ -72,6 +72,15 @@ enum DemoMode {
     static var demoRoute: String? { value(after: "-MiBancoDemoRoute") }
     static var prefsFail: Bool { arguments.contains("-MiBancoDemoPrefsFail") }
     static var bankSyncAgoMinutes: Int? { value(after: "-MiBancoDemoBankSyncAgo").flatMap(Int.init) }
+    /// U74: tras soltar «Ver» en Cuentas y contactos, el IBAN sigue a la vista estos segundos (la pulsación de XCUITest no
+    /// deja mirar la pantalla mientras dura). Solo cambia CUÁNTO dura lo que ya ha revelado el toque, nunca lo revela.
+    static var revealLingerSeconds: Double? {
+        guard isActive else { return nil }
+        return value(after: "-MiBancoDemoRevealLinger").flatMap(Double.init)
+    }
+    /// U76: entrar por el aviso de la mañana (`-MiBancoDemoRoute briefing`) a los N segundos del arranque, para probar que la
+    /// ruta del aviso no abre el resumen encima de una confirmación ni de una conexión.
+    static var demoRouteDelaySeconds: Double? { value(after: "-MiBancoDemoRouteAfter").flatMap(Double.init) }
     static var demoGuideKey: Bool { arguments.contains("-MiBancoDemoGuideKey") }
     static var demoConnectPhase: (phase: String, bank: BankID)? {
         let args = arguments

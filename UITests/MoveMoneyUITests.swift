@@ -244,7 +244,12 @@ final class MoveMoneyUITests: XCTestCase {
         XCTAssertTrue(slider.waitForExistence(timeout: 5), "Falta Desliza para preparar en privado")
         let copied = app.staticTexts["IBAN de Revolut copiado"]
         XCTAssertTrue(dragSlide(slider, until: copied), "No llegó al paso 3 en modo privado")
-        let step3Euro = app.scrollViews.firstMatch.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
+        // U79 (A-M3): dentro de la hoja del paso 3, no en el primer `ScrollView` que salga (podría ser el de Inicio).
+        let step3Sheet = app.scrollViews["move-money-scroll"]
+        XCTAssertTrue(step3Sheet.waitForExistence(timeout: 5), "Falta el contenedor del paso 3")
+        XCTAssertTrue(step3Sheet.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'En imagin:' OR label BEGINSWITH 'En Revolut:'"))
+            .firstMatch.waitForExistence(timeout: 5), "U24: la pista del paso 3 no está dentro de la hoja")
+        let step3Euro = step3Sheet.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS '€'"))
         XCTAssertEqual(step3Euro.count, 0, "U24: la pista del paso 3 expuso € en modo privado")
 
         app.buttons["Cerrar"].tap()
@@ -268,8 +273,14 @@ final class MoveMoneyUITests: XCTestCase {
 
         let activityList = app.otherElements["ActivityListView"]
         let closeShare = app.buttons.matching(NSPredicate(format: "label IN %@", ["Cerrar", "Close"])).firstMatch
-        let opened = activityList.waitForExistence(timeout: 10) || closeShare.waitForExistence(timeout: 5)
-        XCTAssertTrue(opened, "U23: no se abrió la hoja de compartir del sistema")
+        // U79 (A-M5): el cierre se comprueba sobre EL MISMO elemento con el que se vio abierta la hoja.
+        let shareSheet: XCUIElement
+        if activityList.waitForExistence(timeout: 10) {
+            shareSheet = activityList
+        } else {
+            XCTAssertTrue(closeShare.waitForExistence(timeout: 5), "U23: no se abrió la hoja de compartir del sistema")
+            shareSheet = closeShare
+        }
 
         let copyButtons = app.buttons.matching(NSPredicate(format: "label == 'Copiar' OR label == 'Copy'"))
         let copyCells = app.cells.matching(NSPredicate(format: "label == 'Copiar' OR label == 'Copy'"))
@@ -280,7 +291,7 @@ final class MoveMoneyUITests: XCTestCase {
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
         XCTAssertTrue(
-            waitFor(NSPredicate(format: "exists == false"), activityList, timeout: 8),
+            waitFor(NSPredicate(format: "exists == false"), shareSheet, timeout: 8),
             "U23: la hoja de compartir no se cerró al pasar a segundo plano"
         )
     }
@@ -341,7 +352,9 @@ final class MoveMoneyUITests: XCTestCase {
 
     /// U24 #4 + U27: «Ver» en Cuentas responde a pulsación mantenida y vuelve al enmascarado al soltar.
     func testAccountsHoldToRevealIban() throws {
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAccounts"])
+        // U74 (A-I2): `-MiBancoDemoRevealLinger 4` (solo DEBUG) deja el IBAN revelado 4 s tras SOLTAR, porque `press` bloquea
+        // la prueba mientras dura. No revela nada por sí solo: si «Ver» no revelara, el IBAN completo no saldría nunca.
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAccounts", "-MiBancoDemoRevealLinger", "4"])
         XCTAssertTrue(app.navigationBars["Cuentas y contactos"].waitForExistence(timeout: 15), "No se abrió Cuentas y contactos")
 
         let masked = app.staticTexts["ES91 •••• 1332"]
@@ -354,9 +367,13 @@ final class MoveMoneyUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(reveal.frame.width, 44, "U27: Ver debe medir ≥ 44 pt de ancho")
         XCTAssertGreaterThanOrEqual(reveal.frame.height, 44, "U27: Ver debe medir ≥ 44 pt de alto")
 
+        let full = app.staticTexts["ES91 2100 0418 4502 0005 1332"]
+        XCTAssertFalse(full.exists, "U27: el IBAN completo no puede verse antes de pulsar «Ver»")
         reveal.press(forDuration: 1.0)
-        XCTAssertTrue(masked.waitForExistence(timeout: 5), "U24/U27: al soltar Ver debe volver el IBAN enmascarado")
-        XCTAssertFalse(app.staticTexts["ES91 2100 0418 4502 0005 1332"].exists, "U27: el IBAN completo no debe quedarse visible tras soltar")
+        XCTAssertTrue(full.waitForExistence(timeout: 2), "U24/U27: al mantener «Ver» debe verse el IBAN completo")
+        XCTAssertFalse(masked.exists, "U24/U27: con el IBAN revelado no debe quedar el enmascarado")
+        XCTAssertTrue(masked.waitForExistence(timeout: 8), "U24/U27: al soltar Ver debe volver el IBAN enmascarado")
+        XCTAssertFalse(full.exists, "U27: el IBAN completo no debe quedarse visible tras soltar")
     }
 
     /// U24 #5 + U27: «Editar» (≥ 44 pt) abre campo vacío, guardar actualiza el enmascarado y cancelar conserva el guardado.
@@ -498,8 +515,16 @@ final class MoveMoneyUITests: XCTestCase {
         scrollTo(slider)
         let phoneCopied = app.staticTexts["Teléfono copiado"]
         XCTAssertTrue(dragSlide(slider, until: phoneCopied), "No llegó al paso 3")
-        let mentionsRev = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Revolut'")).firstMatch
-        XCTAssertTrue(mentionsRev.waitForExistence(timeout: 5), "U24: la pista del paso 3 debe nombrar Revolut")
+        // U79 (A-M3): la pista se busca DENTRO de la hoja (Inicio, debajo, también dice «Revolut») y con la frase exacta de
+        // `bankTransferHint(from: .rev, kind: .phone, …)`.
+        let readySheet = app.scrollViews["move-money-scroll"]
+        XCTAssertTrue(readySheet.waitForExistence(timeout: 5), "Falta el contenedor del paso 3")
+        let revHint = readySheet.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "En Revolut: Pagos → Enviar → pega el número y pon ")
+        ).firstMatch
+        XCTAssertTrue(revHint.waitForExistence(timeout: 5), "U24: la pista del paso 3 debe ser la de Revolut")
+        XCTAssertFalse(readySheet.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'En imagin:'")).firstMatch.exists,
+                       "U24: la pista del paso 3 no puede ser la de imagin")
     }
 
     /// U24 #9: destino sin IBAN («Guardar y seguir») y «Añadir contacto» en línea.

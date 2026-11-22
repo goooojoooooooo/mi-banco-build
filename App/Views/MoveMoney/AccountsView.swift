@@ -173,7 +173,7 @@ struct AccountsView: View {
                             guard scenePhase == .active, gate?.isLocked != true else { return }
                             revealedBank = bank
                         } else if revealedBank == bank {
-                            revealedBank = nil
+                            endReveal { if revealedBank == bank { revealedBank = nil } }
                         }
                     })
                     .accessibilityLabel("Mantén pulsado para ver el IBAN de \(bank.displayName)")
@@ -338,7 +338,7 @@ struct AccountsView: View {
                         guard scenePhase == .active, gate?.isLocked != true else { return }
                         revealedPayee = payee.id
                     } else if revealedPayee == payee.id {
-                        revealedPayee = nil
+                        endReveal { if revealedPayee == payee.id { revealedPayee = nil } }
                     }
                 })
                 .accessibilityLabel("Mantén pulsado para ver los datos de \(payee.name)")
@@ -609,6 +609,23 @@ func spokenMaskedPhone(_ phone: String) -> String {
 
 /// Estilo de botón para «Ver»: revela el IBAN solo mientras el dedo sigue pulsando, sin robar el desplazamiento vertical
 /// del `Form`, y oculta al soltar o al cancelarse el gesto.
+/// Al soltar «Ver» se tapa al instante. Solo en la demo de pruebas (`-MiBancoDemoRevealLinger <s>`) se tapa unos segundos
+/// después, para que una prueba de interfaz pueda leer lo que reveló la pulsación (U74). El bloqueo y salir de primer plano
+/// lo siguen tapando al momento (`isRevealed` mira `scenePhase` y el bloqueo).
+@MainActor
+private func endReveal(_ hide: @escaping @MainActor () -> Void) {
+    #if DEBUG
+    if let seconds = DemoMode.revealLingerSeconds {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            hide()
+        }
+        return
+    }
+    #endif
+    hide()
+}
+
 private struct HoldRevealButtonStyle: ButtonStyle {
     let onPressedChange: (Bool) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

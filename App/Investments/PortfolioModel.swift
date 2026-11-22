@@ -118,9 +118,10 @@ final class PortfolioModel {
             if size == 0 { throw PortfolioImportError.empty }
             if size > maxImportBytes { throw PortfolioImportError.tooLarge }
         }
+        // U79 (A-M4): con o sin tamaño conocido se lee con tope (como mucho `maxImportBytes + 1`), nunca el fichero entero.
         let data: Data
         do {
-            data = try Data(contentsOf: url)
+            data = try readFileCapped(url, limit: maxImportBytes)
         } catch {
             throw PortfolioImportError.unreadable
         }

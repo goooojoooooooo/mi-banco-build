@@ -108,11 +108,14 @@ final class BanksUITests: XCTestCase {
 
         let refreshBtn = app.buttons["bank-card-refresh"]
         XCTAssertTrue(refreshBtn.waitForExistence(timeout: 8), "U13: falta el botón Actualizar en el reverso")
+        // U74 (A-I1): el reverso ya dice «Actualizado hace 5 min · exacto» antes del toque, así que se mira SOLO el botón:
+        // antes dice «Actualizar» y no lleva la marca; después del toque pasa a «Actualizado» con la marca.
+        XCTAssertFalse(refreshBtn.label.contains("Actualizado"), "U13: el botón ya decía Actualizado antes del toque: \(refreshBtn.label)")
+        XCTAssertFalse(app.descendants(matching: .any)["bank-card-refreshed"].exists, "U13: la marca ya estaba antes del toque")
         refreshBtn.tap()
-        let updated = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "identifier == 'bank-card-refreshed' OR label CONTAINS 'Actualizado'"))
-            .firstMatch
-        XCTAssertTrue(updated.waitForExistence(timeout: 6), "U13: Actualizar no produjo efecto visible en demo")
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label CONTAINS 'Actualizado'"), object: refreshBtn)
+        XCTAssertEqual(XCTWaiter().wait(for: [done], timeout: 8), .completed,
+                       "U13: Actualizar no pasó a «Actualizado» tras el toque: \(refreshBtn.label)")
     }
 
     /// U45: Ajustes › Bancos calcula «Actualizado hace…» en vivo (240 min → «hace 4 h»).
@@ -121,6 +124,22 @@ final class BanksUITests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts["Actualizado hace 4 h · exacto"].waitForExistence(timeout: 15),
             "U45: la fila de Revolut debe mostrar «Actualizado hace 4 h · exacto»"
+        )
+    }
+
+    /// U74 (B-M2) + U45: con la pantalla abierta, la fila cambia sola al pasar el minuto (59 min → 1 h). Con la línea guardada
+    /// en la instantánea del arranque se quedaría en «hace 59 min» para siempre.
+    func testBankRowTimeChangesWhileOpen() {
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoBankSyncAgo", "59"])
+        XCTAssertTrue(
+            app.staticTexts["Actualizado hace 59 min · exacto"].waitForExistence(timeout: 15),
+            "U45: al abrir, la fila de Revolut debe decir «Actualizado hace 59 min · exacto»"
+        )
+        // El minuto 60 llega como mucho 60 s después del arranque y `TimelineView(.everyMinute)` redibuja en el siguiente
+        // cambio de minuto: hasta ~2 min sin tocar nada.
+        XCTAssertTrue(
+            app.staticTexts["Actualizado hace 1 h · exacto"].waitForExistence(timeout: 150),
+            "U45: la fila no siguió al reloj con la pantalla abierta"
         )
     }
 
@@ -242,6 +261,19 @@ final class BanksUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Conectar Revolut"].waitForExistence(timeout: 8), "U49: Guardar no pasó a los botones de conexión")
     }
 
+    /// U78 (U49 #8, B-M5): «Abrir Enable Banking» del paso 1 pone Safari en primer plano.
+    func testGuideOpensEnableBankingInSafari() {
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoGuide"])
+        XCTAssertTrue(app.staticTexts["Paso 1 de 4"].waitForExistence(timeout: 15))
+        let safari = XCUIApplication(bundleIdentifier: "com.apple.mobilesafari")
+        let open = app.buttons["Abrir Enable Banking"]
+        XCTAssertTrue(open.waitForExistence(timeout: 5), "U49: falta «Abrir Enable Banking»")
+        open.tap()
+        XCTAssertTrue(safari.wait(for: .runningForeground, timeout: 20), "U49: «Abrir Enable Banking» no abrió Safari")
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15))
+    }
+
     /// U55: la confirmación de «Desconectar» (ahora en `RootSheet`) se cierra al salir a segundo plano.
     func testDisconnectConfirmClosesOnBackground() {
         let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
@@ -260,16 +292,52 @@ final class BanksUITests: XCTestCase {
         XCTAssertFalse(cancel.waitForExistence(timeout: 2), "U55: la confirmación de Desconectar siguió abierta tras segundo plano")
     }
 
-    /// U55: ningún resumen del día puede abrirse encima de una confirmación de banco.
+    /// Segundos tras el arranque a los que la demo «toca» el aviso de la mañana (`-MiBancoDemoRouteAfter`, solo DEBUG). El
+    /// resumen de hoy se da por visto al arrancar (`-MiBancoDemoRoute briefing`), así que el resumen automático no sube solo:
+    /// lo único que puede presentarlo es la ruta del aviso (`openManualBriefing`).
+    private let routeDelay: TimeInterval = 18
+
+    private func launchWithLateBriefingRoute(_ extra: [String]) -> (XCUIApplication, Date) {
+        let start = Date()
+        let app = launch(extra + ["-MiBancoDemoBriefing", "quiet", "-MiBancoDemoRoute", "briefing",
+                                  "-MiBancoDemoRouteAfter", String(Int(routeDelay))])
+        return (app, start)
+    }
+
+    /// U76 (B-I3) + U55: con la confirmación de «Desconectar» ya abierta, llega el aviso de la mañana: la confirmación sigue y
+    /// el resumen NO se presenta encima.
     func testNoBriefingOverConfirm() {
-        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoBriefing", "quiet"])
+        let (app, start) = launchWithLateBriefingRoute(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
         let revRow = app.buttons["settings-bank-rev"]
         XCTAssertTrue(revRow.waitForExistence(timeout: 15))
         revRow.tap()
 
-        app.buttons["Desconectar"].tap()
-        XCTAssertTrue(app.buttons["Cancelar"].waitForExistence(timeout: 6))
-        XCTAssertFalse(app.buttons["Vale"].waitForExistence(timeout: 2), "U55: el resumen subió encima de la confirmación")
+        let disconnect = app.buttons["Desconectar"]
+        XCTAssertTrue(disconnect.waitForExistence(timeout: 8))
+        disconnect.tap()
+        let cancel = app.buttons["Cancelar"]
+        XCTAssertTrue(cancel.waitForExistence(timeout: 6), "U55: falta Cancelar en la confirmación")
+        XCTAssertLessThan(Date().timeIntervalSince(start), routeDelay - 1,
+                          "La confirmación tenía que estar abierta antes de que llegara el aviso")
+        XCTAssertFalse(app.buttons["Vale"].exists, "U55: el resumen ya estaba encima antes del aviso")
+
+        // Se espera a que pase el aviso (más los 350 ms de la ruta) mirando que el resumen nunca sube.
+        let deadline = start.addingTimeInterval(routeDelay + 6)
+        while Date() < deadline {
+            XCTAssertFalse(app.buttons["Vale"].exists, "U76: el aviso de la mañana abrió el resumen encima de la confirmación")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTAssertTrue(cancel.exists, "U76: la confirmación de Desconectar se cerró al llegar el aviso")
+        XCTAssertFalse(app.buttons["Vale"].waitForExistence(timeout: 2), "U76: el resumen subió encima de la confirmación")
+    }
+
+    /// U76, caso de control: con los mismos argumentos y SIN abrir la confirmación, el aviso de la mañana sí abre el resumen.
+    func testLateBriefingRouteOpensBriefing() {
+        let (app, _) = launchWithLateBriefingRoute(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
+        XCTAssertTrue(app.buttons["settings-bank-rev"].waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["Vale"].exists, "Control: el resumen no debe subir antes del aviso")
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: routeDelay + 10),
+                      "Control: el aviso de la mañana debía abrir el resumen")
     }
 
     /// U58: el resumen del día no aparece mientras hay una conexión bancaria activa (`finishing`).
@@ -277,5 +345,24 @@ final class BanksUITests: XCTestCase {
         let app = launch(["-MiBancoDemoConnectPhase", "finishing", "rev", "-MiBancoDemoBriefing", "quiet"])
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["Vale"].waitForExistence(timeout: 5), "U58: el resumen subió durante una conexión bancaria")
+    }
+
+    /// U58, caso de control: sin la conexión a medias, el mismo resumen de demo sí sube al arrancar.
+    func testBriefingShowsWithoutBankConnection() {
+        let app = launch(["-MiBancoDemoBriefing", "quiet"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 15), "Control U58: sin conexión el resumen debía subir")
+    }
+
+    /// U76 (B-M1): la ruta del aviso de la mañana pasa por la misma guarda que U58: con «Terminando con Revolut…» a medias no
+    /// abre el resumen.
+    func testNoBriefingRouteDuringBankConnection() {
+        let (app, start) = launchWithLateBriefingRoute(["-MiBancoDemoConnectPhase", "finishing", "rev"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15))
+        let deadline = start.addingTimeInterval(routeDelay + 6)
+        while Date() < deadline {
+            XCTAssertFalse(app.buttons["Vale"].exists, "U76: el aviso de la mañana abrió el resumen durante una conexión bancaria")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTAssertFalse(app.buttons["Vale"].waitForExistence(timeout: 2), "U76: el resumen subió durante una conexión bancaria")
     }
 }

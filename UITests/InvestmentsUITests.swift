@@ -219,18 +219,19 @@ final class InvestmentsUITests: XCTestCase {
         // U12 + U19: en modo privado el campo abre sin foco y su valor de accesibilidad debe ser «importe oculto».
         XCTAssertEqual(field.value as? String, "importe oculto", "U12/U19: el campo en privado debe abrir como importe oculto")
 
-        // Al enfocarlo y luego quitar el foco sin guardar, vuelve a «importe oculto».
+        // U75 (A-I3): al enfocarlo el valor deja de ser «importe oculto» (se edita a la vista); al quitar el foco con «Hecho»
+        // del teclado (que NO guarda), vuelve a «importe oculto». Sin condiciones ni plan B.
         field.tap()
-        let titleText = app.staticTexts["Apple"]
-        if titleText.exists && titleText.isHittable {
-            titleText.tap()
-        } else {
-            app.buttons["Guardar"].tap()
-        }
-        if field.waitForExistence(timeout: 2) {
-            let valueText = (field.value as? String) ?? ""
-            XCTAssertEqual(valueText, "importe oculto", "U12/U19: el campo sin foco filtró el precio a VoiceOver: \(valueText)")
-        }
+        XCTAssertTrue(waitFor(NSPredicate(format: "value != 'importe oculto'"), field, timeout: 5),
+                      "U12/U19: con el foco dentro el campo debe dejar de decir «importe oculto»")
+        let keyboardDone = app.buttons["manualPriceKeyboardDone"]
+        XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5), "U75: falta «Hecho» encima del teclado decimal")
+        keyboardDone.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), app.keyboards.firstMatch, timeout: 5),
+                      "U75: «Hecho» no quitó el teclado")
+        XCTAssertTrue(field.waitForExistence(timeout: 3), "U75: el campo desapareció: «Hecho» no debe guardar ni cerrar el editor")
+        let valueText = (field.value as? String) ?? ""
+        XCTAssertEqual(valueText, "importe oculto", "U12/U19: el campo sin foco filtró el precio a VoiceOver: \(valueText)")
         close.tap()
     }
 

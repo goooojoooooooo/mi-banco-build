@@ -563,12 +563,15 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         let morningNow = nov(20, 8, 30)
         let merchAns = answerQuestion("¿Cuánto llevo en Mercadona?", state: morningState, portfolio: nil,
                                       book: AccountBook(), now: morningNow, calendar: cal)
+        try #require(merchAns.lines.count > 0)
         #expect(render(merchAns.lines[0].parts, .plain).contains("80,00"))
         let bigAns = answerQuestion("¿Cuáles son mis mayores pagos este mes?", state: morningState, portfolio: nil,
                                     book: AccountBook(), now: morningNow, calendar: cal)
+        try #require(bigAns.lines.count > 1)
         #expect(render(bigAns.lines[1].parts, .plain).contains("80,00"))
         let incAns = answerQuestion("¿Qué ingresos han entrado este mes?", state: morningState, portfolio: nil,
                                     book: AccountBook(), now: morningNow, calendar: cal)
+        try #require(incAns.lines.count > 0)
         #expect(render(incAns.lines[0].parts, .plain).contains("1.850,00"))
 
         // C2 + U2: `answerQuestion` rechaza un `modelIntent` con `merchant` no presente en la pregunta original,
@@ -811,6 +814,142 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
             for line in ans.lines {
                 let m = render(line.parts, .masked)
                 #expect(!m.contains("€") && !m.contains("%"), "Fuga en privado: \(m)")
+            }
+        }
+    }
+
+    // MARK: U69 — listas de la re-revisión (`rerevision-u1-u7.md` §2a y §2b)
+
+    /// §2b: preguntas de hechos que recibían la negativa. Reciban o no la negativa, DESPUÉS van siempre los datos de la
+    /// intención que el enrutador elige sin el freno de consejos (la negativa nunca sustituye a la respuesta).
+    private static let u69FactQuestions = [
+        "¿Qué acciones tengo?", "¿Qué posiciones tengo?", "¿Cuántas posiciones tengo?", "¿Qué ETFs tengo?", "¿Qué fondos tengo?",
+        "¿Cuántas acciones de Apple tengo?", "¿Tengo acciones de Apple?", "¿Cuál es mi cartera?", "Mi cartera", "Cartera",
+        "Inversiones", "Mis inversiones", "Resumen de mi cartera", "Valor de mi cartera", "¿Qué tal van mis acciones?",
+        "¿Cuál es mi posición en Apple?", "¿Cuál es la rentabilidad de mi cartera?", "Dividendos", "¿Qué dividendos me tocan?",
+        "¿Cuándo cobro el dividendo de Apple?", "¿Cuántos dividendos he cobrado este año?", "¿Cuánto he cobrado en dividendos?",
+        "¿Cuándo es la próxima aportación?", "¿A qué precio compré Apple?", "¿A cuánto cotiza Apple?",
+        "¿Cuál es la cotización de Apple?", "¿Cuánto ha caído Apple?", "¿Qué tal va Apple?", "¿Cuánto me ha dado Apple?",
+        "¿Cuánto me cobró el broker?", "¿Cuánto me cobró Trade Republic por el ETF?", "¿Cuánto me cuesta el ETF de comisión?",
+        "¿Cuánto me pagó Apple de dividendo?", "¿Cuánto me cobró la academia Bitcoin Escuela?",
+        "¿Cuánto pago de cuota en Fondo Social?", "¿Cuánto me entró de Wallapop?", "¿Cuánto me entró de Hacienda?",
+        "¿Cuándo entró la nómina de Acme?", "¿Cuánto fue el aumento de la factura de Iberdrola?",
+        "¿Cuánto dinero líquido tengo en ING?", "¿Cuánto compraba en Mercadona antes?", "¿Cuánto vendía en Wallapop?",
+        "¿Cuánto he ganado vendiendo en Wallapop?", "¿Cuánto gasté en Vinted vendiendo ropa?",
+        "¿Cuánto me pagaron por vender la bici?", "¿Cuánto me pagó el vendedor?", "¿Cuánto le pagué al vendedor del coche?",
+        "¿Cuánto me costaron las vendas en la farmacia?", "¿Cuántas veces compro en Mercadona al mes?",
+        "¿Cuánto gasto cuando compro en Mercadona?", "¿Cuánto me devolvieron al comprar en Amazon?",
+        "¿Cuánto me ahorré comprando en Lidl?", "¿Qué compre el finde?", "¿Qué compre esta mañana?",
+        "¿Dónde compre las zapatillas?", "Compras ayer", "Compras hoy", "Compras esta semana", "Compras Amazon",
+        "Compras con tarjeta", "Ventas Wallapop", "¿Pongo 30 € en el bote de Navidad?", "¿Pongo 50 € para el regalo de Ana?",
+        "¿Meto 50 € en la Tarjeta Regalo de Amazon?", "¿Va a subir el IBI en Madrid?", "¿Está caro Mercadona?",
+        "¿Me compensa el Mercadona?", "¿Subirá Netflix?", "¿Cuánto gasté aprovechando las rebajas?", "¿Cuánto acumula la hucha?",
+        "¿Hasta cuándo aguanta mi saldo?", "¿Cuántos días aguanto con lo que tengo?", "¿Cuánto me cuestan las clases de refuerzo?",
+        "¿Cuánto pagué a la Consejería?", "¿Cuánto gasté en Sal de Ibiza?", "¿Es hora de pagar la luz?",
+        "¿Qué pagos están en hold?", "What did I buy yesterday?", "My purchases this month",
+        // Las dos del borrador de esta ronda: el filtro salta y, aun así, salen el presupuesto y el saldo.
+        "¿Debería comprar menos para mi presupuesto de Comer fuera?", "¿Me recomiendas mover mi saldo de Revolut?",
+    ]
+
+    /// §2a: peticiones de consejo que pasaban sin la negativa.
+    private static let u69AdviceQuestions = [
+        "¿Nvidia está barata?", "¿Tesla es rentable?", "Nvidia worth it?", "¿Nvidia subirá?", "¿Tesla va a subir?",
+        "¿Tesla o Nvidia?", "¿Apple o Microsoft?", "¿Merecería la pena Nvidia?", "¿Valdría la pena Tesla?",
+        "¿En qué meto 1.000 €?", "¿Dónde pongo 1000 €?", "¿Qué hago con mil euros?", "¿Mantengo Nvidia?", "¿Promedio Nvidia?",
+        "¿Hago bien en mantener Tesla?", "¿Me quedo con Tesla?", "¿Sigo en Tesla?", "¿Sigo con Nvidia?",
+        "¿Meto mis ahorros en oro?", "¿Paso mis ahorros a oro?", "¿Me pongo en oro?", "¿Meto todo en oro?", "¿Cuánto meto en oro?",
+        "¿Subirá el oro?", "¿Va a subir el oro?", "¿Qué opinas de Nvidia?", "¿Qué piensas de Tesla?", "¿Qué te parece Nvidia?",
+        "¿Contrato un plan de pensiones?", "¿Abro un plan de pensiones?", "¿Cuánto debería meter en el plan de pensiones?",
+        "¿Opero con Tesla?", "¿Shorteo Tesla?", "¿Hago trading con Tesla?", "¿Echo dinero a Nvidia?",
+        "¿Doblo la apuesta en Nvidia?", "¿Qué hago con la herencia?", "¿Qué hago con la paga extra?", "¿Compensa el oro?",
+        "¿Me interesa Nvidia?", "¿Tesla tiene futuro?", "¿Renuevo el depósito?", "¿Me suscribo a letras del Tesoro?",
+    ]
+
+    @Test func u69HechosSiempreConSusDatosDetrasDeLaNegativa() throws {
+        let fx = richFixture()
+        for portfolio in [fx.portfolio as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            for q in Self.u69FactQuestions {
+                let ans = answerQuestion(q, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
+                let lines = plainLines(ans)
+                try #require(!lines.isEmpty, "[\(tag)] \(q): sin líneas")
+                if ans.isAdviceRefusal {
+                    #expect(lines[0] == investmentAdviceRefusal, "[\(tag)] \(q): \(lines[0])")
+                    #expect(!lines.contains(investmentDataOnlyNote), "[\(tag)] \(q): nota repetida tras la negativa")
+                } else {
+                    #expect(!lines.contains(investmentAdviceRefusal), "[\(tag)] \(q)")
+                }
+                #expect(lines.filter { $0 == investmentAdviceRefusal }.count <= 1, "[\(tag)] \(q)")
+
+                let data = ans.lines.filter { $0.id != "advice-refusal" && $0.id != "inv-data-only" }
+                let underlying = routeAssistantQuestionWithoutAdviceGate(q, state: fx.state, portfolio: portfolio,
+                                                                         now: fx.now, calendar: cal)
+                if underlying == .unknown {
+                    if ans.isAdviceRefusal {
+                        #expect(!data.isEmpty || !ans.chips.isEmpty, "[\(tag)] \(q): la negativa sola, sin datos ni fichas")
+                    }
+                } else {
+                    let expected = answerIntent(underlying, state: fx.state, portfolio: portfolio, book: fx.book,
+                                                now: fx.now, calendar: cal).lines.filter { $0.id != "inv-data-only" }
+                    #expect(!data.isEmpty, "[\(tag)] \(q): sin datos de \(underlying)")
+                    #expect(data == expected, "[\(tag)] \(q): los datos no son los de \(underlying)")
+                }
+            }
+        }
+    }
+
+    @Test func u69TodaRespuestaDeInversionesEmpiezaPorLaNotaOLaNegativa() throws {
+        let fx = richFixture()
+        let investmentQuestions = Self.u69FactQuestions + Self.u69AdviceQuestions + [
+            "¿Cómo van mis inversiones?", "¿Cómo va Apple?", "¿Cómo va Ethereum?", "¿Cómo va Nvidia?",
+            "¿Qué es lo que más ha subido hoy?", "¿Cuánto vale mi cartera?", "¿Cuánto tengo en acciones?",
+            "¿Cómo van mis acciones de Apple?", "¿Cuánto llevo invertido en Apple?",
+        ]
+        var routedToInvestments = 0
+        for portfolio in [fx.portfolio as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            for q in investmentQuestions {
+                let underlying = routeAssistantQuestionWithoutAdviceGate(q, state: fx.state, portfolio: portfolio,
+                                                                         now: fx.now, calendar: cal)
+                guard case .investments = underlying else { continue }
+                routedToInvestments += 1
+                let ans = answerQuestion(q, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
+                let first = try #require(ans.lines.first, "[\(tag)] \(q)")
+                for style in [RenderStyle.plain, .masked] {
+                    let text = render(first.parts, style)
+                    #expect(text == investmentDataOnlyNote || text == investmentAdviceRefusal, "[\(tag)] \(q): \(text)")
+                }
+                // Con el ojo cerrado la voz también empieza por la nota o la negativa y no dice ninguna cifra.
+                let spoken = spokenAssistantAnswer(ans, privateMode: true)
+                #expect(spoken.hasPrefix(investmentDataOnlyNote) || spoken.hasPrefix(investmentAdviceRefusal), "[\(tag)] \(q): \(spoken)")
+                #expect(!spoken.contains("€") && !spoken.contains("%"), "[\(tag)] \(q): \(spoken)")
+            }
+        }
+        #expect(routedToInvestments >= 20, "Muy pocas preguntas llegan a inversiones: \(routedToInvestments)")
+
+        // La intención directa (la que elige el modelo del dispositivo) también lleva la nota delante y datos detrás.
+        let intents: [AssistantIntent] = [
+            .investments(positionQuery: nil, moversOnly: false), .investments(positionQuery: nil, moversOnly: true),
+            .investments(positionQuery: "Apple", moversOnly: false), .investments(positionQuery: "Nvidia", moversOnly: false),
+        ]
+        for intent in intents {
+            for portfolio in [fx.portfolio as Portfolio?, nil] {
+                let ans = answerIntent(intent, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
+                #expect(plainLines(ans).first == investmentDataOnlyNote, "\(intent)")
+                #expect(plainLines(ans).count >= 2, "\(intent): la nota sola, sin datos")
+            }
+        }
+    }
+
+    @Test func u69ConsejosQuePasabanEmpiezanPorLaNegativa() {
+        let fx = richFixture()
+        for portfolio in [fx.portfolio as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            for q in Self.u69AdviceQuestions {
+                let ans = answerQuestion(q, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
+                #expect(ans.isAdviceRefusal, "[\(tag)] \(q)")
+                #expect(plainLines(ans).first == investmentAdviceRefusal, "[\(tag)] \(q): \(plainLines(ans))")
+                #expect(!plainLines(ans).contains(investmentDataOnlyNote), "[\(tag)] \(q)")
             }
         }
     }

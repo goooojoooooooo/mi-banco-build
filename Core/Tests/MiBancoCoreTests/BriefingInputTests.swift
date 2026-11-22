@@ -642,6 +642,11 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         #expect(!morning.upcoming.contains { $0.name == "Netflix" })
         let noon = input(dayOnlyState, since: nov(19, 10), now: nov(20, 12, 30))
         #expect(!noon.upcoming.contains { $0.name == "Netflix" })
+        // U73: a las 12:30 el cobro de hoy sale UNA sola vez en `payments` (el aviso y su fila gemela del banco no se suman dos
+        // veces); se mira por comercio normalizado porque la fila que queda puede llamarse «NETFLIX COM EU».
+        let noonNetflix = noon.payments.filter { normalizeMerchant($0.name).hasPrefix("netflix") }
+        #expect(noonNetflix.count == 1, "\(noon.payments.map(\.name))")
+        #expect(noonNetflix.first?.cents == 1_399)
 
         // Caso 2: fila de hoy con hora futura (NO `dayOnly`, 14:00) consultada a las 08:30 -> `movementCounts` devuelve false
         // y la suscripción SIGUE en `upcoming` (cae si se quita `movementCounts` de `BriefingInput.swift:143`).

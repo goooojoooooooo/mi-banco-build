@@ -613,26 +613,47 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
     // MARK: U7 — El filtro de `BriefingInput.swift:142-143` («cobrado hoy» no se cuenta dos veces)
 
     @Test func cobradoHoyNoSeCuentaDosVeces() {
-        // Caso 1: suscripción con cobro previsto hoy (20 nov) y fila del banco `dayOnly` de hoy (fechada a las 12:00),
-        // consultada a las 08:30 -> `movementCounts` la reconoce como cobrada hoy y NO sale en `upcoming` (sin duplicar).
-        var state = LedgerState()
-        state.movements = [
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: date(9, 20, 12), isShop: true, bankRef: "n1", bankStatus: .booked, dayOnly: true),
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: date(10, 20, 12), isShop: true, bankRef: "n2", bankStatus: .booked, dayOnly: true),
-            // Fila de hoy `dayOnly` (importe distinto para que `sub.nextDate` siga en 20 nov): `chargedToday` la retira de `upcoming`.
-            Movement(bank: .rev, amountCents: -1_999, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: nov(20, 12), isShop: true, bankRef: "n3", bankStatus: .booked, dayOnly: true),
-        ]
-        let morning = input(state, since: nov(19, 10), now: nov(20, 8, 30))
-        #expect(!morning.upcoming.contains { $0.name == "Netflix" })
-        // A las 12:30 el resumen ya lista el cobro en `payments` una sola vez y sigue sin repetirlo en `upcoming`.
-        let noon = input(state, since: nov(19, 10), now: nov(20, 12, 30))
-        #expect(!noon.upcoming.contains { $0.name == "Netflix" })
-        #expect(noon.payments.filter { $0.name == "Netflix" }.count == 1)
+        // U7 / U71 (N6): `chargedToday` en `BriefingInput.swift:142-143` usa `m.date >= today && movementCounts(...) && !excludedFromSpending`.
+        // Usamos una pareja gemela probable hoy («Netflix» notificación + «NETFLIX COM EU» banco) para que `detectSubscriptions`
+        // mantenga `sub.nextDate == 20 nov` (el aviso entra en `spendingExclusions`) y así sea EXCLUSIVAMENTE `chargedToday`
+        // quien decide si la suscripción se oculta de `upcoming`.
+        func baseWithToday(_ todayMovement: Movement, twinBankDate: Date) -> LedgerState {
+            var state = LedgerState()
+            state.movements = [
+                Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                         date: date(9, 20, 12), isShop: true, bankRef: "n1", bankStatus: .booked, dayOnly: true),
+                Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
+                         date: date(10, 20, 12), isShop: true, bankRef: "n2", bankStatus: .booked, dayOnly: true),
+                todayMovement,
+                Movement(bank: .rev, amountCents: -1_399, merchant: "NETFLIX COM EU", kind: .payment, source: .bank,
+                         date: twinBankDate, isShop: true, bankRef: "n3", bankStatus: .booked, dayOnly: todayMovement.dayOnly),
+            ]
+            return state
+        }
 
-        // Caso 2: si la fila de hoy está marcada `excludedFromSpending`, NO oculta el cobro pendiente de la suscripción.
+        // Caso 1: fila de hoy `dayOnly` fechada a las 12:00, consultada a las 08:30 -> `movementCounts` la cuenta como cobrada hoy
+        // y NO aparece duplicada en `upcoming`.
+        let dayOnlyState = baseWithToday(
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .notification,
+                     date: nov(20, 12), isShop: true, dayOnly: true),
+            twinBankDate: nov(20, 12, 5)
+        )
+        let morning = input(dayOnlyState, since: nov(19, 10), now: nov(20, 8, 30))
+        #expect(!morning.upcoming.contains { $0.name == "Netflix" })
+        let noon = input(dayOnlyState, since: nov(19, 10), now: nov(20, 12, 30))
+        #expect(!noon.upcoming.contains { $0.name == "Netflix" })
+
+        // Caso 2: fila de hoy con hora futura (NO `dayOnly`, 14:00) consultada a las 08:30 -> `movementCounts` devuelve false
+        // y la suscripción SIGUE en `upcoming` (cae si se quita `movementCounts` de `BriefingInput.swift:143`).
+        let futureHourState = baseWithToday(
+            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .notification,
+                     date: nov(20, 14), isShop: true, dayOnly: false),
+            twinBankDate: nov(20, 14, 5)
+        )
+        let beforeHour = input(futureHourState, since: nov(19, 10), now: nov(20, 8, 30))
+        #expect(beforeHour.upcoming.filter { $0.name == "Netflix" }.count == 1)
+
+        // Caso 3: si la fila de hoy está marcada `excludedFromSpending`, NO oculta el cobro pendiente de la suscripción.
         var withExcluded = LedgerState()
         withExcluded.movements = [
             Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
@@ -645,19 +666,5 @@ private func subscription(_ bank: BankID, _ name: String, _ cents: Int, _ first:
         let excludedMorning = input(withExcluded, since: nov(19, 10), now: nov(20, 8, 30))
         #expect(excludedMorning.upcoming.filter { $0.name == "Netflix" }.count == 1)
         #expect(excludedMorning.payments.filter { $0.name == "Netflix" }.isEmpty)
-
-        // Caso 3 (N6): fila de hoy con hora futura (NO `dayOnly`) consultada antes de esa hora -> `movementCounts` NO la cuenta
-        // como cobrada todavía y la suscripción sigue apareciendo en `upcoming`.
-        var futureToday = LedgerState()
-        futureToday.movements = [
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: date(9, 20, 12), isShop: true, bankRef: "f1", bankStatus: .booked),
-            Movement(bank: .rev, amountCents: -1_399, merchant: "Netflix", kind: .payment, source: .bank,
-                     date: date(10, 20, 12), isShop: true, bankRef: "f2", bankStatus: .booked),
-            Movement(bank: .rev, amountCents: -1_999, merchant: "Netflix", kind: .payment, source: .notification,
-                     date: nov(20, 14, 0), isShop: true, dayOnly: false),
-        ]
-        let beforeHour = input(futureToday, since: nov(19, 10), now: nov(20, 8, 30))
-        #expect(beforeHour.upcoming.filter { $0.name == "Netflix" }.count == 1)
     }
 }

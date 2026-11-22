@@ -365,31 +365,37 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
 
     @Test func inversionesResumenMoversYPosicionConcreta() throws {
         let fx = richFixture()
+        let note = "Solo te enseño tus datos; no te digo qué comprar ni vender."
         let overview = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         let lines = plainLines(overview)
-        // U5: sujeto y punto final en el resumen de cartera del asistente.
-        #expect(try #require(lines.first) == nb("Tus inversiones valen 1.510,00 €: +6,00 € hoy (+0,4 %)."))
-        #expect(try #require(lines.dropFirst().first) == nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."))
+        // U69(b) + U5: nota fija al inicio y sujeto + punto final en el resumen de cartera del asistente.
+        try #require(lines.count >= 3)
+        #expect(lines[0] == note)
+        #expect(lines[1] == nb("Tus inversiones valen 1.510,00 €: +6,00 € hoy (+0,4 %)."))
+        #expect(lines[2] == nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."))
         #expect(overview.lines.allSatisfy { $0.action == .openInvestments })
 
         // Posición concreta: Apple (con cambio negativo usando U+2212).
         let apple = answerQuestion("¿Cómo va Apple?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         let appleLines = plainLines(apple)
-        try #require(appleLines.count >= 2)
-        #expect(appleLines[0] == nb("Apple: 600,00 € (\u{2212}6,00 € hoy, \u{2212}1,0 %)."))
-        #expect(appleLines[1].hasPrefix(nb("Desde la compra: +59,00 € (+10,9 %)")))
+        try #require(appleLines.count >= 3)
+        #expect(appleLines[0] == note)
+        #expect(appleLines[1] == nb("Apple: 600,00 € (\u{2212}6,00 € hoy, \u{2212}1,0 %)."))
+        #expect(appleLines[2].hasPrefix(nb("Desde la compra: +59,00 € (+10,9 %)")))
 
         // Posición con coste incompleto (ETH adquirido a coste 0): NO inventa ganancia (J1).
         let eth = answerQuestion("¿Cómo va Ethereum?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         let ethLines = plainLines(eth)
-        #expect(try #require(ethLines.first) == nb("Ethereum: 30,00 €."))
+        try #require(ethLines.count >= 2)
+        #expect(ethLines[0] == note)
+        #expect(ethLines[1] == nb("Ethereum: 30,00 €."))
         #expect(!ethLines.joined().contains("Desde la compra"))
 
         // Solo movers.
         let movers = answerQuestion("¿Qué es lo que más ha subido hoy?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
-        #expect(plainLines(movers) == [nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %).")])
+        #expect(plainLines(movers) == [note, nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %).")])
 
-        // Minor 4: cartera con operaciones pero todas vendidas -> «No tienes posiciones abiertas en tu cartera.»
+        // Minor 4: cartera con operaciones pero todas vendidas -> nota fija + «No tienes posiciones abiertas en tu cartera.»
         var closed = Portfolio()
         closed.transactions = [
             InvestmentTransaction(id: "b", date: at(2026, 3, 2, 9), instrument: "US0378331005", name: "Apple",
@@ -398,18 +404,21 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                                   assetClass: "STOCK", shares: -2, cashCents: 34_000, priceEUR: 170),
         ]
         let closedAns = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: closed, book: fx.book, now: fx.now, calendar: cal)
-        #expect(plainLines(closedAns) == ["No tienes posiciones abiertas en tu cartera."])
+        #expect(plainLines(closedAns) == [note, "No tienes posiciones abiertas en tu cartera."])
 
         // Minor 3: fallback de posición desconocida con precios faltantes dice «de las que tienen precio».
         var partialPortfolio = fx.portfolio
         partialPortfolio.manualPrices.removeAll()
         let notFound = answerIntent(.investments(positionQuery: "Nvidia", moversOnly: false),
                                     state: fx.state, portfolio: partialPortfolio, book: fx.book, now: fx.now, calendar: cal)
-        #expect(try #require(plainLines(notFound).dropFirst().first).contains("de las que tienen precio."))
+        let notFoundLines = plainLines(notFound)
+        try #require(notFoundLines.count >= 3)
+        #expect(notFoundLines[0] == note)
+        #expect(notFoundLines[2].contains("de las que tienen precio."))
 
         // Sin cartera.
         let empty = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
-        #expect(plainLines(empty) == ["Aún no tienes inversiones importadas."])
+        #expect(plainLines(empty) == [note, "Aún no tienes inversiones importadas."])
     }
 
     @Test func queHaPasadoDesdeAyerReutilizaElResumenYAvisaSiHayMasAvisos() throws {
@@ -756,6 +765,53 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                                      modelIntent: intent, now: fx.now, calendar: cal)
             #expect(ans.intent == .unsupportedPeriod, "\(q) -> \(ans.intent)")
             #expect(try #require(plainLines(ans).first) == "Aún no sé contarte el gasto por días, semanas o años; sí por meses.", "\(q)")
+        }
+    }
+
+    // MARK: U69 — La negativa nunca quita los datos y toda respuesta de inversiones lleva la nota fija
+
+    @Test func u69NegativaNuncaSustituyeDatosYNotaFijaEnInversiones() throws {
+        let fx = richFixture()
+        let note = "Solo te enseño tus datos; no te digo qué comprar ni vender."
+
+        // (a) Una pregunta que dispara el filtro de consejo PERO también pide un dato concreto del libro (presupuesto, gasto, saldo…)
+        // devuelve `investmentAdviceRefusal` como primera línea Y DESPUÉS los datos reales de esa intención (sin sustituirlos).
+        let adviceWithBudget = answerQuestion("¿Debería comprar menos para mi presupuesto de Comer fuera?", state: fx.state,
+                                              portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(adviceWithBudget.isAdviceRefusal)
+        let budgetLines = plainLines(adviceWithBudget)
+        try #require(budgetLines.count >= 2)
+        #expect(budgetLines[0] == investmentAdviceRefusal)
+        #expect(budgetLines.dropFirst().contains { $0.contains("Comer fuera") && $0.contains(nb("45,00 €")) })
+        #expect(!budgetLines.contains(note), "No repetir la nota cuando ya va delante la negativa")
+
+        let adviceWithBalance = answerQuestion("¿Me recomiendas mover mi saldo de Revolut?", state: fx.state,
+                                               portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        #expect(adviceWithBalance.isAdviceRefusal)
+        let balanceLines = plainLines(adviceWithBalance)
+        try #require(balanceLines.count >= 2)
+        #expect(balanceLines[0] == investmentAdviceRefusal)
+        #expect(balanceLines.dropFirst().contains { $0.contains("Revolut") && $0.contains(nb("340,20 €")) })
+
+        // (a) Cuando la pregunta pide consejo sobre inversiones con cartera, lleva `investmentAdviceRefusal` y NO repite `note`.
+        let adviceInv = answerQuestion("¿Debería vender Apple?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let adviceInvLines = plainLines(adviceInv)
+        try #require(adviceInvLines.count >= 2)
+        #expect(adviceInvLines[0] == investmentAdviceRefusal)
+        #expect(!adviceInvLines.contains(note))
+
+        // (b) Toda respuesta de inversiones (también en modo privado `.masked`) empieza por `note` y nunca filtra cifras.
+        for q in ["Mis inversiones", "¿Qué acciones tengo?", "¿Cómo va Apple?", "¿Qué es lo que más ha subido hoy?"] {
+            let ans = answerQuestion(q, state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+            let lines = plainLines(ans)
+            try #require(lines.count >= 2, "Sin datos para \(q): \(lines)")
+            #expect(lines[0] == note || lines[0] == investmentAdviceRefusal, "\(q): \(lines[0])")
+            let maskedFirst = render(try #require(ans.lines.first).parts, .masked)
+            #expect(maskedFirst == note || maskedFirst == investmentAdviceRefusal)
+            for line in ans.lines {
+                let m = render(line.parts, .masked)
+                #expect(!m.contains("€") && !m.contains("%"), "Fuga en privado: \(m)")
+            }
         }
     }
 }

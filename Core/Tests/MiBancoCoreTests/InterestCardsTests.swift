@@ -108,7 +108,7 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
                 #expect(text.contains("por encima de octubre"))
                 #expect(card.action == .openBudgets)
             case .portfolioMover:
-                #expect(text == nb("Lo que más subió: MSCI World (+2,5 %). Lo que más bajó: Apple (\u{2212}1,5 %)."))
+                #expect(text == nb("Solo te enseño tus datos; no te digo qué comprar ni vender. Lo que más subió: MSCI World (+2,5 %). Lo que más bajó: Apple (\u{2212}1,5 %)."))
                 #expect(card.action == .openInvestments)
             }
         }
@@ -241,8 +241,11 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
                 #expect(masked.range(of: "[0-9]\\.[0-9]{3}", options: .regularExpression) == nil, "\(masked)")
                 if card.topic == .portfolioMover {
                     let plain = render(card.parts, .plain)
-                    #expect(!hasAdviceMarker(plain), "\(plain)")
-                    #expect(!hasTradeVerb(plain), "\(plain)")
+                    let note = "Solo te enseño tus datos; no te digo qué comprar ni vender."
+                    #expect(plain.hasPrefix(note), "U69(b): falta nota fija en «Movimiento en inversiones»: \(plain)")
+                    let rest = String(plain.dropFirst(note.count))
+                    #expect(!hasAdviceMarker(rest), "\(rest)")
+                    #expect(!hasTradeVerb(rest), "\(rest)")
                 }
             }
         }
@@ -305,7 +308,7 @@ private func allSixSignalsFixture() -> (state: LedgerState, portfolio: Portfolio
                                   now: nov(20, 10), calendar: cal)
         #expect(cards.count == 1)
         #expect(cards[0].topic == .portfolioMover)
-        #expect(render(cards[0].parts, .plain) == nb("Apple hoy: +2,5 %."))
+        #expect(render(cards[0].parts, .plain) == nb("Solo te enseño tus datos; no te digo qué comprar ni vender. Apple hoy: +2,5 %."))
     }
 
     @Test func almacenLocalDePreferenciasDelAsistente() throws {

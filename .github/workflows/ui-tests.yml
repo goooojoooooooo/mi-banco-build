@@ -16,7 +16,9 @@ permissions:
 jobs:
   ui:
     runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
-    timeout-minutes: 75
+    # U80: la batería completa (U8–U80) ya no cabe en 75 min. La prueba sola tiene su propio tope para que, si se pasa, el
+    # paso falle (no se cancele) y se suban el registro y el `.xcresult`.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
@@ -50,6 +52,7 @@ jobs:
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
       - name: Pruebas de toques
+        timeout-minutes: 125
         env:
           TEST_CLASS: ${{ github.event.inputs.test_class }}
         run: |
@@ -65,12 +68,14 @@ jobs:
           fi
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
-            $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600             $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
           exit 0
       - name: Resumen por prueba
+        if: always()
         run: |
+          test -f build/status.txt || echo "124" > build/status.txt
           echo "== Resultado por prueba =="
           grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
@@ -81,7 +86,7 @@ jobs:
           fi
           test "$(cat build/status.txt)" = "0"
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() || cancelled()
         with:
           name: ui-xcresult
           path: |

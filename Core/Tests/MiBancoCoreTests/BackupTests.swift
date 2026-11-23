@@ -228,6 +228,45 @@ private func tempDirectory() -> URL {
         #expect(try JSONDecoder().decode(LedgerState.self, from: saved) == a)
     }
 
+    /// R35 y R40: restaurar B por segunda vez (tras «No se pudo terminar…», cerrar y elegir el mismo fichero) NO pisa la copia
+    /// de seguridad: en el disco ya está B y la copia sigue siendo la de antes de la primera restauración (A).
+    @Test func restaurarDosVecesLaMismaCopiaDejaALaCopiaDeSeguridad() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        try store.save(a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        let firstCopy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
+        #expect(firstCopy == a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        let secondCopy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
+        #expect(secondCopy == a)
+        #expect(try store.load() == b)
+    }
+
+    /// R40: restaurar B y luego otra copia distinta C sí sustituye la copia de seguridad, que pasa a ser B (sin cambios).
+    @Test func restaurarBYLuegoCDejaBEnLaCopiaDeSeguridad() throws {
+        let dir = tempDirectory()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = FileStore(directory: dir)
+        var a = LedgerState()
+        a.movements = [pay(500, "Bar Manolo", nov(10))]
+        var b = LedgerState()
+        b.movements = [pay(900, "Zara", nov(11), isShop: true)]
+        var c = LedgerState()
+        c.movements = [pay(1_200, "Lidl", nov(12))]
+        try store.save(a)
+        try store.restoreKeepingCopy(b, copyName: "antes.json")
+        try store.restoreKeepingCopy(c, copyName: "antes.json")
+        let copy = try JSONDecoder().decode(LedgerState.self, from: Data(contentsOf: dir.appendingPathComponent("antes.json")))
+        #expect(copy == b)
+        #expect(try store.load() == c)
+    }
+
     @Test func siFallaLaCopiaPreviaNoSeRestauraNada() throws {
         struct Boom: Error {}
         let dir = tempDirectory()
@@ -308,6 +347,33 @@ private func tempDirectory() -> URL {
         let info = try #require(store.copyInfo(named: "antes.json"))
         #expect(info.state == a)
         #expect(abs(info.date.timeIntervalSinceNow) < 120)
+    }
+
+    /// Al restaurar una copia, `guideSightings` conserva por guía la fecha más reciente de último aviso (y la más antigua de primero),
+    /// y la operación sigue siendo idempotente (R40).
+    @Test func restaurarConservaElUltimoAvisoMasRecientePorGuia() throws {
+        var local = LedgerState()
+        local.guideSightings = [
+            GuideTrack.revolut.rawValue: GuideSighting(first: nov(5), last: nov(18)),
+            GuideTrack.tradeRepublic.rawValue: GuideSighting(first: nov(8), last: nov(10)),
+            GuideTrack.walletImagin.rawValue: GuideSighting(first: nov(12), last: nov(16)),
+        ]
+        var backup = LedgerState()
+        backup.guideSightings = [
+            GuideTrack.revolut.rawValue: GuideSighting(first: nov(2), last: nov(14)),
+            GuideTrack.tradeRepublic.rawValue: GuideSighting(first: nov(9), last: nov(15)),
+            GuideTrack.walletRevolut.rawValue: GuideSighting(first: nov(7), last: nov(11)),
+        ]
+        var ledger = Ledger(state: local)
+        ledger.restore(backup)
+        #expect(ledger.state.guideSightings[GuideTrack.revolut.rawValue] == GuideSighting(first: nov(2), last: nov(18)))
+        #expect(ledger.state.guideSightings[GuideTrack.tradeRepublic.rawValue] == GuideSighting(first: nov(8), last: nov(15)))
+        #expect(ledger.state.guideSightings[GuideTrack.walletImagin.rawValue] == GuideSighting(first: nov(12), last: nov(16)))
+        #expect(ledger.state.guideSightings[GuideTrack.walletRevolut.rawValue] == GuideSighting(first: nov(7), last: nov(11)))
+        // Idempotencia (R40): volver a restaurar la misma copia deja el mismo estado.
+        let once = ledger.state
+        ledger.restore(backup)
+        #expect(ledger.state == once)
     }
 
     // MARK: Ronda U0–U68 (U57)

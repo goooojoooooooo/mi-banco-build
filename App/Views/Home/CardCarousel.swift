@@ -148,7 +148,7 @@ struct CardCarousel: View {
                     link: link,
                     estimated: snapshot.balances[bank]?.estimated,
                     canConnect: BankConnector.shared.canConnect(bank),
-                    now: Date(),
+                    now: AppClock.now,
                     calendar: DateText.madridCalendar
                 )
                 switch status.action {
@@ -160,7 +160,7 @@ struct CardCarousel: View {
                         // U88: la acción con nombre dice cómo acabó, como el botón del reverso.
                         let problem: SyncProblem? = if case .failed(let p)? = outcome { p } else { nil }
                         let text = manualRefreshAnnouncement(bank: bank, link: link, problem: problem, estimated: estimated,
-                                                             canConnect: canConnect, now: Date(),
+                                                             canConnect: canConnect, now: AppClock.now,
                                                              calendar: DateText.madridCalendar)
                         AccessibilityNotification.Announcement(text).post()
                     }
@@ -195,7 +195,7 @@ struct CardCarousel: View {
                     link: link,
                     estimated: snapshot.balances[bank]?.estimated,
                     canConnect: BankConnector.shared.canConnect(bank),
-                    now: Date(),
+                    now: AppClock.now,
                     calendar: DateText.madridCalendar
                 )
                 switch status.action {

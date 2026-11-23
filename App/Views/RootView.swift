@@ -555,7 +555,7 @@ struct RootView: View {
         guard gate.canPresent, !isLocked, isForeground, !model.needsOnboarding, sheet == nil, !importing,
               !BankConnector.shared.isActive,
               router.pending == nil, routeTask == nil, !suppressBriefingForActivation else { return }
-        let now = Date()
+        let now = AppClock.now
         guard let due = briefing.dueRecord(now: now) else { return }
         let isFirst = briefing.record == nil
         briefing.prepare(
@@ -580,7 +580,7 @@ struct RootView: View {
         // tampoco cuando se entra por el aviso de la mañana.
         guard gate.canPresent, !isLocked, isForeground, !importing, sheet == nil, !model.needsOnboarding,
               !BankConnector.shared.isActive else { return }
-        let now = Date()
+        let now = AppClock.now
         let rec = briefing.manualRecord(now: now)
         let isFirst = briefing.record == nil
         briefing.prepare(
@@ -679,7 +679,7 @@ struct RootView: View {
             // Simula entrar por el aviso de la mañana con el resumen de hoy ya visto (U37); con `-MiBancoDemoRouteUnseen`,
             // sin verlo, que es el caso normal del aviso de las 08:30 (U82).
             if !DemoMode.demoRouteUnseen {
-                let now = Date()
+                let now = AppClock.now
                 briefing.markShown(BriefingRecord(shownAt: now, since: now))
             }
             if let delay = DemoMode.demoRouteDelaySeconds {

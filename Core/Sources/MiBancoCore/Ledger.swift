@@ -241,12 +241,15 @@ public struct LedgerState: Codable, Equatable, Sendable {
     /// Periodos que cubren los extractos importados, por banco (R38): de la primera fila al último día completo antes de
     /// importarlo. Un día solo está cubierto dentro de uno de ellos; entre dos extractos no hay cobertura.
     public var statementCoverage: [BankID: [DateInterval]]
+    /// Primer y último aviso visto por cada guía de Atajos (clave: `GuideTrack.rawValue`).
+    public var guideSightings: [String: GuideSighting]
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
                 alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
                 categoryOverrides: [String: SpendingCategory] = [:], budgets: Budgets = Budgets(),
                 dismissedSubscriptions: Set<String> = [],
-                links: [BankID: BankLinkInfo] = [:], statementCoverage: [BankID: [DateInterval]] = [:]) {
+                links: [BankID: BankLinkInfo] = [:], statementCoverage: [BankID: [DateInterval]] = [:],
+                guideSightings: [String: GuideSighting] = [:]) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
@@ -257,10 +260,11 @@ public struct LedgerState: Codable, Equatable, Sendable {
         self.dismissedSubscriptions = dismissedSubscriptions
         self.links = links
         self.statementCoverage = statementCoverage
+        self.guideSightings = guideSightings
     }
 
     private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides, budgets, dismissedSubscriptions
-        case links, statementCoverage
+        case links, statementCoverage, guideSightings
     }
 
     /// Los libros guardados antes de los avisos no traen ajustes ni silenciados: valores por defecto.
@@ -276,6 +280,8 @@ public struct LedgerState: Codable, Equatable, Sendable {
         dismissedSubscriptions = try c.decodeIfPresent(Set<String>.self, forKey: .dismissedSubscriptions) ?? []
         links = try c.decodeIfPresent([BankID: BankLinkInfo].self, forKey: .links) ?? [:]
         statementCoverage = try c.decodeIfPresent([BankID: [DateInterval]].self, forKey: .statementCoverage) ?? [:]
+        // Tolerante: un registro ausente o estropeado no impide abrir el libro.
+        guideSightings = (try? c.decodeIfPresent([String: GuideSighting].self, forKey: .guideSightings)) ?? [:]
     }
 }
 
@@ -454,6 +460,17 @@ public struct Ledger: Sendable {
             rewound.historyLoaded = false
             return rewound
         }
+        // En `guideSightings` se conserva, por cada guía, la fecha más reciente de último aviso (y la más antigua de primero).
+        for (key, local) in state.guideSightings {
+            if let fromBackup = restored.guideSightings[key] {
+                restored.guideSightings[key] = GuideSighting(
+                    first: min(local.first, fromBackup.first),
+                    last: max(local.last, fromBackup.last)
+                )
+            } else {
+                restored.guideSightings[key] = local
+            }
+        }
         state = restored
     }
 
@@ -478,6 +495,7 @@ public struct Ledger: Sendable {
     }
 
     public mutating func ingest(_ input: IngestInput, now: Date) -> IngestOutcome {
+        state.recordGuideSighting(for: input, now: now)
         let bank: BankID
         let parsed: ParsedMovement
         let source: Movement.Source

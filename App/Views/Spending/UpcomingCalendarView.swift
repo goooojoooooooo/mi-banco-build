@@ -26,7 +26,7 @@ struct UpcomingCalendarView: View {
     }
 
     var body: some View {
-        let now = Date()
+        let now = AppClock.now
         let cal = DateText.madridCalendar
         let days = upcomingCalendar(state: model.state, book: accountBook.book, now: now, calendar: cal)
         let topUps = calendarTopUps(days: days, floors: accountBook.book.floors)

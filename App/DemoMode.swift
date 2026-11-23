@@ -8,8 +8,11 @@ import MiBancoCore
 /// (hoja del movimiento más reciente), `-MiBancoDemoPrivate` (modo privado), `-MiBancoDemoSearch <texto>`,
 /// `-MiBancoDemoArrival` (llega un pago a los ~4 s), `-MiBancoDemoLock` (bloqueo y desbloqueo a los ~4 s),
 /// `-MiBancoDemoOnlineLogo` (una tienda fuera del directorio, para la descarga del logo),
-/// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores).
-/// En la demo nada se escribe en el almacén ni en UserDefaults: los cambios viven en memoria.
+/// `-MiBancoDemoSwitch` (a los 2 s pasa a la tarjeta siguiente), `-MiBancoDemoRules` (Avisos, en los interruptores),
+/// `-MiBancoDemoAlertsGuide <rev|tr|wallet|wallet-rev|wallet-tr> <paso>` (wallet = Apple Pay de imagin; con `-MiBancoDemoScreen ajustes`,
+/// abre la guía de avisos en ese paso contando desde 1; con paso 0 solo abre la lista de guías).
+/// En la demo nada se escribe en el almacén ni en UserDefaults (salvo `-MiBancoDemoPersistGuide`, y el ojo, que va a un
+/// dominio propio de la demo que se siembra en cada arranque: `AppPreferences.privateModeStore`): los cambios viven en memoria.
 enum DemoMode {
     enum Screen { case home, spending, alerts, settings }
 
@@ -22,6 +25,24 @@ enum DemoMode {
     }
 
     static var isActive: Bool { arguments.contains("-MiBancoDemo") }
+
+    /// `-MiBancoDemoToday <aaaa-mm-dd>` (solo con `-MiBancoDemo`): fija el «hoy» de la demo a las 12:00 de ese día, para probar
+    /// que el libro de la demo da lo mismo cualquier día del año. Un texto que no sea una fecha válida se ignora.
+    static var fixedNow: Date? {
+        guard isActive, let text = value(after: "-MiBancoDemoToday") else { return nil }
+        let parts = text.split(separator: "-").compactMap { Int($0) }
+        guard parts.count == 3 else { return nil }
+        let calendar = Calendar.current
+        let components = DateComponents(year: parts[0], month: parts[1], day: parts[2], hour: 12)
+        guard let date = calendar.date(from: components) else { return nil }
+        // Un día que no existe (30-02) se desplazaría al mes siguiente: se ignora.
+        let back = calendar.dateComponents([.year, .month, .day], from: date)
+        guard back.year == parts[0], back.month == parts[1], back.day == parts[2] else { return nil }
+        return date
+    }
+
+    /// El «ahora» de la demo: el reloj, salvo que `-MiBancoDemoToday` lo fije.
+    static var now: Date { fixedNow ?? Date() }
 
     static var screen: Screen {
         switch value(after: "-MiBancoDemoScreen") ?? "" {
@@ -96,14 +117,14 @@ enum DemoMode {
         return (args[i + 1], bank)
     }
 
-    static func initialPendingMoves(now: Date = Date()) -> [PendingMove] {
+    static func initialPendingMoves(now: Date = DemoMode.now) -> [PendingMove] {
         guard demoPendingMode != nil else { return [] }
         return [PendingMove(from: .ima, target: .own(.rev), amountCents: 20_000, createdAt: now.addingTimeInterval(-600))]
     }
 
     /// Extracto sintético de Revolut (muestra de la Tarea 6 con fechas desplazadas ~40 días atrás para que nada enlace
     /// y el resumen sea exactamente «3 movimientos nuevos, 3 filas ignoradas», con saldo 327,70 €).
-    static func sampleRevolutStatementData(now: Date = Date()) -> Data {
+    static func sampleRevolutStatementData(now: Date = DemoMode.now) -> Data {
         let cal = DateText.madridCalendar
         let today = cal.startOfDay(for: now)
         func fmt(_ daysAgo: Int, _ time: String) -> String {
@@ -155,7 +176,7 @@ enum DemoMode {
 
     /// Entradas del resumen de demo (`-MiBancoDemoBriefing busy|quiet`, con `-MiBancoDemoShortfall` opcional):
     /// valores idénticos a `busy` / `quiet` / `consejoPorFalta` de la Tarea 5 (`BriefingTests.swift`).
-    static func briefingInput(mode: BriefingMode, shortfall: Bool, state: LedgerState? = nil, now: Date = Date()) -> BriefingInput {
+    static func briefingInput(mode: BriefingMode, shortfall: Bool, state: LedgerState? = nil, now: Date = DemoMode.now) -> BriefingInput {
         let cal = DateText.madridCalendar
         func nov(_ day: Int, _ hour: Int = 12, _ minute: Int = 0) -> Date {
             cal.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute)) ?? now
@@ -246,7 +267,7 @@ enum DemoMode {
     }
 
     /// Cartera inventada del Plan 4b (tareas 6–7): MSCI World (8 acc.), Apple (3 acc.) y Ethereum (0,01).
-    static func portfolio(now: Date = Date()) -> Portfolio {
+    static func portfolio(now: Date = DemoMode.now) -> Portfolio {
         let cal = DateText.madridCalendar
         let today = cal.startOfDay(for: now)
         let marketTime = cal.date(bySettingHour: 17, minute: 35, second: 0, of: today) ?? now
@@ -292,6 +313,60 @@ enum DemoMode {
     /// `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente como lo haría un toque en el segmentado.
     static var switchesCard: Bool { arguments.contains("-MiBancoDemoSwitch") }
 
+    /// `-MiBancoDemoAlertsGuide <rev|tr|wallet|wallet-rev|wallet-tr> <paso>` (wallet = Apple Pay de imagin): paso desde 1 (0 = solo la lista); el paso en `step` cuenta desde 0.
+    static var guideStart: (track: GuideTrack?, step: Int)? {
+        guard let flag = arguments.firstIndex(of: "-MiBancoDemoAlertsGuide"), flag + 1 < arguments.count else { return nil }
+        let track: GuideTrack?
+        let number = flag + 2 < arguments.count ? Int(arguments[flag + 2]) ?? 1 : 1
+        // Paso 0: solo la lista de guías (sin entrar en ninguna).
+        if number <= 0 { return (nil, 0) }
+        switch arguments[flag + 1] {
+        case "rev": track = .revolut
+        case "tr": track = .tradeRepublic
+        case "wallet", "wallet-ima": track = .walletImagin
+        case "wallet-rev": track = .walletRevolut
+        case "wallet-tr": track = .walletTradeRepublic
+        default: track = nil
+        }
+        return (track, number - 1)
+    }
+
+    /// `-MiBancoDemoGuideHalfway`: la guía de Apple Pay de imagin queda a medias (paso 9), para ver la lista con una guía empezada.
+    static var guideProgressSeed: [String: String] {
+        var seed: [String: String] = [:]
+        if arguments.contains("-MiBancoDemoGuideHalfway") {
+            seed[GuideTrack.walletImagin.rawValue] = GuideSavedStep(step: 8, of: guideSteps(for: .walletImagin).count).stored
+        }
+        if let (track, number) = guideSeed {
+            seed[track.rawValue] = GuideSavedStep(step: number - 1, of: guideSteps(for: track).count).stored
+        }
+        return seed
+    }
+
+    /// `-MiBancoDemoGuideSeed <rev|tr|wallet|wallet-rev|wallet-tr> <paso>`: la guía queda guardada en ese paso (desde 1) y
+    /// se abre retomándola, como al volver a entrar desde la lista.
+    static var guideSeed: (track: GuideTrack, number: Int)? {
+        guard let flag = arguments.firstIndex(of: "-MiBancoDemoGuideSeed"), flag + 2 < arguments.count,
+              let number = Int(arguments[flag + 2]), number >= 2 else { return nil }
+        let track: GuideTrack
+        switch arguments[flag + 1] {
+        case "rev": track = .revolut
+        case "tr": track = .tradeRepublic
+        case "wallet", "wallet-ima": track = .walletImagin
+        case "wallet-rev": track = .walletRevolut
+        case "wallet-tr": track = .walletTradeRepublic
+        default: return nil
+        }
+        return (track, number)
+    }
+
+    /// `-MiBancoDemoPersistGuide`: la demo guarda el último paso de cada guía en UserDefaults (prueba de reinicio);
+    /// `-MiBancoDemoGuideReset` lo borra al arrancar.
+    static var persistsGuideProgress: Bool { arguments.contains("-MiBancoDemoPersistGuide") }
+    static var resetsGuideProgress: Bool { arguments.contains("-MiBancoDemoGuideReset") }
+    /// `-MiBancoDemoGuideHelpOpen`: abre el paso de la guía con «¿No te sale esto?» desplegado (captura de G28).
+    static var opensGuideHelp: Bool { arguments.contains("-MiBancoDemoGuideHelpOpen") }
+
     /// `-MiBancoDemoMonth <n>`: en Gasto, desplazamiento de meses respecto al actual (p. ej. `-1` = el mes anterior).
     static var monthOffset: Int { value(after: "-MiBancoDemoMonth").flatMap(Int.init) ?? 0 }
 
@@ -322,7 +397,7 @@ enum DemoMode {
     /// movimientos, todos anteriores, no los alteran (el pago de Mercadona de hoy ya está dentro de los 340,20 €).
     /// Hay historia para que salgan los avisos: Spotify sube de 9,99 a 10,99, Netflix se cobra en 3 días, una nómina,
     /// gasto repartido por el mes pasado (frase del ritmo) y compras previas en Mercadona (historial del comercio).
-    static func state(now: Date = Date()) -> LedgerState {
+    static func state(now: Date = DemoMode.now) -> LedgerState {
         if onboardingStep != nil {
             return LedgerState()
         }
@@ -411,11 +486,12 @@ enum DemoMode {
             (8, .tr, -8_990, "Zara"), (9, .rev, -2_960, "Renfe"), (11, .ima, -4_620, "Carrefour"),
             (13, .rev, -2_975, "Mercadona"), (15, .ima, -6_040, "Repsol"), (17, .rev, -950, "Starbucks"),
             (18, .ima, -3_310, "Lidl"), (20, .rev, -2_650, "Glovo"), (23, .tr, -5_499, "Decathlon"),
-            (25, .rev, -3_760, "Mercadona"), (27, .ima, -1_985, "Carrefour"),
+            (25, .rev, -3_760, "Mercadona"), (27, .ima, -3_150, "Carrefour"),
         ]
         // Ojo: el ÚLTIMO cargo del mes pasado de un comercio que también tiene un pago reciente no puede parecerse en importe
         // (±25 %) al reciente, o según el día del mes (26–35 días de distancia) la demo mostraría una suscripción de más
-        // (Glovo y Renfe lo hacían). Por eso Glovo del día 20 y Renfe cuestan bastante más que sus pagos recientes.
+        // (Glovo y Renfe lo hacían). Por eso Glovo del día 20 y Renfe cuestan bastante más que sus pagos recientes. Lo mismo con la
+        // llegada de la demo (Carrefour 23,45 €, imagin): el Carrefour del día 27 cuesta 31,50 €, fuera del ±25 % de 23,45 €.
         // Los dos meses anteriores (el segundo, algo más barato): las comparaciones salen con cifras creíbles.
         for (back, percent) in [(1, 100), (2, 90)] {
             let first = monthsAgo(back, from: monthStart)

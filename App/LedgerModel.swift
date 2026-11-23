@@ -94,7 +94,7 @@ final class LedgerModel {
         if DemoMode.isActive {
             let demoState = DemoMode.state()
             state = demoState
-            snapshot = LedgerSnapshot(state: demoState, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            snapshot = LedgerSnapshot(state: demoState, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
             let decision = onboardingDecision(
                 load: .success(demoState),
                 onboardingDone: DemoMode.onboardingStep == nil
@@ -123,6 +123,14 @@ final class LedgerModel {
         }
     }
 
+    /// El «ahora» del libro: el reloj (en la demo, `-MiBancoDemoToday` puede fijarlo para probar otros días).
+    private var clock: Date {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.now }
+        #endif
+        return Date()
+    }
+
     private func loadInitialFromStore() {
         let result = Result { try store.load() }
         let done = UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
@@ -130,7 +138,7 @@ final class LedgerModel {
         if case .success(let loaded) = result {
             startupLoadSucceeded = true
             state = loaded
-            snapshot = LedgerSnapshot(state: loaded, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            snapshot = LedgerSnapshot(state: loaded, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
             if decision.markDone {
                 UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
             }
@@ -153,7 +161,7 @@ final class LedgerModel {
                 }
                 onboardingSessionActive = decision.startSession
             }
-            if loaded != state || !Calendar.current.isDateInToday(snapshot.day) {
+            if loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock) {
                 publish(loaded)
                 return
             }
@@ -163,10 +171,10 @@ final class LedgerModel {
 
     /// Tras una consulta a un banco o cambio de lista ASPSP: rehace el snapshot sin `arrival`.
     private func reloadAfterSync() {
-        if let loaded = loadNext(), (loaded != state || !Calendar.current.isDateInToday(snapshot.day)) {
+        if let loaded = loadNext(), (loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock)) {
             publish(loaded)
         } else {
-            snapshot = LedgerSnapshot(state: state, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            snapshot = LedgerSnapshot(state: state, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
             resolvePendingMoves()
         }
     }
@@ -187,7 +195,7 @@ final class LedgerModel {
         staged?.cancel()
         staged = nil
         state = next
-        snapshot = LedgerSnapshot(state: next, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+        snapshot = LedgerSnapshot(state: next, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
         reschedule(next)
         resolvePendingMoves()
     }
@@ -207,8 +215,10 @@ final class LedgerModel {
 
     /// Resuelve los traspasos pendientes contra `state.movements`: caducados fuera en silencio;
     /// hechos en cuenta propia se marcan como traspaso propio y se retiran tras 6 s.
-    func resolvePendingMoves(now: Date = Date()) {
+    /// `now` nil = el reloj del libro (`clock`: en la demo, `-MiBancoDemoToday`).
+    func resolvePendingMoves(now: Date? = nil) {
         guard !resolvingMoves else { return }
+        let now = now ?? clock
         resolvingMoves = true
         defer { resolvingMoves = false }
 
@@ -301,7 +311,7 @@ final class LedgerModel {
             let animation: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.roll
             withAnimation(animation) {
                 self.state = next
-                self.snapshot = LedgerSnapshot(state: next, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+                self.snapshot = LedgerSnapshot(state: next, now: self.clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
             }
             self.staged = nil
             self.reschedule(next)
@@ -315,7 +325,7 @@ final class LedgerModel {
     /// coreografía, háptica, aviso de VoiceOver) es el código real.
     func demoSimulateArrival() {
         var ledger = Ledger(state: state)
-        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: Date()) else { return }
+        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: clock) else { return }
         demoIncoming = ledger.state
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
     }
@@ -392,7 +402,8 @@ final class LedgerModel {
         try mutate { $0.setBudget(cents, for: category) }
     }
 
-    func previewImport(_ data: Data, bank: BankID, now: Date = Date()) throws -> ImportPreview {
+    func previewImport(_ data: Data, bank: BankID, now: Date? = nil) throws -> ImportPreview {
+        let now = now ?? clock
         let cal = DateText.madridCalendar
         let statement = try parseStatement(data, expected: bank, now: now, calendar: cal)
         let report = Ledger(state: state).previewImport(statement, now: now, calendar: cal)
@@ -419,7 +430,8 @@ final class LedgerModel {
     }
 
     @discardableResult
-    func applyImport(_ preview: ImportPreview, now: Date = Date()) throws -> ReconcileReport {
+    func applyImport(_ preview: ImportPreview, now: Date? = nil) throws -> ReconcileReport {
+        let now = now ?? clock
         let cal = DateText.madridCalendar
         #if DEBUG
         if DemoMode.isActive {

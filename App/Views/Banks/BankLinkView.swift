@@ -99,7 +99,7 @@ struct BankLinkView: View {
     var body: some View {
         // Hora de verdad al dibujar; `TimelineView` solo marca el redibujo de cada minuto (U80).
         TimelineView(.everyMinute) { _ in
-            let lines = statusLines(now: Date())
+            let lines = statusLines(now: AppClock.now)
             Form {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {

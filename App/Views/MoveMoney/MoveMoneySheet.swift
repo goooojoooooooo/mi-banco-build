@@ -658,7 +658,7 @@ struct MoveMoneySheet: View {
     // MARK: - Lógica
 
     private func refreshUpcoming() {
-        let days = upcomingCalendar(state: model.state, book: accountBook.book, now: Date(), calendar: DateText.madridCalendar)
+        let days = upcomingCalendar(state: model.state, book: accountBook.book, now: AppClock.now, calendar: DateText.madridCalendar)
         cachedUpcoming = Array(days.prefix(7).flatMap(\.charges))
     }
 

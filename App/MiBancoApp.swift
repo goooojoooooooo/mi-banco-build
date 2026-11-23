@@ -119,6 +119,11 @@ private struct AppShellView: View {
                 await portfolio.refreshPrices(force: false)
             }
             .environment(logos)
+            // El entorno de movimiento va DENTRO de `.environment(preferences)`: lee las preferencias.
+            .motionEnvironment()
+            #if DEBUG
+            .motionGalleryOverlay()
+            #endif
             .environment(preferences)
             .preferredColorScheme(.dark)
             .environment(\.locale, Locale(identifier: "es_ES"))
@@ -200,7 +205,7 @@ private struct AppShellView: View {
             Theme.canvas.ignoresSafeArea()
             VStack(spacing: Theme.Space.row) {
                 AppMark(size: 64)
-                Text("Mi Banco")
+                Text(AppIdentity.displayName)
                     .titan(.sheetTitle)
                     .foregroundStyle(Theme.label)
             }

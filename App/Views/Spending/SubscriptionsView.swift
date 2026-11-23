@@ -267,6 +267,37 @@ struct SubscriptionRowView: View {
             if let hideAction {
                 Button("Esto no es una suscripción", systemImage: "eye.slash", action: hideAction)
             }
+        } preview: {
+            HStack(spacing: 14) {
+                MerchantTile(image: logos.image(merchant: row.merchant, domain: row.logoDomain, isShop: true),
+                             symbol: "repeat", size: tileSize)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.merchant)
+                        .titan(.row)
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                    Text(row.nextCharge)
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label2)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(formatEUR(row.amountCents))
+                        .titan(.row)
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .privateAmount()
+                    if let change = row.priceChange {
+                        Text(change)
+                            .titan(.meta)
+                            .foregroundStyle(row.priceWentUp ? Theme.warning : Theme.label2)
+                            .lineLimit(1)
+                            .privateAmount(radius: 6)
+                    }
+                }
+            }
         }
         .accessibilityElement(children: restoreAction == nil ? .ignore : .contain)
         .accessibilityLabel(restoreAction == nil ? spoken : "")

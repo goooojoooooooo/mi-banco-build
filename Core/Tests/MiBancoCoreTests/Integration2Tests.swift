@@ -205,6 +205,23 @@ private func income(_ cents: Int, _ merchant: String, _ when: Date, bank: BankID
         }
     }
 
+    // MARK: R34 — la cifra «hoy» del aviso cuenta las filas de solo día desde el inicio de su día
+
+    @Test func r34LaCifraDeHoyDelAvisoCuentaLaFilaDeSoloDiaAntesDeLasDoce() {
+        let recibo = bankDay(6_000, "Recibo", 11, 19)
+        let pago = pay(1_250, "Mercadona", at(11, 19, 10))
+        let manana = bankDay(9_900, "Recibo", 11, 20)
+        // 10:00: el recibo del día (60,00 €) y el pago de las 10:00 (12,50 €) suman 72,50 €; el de mañana no.
+        #expect(spentToday(in: [recibo, pago, manana], now: at(11, 19, 10), calendar: cal) == 7_250)
+        #expect(spentToday(in: [recibo, pago, manana], now: at(11, 19, 13), calendar: cal) == 7_250)
+        // Sin el recibo del día, solo el pago; el de mañana nunca.
+        #expect(spentToday(in: [pago, manana], now: at(11, 19, 10), calendar: cal) == 1_250)
+        // Un recibo de ayer no es de hoy; un traspaso excluido tampoco cuenta.
+        let ayer = bankDay(5_000, "Recibo", 11, 18)
+        #expect(spentToday(in: [ayer, pago], now: at(11, 19, 10), calendar: cal) == 1_250)
+        #expect(spentToday(in: [recibo, pago], now: at(11, 19, 10), calendar: cal, notSpending: [recibo.id]) == 1_250)
+    }
+
     @Test func r23SoloUnaFilaDeHoyEs6000EnElMes() {
         let state = LedgerState(movements: [bankDay(6_000, "Endesa", 11, 19)])
         let now = at(11, 19, 9)
@@ -222,15 +239,32 @@ private func income(_ cents: Int, _ merchant: String, _ when: Date, bank: BankID
     }
 
     @Test func r23FilaDeMananaSigueFueraALasVeintitresCincuentaYNueve() {
-        let state = LedgerState(movements: [bankDay(6_000, "Endesa", 11, 20)])
+        // Con un pago el mes pasado el ritmo existe (no es nil) y la comprobación puede fallar (R36 11).
+        let state = LedgerState(movements: [bankDay(6_000, "Endesa", 11, 20), pay(900, "Bar", at(10, 15))])
         let now = at(11, 19, 23, 59)
         #expect(monthSpending(in: state, month: now, now: now, calendar: cal).totalCents == 0)
-        #expect(spendingPace(movements: state.movements, now: now, calendar: cal) == nil
-                || spendingPace(movements: state.movements, now: now, calendar: cal)?.thisMonthCents == 0)
+        #expect(spendingPace(movements: state.movements, now: now, calendar: cal)?.thisMonthCents == 0)
         #expect(monthForecast(in: state, now: now, calendar: cal)?.spentCents == 0)
         // Y entra al empezar su día.
         let next = at(11, 20, 0, 5)
         #expect(monthSpending(in: state, month: next, now: next, calendar: cal).totalCents == 6_000)
+        #expect(spendingPace(movements: state.movements, now: next, calendar: cal)?.thisMonthCents == 6_000)
+    }
+
+    /// R36 (11): una fila de solo día cuenta desde el inicio de su día en los días raros: el cambio de hora de marzo (23 h), el de
+    /// octubre (25 h) y el último día de un mes. La víspera a las 23:59 no la cuenta; el propio día a las 0:30 sí.
+    @Test(arguments: [(3, 29), (10, 25), (11, 30)])
+    func r23FilaDeSoloDiaEnDiasRaros(_ month: Int, _ day: Int) {
+        let state = LedgerState(movements: [bankDay(6_000, "Endesa", month, day), pay(900, "Bar", at(month - 1, 15))])
+        let eve = at(month, day - 1, 23, 59)
+        #expect(monthSpending(in: state, month: eve, now: eve, calendar: cal).totalCents == 0)
+        #expect(spendingPace(movements: state.movements, now: eve, calendar: cal)?.thisMonthCents == 0)
+        for (hour, minute) in [(0, 30), (10, 0), (13, 0)] {
+            let now = at(month, day, hour, minute)
+            #expect(monthSpending(in: state, month: now, now: now, calendar: cal).totalCents == 6_000, "\(month)/\(day) \(hour):\(minute)")
+            #expect(spendingPace(movements: state.movements, now: now, calendar: cal)?.thisMonthCents == 6_000)
+            #expect(spentToday(in: state.movements, now: now, calendar: cal) == 6_000)
+        }
     }
 
     @Test func r23DiaUnoDelMesAMedianoche() {

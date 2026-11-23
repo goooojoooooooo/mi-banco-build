@@ -223,7 +223,7 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Escribe un importe como 120,00"].waitForExistence(timeout: 5),
                       "El importe mal escrito se perdió al volver")
 
-        // Al final del texto (un toque en medio deja letras detrás del cursor y el borrado no las quita).
+        // El campo alinea el texto a la derecha (AmountField): tocar el borde derecho deja el cursor al final de «abc».
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 6) + "100\n")
         XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].waitForExistence(timeout: 2))
@@ -231,10 +231,48 @@ final class Plan3TapTests: XCTestCase {
         goBack()
         scrollTo(link)
         XCTAssertTrue(link.waitForExistence(timeout: 5))
+        // El resumen de la fila de Gasto sigue al presupuesto guardado: la demo trae el del mes y uno de «Comer fuera», y ahora
+        // hay también el de Supermercado (R36 9).
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", "2 categorías"), link, timeout: 10),
+                      "La fila de Presupuestos en Gasto no cuenta el límite guardado: \(link.label)")
         link.tap()
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "100"), field, timeout: 10), "El límite no se guardó")
+        // «100,00» y no «100»: un borrador sin guardar («100») también contiene «100».
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "100,00"), field, timeout: 10), "El límite no se guardó")
         XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].exists)
+    }
+
+    /// R30 (b) y R38: la demo enseña exactamente Spotify y Netflix como suscripciones CUALQUIER día del año, y además ese día
+    /// es el que se pidió. Se fija el «hoy» de la demo (`-MiBancoDemoToday`, solo en DEBUG y con `-MiBancoDemo`) en días de cada
+    /// hueco del mes en que antes se encadenaban Renfe (7 a 16) y Glovo (21 a 30), en fin de mes, en un cambio de año y en un
+    /// marzo tras un febrero corto. Netflix se cobra tres días después del «hoy» de la demo: su fila lo dice, y si el «hoy» no
+    /// se aplicara (se ignorara el argumento) fallarían cinco de las seis fechas. Los dos últimos días de noviembre se repiten
+    /// con la llegada de la demo (`-MiBancoDemoArrival`: Carrefour 23,45 € ~4 s tras arrancar), que no debe encadenarse con el
+    /// Carrefour del mes pasado (31,50 € el día 27).
+    func testDemoSubscriptionsAreSpotifyAndNetflixOnAnyDay() throws {
+        let cases: [(day: String, arrival: Bool, netflix: String)] = [
+            ("2026-11-07", false, "10 nov"), ("2026-11-16", false, "19 nov"), ("2026-11-21", false, "24 nov"),
+            ("2026-11-30", false, "3 dic"), ("2027-01-31", false, "3 feb"), ("2027-03-01", false, "4 mar"),
+            ("2026-11-22", true, "25 nov"), ("2026-11-30", true, "3 dic"),
+        ]
+        for c in cases {
+            let day = c.day + (c.arrival ? " con llegada" : "")
+            if app != nil { app.terminate() }
+            launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoSubscriptions", "-MiBancoDemoToday", c.day]
+                   + (c.arrival ? ["-MiBancoDemoArrival"] : []))
+            XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 20), "No se ve Suscripciones el \(day)")
+            let rows = app.descendants(matching: .any).matching(identifier: "suscripciones.fila")
+            XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "No hay filas de suscripción el \(day)")
+            // La llegada entra a los ~4 s: se espera a que haya pasado antes de contar.
+            if c.arrival { Thread.sleep(forTimeInterval: 9) }
+            let labels = rows.allElementsBoundByIndex.map { $0.label }
+            XCTAssertEqual(labels.count, 2, "El \(day) la demo no trae exactamente 2 suscripciones: \(describe(rows))")
+            XCTAssertTrue(labels.contains { $0.hasPrefix("Spotify,") }, "El \(day) falta Spotify: \(labels)")
+            let netflix = labels.first { $0.hasPrefix("Netflix,") }
+            XCTAssertNotNil(netflix, "El \(day) falta Netflix: \(labels)")
+            XCTAssertTrue(netflix?.contains(c.netflix) == true,
+                          "El \(day) la fila de Netflix no trae «\(c.netflix)» (¿se aplicó el «hoy» de la demo?): \(netflix ?? "")")
+        }
     }
 
     func testSubscriptionsHideAndShowAgain() throws {
@@ -246,9 +284,7 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 5), "No se ve Suscripciones")
         XCTAssertTrue(element("suscripciones.pie").exists, "Falta cómo ocultar una suscripción")
         let rows = app.descendants(matching: .any).matching(identifier: "suscripciones.fila")
-        // Se espera a que la lista se asiente (con el cambio de fila del menú, un instante pueden verse dos copias de una fila).
-        XCTAssertTrue(waitFor(NSPredicate(format: "count == 2"), rows, timeout: 8),
-                      "La demo no trae exactamente 2 suscripciones: \(describe(rows))")
+        XCTAssertEqual(rows.count, 2, "La demo no trae exactamente 2 suscripciones: \(describe(rows))")
 
         rows.element(boundBy: 0).press(forDuration: 1.2)
         let hide = app.buttons["Esto no es una suscripción"]
@@ -332,22 +368,21 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(waitFor(gone, cancel, timeout: 5))
     }
 
-    /// R25 (b): se desliza hasta el final y se espera el texto de éxito de la hoja, no solo a que desaparezca el control.
+    /// R25 (b) y R36 (10): se desliza hasta el final y se espera el texto de éxito de la hoja, no solo a que desaparezca el
+    /// control. El resultado de la espera se guarda (no se vuelve a preguntar `exists`: el texto dura 1,6 s) y se afirma sobre el
+    /// PRIMER arrastre: un arrastre que no hizo nada ya no pasa en silencio.
     func testRestoreSlideShowsSuccessText() throws {
         openRestoreSheetByTap()
         let slide = element("restore-slide")
-        // La hoja termina de subir antes de arrastrar (si no, el arrastre se lo lleva la hoja); un segundo intento si hace falta.
+        // La hoja termina de subir antes de arrastrar (si no, el arrastre se lo lleva la hoja).
         Thread.sleep(forTimeInterval: 1.5)
         let success = app.staticTexts["Copia restaurada"]
-        for _ in 0..<2 where slide.exists && !success.exists {
-            let frame = slide.frame
-            let start = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 28, dy: frame.height / 2))
-            let end = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
-            start.press(forDuration: 0.3, thenDragTo: end, withVelocity: 300, thenHoldForDuration: 0.2)
-            if success.waitForExistence(timeout: 10) { break }
-        }
-        XCTAssertTrue(success.exists || waitFor(NSPredicate(format: "exists == true"), success, timeout: 3),
-                      "Deslizar no mostró «Copia restaurada»")
+        let frame = slide.frame
+        let start = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: 28, dy: frame.height / 2))
+        let end = slide.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
+        start.press(forDuration: 0.3, thenDragTo: end, withVelocity: 300, thenHoldForDuration: 0.2)
+        let appeared = success.waitForExistence(timeout: 10)
+        XCTAssertTrue(appeared, "El primer arrastre no mostró «Copia restaurada»")
         XCTAssertTrue(waitFor(gone, slide, timeout: 10), "La hoja no se cerró tras restaurar")
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 10), "No volvió a Ajustes")
     }
@@ -403,6 +438,9 @@ final class Plan3TapTests: XCTestCase {
         let link = element("gasto.presupuestos")
         scrollTo(link)
         XCTAssertTrue(link.waitForExistence(timeout: 5))
+        // El resumen de la fila de Gasto antes de tocar nada: el presupuesto del mes y uno por categoría.
+        let before = link.label
+        XCTAssertTrue(before.contains("Del mes"), "La demo no trae el presupuesto del mes en Gasto: \(before)")
         link.tap()
         let field = app.textFields["presupuestos.mes"]
         XCTAssertTrue(field.waitForExistence(timeout: 5), "No se ve el presupuesto del mes")
@@ -411,17 +449,49 @@ final class Plan3TapTests: XCTestCase {
         // La demo trae un presupuesto del mes de 700 €.
         XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "700"), field, timeout: 5), "La demo no trae el límite del mes")
 
-        // El texto va pegado a la derecha y un toque en el centro deja el cursor al principio (borrar no quita nada):
-        // se toca junto al borde derecho, donde el cursor queda al final del texto.
+        // Primera pasada: el texto va pegado a la derecha y un toque en el centro deja el cursor al principio (borrar no quita
+        // nada): se toca junto al borde derecho, donde el cursor queda al final del texto.
         field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + "\n")
+        assertLimitRemoved(field)
         goBack()
         scrollTo(link)
         XCTAssertTrue(link.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitFor(NSPredicate(format: "NOT (label CONTAINS %@)", "Del mes"), link, timeout: 10),
+                      "La fila de Presupuestos en Gasto sigue contando el límite del mes: \(link.label)")
+        XCTAssertNotEqual(link.label, before)
         link.tap()
         XCTAssertTrue(field.waitForExistence(timeout: 5))
-        XCTAssertTrue(waitFor(NSPredicate(format: "NOT (value CONTAINS %@)", "700"), field, timeout: 10),
-                      "Vaciar el campo no quitó el límite")
+        assertLimitRemoved(field)
+
+        // Segunda pasada (R32): se borran los números y queda « €». Lo mismo que vaciar el campo: se quita el límite y no sale
+        // el error. Se hace en «Comer fuera» (90,00 € en la demo).
+        let category = app.textFields["presupuestos.cat.comerFuera"]
+        scrollTo(category)
+        XCTAssertTrue(category.waitForExistence(timeout: 5), "No se ve el presupuesto de Comer fuera")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "90"), category, timeout: 5),
+                      "La demo no trae el límite de Comer fuera")
+        category.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        // R40 (c): primero « €», se comprueba que «€» llegó al campo, y SOLO después se pulsa Intro.
+        category.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + " €")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "€"), category, timeout: 5),
+                      "El símbolo «€» no llegó al campo antes de pulsar Intro: «\(String(describing: category.value))»")
+        category.typeText("\n")
+        assertLimitRemoved(category)
+        goBack()
+        scrollTo(link)
+        XCTAssertTrue(link.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", "Sin presupuestos"), link, timeout: 10),
+                      "La fila de Presupuestos en Gasto sigue contando el límite de Comer fuera: \(link.label)")
+    }
+
+    /// El campo quedó vacío (o con su texto de relleno «Sin límite») y no hay error de importe.
+    private func assertLimitRemoved(_ field: XCUIElement, file: StaticString = #filePath, line: UInt = #line) {
+        let empty = NSPredicate(format: "value == %@ OR value == %@", "", "Sin límite")
+        XCTAssertTrue(waitFor(empty, field, timeout: 10), "El campo no quedó vacío: «\(String(describing: field.value))»",
+                      file: file, line: line)
+        XCTAssertFalse(app.staticTexts["Escribe un importe como 120,00"].exists, "Salió el error de importe",
+                       file: file, line: line)
     }
 
     func testPrivateModeHidesBudgetFromVoiceOver() throws {
@@ -545,8 +615,14 @@ final class Plan3TapTests: XCTestCase {
         XCTAssertTrue(waitFor(NSPredicate(format: "label == %@", original), chip, timeout: 5))
     }
 
-    // MARK: - R24: un solo toque en cada pestaña (visible en el log, sin poner en rojo la ejecución)
+    // MARK: - R24 y R31: un solo toque en cada pestaña (con los tiempos a la vista, sin poner en rojo la ejecución)
 
+    /// R39. Mide, para cada pestaña, lo que tarda UN toque en dejarla seleccionada (`isSelected` de su botón en la barra) y en
+    /// dejar su contenido a la vista. El reloj arranca cuando `tap()` ya volvió. Un paso cuya pestaña ya estaba seleccionada
+    /// antes del toque se da por «sin medir» y nunca como un tiempo. Se hacen DOS vueltas: la 1 es la primera visita de cada
+    /// pestaña; la 2, cuando las cuatro ya se han visitado. Las cifras van en el nombre de una actividad y en el mensaje del
+    /// fallo esperado; el paso «Resumen por prueba» de `ui-tests.yml` las imprime en cada ejecución. Vuelta 2 en verde y la 1
+    /// no: el coste es construir la pestaña la primera vez; vuelta 2 en rojo: es el toque sintético del simulador.
     func testTabSwitchSingleTapStrict() throws {
         continueAfterFailure = true
         launch()
@@ -557,11 +633,42 @@ final class Plan3TapTests: XCTestCase {
             ("Gasto", element("gasto.total")),
             ("Inicio", app.staticTexts["Tu dinero"]),
         ]
-        XCTExpectFailure("Cambio de pestaña con un solo toque: lento o ignorado en el simulador de CI", strict: false) {
-            for (name, target) in steps {
-                app.tabBars.buttons[name].tap()
-                XCTAssertTrue(target.waitForExistence(timeout: 5), "La pestaña \(name) no cambió con un solo toque")
+        var laps: [String] = []
+        var allChanged = true
+        var visited: Set<String> = ["Inicio"]
+        for lap in 1...2 {
+            // R39: la segunda vuelta empieza SOLO cuando las cuatro pestañas ya se han visitado de verdad y se está en Inicio.
+            if lap == 2 {
+                for (name, target) in steps where !visited.contains(name) {
+                    _ = selectTab(app.tabBars.buttons[name], until: target)
+                }
+                let home = app.tabBars.buttons["Inicio"]
+                if !home.isSelected { _ = selectTab(home, until: app.staticTexts["Tu dinero"]) }
             }
+            var figures: [String] = []
+            for (name, target) in steps {
+                let tab = app.tabBars.buttons[name]
+                if tab.isSelected {
+                    figures.append("\(name) sin medir (ya estaba seleccionada)")
+                    continue
+                }
+                tab.tap()
+                let start = Date()
+                let selected = waitFor(NSPredicate(format: "isSelected == true"), tab, timeout: 5)
+                let selectedAt = Date().timeIntervalSince(start)
+                let shown = target.waitForExistence(timeout: 5)
+                let shownAt = Date().timeIntervalSince(start)
+                let tabText = selected ? String(format: "pestaña %.1f s", selectedAt) : "pestaña no seleccionada en 5 s"
+                let contentText = shown ? String(format: "contenido %.1f s", shownAt) : "contenido no visto en 5 s"
+                figures.append("\(name) \(tabText), \(contentText)")
+                if selected && shown { visited.insert(name) } else { allChanged = false }
+            }
+            laps.append("vuelta \(lap): " + figures.joined(separator: "; "))
+        }
+        let summary = "Cambio de pestaña con un solo toque, " + laps.joined(separator: "; ")
+        XCTContext.runActivity(named: summary) { _ in }
+        XCTExpectFailure(summary, strict: false) {
+            XCTAssertTrue(allChanged, summary)
         }
     }
 
@@ -603,10 +710,92 @@ final class Plan3TapTests: XCTestCase {
         link.tap()
         let row = app.descendants(matching: .any).matching(identifier: "suscripciones.fila").element(boundBy: 0)
         XCTAssertTrue(row.waitForExistence(timeout: 5))
+        let merchant = row.label.split(separator: ",").first.map(String.init) ?? ""
         row.press(forDuration: 1.2)
+        // R43 (c) / Menor 3: comprobar también la vista previa con el ojo abierto de una fila de suscripción.
+        let preview = app.descendants(matching: .any).matching(identifier: "menu.vistaPrevia").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5), "Falta la vista previa del menú de suscripción (menu.vistaPrevia)")
+        XCTAssertFalse(merchant.isEmpty)
+        XCTAssertTrue(preview.label.contains(merchant), "La vista previa de suscripción no trae «\(merchant)»: «\(preview.label)»")
         let hide = app.buttons["Esto no es una suscripción"]
         XCTAssertTrue(hide.waitForExistence(timeout: 5), "No salió el menú de ocultar")
         backgroundAndReturn()
         XCTAssertTrue(waitFor(gone, hide, timeout: 10), "El menú contextual sigue abierto tras salir de primer plano")
+    }
+
+    // MARK: - R33: el ojo no reconstruye las filas y la vista previa privada no lleva importes
+
+    /// En Inicio, tocar el ojo (cerrarlo y abrirlo) no hace aparecer copias de las filas: durante 1 s tras cada toque el número
+    /// de filas de movimiento no supera el de antes. (XCUITest espera a que la app esté quieta tras el toque, así que esto
+    /// vigila lo que quede de la transición de 0,35 s; el parpadeo en sí solo se ve en el iPhone.)
+    func testEyeToggleDoesNotDuplicateRows() throws {
+        launch()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let rows = app.buttons.matching(identifier: "movementRow")
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 8), "No hay filas de movimiento")
+        let before = rows.count
+        XCTAssertGreaterThan(before, 0)
+        for name in ["Ocultar importes", "Mostrar importes"] {
+            let eye = app.buttons[name]
+            XCTAssertTrue(eye.waitForExistence(timeout: 5), "No está el ojo «\(name)»")
+            eye.tap()
+            var peak = 0
+            let end = Date().addingTimeInterval(1)
+            repeat { peak = max(peak, rows.count) } while Date() < end
+            XCTAssertLessThanOrEqual(peak, before, "Tras «\(name)» hubo \(peak) filas de movimiento y antes \(before)")
+        }
+    }
+
+    /// R37(a): con el ojo abierto, mantener pulsada la primera fila de Inicio («Mercadona») levanta una vista previa que existe,
+    /// mide al menos 44 pt de alto y trae el nombre del comercio (si dibujara en blanco, no tendría ni alto ni nombre).
+    func testOpenEyePreviewDrawsTheRow() throws {
+        launch()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas de movimiento")
+        XCTAssertTrue(row.label.contains("Mercadona"), "La primera fila no es Mercadona: \(row.label)")
+        row.press(forDuration: 1.2)
+        let preview = app.descendants(matching: .any).matching(identifier: "menu.vistaPrevia").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5), "No existe la vista previa del menú (menu.vistaPrevia)")
+        XCTAssertGreaterThanOrEqual(preview.frame.height, 44, "La vista previa mide \(preview.frame.height) pt de alto")
+        XCTAssertTrue(preview.label.contains("Mercadona"), "La vista previa no trae el nombre: «\(preview.label)»")
+    }
+
+    /// R37(b) y R43(c): con el ojo cerrado la vista previa es solo el nombre: existe la privada («Mercadona»), no existe la
+    /// normal, y al abrir el menú no aparece ningún elemento nuevo en TODA la app con forma de importe ni en `label` ni en `value`.
+    func testPrivatePreviewHasNoAmount() throws {
+        launch(["-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas de movimiento")
+        func moneyShaped(_ text: String) -> Bool {
+            text.contains("€") || text.contains("euros") || text.range(of: #"\d,\d{2}"#, options: .regularExpression) != nil
+        }
+        func moneyStrings() -> [String] {
+            app.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
+                var found: [String] = []
+                if moneyShaped(el.label) { found.append("label:\(el.label)") }
+                if let val = el.value as? String, moneyShaped(val) { found.append("value:\(val)") }
+                return found
+            }
+        }
+        let before = NSCountedSet(array: moneyStrings())
+        row.press(forDuration: 1.2)
+        let preview = app.descendants(matching: .any).matching(identifier: "menu.vistaPreviaPrivada").firstMatch
+        XCTAssertTrue(preview.waitForExistence(timeout: 5), "No existe la vista previa privada (menu.vistaPreviaPrivada)")
+        XCTAssertEqual(preview.label, "Mercadona", "La vista previa privada no es solo el nombre: «\(preview.label)»")
+        if let val = preview.value as? String {
+            XCTAssertFalse(moneyShaped(val), "La vista previa privada trae importe en value: «\(val)»")
+        }
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "menu.vistaPrevia").firstMatch.exists,
+                       "Con el ojo cerrado salió la vista previa normal")
+        let after = NSCountedSet(array: moneyStrings())
+        var leaked: [String] = []
+        for item in after {
+            if after.count(for: item) > before.count(for: item), let text = item as? String {
+                leaked.append(text)
+            }
+        }
+        XCTAssertTrue(leaked.isEmpty, "Al abrir el menú en modo privado aparecieron importes en la app: \(leaked)")
     }
 }

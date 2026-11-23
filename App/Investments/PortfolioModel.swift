@@ -65,7 +65,7 @@ final class PortfolioModel {
     init(store: PortfolioStore = SharedStore.makePortfolioStore(), priceService: PriceService = PriceService()) {
         self.store = store
         self.priceService = priceService
-        let now = Date()
+        let now = AppClock.now
         self.summaryDay = DateText.madridCalendar.startOfDay(for: now)
         #if DEBUG
         if DemoMode.isActive {
@@ -91,7 +91,7 @@ final class PortfolioModel {
 
     /// Relee la cartera de disco o recalcula el resumen si ha cambiado el día de Madrid.
     func reload() {
-        let now = Date()
+        let now = AppClock.now
         let today = DateText.madridCalendar.startOfDay(for: now)
         #if DEBUG
         if DemoMode.isActive {

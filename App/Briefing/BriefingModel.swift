@@ -44,7 +44,7 @@ final class BriefingModel {
     }
 
     var shownToday: Bool {
-        BriefingSchedule.due(previous: record, now: Date(), calendar: DateText.madridCalendar) == nil
+        BriefingSchedule.due(previous: record, now: AppClock.now, calendar: DateText.madridCalendar) == nil
     }
 
     /// Lectura segura fuera del actor principal (para `BackgroundRefresh.run()`).
@@ -53,7 +53,7 @@ final class BriefingModel {
         return BriefingSchedule.due(previous: stored, now: now, calendar: DateText.madridCalendar) == nil
     }
 
-    func dueRecord(now: Date = Date()) -> BriefingRecord? {
+    func dueRecord(now: Date = AppClock.now) -> BriefingRecord? {
         #if DEBUG
         if DemoMode.isActive {
             guard DemoMode.briefingMode != nil else { return nil }
@@ -63,7 +63,7 @@ final class BriefingModel {
         return BriefingSchedule.due(previous: record, now: now, calendar: DateText.madridCalendar)
     }
 
-    func manualRecord(now: Date = Date()) -> BriefingRecord {
+    func manualRecord(now: Date = AppClock.now) -> BriefingRecord {
         #if DEBUG
         if DemoMode.isActive {
             if let existing = record {
@@ -86,7 +86,7 @@ final class BriefingModel {
     }
 
     /// Al terminar la bienvenida se guarda el registro de hoy para que no salga un resumen vacío justo detrás (Tarea 12).
-    func markOnboardingCompleted(now: Date = Date()) {
+    func markOnboardingCompleted(now: Date = AppClock.now) {
         markShown(BriefingRecord(shownAt: now, since: now))
     }
 

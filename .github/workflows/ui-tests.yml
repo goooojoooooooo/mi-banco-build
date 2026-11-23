@@ -7,6 +7,14 @@ on:
         description: "Clase de pruebas a ejecutar sola (vacio = todas)"
         required: false
         default: ""
+      pequeno:
+        description: "En un iPhone de 393 pt (iPhone 15/16), como en screenshots.yml"
+        type: boolean
+        default: false
+      parallel_workers:
+        description: "Pruebas en paralelo: numero de simuladores (>=2). Vacio = 2 con la bateria completa; una clase sola va en serie"
+        required: false
+        default: ""
       runner:
         description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
@@ -40,6 +48,15 @@ jobs:
           fi
           RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          # Interruptor pequeno (G30 M5): exige un iPhone de 393 pt (15/16) y falla si no existe, sin elegir 402 pt en silencio.
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1 || true)
+            if [ -z "$DEVICETYPE" ]; then
+              echo "No se encontro un simulador de 393 pt (iPhone 15 o 16) para pequeno=true"
+              xcrun simctl list devicetypes | grep -E "^iPhone " || true
+              exit 1
+            fi
+          fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
           UDID=$(xcrun simctl create "MiBancoUI" "$DEVICETYPE" "$RUNTIME")
@@ -51,10 +68,12 @@ jobs:
           fi
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
       - name: Pruebas de toques
         timeout-minutes: 125
         env:
           TEST_CLASS: ${{ github.event.inputs.test_class }}
+          PARALLEL_WORKERS: ${{ github.event.inputs.parallel_workers }}
         run: |
           mkdir -p build
           set +e
@@ -65,10 +84,43 @@ jobs:
             SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
           else
             SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests"
+            # La bateria completa va en 2 simuladores salvo que se pida otro numero (experimento medido: mismas pruebas y
+            # mismos resultados que en serie). Una clase sola sigue en serie, salvo que se pida `parallel_workers`.
+            PARALLEL_WORKERS="${PARALLEL_WORKERS:-2}"
           fi
+          if [ -n "$PARALLEL_WORKERS" ]; then
+            case "$PARALLEL_WORKERS" in
+              *[!0-9]*|0|1) echo "parallel_workers debe ser un numero >= 2"; echo "2" > build/status.txt; exit 1 ;;
+            esac
+            SELECT="$SELECT -parallel-testing-enabled YES -parallel-testing-worker-count $PARALLEL_WORKERS -maximum-parallel-testing-workers $PARALLEL_WORKERS"
+          fi
+          echo "SELECT=$SELECT" >> "$GITHUB_ENV"
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
-            -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600             $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600 \
+            $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
+          echo "$?" > build/status.txt
+          tail -n 60 build/ui.log
+          exit 0
+      # G26: a veces el simulador no deja arrancar las pruebas y ninguna llega a empezar («The test runner failed to
+      # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulador
+      # y se repite una sola vez la misma orden de «Pruebas de toques».
+      - name: Reintento si las pruebas no llegaron a empezar
+        run: |
+          if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test [Cc]ase " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
+            exit 0
+          fi
+          echo "== Las pruebas no llegaron a empezar =="
+          grep -E "encountered an error" build/ui.log | head -n 5 || true
+          xcrun simctl shutdown "$UDID" || true
+          xcrun simctl boot "$UDID"
+          perl -e 'alarm 600; exec @ARGV' xcrun simctl bootstatus "$UDID" -b > /dev/null || echo "El simulador tarda en arrancar"
+          mv build/ui.xcresult build/ui-primer-intento.xcresult || true
+          set +e
+          xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600 \
+            $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
           exit 0
@@ -78,8 +130,17 @@ jobs:
           test -f build/status.txt || echo "124" > build/status.txt
           echo "== Resultado por prueba =="
           # Una prueba que se pasa de su tope no deja «passed/failed»: se ve por «exceeded …» y por el reinicio.
-          grep -E "^Test Case .* (passed|failed)|exceeded execution time allowance|Restarting after unexpected exit" build/ui.log | tee build/summary.txt || true
+          grep -E "^Test [Cc]ase .* (passed|failed)|exceeded execution time allowance|Restarting after unexpected exit" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # R31: lo que dejó la prueba de un solo toque por pestaña (rojo o verde): del log y, si no, del xcresult.
+          echo "== R24: Cambio de pestaña con un solo toque =="
+          grep -h "Cambio de pestaña con un solo toque" build/ui.log | sort -u > build/r24.txt || true
+          if [ ! -s build/r24.txt ] && [ -d build/ui.xcresult ]; then
+            python3 .github/scripts/r24_tab_times.py build/ui.xcresult > build/r24.txt || true
+          fi
+          if [ ! -s build/r24.txt ]; then echo "R24: la prueba no se ejecutó en esta tanda (o no dejó mensaje)" > build/r24.txt; fi
+          cat build/r24.txt
+          { echo "### R24: un solo toque por pestaña"; echo '```'; cat build/r24.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "xcodebuild exit: $(cat build/status.txt)"
           if [ "$(cat build/status.txt)" != "0" ]; then
             echo "== Lineas con error: de build/ui.log =="
@@ -92,5 +153,6 @@ jobs:
           name: ui-xcresult
           path: |
             build/ui.xcresult
+            build/ui-primer-intento.xcresult
             build/ui.log
           if-no-files-found: warn

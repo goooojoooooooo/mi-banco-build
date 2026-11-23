@@ -7,15 +7,42 @@ import MiBancoCore
 @MainActor @Observable
 final class AppPreferences {
     nonisolated static let privateModeKey = "privateMode"
+
+    /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arrancar
+    /// con `-MiBancoDemoPrivate`, para que la demo nunca toque el ojo del dueño y, aun así, quien observe lo guardado
+    /// (`RollingAmount` sin preferencias) lo vea cambiar en vivo.
+    nonisolated(unsafe) static let privateModeStore: UserDefaults = {
+        #if DEBUG
+        if DemoMode.isActive, let demo = UserDefaults(suiteName: "MiBancoDemoPreferences") {
+            demo.set(DemoMode.startsPrivate, forKey: privateModeKey)
+            return demo
+        }
+        #endif
+        return .standard
+    }()
+
+    /// El modo privado guardado (la misma clave y el mismo almacén que lee `init`): para quien no tiene las preferencias
+    /// en el entorno y aun así nunca debe enseñar un importe que el dueño tiene oculto.
+    static var storedPrivateMode: Bool { privateModeStore.bool(forKey: privateModeKey) }
+
     nonisolated static let pricesEnabledKey = "investmentPrices"
     nonisolated static let pricesAskedKey = "investmentPricesAsked"
 
     var privateMode: Bool {
+        didSet { Self.privateModeStore.set(privateMode, forKey: Self.privateModeKey) }
+    }
+
+    static let motionLevelKey = "motionLevel"
+    /// Intensidad con la que se estrena la app (el dueño aprobó el movimiento en «Expresivo»): una sola constante.
+    static let defaultMotionLevel = MotionLevel.expressive
+
+    /// Intensidad del movimiento (Ajustes › Animaciones). Se guarda en UserDefaults.
+    var motionLevel: MotionLevel {
         didSet {
             #if DEBUG
             if DemoMode.isActive { return }
             #endif
-            UserDefaults.standard.set(privateMode, forKey: Self.privateModeKey)
+            UserDefaults.standard.set(motionLevel.rawValue, forKey: Self.motionLevelKey)
         }
     }
 
@@ -40,17 +67,58 @@ final class AppPreferences {
     }
 
     init() {
+        let stored = UserDefaults.standard.string(forKey: Self.motionLevelKey).flatMap(MotionLevel.init(rawValue:))
+        privateMode = Self.storedPrivateMode
         #if DEBUG
         if DemoMode.isActive {
-            privateMode = DemoMode.startsPrivate
+            motionLevel = Self.defaultMotionLevel
             pricesEnabled = false
             pricesAsked = DemoMode.asksPrices ? false : DemoMode.includesPortfolio
+            // La demo no guarda nada, salvo la prueba de reinicio de la guía (`-MiBancoDemoPersistGuide`).
+            if DemoMode.persistsGuideProgress {
+                if DemoMode.resetsGuideProgress { UserDefaults.standard.removeObject(forKey: Self.guideStepKey) }
+                guideLastStep = Self.storedGuideSteps()
+            } else {
+                guideLastStep = DemoMode.guideProgressSeed
+            }
             return
         }
         #endif
-        privateMode = UserDefaults.standard.bool(forKey: Self.privateModeKey)
+        motionLevel = stored ?? Self.defaultMotionLevel
         pricesEnabled = UserDefaults.standard.bool(forKey: Self.pricesEnabledKey)
         pricesAsked = UserDefaults.standard.bool(forKey: Self.pricesAskedKey)
+        guideLastStep = Self.storedGuideSteps()
+    }
+
+    // MARK: Guía de avisos: el último paso de cada guía
+
+    static let guideStepKey = "guideLastStep"
+
+    /// Último paso (desde 0) en que se quedó cada guía de Atajos, por `GuideTrack.rawValue`. Vive aquí y no en el libro:
+    /// es una preferencia del aparato, y iOS puede cerrar la app mientras él está en Atajos. Se lee con tolerancia.
+    /// Se guarda con el número de pasos que tenía la guía («8/22» = paso 9 de 22): si la guía cambia de largo, no se retoma.
+    private(set) var guideLastStep: [String: String]
+
+    func guideResume(_ track: GuideTrack) -> Int? {
+        guideResumeIndex(saved: GuideSavedStep(stored: guideLastStep[track.rawValue]), total: guideSteps(for: track).count)
+    }
+
+    /// Guarda el paso al que llega una guía; en el primero (o al terminar) no queda nada que retomar.
+    func setGuideStep(_ track: GuideTrack, _ index: Int?) {
+        if let index, index > 0 {
+            guideLastStep[track.rawValue] = GuideSavedStep(step: index, of: guideSteps(for: track).count).stored
+        } else {
+            guideLastStep.removeValue(forKey: track.rawValue)
+        }
+        #if DEBUG
+        if DemoMode.isActive && !DemoMode.persistsGuideProgress { return }
+        #endif
+        UserDefaults.standard.set(guideLastStep, forKey: Self.guideStepKey)
+    }
+
+    /// Lo guardado con la forma antigua (un número suelto) se descarta al leerlo: no hay retoma.
+    private static func storedGuideSteps() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: guideStepKey)?.compactMapValues { $0 as? String } ?? [:]
     }
 }
 

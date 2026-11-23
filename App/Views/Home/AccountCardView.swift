@@ -327,7 +327,7 @@ private struct CardBack: View {
     var body: some View {
         // Hora de verdad al dibujar; `TimelineView` solo marca el redibujo de cada minuto (U80).
         TimelineView(.everyMinute) { _ in
-            let liveLines = liveBankStatus(now: Date())
+            let liveLines = liveBankStatus(now: AppClock.now)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 10) {
                     if card == .investments {

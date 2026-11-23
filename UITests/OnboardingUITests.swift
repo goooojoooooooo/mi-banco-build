@@ -182,4 +182,37 @@ final class OnboardingUITests: XCTestCase {
             "U62: tras Seguir debe aparecer «Empezar la guía»"
         )
     }
+
+    /// Unión #5 (rulings, «RONDA 3/5 — añadido por petición del dueño», (a)): «Empezar la guía» abre la guía de avisos NUEVA
+    /// (la lista por banco y, al tocar una, la pantalla de pasos con partes), nunca la lista vieja de 5 pasos. Sin la guía
+    /// nueva no existen ni `guide-track-revolut` ni `guide-step-counter`, así que esta prueba falla.
+    func testWelcomeOpensNewStepGuide() {
+        let app = XCUIApplication()
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoOnboarding", "2", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
+        app.launch()
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for name in ["Permitir", "Allow"] {
+            let b = springboard.alerts.buttons[name]
+            if b.waitForExistence(timeout: 2) { b.tap(); break }
+        }
+
+        let startGuide = app.buttons["onboarding-start-guide"]
+        XCTAssertTrue(startGuide.waitForExistence(timeout: 15), "Falta «Empezar la guía»")
+        startGuide.tap()
+
+        // La lista de la guía nueva: consejo de qué guía hacer y una fila por banco.
+        XCTAssertTrue(app.navigationBars["Avisos al instante"].waitForExistence(timeout: 8), "No se abrió «Avisos al instante»")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "guide-advice").firstMatch.waitForExistence(timeout: 5),
+                      "La bienvenida abrió una guía sin el consejo de la guía nueva")
+        let revolut = app.buttons["guide-track-revolut"]
+        XCTAssertTrue(revolut.waitForExistence(timeout: 5), "La bienvenida no abrió la lista de la guía nueva")
+        revolut.tap()
+
+        // Primera pantalla de pasos: «Parte 1 de 4 · Paso 1 de 22» y el botón «Siguiente» se puede tocar.
+        let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
+        XCTAssertTrue(counter.waitForExistence(timeout: 10), "La guía nueva no enseñó su primer paso")
+        XCTAssertEqual(counter.label, "Parte 1 de 4 · Paso 1 de \(GuideUITests.revolutSteps)")
+        XCTAssertTrue(app.buttons["guide-next"].waitForExistence(timeout: 5) && app.buttons["guide-next"].isHittable,
+                      "En la bienvenida, el primer paso de la guía no deja avanzar")
+    }
 }

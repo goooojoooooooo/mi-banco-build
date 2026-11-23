@@ -59,6 +59,16 @@ public func movementCounts(_ movement: Movement, upTo now: Date, calendar: Calen
     movement.dayOnly ? calendar.startOfDay(for: movement.date) <= now : movement.date <= now
 }
 
+/// Lo que llevas gastado HOY hasta `now` (la cifra «hoy» del aviso de un pago): pagos tuyos de hoy, sin los «no es mío» ni
+/// los traspasos entre tus cuentas (`notSpending`). Los de solo día cuentan desde el INICIO de su día, igual que en las cifras
+/// del mes (R23, R34); uno fechado mañana no cuenta.
+public func spentToday(in movements: [Movement], now: Date, calendar: Calendar, notSpending: Set<UUID>? = nil) -> Int {
+    let start = calendar.startOfDay(for: now)
+    return spendingMovements(in: movements, notSpending: notSpending).reduce(0) { sum, m in
+        m.date >= start && movementCounts(m, upTo: now, calendar: calendar) ? sum + abs(m.amountCents) : sum
+    }
+}
+
 /// Tramo de tiempo de un mes: el mes en curso llega hasta `now` (incluido); un mes pasado, entero.
 private struct MonthWindow {
     let start: Date

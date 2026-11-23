@@ -56,6 +56,27 @@ final class BanksUITests: XCTestCase {
         )
     }
 
+    /// Unión #5 (mapa §4.3, rulings «Para la unión» #4): con el día de la demo fijado, Ajustes y la pantalla del banco cuentan
+    /// desde ese día y no desde el reloj de verdad (si no, «hace 5 min» sería «hace meses» y el permiso de imagin, caducado).
+    func testFixedDemoDayKeepsBankStatus() {
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoToday", "2026-02-28"])
+
+        XCTAssertTrue(app.buttons["settings-bank-rev"].waitForExistence(timeout: 15), "Debe existir la fila de Revolut en Ajustes › Bancos")
+        XCTAssertTrue(
+            app.staticTexts["Actualizado hace 5 min · exacto"].waitForExistence(timeout: 10),
+            "Con -MiBancoDemoToday, Revolut debe contar desde el día de la demo"
+        )
+        let imaRow = app.buttons["settings-bank-ima"]
+        XCTAssertTrue(imaRow.waitForExistence(timeout: 5), "Debe existir la fila de imagin")
+        imaRow.tap()
+        XCTAssertTrue(
+            app.staticTexts["Caduca en 9 días"].waitForExistence(timeout: 10),
+            "Con -MiBancoDemoToday, el permiso de imagin caduca en 9 días contados desde el día de la demo"
+        )
+        let expired = app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "caducó"))
+        XCTAssertEqual(expired.count, 0, "Con -MiBancoDemoToday no puede verse el permiso de imagin como caducado")
+    }
+
     func testConnectionGuideSteps() {
         let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoGuide"])
 

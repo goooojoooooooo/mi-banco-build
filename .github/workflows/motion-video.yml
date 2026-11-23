@@ -2,11 +2,16 @@ name: motion-video
 run-name: motion-video ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      runner:
+        description: "Runner macOS (por defecto Namespace Apple silicon)"
+        type: string
+        default: "namespace-profile-onyx"
 permissions:
   contents: read
 jobs:
   video:
-    runs-on: namespace-profile-onyx
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4

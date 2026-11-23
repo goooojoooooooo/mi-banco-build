@@ -207,3 +207,25 @@ private func budgetAlerts(_ alerts: [Insight]) -> [Insight] {
         #expect(again == s)
     }
 }
+
+/// R32: qué hace el texto de un campo de presupuesto.
+@Suite struct BudgetInputTests {
+    @Test(arguments: ["", " ", "€", " €", "\u{00A0}€", ","])
+    func unTextoSinCifrasQuitaElLimite(_ text: String) {
+        #expect(parseBudgetInput(text) == .remove)
+    }
+
+    @Test func cerosQuitanYImportesFijan() {
+        #expect(parseBudgetInput("0") == .remove)
+        #expect(parseBudgetInput("0,00 €") == .remove)
+        #expect(parseBudgetInput("120") == .set(12_000))
+        #expect(parseBudgetInput("120,00 €") == .set(12_000))
+        #expect(parseBudgetInput("700,00\u{00A0}€") == .set(70_000))
+    }
+
+    @Test func loQueNoSeEntiendeSigueSiendoInvalido() {
+        for text in ["abc", "-", "-5", "12,345", "1a"] {
+            #expect(parseBudgetInput(text) == .invalid, "\(text)")
+        }
+    }
+}

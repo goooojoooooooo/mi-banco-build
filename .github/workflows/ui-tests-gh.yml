@@ -2,6 +2,9 @@ name: ui-tests-gh
 run-name: ui-tests-gh ${{ github.ref_name }} ${{ inputs.runner }}
 # EXPERIMENTO: suite completa de XCUITest partida en 5 trabajos paralelos (por clase) en runners de GitHub.
 on:
+  push:
+    branches: [ci-exp-gh]
+    paths: [".github/registro-no-existe"]
   workflow_dispatch:
     inputs:
       runner:
@@ -13,7 +16,7 @@ permissions:
 jobs:
   ui:
     name: ui (${{ matrix.group }})
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 60
     strategy:
       fail-fast: false

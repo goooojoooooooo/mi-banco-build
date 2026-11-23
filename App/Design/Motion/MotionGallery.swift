@@ -63,6 +63,7 @@ struct MotionGallery: View {
     @State private var rowTaps = 0
     @State private var rowTapsAbove = 0
     @State private var rowTapsBelow = 0
+    @State private var liveFaces = -1
 
     private var motion: MotionContext {
         var m = baseMotion
@@ -102,6 +103,7 @@ struct MotionGallery: View {
                     fillSection
                     Color.clear.frame(height: 1).id("pasos")
                     stepperSection
+                    censusSection
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.bottom, 48)
@@ -196,12 +198,31 @@ struct MotionGallery: View {
                 rowAmount("Saldo", cents: 6_120, sign: false, color: Theme.label, id: "gallery.row.plain")
                 // Título e importe largos: con el texto más grande, el importe tiene que encoger de verdad (K18).
                 rowAmount("Nómina de noviembre", cents: 1_234_567, sign: true, color: Theme.income, id: "gallery.row.long")
+                // Un importe enorme con un título largo: el importe baja hasta la mitad y, de ahí, cede el título (se
+                // parte); el importe nunca se sale de la fila (K21).
+                rowAmount("Traspaso a la cuenta de ahorro", cents: 123_456_789, sign: true, color: Theme.income, id: "gallery.row.huge")
                 // Filas que son botones, pegadas (como en una lista): cada una recibe el toque en toda su forma visible y
                 // ninguna se lo roba a sus vecinas (K19). «Ahorro» empieza por 5: con las tiras «0…9,0» de antes, la de
-                // ese dígito subía 5 líneas por encima de su fila, sobre «Hucha».
+                // ese dígito subía 5 líneas por encima de su fila, sobre «Hucha». Va encima de sus vecinas (`zIndex`),
+                // para que una fuga de su área hacia abajo, sobre «Alquiler», se vea en la prueba (K24).
                 rowButton("Hucha", cents: 12_345, taps: $rowTapsAbove, id: "gallery.row.buttonAbove")
                 rowButton("Ahorro", cents: 50_000, taps: $rowTaps, id: "gallery.row.button")
+                    .zIndex(1)
                 rowButton("Alquiler", cents: -95_000, taps: $rowTapsBelow, id: "gallery.row.buttonBelow")
+            }
+        }
+    }
+
+    /// Cuántas caras con cifras reales (cada una con su `TimelineView`) hay montadas: una por importe (K22). Al final de
+    /// la galería, para no poner un botón en el hueco bajo las filas (las pruebas de toques lo quieren vacío).
+    private var censusSection: some View {
+        section("Recuento") {
+            HStack(spacing: 10) {
+                chip("Contar caras", id: "gallery.census") { liveFaces = RollingAmountCensus.liveFaces }
+                Text("\(liveFaces)")
+                    .titan(.subtitle)
+                    .foregroundStyle(Theme.label2)
+                    .accessibilityIdentifier("gallery.census.value")
             }
         }
     }

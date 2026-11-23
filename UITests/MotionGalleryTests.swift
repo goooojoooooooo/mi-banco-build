@@ -304,6 +304,11 @@ final class MotionGalleryTests: XCTestCase {
         var inkMaxX = -CGFloat.infinity
         /// El borde derecho (x, en puntos) de la tinta gris de los títulos (`Theme.label2`), sin contar el verde.
         var greyMaxX = -CGFloat.infinity
+        /// La caja de la tinta blanca o verde (un importe): x en puntos; alto en puntos (filas de la franja).
+        var figureMinX = CGFloat.infinity, figureMaxX = -CGFloat.infinity
+        var figureMinRow = CGFloat.infinity, figureMaxRow = -CGFloat.infinity
+        var figureWidth: CGFloat { figureMaxX - figureMinX }
+        var figureHeight: CGFloat { figureMaxRow - figureMinRow }
     }
 
     private func ink(in band: CGRect) -> Ink {
@@ -334,6 +339,15 @@ final class MotionGalleryTests: XCTestCase {
                 out.greenMaxX = max(out.greenMaxX, x)
             }
             if r > 225, g > 225, b > 225 { out.white += 1 }
+            // Tinta de un importe (blanca o verde; el gris de los títulos no cuenta): su caja, en puntos.
+            if (r > 200 && g > 200 && b > 200) || (g > 150 && r < 120 && b < 160 && g - r > 70) {
+                let x = (px.minX + CGFloat((i / 4) % width)) / scale
+                let row = CGFloat((i / 4) / width) / scale
+                out.figureMinX = min(out.figureMinX, x)
+                out.figureMaxX = max(out.figureMaxX, x)
+                out.figureMinRow = min(out.figureMinRow, row)
+                out.figureMaxRow = max(out.figureMaxRow, row)
+            }
             if max(r, g, b) > 150 { out.inkMaxX = max(out.inkMaxX, (px.minX + CGFloat((i / 4) % width)) / scale) }
             if max(r, g, b) > 90, abs(r - g) < 25, abs(g - b) < 25 {
                 out.greyMaxX = max(out.greyMaxX, (px.minX + CGFloat((i / 4) % width)) / scale)
@@ -438,6 +452,105 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertEqual(any("gallery.row.long").label, "12.345,67 euros")
     }
 
+    /// K21: con el texto más grande, el importe de una fila encoge SOLO lo que el título necesita. Escala de cada importe =
+    /// alto de su tinta / alto de la tinta de «−4,80 €» (que cabe de sobra). Si título + 8 pt + importe a tamaño natural
+    /// caben en la fila, el importe va al menos a 0,9; si caben con 16 pt, va a tamaño completo (la columna no queda
+    /// desigual). Con el `HStack` de antes el importe recibía media fila: «+1.250,00 €» salía a ~0,70 con 82 pt vacíos.
+    func testRowAmountsShrinkOnlyAsMuchAsNeededAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let edge = app.windows.firstMatch.frame.maxX - 19
+        func figure(_ name: String) -> (title: CGRect, ink: Ink) {
+            let title = app.staticTexts[name]
+            revealWhole(title)
+            let t = title.frame
+            return (t, ink(in: CGRect(x: t.maxX + 1, y: t.minY, width: edge + 19 - t.maxX - 1, height: t.height)))
+        }
+        let reference = figure("Café").ink
+        XCTAssertGreaterThan(reference.figureHeight, 20, "No se ve «−4,80 €»: \(reference)")
+        var report: [String] = []
+        for name in ["Nómina", "Saldo", "Hucha", "Ahorro", "Alquiler"] {
+            let (title, ink) = figure(name)
+            XCTAssertGreaterThan(ink.figureHeight, 10, "No se ve el importe de «\(name)»: \(ink)")
+            let scale = ink.figureHeight / reference.figureHeight
+            let natural = ink.figureWidth / max(scale, 0.01)
+            report.append("\(name): escala \(scale), natural \(natural), título hasta \(title.maxX)")
+            XCTAssertLessThanOrEqual(ink.figureMaxX, edge, "«\(name)» se sale del margen: \(ink)")
+            XCTAssertGreaterThanOrEqual(ink.figureMinX - title.maxX, 8, "«\(name)»: título e importe casi se tocan: \(ink)")
+            if title.maxX + 8 + natural <= edge {
+                XCTAssertGreaterThanOrEqual(scale, 0.9, "«\(name)» encoge de más: \(report.last ?? "")")
+            }
+            if title.maxX + 16 + natural <= edge {
+                XCTAssertEqual(ink.figureHeight, reference.figureHeight, accuracy: 1,
+                               "«\(name)» cabe y no va a tamaño completo (columna desigual): \(report.last ?? "")")
+            }
+        }
+        // «Nómina» (~134 pt de título, ~268 pt de importe en una fila de 400): cabe a 0,95 como mucho; nunca a 0,7.
+        let nomina = figure("Nómina").ink
+        XCTAssertGreaterThanOrEqual(nomina.figureHeight / reference.figureHeight, 0.9, "«+1.250,00 €» encoge de más: \(report)")
+    }
+
+    /// K21 (y M-5): un importe enorme con un título largo baja hasta la mitad y, de ahí, cede el título (que se parte);
+    /// el importe queda entero dentro de la fila, a 8 pt o más del título.
+    func testHugeAmountStaysInsideItsRowAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let title = app.staticTexts["Traspaso a la cuenta de ahorro"]
+        revealWhole(title)
+        let window = app.windows.firstMatch.frame
+        let row = CGRect(x: window.minX, y: title.frame.minY, width: window.width, height: title.frame.height)
+        let rowInk = ink(in: row)
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        XCTAssertGreaterThanOrEqual(rowInk.greenMinX - rowInk.greyMaxX, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 19, "El importe se sale del margen: \(rowInk)")
+        XCTAssertGreaterThanOrEqual(rowInk.greyMaxX, window.minX + 60, "El título se quedó sin sitio: \(rowInk)")
+        XCTAssertEqual(any("gallery.row.huge").label, "1.234.567,89 euros")
+    }
+
+    /// K22: cada importe monta UNA cara con cifras reales (una `TimelineView`), no una por escalón de encogido. La
+    /// galería cuenta las caras vivas; con el ojo abierto hay tantas como importes (cada uno con su etiqueta «… euros»).
+    func testEachAmountMountsOneLiveFace() throws {
+        launchGallery()
+        XCTAssertTrue(waitUntil { self.amountLabel() == "3.774,75 euros" })
+        let amounts = moneyLabelCount()
+        XCTAssertGreaterThanOrEqual(amounts, 9, "La galería debería tener al menos 9 importes: \(amounts)")
+        tap("gallery.census")
+        let value = app.staticTexts["gallery.census.value"]
+        XCTAssertTrue(waitUntil { value.label != "-1" }, "El recuento no cambió")
+        XCTAssertEqual(Int(value.label), amounts, "Caras vivas \(value.label) para \(amounts) importes")
+    }
+
+    /// K23: con el texto más grande, cerrar el ojo no deja ninguna cifra a la vista de VoiceOver en ningún momento y la
+    /// máscara ocupa el mismo hueco que el importe al que sustituye (no salta de tamaño). Con la escalera de antes,
+    /// «+•••,•• €», más estrecho, pasaba al escalón 1,0 y crecía.
+    private func assertClosingTheEyeKeepsTheSlot(_ extra: [String]) {
+        launchGallery(Self.hugeText + ["-MiBancoMotionGalleryPage", "cifras"] + extra)
+        let long = any("gallery.row.long")
+        XCTAssertTrue(long.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil { long.label == "12.345,67 euros" }, "No se ve el importe largo: \(long.label)")
+        Thread.sleep(forTimeInterval: 0.6)
+        let before = long.frame
+        tap("gallery.eye")
+        var samples: [Int] = []
+        for _ in 0..<6 {
+            samples.append(moneyLabelCount())
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        XCTAssertEqual(samples, Array(repeating: 0, count: samples.count), "Cifras a la vista al cerrar el ojo: \(samples)")
+        XCTAssertEqual(long.label, "importe oculto")
+        Thread.sleep(forTimeInterval: 0.8)
+        let after = long.frame
+        XCTAssertEqual(after.width, before.width, accuracy: 1, "La máscara cambia de ancho: \(before) → \(after)")
+        XCTAssertEqual(after.height, before.height, accuracy: 1, "La máscara cambia de alto: \(before) → \(after)")
+        XCTAssertEqual(after.maxX, before.maxX, accuracy: 1, "La máscara se mueve: \(before) → \(after)")
+    }
+
+    func testClosingTheEyeKeepsTheSlotAtLargestText() throws {
+        assertClosingTheEyeKeepsTheSlot([])
+    }
+
+    func testClosingTheEyeKeepsTheSlotAtLargestTextReduced() throws {
+        assertClosingTheEyeKeepsTheSlot(["-MiBancoMotionReduce"])
+    }
+
     /// K19 / K20: el elemento de VoiceOver de un importe mide su línea, no la de las tiras «0…9,0» de cada dígito (que
     /// se dibujan desplazadas y hacían el marco de 16 líneas: 325 pt a tamaño normal y 693 pt con el texto más grande).
     private func assertAmountFrameIsOneLine(_ extra: [String]) {
@@ -514,6 +627,10 @@ final class MotionGalleryTests: XCTestCase {
         // Un hueco vacío lejos de todo botón (32 pt bajo la última fila) no activa ninguna.
         XCTAssertLessThan(down.maxY + 40, app.windows.firstMatch.frame.maxY, "El hueco bajo «Alquiler» no se ve: \(down)")
         tapAt(amount.midX, down.maxY + 32)
+        // K24: «Ahorro» va encima de sus vecinas (`zIndex`), así que una fuga de su área hacia abajo se vería en los
+        // toques sobre «Alquiler» de arriba y, más allá, justo fuera de la holgura del sistema (20 pt): a 24 pt bajo
+        // «Alquiler», en las cuatro x, nada cuenta.
+        for x in xs { tapAt(x, down.maxY + 24) }
         Thread.sleep(forTimeInterval: 0.5)
         XCTAssertEqual(count(button), 2, "Un toque sobre una vecina o en un hueco cayó en «Ahorro»")
         XCTAssertEqual(count(above), expected.above)

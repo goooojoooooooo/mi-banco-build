@@ -1,5 +1,8 @@
 import SwiftUI
 import MiBancoCore
+#if DEBUG
+import Synchronization
+#endif
 
 /// «•••,•• €» (con «−» o «+» delante según el signo y `sign`). No depende de las cifras del importe, solo de su signo.
 func maskedEUR(_ cents: Int, sign: Bool) -> String {
@@ -135,6 +138,7 @@ struct RollingDigits: View {
                 .id(motion.reduce ? shownValue : 0)
                 .transition(.opacity)
             }
+            .faceCensus()
         case .scramble:
             row(maskGlyphs(scrambleStep: scrambleStep), at: .infinity, blurAll: motion.richEffects ? 0.5 : 0)
         case .dots:
@@ -533,6 +537,38 @@ private extension View {
 
     @ViewBuilder func cellStyle(_ style: AnyShapeStyle?) -> some View {
         if let style { self.foregroundStyle(style) } else { self }
+    }
+}
+
+#if DEBUG
+/// Solo DEBUG: cuántas caras con cifras reales (cada una con su `TimelineView`) hay montadas ahora. La galería lo
+/// enseña para comprobar que cada importe monta UNA sola (K22). Cuenta identidades vivas de SwiftUI: cada cara guarda
+/// en su `@State` una ficha que suma al crearse y resta al soltarse (las fichas de más que crea cada `init` de la
+/// vista se sueltan al momento).
+enum RollingAmountCensus {
+    fileprivate static let count = Atomic<Int>(0)
+    static var liveFaces: Int { count.load(ordering: .relaxed) }
+}
+
+private final class FaceToken: Sendable {
+    init() { _ = RollingAmountCensus.count.add(1, ordering: .relaxed) }
+    deinit { _ = RollingAmountCensus.count.subtract(1, ordering: .relaxed) }
+}
+
+private struct FaceCensus: View {
+    @State private var token = FaceToken()
+    var body: some View { Color.clear.frame(width: 0, height: 0).accessibilityHidden(true) }
+}
+#endif
+
+private extension View {
+    /// Solo DEBUG: apunta esta cara en `RollingAmountCensus`; en Release no hace nada.
+    @ViewBuilder func faceCensus() -> some View {
+        #if DEBUG
+        background(FaceCensus())
+        #else
+        self
+        #endif
     }
 }
 

@@ -458,25 +458,74 @@ final class MotionGalleryTests: XCTestCase {
         assertAmountFrameIsOneLine(Self.hugeText)
     }
 
-    /// K19: una fila que es un botón y lleva un importe recibe el toque en toda su forma visible (título e importe) y
-    /// no lo roba a las filas de al lado.
-    func testRowButtonTakesTapsOnlyOnItsRow() throws {
-        launchRows()
+    /// K19: tres filas-botón pegadas («Hucha», «Ahorro», «Alquiler»), cada una con su importe. La del medio recibe el
+    /// toque en toda su forma visible (título e importe) y ninguna roba toques a sus vecinas: un toque sobre la fila de
+    /// arriba o la de abajo, a la altura de cada cifra del importe del medio y a 4 pt del borde común, cuenta en la
+    /// vecina y no en ella. Su importe (marco de VoiceOver) cabe en su fila.
+    ///
+    /// Lo que NO se puede pedir: que un toque en un hueco VACÍO a menos de ~20 pt de un botón no lo active. Eso lo hace
+    /// el sistema con cualquier botón (sonda del 23-11, ejecución 45165248227: una fila de solo `Text`, igual que una con
+    /// `RollingAmount` y que una con el importe sin toques, cuentan hasta 20 pt fuera en un hueco vacío y nada a 24 pt).
+    /// Por eso aquí los toques «de fuera» caen sobre vecinas de verdad, y el hueco vacío se prueba a 32 pt.
+    private func assertRowButtonsKeepTheirTaps(_ extra: [String]) {
+        launchRows(extra)
+        let above = app.buttons["gallery.row.buttonAbove"]
         let button = app.buttons["gallery.row.button"]
-        revealWhole(button)
-        let frame = button.frame
-        XCTAssertLessThanOrEqual(frame.height, 70, "El botón de la fila mide \(frame)")
-        XCTAssertEqual(button.value as? String, "0")
+        let below = app.buttons["gallery.row.buttonBelow"]
+        revealWhole(above)
+        revealWhole(below)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(above.frame), "«Hucha» no se ve entera: \(above.frame)")
+        Thread.sleep(forTimeInterval: 0.5)
+        let up = above.frame, mid = button.frame, down = below.frame
+        let amount = any("gallery.row.buttonAmount").frame
+        let title = app.staticTexts["Ahorro"].frame
+        // Las filas no se pisan y el importe del medio (lo que lee VoiceOver) está dentro de su fila, en una línea.
+        XCTAssertLessThanOrEqual(up.maxY, mid.minY + 0.5, "«Hucha» pisa «Ahorro»: \(up) \(mid)")
+        XCTAssertLessThanOrEqual(mid.maxY, down.minY + 0.5, "«Ahorro» pisa «Alquiler»: \(mid) \(down)")
+        XCTAssertGreaterThanOrEqual(amount.minY, mid.minY - 0.5, "El importe sube fuera de su fila: \(amount) \(mid)")
+        XCTAssertLessThanOrEqual(amount.maxY, mid.maxY + 0.5, "El importe baja fuera de su fila: \(amount) \(mid)")
+        XCTAssertLessThanOrEqual(amount.height, max(title.height, 1) * 1.6, "Importe de más de una línea: \(amount), título \(title)")
+        func count(_ e: XCUIElement) -> Int { Int(e.value as? String ?? "") ?? -1 }
+        XCTAssertEqual([count(above), count(button), count(below)], [0, 0, 0])
         let origin = app.coordinate(withNormalizedOffset: .zero)
         func tapAt(_ x: CGFloat, _ y: CGFloat) { origin.withOffset(CGVector(dx: x, dy: y)).tap() }
-        tapAt(frame.minX + 20, frame.midY)
-        XCTAssertTrue(waitUntil { (button.value as? String) == "1" }, "El título de la fila no recibe el toque")
-        tapAt(frame.maxX - 20, frame.midY)
-        XCTAssertTrue(waitUntil { (button.value as? String) == "2" }, "El importe de la fila no recibe el toque")
-        tapAt(frame.maxX - 20, frame.minY - 20)
-        tapAt(frame.maxX - 20, frame.maxY + 20)
+        // Dentro: título e importe cuentan.
+        tapAt(mid.minX + 20, mid.midY)
+        XCTAssertTrue(waitUntil { count(button) == 1 }, "El título de la fila no recibe el toque")
+        tapAt(amount.midX, amount.midY)
+        XCTAssertTrue(waitUntil { count(button) == 2 }, "El importe de la fila no recibe el toque")
+        // Vecinas: a la altura de la primera cifra, del centro y del final del importe, y del título.
+        let xs = [amount.minX + 4, amount.midX, amount.maxX - 4, mid.minX + 20]
+        var expected = (above: 0, below: 0)
+        for x in xs {
+            for y in [up.midY, up.maxY - 4] {
+                tapAt(x, y)
+                expected.above += 1
+                XCTAssertTrue(waitUntil { count(above) == expected.above },
+                              "Un toque sobre «Hucha» (\(x), \(y)) no cayó en ella: \(count(above)) de \(expected.above)")
+            }
+            for y in [down.minY + 4, down.midY] {
+                tapAt(x, y)
+                expected.below += 1
+                XCTAssertTrue(waitUntil { count(below) == expected.below },
+                              "Un toque sobre «Alquiler» (\(x), \(y)) no cayó en ella: \(count(below)) de \(expected.below)")
+            }
+        }
+        // Un hueco vacío lejos de todo botón (32 pt bajo la última fila) no activa ninguna.
+        XCTAssertLessThan(down.maxY + 40, app.windows.firstMatch.frame.maxY, "El hueco bajo «Alquiler» no se ve: \(down)")
+        tapAt(amount.midX, down.maxY + 32)
         Thread.sleep(forTimeInterval: 0.5)
-        XCTAssertEqual(button.value as? String, "2", "Un toque fuera de la fila cayó en ella")
+        XCTAssertEqual(count(button), 2, "Un toque sobre una vecina o en un hueco cayó en «Ahorro»")
+        XCTAssertEqual(count(above), expected.above)
+        XCTAssertEqual(count(below), expected.below)
+    }
+
+    func testRowButtonTakesTapsOnlyOnItsRow() throws {
+        assertRowButtonsKeepTheirTaps([])
+    }
+
+    func testRowButtonTakesTapsOnlyOnItsRowAtLargestText() throws {
+        assertRowButtonsKeepTheirTaps(Self.hugeText)
     }
 
     /// B-4: sin preferencias, el ojo guardado se observa en vivo. Con el ojo abierto se ve el importe; si se cierra lo
@@ -507,51 +556,5 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil { expressive.isSelected }, "«Expresivo» no es el nivel de partida")
         XCTAssertFalse(app.buttons["Equilibrado"].isSelected)
         XCTAssertFalse(app.buttons["Sutil"].isSelected)
-    }
-}
-
-/// DIAGNÓSTICO TEMPORAL: dónde reciben toques las filas-botón (0 texto, 1 importe, 2 importe sin toques, 3 largo).
-final class RowHitProbeTests: XCTestCase {
-    var app: XCUIApplication!
-
-    private func probe(_ extra: [String], _ tag: String) {
-        app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoMotionGallery", "-MiBancoRowHitProbe",
-                               "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"] + extra
-        app.launch()
-        let origin = app.coordinate(withNormalizedOffset: .zero)
-        var lines: [String] = []
-        for i in 0..<4 {
-            let button = app.buttons["probe.\(i)"]
-            XCTAssertTrue(button.waitForExistence(timeout: 15))
-            var swipes = 0
-            while button.frame.minY < 120 || button.frame.maxY > app.windows.firstMatch.frame.maxY - 120, swipes < 8 {
-                if button.frame.minY < 120 { app.swipeDown() } else { app.swipeUp() }
-                swipes += 1
-            }
-            Thread.sleep(forTimeInterval: 0.6)
-            let f = button.frame
-            let kids = button.descendants(matching: .any).allElementsBoundByIndex.map { "\($0.elementType.rawValue):\($0.label):\($0.frame)" }
-            lines.append("PROBE \(tag) row=\(i) frame=\(f) kids=\(kids)")
-            for x in [f.minX + 20, f.maxX - 20] {
-                var row: [String] = []
-                for dy: CGFloat in [-44, -36, -28, -24, -20, -16, -12, -8, -4, 4, 8, 12, 16, 20, 24, 28, 36, 44] {
-                    let y = dy < 0 ? f.minY + dy : f.maxY + dy
-                    let before = button.value as? String ?? ""
-                    origin.withOffset(CGVector(dx: x, dy: y)).tap()
-                    Thread.sleep(forTimeInterval: 0.35)
-                    let after = button.value as? String ?? ""
-                    row.append("\(Int(dy))=\(before == after ? "no" : "SI")")
-                }
-                lines.append("PROBE \(tag) row=\(i) x=\(Int(x)) " + row.joined(separator: " "))
-            }
-        }
-        for l in lines { print(l) }
-        XCTContext.runActivity(named: lines.joined(separator: "\n")) { _ in }
-    }
-
-    func testProbeDefault() { probe([], "normal") }
-    func testProbeHuge() {
-        probe(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"], "xxxl")
     }
 }

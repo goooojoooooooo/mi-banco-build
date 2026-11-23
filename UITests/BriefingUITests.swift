@@ -545,6 +545,52 @@ final class BriefingUITests: XCTestCase {
         XCTAssertTrue(element("briefing-done").waitForExistence(timeout: 12), "U37: la ruta del aviso de la mañana no abrió el resumen")
     }
 
+    /// U82 (I2): se entra por el aviso con el resumen de hoy SIN ver; tras «Vale», volver a la app no lo abre otra vez.
+    func testBriefingRouteDoesNotReopenAfterDone() throws {
+        launch(["-MiBancoDemoBriefing", "quiet", "-MiBancoDemoRoute", "briefing", "-MiBancoDemoRouteUnseen"])
+        let done = element("briefing-done")
+        XCTAssertTrue(done.waitForExistence(timeout: 12), "U82: la ruta del aviso no abrió el resumen pendiente")
+        done.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), done, timeout: 8), "U82: «Vale» no cerró el resumen")
+
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 2)
+        app.activate()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 10), "U82: no se volvió a Inicio")
+        let end = Date().addingTimeInterval(6)
+        while Date() < end {
+            XCTAssertFalse(done.exists, "U82: el resumen volvió a salir tras verlo desde el aviso")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    /// U89: tras «Mis inversiones», la primera línea de la respuesta es un dato y la nota va al final, como pie.
+    func testInvestmentsAnswerShowsDataFirstAndNoteLast() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 12))
+
+        let field = element("assistant-question-field")
+        scrollInBriefingSheet(to: field)
+        field.tap()
+        field.typeText("Mis inversiones")
+        element("assistant-send").tap()
+
+        let card = element("assistant-answer-card")
+        scrollInBriefingSheet(to: card)
+        XCTAssertTrue(card.waitForExistence(timeout: 8), "U89: falta la respuesta")
+        let firstLine = card.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier BEGINSWITH 'answer-line-'")).firstMatch
+        XCTAssertTrue(firstLine.waitForExistence(timeout: 8), "U89: la respuesta no tiene líneas")
+        XCTAssertNotEqual(firstLine.identifier, "answer-line-inv-data-only", "U89: la nota va delante")
+        XCTAssertFalse(firstLine.label.contains("Son datos, no una recomendación."), "U89: la primera línea es la nota")
+
+        let note = card.descendants(matching: .any).matching(identifier: "answer-note-inv-data-only").firstMatch
+        scrollInBriefingSheet(to: note)
+        XCTAssertTrue(note.waitForExistence(timeout: 5), "U89: falta la nota «Son datos, no una recomendación.»")
+        XCTAssertEqual(note.label, "Son datos, no una recomendación.")
+        XCTAssertGreaterThan(note.frame.minY, firstLine.frame.minY, "U89: la nota no va detrás del dato")
+    }
+
     /// U39: si falla guardar preferencias, «No me interesa» conserva la tarjeta en pantalla.
     func testDislikeKeepsCardWhenSaveFails() throws {
         launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrefsFail"])

@@ -179,4 +179,18 @@ private func link(validUntil: Date) -> BankLinkInfo {
         #expect(primary(t0.addingTimeInterval(60 * 60)) == "Actualizado hace 1 h · exacto")
         #expect(primary(t0.addingTimeInterval(4 * 3600)) == "Actualizado hace 4 h · exacto")
     }
+
+    /// U88 (M6): la acción «Actualizar» de VoiceOver anuncia el resultado: «Actualizado», o el mensaje de la tarjeta si falla.
+    @Test func anuncioDeActualizarConVoiceOver() {
+        var l = link(validUntil: at(2027, 5, 19))
+        l.lastSuccessAt = at(2026, 11, 20, 11, 55)
+        func announce(_ problem: SyncProblem?) -> String {
+            manualRefreshAnnouncement(bank: .rev, link: l, problem: problem, estimated: false, canConnect: true,
+                                      now: now, calendar: madrid)
+        }
+        #expect(announce(nil) == "Actualizado")
+        #expect(announce(.unknown) == "No se pudo actualizar · lo intentamos más tarde")
+        #expect(announce(.keyRejected) == "Enable Banking no acepta la clave")
+        #expect(announce(.rateLimited).hasPrefix("El banco ha pedido esperar"))
+    }
 }

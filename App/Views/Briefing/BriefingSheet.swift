@@ -455,8 +455,22 @@ struct BriefingSheet: View {
                 }
             }
             BriefingLineView(parts: card.parts, role: .callout, color: Theme.label2)
+            if let footer = card.footer {
+                // U89: la nota de inversiones es el pie de la tarjeta, no un prefijo del texto.
+                footnote(footer)
+                    .accessibilityIdentifier("card-footer-\(card.topic.rawValue)")
+            }
         }
         .contentShape(Rectangle())
+    }
+
+    /// Pie en estilo secundario (letra pequeña, gris).
+    private func footnote(_ text: String) -> some View {
+        Text(text)
+            .titan(.meta)
+            .foregroundStyle(Theme.label2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     // MARK: - «Pregúntame» (A1–A3, A5)
@@ -540,14 +554,22 @@ struct BriefingSheet: View {
 
     private func answerCard(_ answer: AssistantAnswer) -> some View {
         VStack(spacing: 0) {
-            ForEach(Array(answer.lines.enumerated()), id: \.element.id) { index, line in
+            // U89: la nota de inversiones va al final, como pie en estilo secundario, sin separador ni flecha.
+            let rows = answer.lines.filter { $0.id != investmentDataOnlyLineID }
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, line in
                 briefingRow(line, idPrefix: "answer-line")
-                if index < answer.lines.count - 1 {
+                if index < rows.count - 1 {
                     Rectangle()
                         .fill(Theme.separator)
                         .frame(height: 0.5)
                         .padding(.leading, 16)
                 }
+            }
+            if let note = answer.lines.first(where: { $0.id == investmentDataOnlyLineID }) {
+                footnote(BriefingLineView.accessibleText(for: note.parts, hidden: false))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                    .accessibilityIdentifier("answer-note-\(investmentDataOnlyLineID)")
             }
         }
         .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
@@ -665,8 +687,9 @@ struct BriefingSheet: View {
                 book: accountBook.book
             )
             guard !Task.isCancelled else { return }
-            if let first = briefingModel.lastAnswer?.lines.first {
-                let spoken = BriefingLineView.accessibleText(for: first.parts, hidden: preferences.privateMode)
+            // U85: se anuncia el dato pedido, no la nota fija ni la negativa.
+            if let answer = briefingModel.lastAnswer, let announced = assistantAnnouncedLine(answer) {
+                let spoken = BriefingLineView.accessibleText(for: announced.parts, hidden: preferences.privateMode)
                 AccessibilityNotification.Announcement(spoken).post()
             }
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) {

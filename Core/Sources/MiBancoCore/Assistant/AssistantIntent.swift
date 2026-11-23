@@ -660,6 +660,33 @@ private func investmentContexts(list: [String], phoneticList: [String], alnumTok
     return (strong, weakConcepts.count, weakMatchedWords)
 }
 
+/// U87: valores y criptos conocidos que no están en la cartera ni en `strongInvestmentExactWords`. Solo los usa
+/// `questionNamesInvestmentSubject`; el filtro de consejos no cambia (U69(c)). Sin marcas que también son comercios
+/// habituales (Apple, Amazon, Netflix…) ni bancos o recibos (Santander, Iberdrola, Repsol…).
+private let knownSecurityNames: Set<String> = [
+    "nvidia", "tesla", "amd", "palantir", "alphabet", "berkshire", "inditex", "solana", "dogecoin", "doge",
+    "xrp", "ripple", "cardano",
+]
+
+/// U87: true si la pregunta nombra algo de inversión: el S del filtro de consejos (una posición de la cartera, vocabulario
+/// de inversión o cripto), oro, o un valor conocido. No cuenta lo que forma parte de un comercio del libro («Apple Store»).
+func questionNamesInvestmentSubject(_ question: String, portfolio: Portfolio?, knownMerchants: Set<String>) -> Bool {
+    let trimmed = compatNormalized(question).trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return false }
+    let alnumTokens = foldedQuery(foldConfusables(trimmed))
+        .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    for list in allAdviceReadings(trimmed) where !list.isEmpty {
+        let fullMerchantIdx = fullKnownMerchantIndices(in: list, knownMerchants: knownMerchants)
+        let ctx = investmentContexts(list: list, phoneticList: list.map(phoneticWord), alnumTokens: alnumTokens,
+                                     fullMerchantIdx: fullMerchantIdx, portfolio: portfolio)
+        if ctx.strong { return true }
+        for (i, w) in list.enumerated() where !fullMerchantIdx.contains(i) {
+            if w == "oro" || w == "gold" || knownSecurityNames.contains(w) { return true }
+        }
+    }
+    return false
+}
+
 /// true si la pregunta es solo «Compra(s)» / «Venta(s)» (≤ 3 palabras o con «este mes» / «el mes pasado» / un mes / ayer / hoy) — U1 punto 6.
 private func isBareCategoryTradeQuery(_ list: [String], joined: String) -> Bool {
     guard let first = list.first, ["compra", "compras", "venta", "ventas"].contains(first) else { return false }

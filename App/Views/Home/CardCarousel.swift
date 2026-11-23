@@ -153,7 +153,17 @@ struct CardCarousel: View {
                 )
                 switch status.action {
                 case .refresh:
-                    Task { _ = await BankSync.shared.refresh(trigger: .manual, only: bank) }
+                    let estimated = snapshot.balances[bank]?.estimated
+                    let canConnect = BankConnector.shared.canConnect(bank)
+                    Task {
+                        let outcome = await BankSync.shared.refresh(trigger: .manual, only: bank)[bank]
+                        // U88: la acción con nombre dice cómo acabó, como el botón del reverso.
+                        let problem: SyncProblem? = if case .failed(let p)? = outcome { p } else { nil }
+                        let text = manualRefreshAnnouncement(bank: bank, link: link, problem: problem, estimated: estimated,
+                                                             canConnect: canConnect, now: Date(),
+                                                             calendar: DateText.madridCalendar)
+                        AccessibilityNotification.Announcement(text).post()
+                    }
                 case .renew:
                     onOpenBank(bank)
                 case .connect, .importStatement, .editBalance, nil:

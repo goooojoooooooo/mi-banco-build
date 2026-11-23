@@ -100,6 +100,16 @@ public func bankStatusLines(
         secondary: expiry, action: days <= 10 ? .renew : .refresh)
 }
 
+/// U88: lo que VoiceOver anuncia tras la acción con nombre «Actualizar» del carrusel: «Actualizado» si salió bien; si
+/// falló, el mismo mensaje que enseña la tarjeta con el fallo apuntado.
+public func manualRefreshAnnouncement(
+    bank: BankID, link: BankLinkInfo, problem: SyncProblem?, estimated: Bool?, canConnect: Bool, now: Date, calendar: Calendar
+) -> String {
+    guard let problem else { return "Actualizado" }
+    return bankStatusLines(bank: bank, link: link.recordingFailure(problem, at: now), estimated: estimated,
+                           canConnect: canConnect, now: now, calendar: calendar).primary
+}
+
 /// Estado de la fila de saldo en Ajustes para un banco conectado (U45): nombra el origen real.
 public func connectedBalanceRowStatus(
     estimated: Bool, origin: BalanceOrigin, setAt: Date, now: Date, calendar: Calendar

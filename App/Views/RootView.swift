@@ -569,6 +569,8 @@ struct RootView: View {
         )
         // Se guarda ANTES de presentar la hoja (tarea 9, Review Focus 2).
         briefing.markShown(due)
+        // U82: si el dueño entró por el aviso de la mañana, este resumen ya lo atiende; que no vuelva a salir al volver a la app.
+        briefingRouteWaiting = false
         sheet = .briefing(due)
         rescheduleMorningReminder()
     }
@@ -674,9 +676,12 @@ struct RootView: View {
                 }
             }
         } else if DemoMode.demoRoute == "briefing" {
-            // Simula entrar por el aviso de la mañana con el resumen de hoy ya visto (U37).
-            let now = Date()
-            briefing.markShown(BriefingRecord(shownAt: now, since: now))
+            // Simula entrar por el aviso de la mañana con el resumen de hoy ya visto (U37); con `-MiBancoDemoRouteUnseen`,
+            // sin verlo, que es el caso normal del aviso de las 08:30 (U82).
+            if !DemoMode.demoRouteUnseen {
+                let now = Date()
+                briefing.markShown(BriefingRecord(shownAt: now, since: now))
+            }
             if let delay = DemoMode.demoRouteDelaySeconds {
                 // U76: el toque del aviso llega N segundos después (con una confirmación o una conexión ya abiertas).
                 Task {

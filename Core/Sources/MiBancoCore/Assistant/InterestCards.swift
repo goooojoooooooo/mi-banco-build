@@ -180,13 +180,17 @@ public struct InterestCard: Equatable, Sendable, Identifiable {
     public let title: String
     public let parts: [BriefingPart]
     public let action: BriefingAction?
+    /// Pie de la tarjeta en estilo secundario (U89: `investmentDataOnlyNote` en «Movimiento en inversiones»).
+    public let footer: String?
 
-    public init(id: String, topic: AssistantTopic, title: String, parts: [BriefingPart], action: BriefingAction? = nil) {
+    public init(id: String, topic: AssistantTopic, title: String, parts: [BriefingPart], action: BriefingAction? = nil,
+                footer: String? = nil) {
         self.id = id
         self.topic = topic
         self.title = title
         self.parts = parts
         self.action = action
+        self.footer = footer
     }
 }
 
@@ -524,9 +528,9 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
             }
             if up { phrase("lo que más subió", dayMovers[best]) }
             if down { phrase("lo que más bajó", dayMovers[worst]) }
-            // U69(b): toda tarjeta «Movimiento en inversiones» empieza por `investmentDataOnlyNote`.
+            // U69(b) con la forma de U89: toda tarjeta «Movimiento en inversiones» lleva `investmentDataOnlyNote` de pie.
             return InterestCard(id: id, topic: .portfolioMover, title: "Movimiento en inversiones",
-                                parts: [.text(investmentDataOnlyNote + " ")] + parts, action: .openInvestments)
+                                parts: parts, action: .openInvestments, footer: investmentDataOnlyNote)
         }
     }
 
@@ -537,8 +541,8 @@ private func portfolioMoverCard(portfolio: Portfolio, now: Date, calendar: Calen
         let when = isToday ? "hoy" : "en la última sesión (\(cardWeekdayNames[((calendar.component(.weekday, from: day) - 1) % 7 + 7) % 7]))"
         return InterestCard(
             id: id, topic: .portfolioMover, title: "Movimiento en inversiones",
-            parts: [.text("\(investmentDataOnlyNote) \(clippedName(only.name)) \(when): "), .percentTenths(only.tenths), .text(".")],
-            action: .openInvestments)
+            parts: [.text("\(clippedName(only.name)) \(when): "), .percentTenths(only.tenths), .text(".")],
+            action: .openInvestments, footer: investmentDataOnlyNote)
     }
     return nil
 }

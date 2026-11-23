@@ -18,6 +18,8 @@ jobs:
           # ventana; `Menu` y `.pickerStyle(.menu)` también. Ninguno puede quedar por encima del bloqueo.
           bad=0
           if grep -rnE '(^|[^A-Za-z.])Menu[[:space:]]*[({]|pickerStyle\(\.menu\)' App --include='*.swift'; then echo "Menu o Picker de menú"; bad=1; fi
+          # U88 (M10): un `.contextMenu` solo vive en `GatedContextMenu` (que lo cierra al bloquear).
+          if grep -rnE '\.contextMenu[[:space:]]*[({]' App --include='*.swift' | grep -v '^App/Design/GatedContextMenu.swift:'; then echo "contextMenu fuera de GatedContextMenu"; bad=1; fi
           for f in $(grep -rlE 'DatePicker\(|[^A-Za-z]Picker\(' App --include='*.swift'); do
             awk -v f="$f" '
               /DatePicker\(/ { start = NR; kind = "date" }

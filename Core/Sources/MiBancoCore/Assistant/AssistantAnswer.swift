@@ -22,42 +22,24 @@ public let assistantUnknownMessage =
 
 // MARK: Entrada principal
 
+/// Id de la línea que lleva `investmentAdviceRefusal`.
+private let adviceRefusalLineID = "advice-refusal"
+
 /// Responde a una pregunta del dueño con hechos calculados por el Core.
 /// Si `modelIntent` viene del modelo del dispositivo y es concreta, se usa; si no, manda el enrutador determinista.
-/// Cualquier petición de consejo devuelve siempre `investmentAdviceRefusal` diga lo que diga `modelIntent`.
+/// Cualquier petición de consejo (reglas, modelo del dispositivo o sujeto de inversión con otra intención) lleva siempre
+/// `investmentAdviceRefusal` delante, y detrás los datos de la intención (U69(a), U81, U87).
 public func answerQuestion(_ question: String, state: LedgerState, portfolio: Portfolio?, book: AccountBook,
                            briefingInput precomputedBriefing: BriefingInput? = nil,
                            modelIntent: AssistantIntent? = nil, now: Date, calendar: Calendar) -> AssistantAnswer {
     let knownMerchants = ledgerMerchantKeys(in: state)
-    if isAdviceRequest(question, portfolio: portfolio, knownMerchants: knownMerchants) {
-        let folded = withoutFormatCharacters(question).decomposedStringWithCompatibilityMapping
-            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
-        let tokens = folded.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
-        let pos = extractPositionQuery(tokens: tokens, joined: " " + tokens.joined(separator: " ") + " ", portfolio: portfolio)
-        // U69(a): la negativa NUNCA sustituye a la respuesta. Va delante, literal, y DESPUÉS la respuesta de la intención que el
-        // enrutador habría elegido sin el freno de consejos (saldo, gasto, presupuesto, cartera…). Si no hay ninguna, la
-        // negativa de siempre con los datos neutros que haya y sus fichas (A3).
-        let baseRefusal = answerIntent(.adviceRequest(positionQuery: pos), state: state, portfolio: portfolio, book: book,
-                                       briefingInput: precomputedBriefing, now: now, calendar: calendar)
+    let modelAsksAdvice: Bool = if case .adviceRequest? = modelIntent { true } else { false }
+    // U81: si el modelo del dispositivo dice «consejo», se trata igual que el detector por reglas.
+    if modelAsksAdvice || isAdviceRequest(question, portfolio: portfolio, knownMerchants: knownMerchants) {
         let underlying = routeAssistantQuestionWithoutAdviceGate(question, state: state, portfolio: portfolio,
                                                                  now: now, calendar: calendar)
-        let hasOpenPortfolio = portfolio.flatMap { portfolioSummary($0, now: now, calendar: calendar) } != nil
-        switch underlying {
-        case .unknown, .adviceRequest:
-            return baseRefusal
-        case .investments where !hasOpenPortfolio:
-            // Sin cartera abierta no hay datos de inversiones que enseñar: la negativa literal sola y sus fichas (Minor 5).
-            return baseRefusal
-        default:
-            let factualAns = answerIntent(underlying, state: state, portfolio: portfolio, book: book,
-                                          briefingInput: precomputedBriefing, now: now, calendar: calendar)
-            // U69(b): con la negativa delante, la nota fija de inversiones no se repite.
-            let dataLines = factualAns.lines.filter { $0.id != investmentDataOnlyLineID }
-            let refusalLine = BriefingLine(id: "advice-refusal", parts: [.text(investmentAdviceRefusal)])
-            let chips = factualAns.chips.isEmpty ? baseRefusal.chips : factualAns.chips
-            return AssistantAnswer(intent: .adviceRequest(positionQuery: pos), lines: [refusalLine] + dataLines,
-                                   chips: chips, isAdviceRefusal: true)
-        }
+        return refusalThenData(question, underlying: underlying, state: state, portfolio: portfolio, book: book,
+                               briefingInput: precomputedBriefing, now: now, calendar: calendar)
     }
     let resolved: AssistantIntent
     if let modelIntent, modelIntent != .unknown, modelIntent != .unsupportedPeriod,
@@ -70,8 +52,46 @@ public func answerQuestion(_ question: String, state: LedgerState, portfolio: Po
     } else {
         resolved = routeAssistantQuestion(question, state: state, portfolio: portfolio, now: now, calendar: calendar)
     }
+    // U87: la pregunta nombra algo de inversión y la intención NO es la de datos de inversiones («¿Cuánto me queda libre
+    // para meterle a Nvidia?» → dinero libre): la negativa delante y después los datos de esa intención.
+    let isInvestmentsIntent: Bool = if case .investments = resolved { true } else { false }
+    if !isInvestmentsIntent,
+       questionNamesInvestmentSubject(question, portfolio: portfolio, knownMerchants: knownMerchants) {
+        return refusalThenData(question, underlying: resolved, state: state, portfolio: portfolio, book: book,
+                               briefingInput: precomputedBriefing, now: now, calendar: calendar)
+    }
     return answerIntent(resolved, state: state, portfolio: portfolio, book: book,
                         briefingInput: precomputedBriefing, now: now, calendar: calendar)
+}
+
+/// U69(a): la negativa NUNCA sustituye a la respuesta. Va delante, literal, y DESPUÉS la respuesta de `underlying` (saldo,
+/// gasto, presupuesto, cartera…; sin cartera, «Aún no tienes inversiones importadas.», U84). Sin intención, la negativa con
+/// las fichas de preguntas sugeridas (U83).
+private func refusalThenData(_ question: String, underlying: AssistantIntent, state: LedgerState, portfolio: Portfolio?,
+                             book: AccountBook, briefingInput precomputedBriefing: BriefingInput?,
+                             now: Date, calendar: Calendar) -> AssistantAnswer {
+    let folded = withoutFormatCharacters(question).decomposedStringWithCompatibilityMapping
+        .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+    let tokens = folded.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    let pos = extractPositionQuery(tokens: tokens, joined: " " + tokens.joined(separator: " ") + " ", portfolio: portfolio)
+    let refusalLine = BriefingLine(id: adviceRefusalLineID, parts: [.text(investmentAdviceRefusal)])
+    switch underlying {
+    case .unknown, .adviceRequest:
+        let chips = suggestedAssistantChips(state: state, portfolio: portfolio, now: now, calendar: calendar)
+        return AssistantAnswer(intent: .adviceRequest(positionQuery: pos), lines: [refusalLine], chips: chips,
+                               isAdviceRefusal: true)
+    default:
+        let factualAns = answerIntent(underlying, state: state, portfolio: portfolio, book: book,
+                                      briefingInput: precomputedBriefing, now: now, calendar: calendar)
+        // U69(b)/U89: con la negativa delante, la nota de inversiones no se repite.
+        let dataLines = factualAns.lines.filter { $0.id != investmentDataOnlyLineID }
+        let chips = factualAns.chips.isEmpty
+            ? answerIntent(.adviceRequest(positionQuery: pos), state: state, portfolio: portfolio, book: book,
+                           briefingInput: precomputedBriefing, now: now, calendar: calendar).chips
+            : factualAns.chips
+        return AssistantAnswer(intent: .adviceRequest(positionQuery: pos), lines: [refusalLine] + dataLines,
+                               chips: chips, isAdviceRefusal: true)
+    }
 }
 
 /// Revalida en la frontera pública de `answerQuestion` cualquier `merchant` propuesto en `modelIntent` (C2, J21(d), U2).
@@ -126,7 +146,7 @@ public func answerIntent(_ intent: AssistantIntent, state: LedgerState, portfoli
                                lines: briefingRecapAnswer(state: state, portfolio: portfolio, book: book,
                                                           precomputed: precomputedBriefing, now: now, calendar: calendar))
     case .adviceRequest(let positionQuery):
-        var lines = [BriefingLine(id: "advice-refusal", parts: [.text(investmentAdviceRefusal)])]
+        var lines = [BriefingLine(id: adviceRefusalLineID, parts: [.text(investmentAdviceRefusal)])]
         let summary = portfolio.flatMap { portfolioSummary($0, now: now, calendar: calendar) }
         if let summary {
             if let q = positionQuery, let matched = matchPosition(query: q, in: summary.positions) {
@@ -1040,20 +1060,25 @@ private func portfolioOverviewLines(_ s: PortfolioSummary, now: Date, calendar: 
 
 private func investmentsAnswer(positionQuery: String?, moversOnly: Bool, portfolio: Portfolio?,
                                now: Date, calendar: Calendar) -> [BriefingLine] {
-    // U69(b): toda respuesta de inversiones empieza SIEMPRE por `investmentDataOnlyNote`.
-    let noteLine = BriefingLine(id: investmentDataOnlyLineID, parts: [.text(investmentDataOnlyNote)], action: .openInvestments)
+    // U69(b) con la forma de U89: toda respuesta de inversiones TERMINA SIEMPRE con `investmentDataOnlyNote`.
+    investmentsDataLines(positionQuery: positionQuery, moversOnly: moversOnly, portfolio: portfolio, now: now, calendar: calendar)
+        + [BriefingLine(id: investmentDataOnlyLineID, parts: [.text(investmentDataOnlyNote)], action: .openInvestments)]
+}
+
+private func investmentsDataLines(positionQuery: String?, moversOnly: Bool, portfolio: Portfolio?,
+                                  now: Date, calendar: Calendar) -> [BriefingLine] {
     guard let portfolio, !portfolio.transactions.isEmpty else {
-        return [noteLine, BriefingLine(id: "inv-empty", parts: [.text("Aún no tienes inversiones importadas.")], action: .openInvestments)]
+        return [BriefingLine(id: "inv-empty", parts: [.text("Aún no tienes inversiones importadas.")], action: .openInvestments)]
     }
     guard let summary = portfolioSummary(portfolio, now: now, calendar: calendar) else {
-        return [noteLine, BriefingLine(id: "inv-closed", parts: [.text("No tienes posiciones abiertas en tu cartera.")], action: .openInvestments)]
+        return [BriefingLine(id: "inv-closed", parts: [.text("No tienes posiciones abiertas en tu cartera.")], action: .openInvestments)]
     }
     if let positionQuery {
         if let matched = matchPosition(query: positionQuery, in: summary.positions) {
-            return [noteLine] + positionLines(matched, now: now, calendar: calendar)
+            return positionLines(matched, now: now, calendar: calendar)
         }
-        var lines = [noteLine, BriefingLine(id: "inv-not-found",
-                                            parts: [.text("No encuentro esa posición en tu cartera.")], action: .openInvestments)]
+        var lines = [BriefingLine(id: "inv-not-found",
+                                  parts: [.text("No encuentro esa posición en tu cartera.")], action: .openInvestments)]
         if let value = summary.valueCents {
             let partial = summary.missingPrices > 0
             lines.append(BriefingLine(id: "inv-fallback-total",
@@ -1065,7 +1090,7 @@ private func investmentsAnswer(positionQuery: String?, moversOnly: Bool, portfol
         return lines
     }
     if moversOnly {
-        if let movers = moversLine(summary, now: now, calendar: calendar) { return [noteLine, movers] }
+        if let movers = moversLine(summary, now: now, calendar: calendar) { return [movers] }
         let comparableCount: Int = {
             guard let day = summary.changeDay else { return 0 }
             return summary.positions.filter { p in
@@ -1077,9 +1102,9 @@ private func investmentsAnswer(positionQuery: String?, moversOnly: Bool, portfol
         let text = comparableCount >= 2
             ? "En la última sesión no hubo diferencias apreciables entre tus posiciones."
             : "No hay suficientes posiciones con precio de mercado y cierre anterior para comparar subidas y bajadas."
-        return [noteLine, BriefingLine(id: "inv-no-movers", parts: [.text(text)], action: .openInvestments)]
+        return [BriefingLine(id: "inv-no-movers", parts: [.text(text)], action: .openInvestments)]
     }
-    return [noteLine] + portfolioOverviewLines(summary, now: now, calendar: calendar)
+    return portfolioOverviewLines(summary, now: now, calendar: calendar)
 }
 
 // MARK: 11. «¿Qué ha pasado desde ayer?»
@@ -1190,17 +1215,28 @@ private func ensureSentenceEnd(_ text: String) -> String {
 
 /// Lo que lee la voz de una respuesta del asistente. En modo privado nunca lee ningún importe ni porcentaje.
 public func spokenAssistantAnswer(_ answer: AssistantAnswer, privateMode: Bool) -> String {
+    // U89: la nota de inversiones no se lee en voz alta (la voz lee el dato).
+    let lines = answer.lines.filter { $0.id != investmentDataOnlyLineID }
     if privateMode {
         let privacyLine = "Tienes el modo privado activado, así que no leo importes."
         if answer.isAdviceRefusal {
-            let hasExtraFigures = answer.lines.dropFirst().contains(where: hasSensitiveFigure)
-            return hasExtraFigures ? "\(investmentAdviceRefusal) \(privacyLine)" : investmentAdviceRefusal
+            // U86: detrás de la negativa se leen las líneas sin cifras; si alguna lleva cifras, se avisa del modo privado.
+            let rest = lines.dropFirst()
+            var spoken = [investmentAdviceRefusal]
+            spoken += rest.filter { !hasSensitiveFigure($0) }.map { ensureSentenceEnd(render($0.parts, .masked)) }
+            if rest.contains(where: hasSensitiveFigure) { spoken.append(privacyLine) }
+            return spoken.joined(separator: " ")
         }
-        if answer.lines.contains(where: hasSensitiveFigure) {
-            // U69(b): la nota fija de inversiones también se oye con el ojo cerrado.
-            return answer.lines.first?.id == investmentDataOnlyLineID ? "\(investmentDataOnlyNote) \(privacyLine)" : privacyLine
+        if lines.contains(where: hasSensitiveFigure) {
+            return privacyLine
         }
-        return answer.lines.map { ensureSentenceEnd(render($0.parts, .masked)) }.joined(separator: " ")
+        return lines.map { ensureSentenceEnd(render($0.parts, .masked)) }.joined(separator: " ")
     }
-    return answer.lines.map { ensureSentenceEnd(spokenParts($0)) }.joined(separator: " ")
+    return lines.map { ensureSentenceEnd(spokenParts($0)) }.joined(separator: " ")
+}
+
+/// U85: la línea que VoiceOver anuncia al llegar una respuesta: la primera con el dato pedido (ni la nota fija de
+/// inversiones ni la negativa); si solo hay nota o negativa, esa.
+public func assistantAnnouncedLine(_ answer: AssistantAnswer) -> BriefingLine? {
+    answer.lines.first { $0.id != investmentDataOnlyLineID && $0.id != adviceRefusalLineID } ?? answer.lines.first
 }

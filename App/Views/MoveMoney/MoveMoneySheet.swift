@@ -72,15 +72,29 @@ struct MoveMoneySheet: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                switch step {
-                case .target:
-                    targetStep
-                case .amount:
-                    amountStep
-                case let .ready(from, target, cents, kind):
-                    readyStep(from: from, target: target, amountCents: cents, kind: kind)
+            VStack(spacing: 0) {
+                // U90: una línea fija bajo el título que dice qué hace la app y qué no (nunca mueve dinero).
+                Text("Yo lo preparo: copio los datos y abro tu banco. El dinero lo envías tú allí.")
+                    .titan(.subtitle)
+                    .foregroundStyle(Theme.label2)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, Theme.Space.gutter)
+                    .padding(.top, 4)
+                    .padding(.bottom, 8)
+                    .accessibilityIdentifier("move-money-explainer")
+                Group {
+                    switch step {
+                    case .target:
+                        targetStep
+                    case .amount:
+                        amountStep
+                    case let .ready(from, target, cents, kind):
+                        readyStep(from: from, target: target, amountCents: cents, kind: kind)
+                    }
                 }
+                .frame(maxHeight: .infinity)
             }
             .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Mover dinero")

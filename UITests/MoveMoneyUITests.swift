@@ -185,6 +185,20 @@ final class MoveMoneyUITests: XCTestCase {
         XCTAssertTrue(savedContact.waitForExistence(timeout: 8), "U24: el contacto válido no se guardó")
     }
 
+    /// U90: bajo el título de «Mover dinero» va la línea fija que dice que el dinero lo envía el dueño en su banco.
+    func testMoveSheetExplainsItNeverSendsMoney() throws {
+        launch(["-MiBancoDemoCard", "ima"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        let moveButton = app.buttons["Mover dinero"]
+        XCTAssertTrue(moveButton.waitForExistence(timeout: 10), "Falta Mover dinero")
+        moveButton.tap()
+        XCTAssertTrue(app.navigationBars["Mover dinero"].waitForExistence(timeout: 8), "No se abrió la hoja Mover dinero")
+
+        let line = app.staticTexts["move-money-explainer"]
+        XCTAssertTrue(line.waitForExistence(timeout: 5), "U90: falta la línea bajo el título")
+        XCTAssertEqual(line.label, "Yo lo preparo: copio los datos y abro tu banco. El dinero lo envías tú allí.")
+    }
+
     func testMoveSheetDismissesOnBackground() throws {
         launch(["-MiBancoDemoCard", "ima"])
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")

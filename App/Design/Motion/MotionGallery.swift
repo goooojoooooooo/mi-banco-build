@@ -242,11 +242,11 @@ struct MotionGallery: View {
     }
 
     private func rowAmount(_ name: String, cents: Int, sign: Bool, color: Color, id: String) -> some View {
-        HStack {
+        // El reparto del kit: el título hasta su ancho ideal y el importe a tamaño completo si cabe (K21).
+        AmountRowLayout {
             Text(name)
                 .titan(.subtitle)
                 .foregroundStyle(Theme.label2)
-            Spacer(minLength: 12)
             RollingAmount(cents: cents, countsUp: false, style: .plain(sign: sign))
                 .titan(.row)
                 .foregroundStyle(color)

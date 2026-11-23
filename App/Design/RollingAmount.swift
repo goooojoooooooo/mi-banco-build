@@ -139,6 +139,9 @@ struct RollingDigits: View {
                 .transition(.opacity)
             }
             .faceCensus()
+            // Al cerrar el ojo las cifras se quitan al instante, aunque quien llama (o `ReduceFade`) anime el cambio:
+            // nunca se funden encima de la máscara (K23). Al abrirlo sí aparecen fundiéndose.
+            .transition(.asymmetric(insertion: .opacity, removal: .identity))
         case .scramble:
             row(maskGlyphs(scrambleStep: scrambleStep), at: .infinity, blurAll: motion.richEffects ? 0.5 : 0)
         case .dots:
@@ -294,32 +297,60 @@ struct RollingDigits: View {
         reveal.drawn == .dots ? index < popped : true
     }
 
-    /// Si no cabe, el importe se encoge entero, nunca celda a celda: la primera escala de `fitSteps` (de 1 a 0,5, de 5 en
-    /// 5 %) cuyo ancho cabe. Cada escala es una caja de maquetación (`ScaledToFit`) que ocupa exactamente lo que se dibuja,
-    /// así que lo que se ve es lo que mide (antes la escala salía de medidas con `onGeometryChange` y el dibujo invadía
-    /// ~10 pt el hueco del título).
+    /// Si no cabe, el importe se encoge entero, nunca celda a celda, y UNA sola vez: escala exacta = min(1, ancho ofrecido /
+    /// ancho natural), calculada por la maquetación (`FitBox`) con una sola cara viva (K22; antes, una escalera de 11
+    /// copias en `ViewThatFits`). Lo que ocupa es lo que se ve: la caja mide natural × escala y la cara se dibuja con esa
+    /// misma escala (la lee de la caja con `visualEffect`, en el mismo fotograma, sin `@State` ni medidas a destiempo).
+    /// - El hueco: la cara va sobre una copia oculta del importe real con cada cifra cambiada por «0» (`slotGlyphs`). El
+    ///   ancho natural es el mayor de los dos, así que la máscara ocupa el mismo hueco, con la misma escala, que las cifras
+    ///   a las que sustituye (K23) y el importe no cambia de tamaño mientras cuenta.
     /// - El protagonista ocupa todo el ancho y se encoge hacia la izquierda.
-    /// - Una línea (`.plain`) pide su ancho natural y acepta hasta la mitad: en una fila con el texto más grande deja
-    ///   sitio al título (con `fixedSize()` el importe se quedaba con ~268 pt y al título le quedaban ~120).
-    @ViewBuilder private func fitted<V: View>(_ view: V) -> some View {
-        let fitting = ViewThatFits(in: .horizontal) {
-            ForEach(Self.fitSteps, id: \.self) { scale in
-                ScaledToFit(scale: scale) {
-                    view
-                        .fixedSize()
-                        .scaleEffect(scale, anchor: .topLeading)
-                }
+    /// - Una línea (`.plain`) nunca pasa del ancho que se le ofrece. Cuánto se le ofrece en una fila lo decide
+    ///   `AmountRowLayout` (el título hasta su ancho ideal; el importe a tamaño completo si cabe y, si no, hasta la mitad).
+    @ViewBuilder private func fitted<V: View>(_ face: V) -> some View {
+        let box = FitBox {
+            ZStack(alignment: heroEuros != nil ? .leading : .trailing) {
+                slotRow(slotGlyphs).hidden()
+                face
+            }
+            .fixedSize()
+            // El área de toque es la caja (abajo, `contentShape`), no el dibujo.
+            .allowsHitTesting(false)
+            .visualEffect { content, proxy in
+                content.scaleEffect(fitScale(in: proxy), anchor: .topLeading)
             }
         }
+        .coordinateSpace(.named(fitSpace))
+        .contentShape(Rectangle())
         if heroEuros != nil {
-            fitting.frame(maxWidth: .infinity, alignment: .leading)
+            box.frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            fitting
+            box
         }
     }
 
-    /// Las escalas que se prueban, de mayor a menor; la última se usa aunque no quepa.
-    private static let fitSteps: [CGFloat] = [1, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5]
+    /// El hueco del importe real (`cents`) con cada cifra cambiada por «0»: mide lo mismo que las celdas de las cifras
+    /// (cada una es un «0» oculto) sin decir cuáles son. Lo mismo para la máscara (que no tiene cifras).
+    private var slotGlyphs: [Glyph] {
+        let parts = texts(of: cents)
+        func zeroed(_ text: String) -> String {
+            String(text.map { $0.isASCII && $0.isNumber ? "0" : $0 })
+        }
+        return build(main: zeroed(parts.main), small: zeroed(parts.small), random: nil)
+    }
+
+    /// Una fila de solo texto con las mismas celdas, tipografías y espaciado que `row`, para medir (siempre oculta).
+    private func slotRow(_ glyphs: [Glyph]) -> some View {
+        HStack(alignment: .lastTextBaseline, spacing: 0) {
+            ForEach(glyphs) { g in
+                Text(String(g.char)).cellFont(font(g.small))
+            }
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .modifier(HeroTracking(euros: heroEuros))
+        .accessibilityHidden(true)
+    }
 
     // MARK: Estados
 
@@ -431,16 +462,21 @@ struct RollingDigits: View {
     }
 }
 
-/// Coloca a su hijo a su tamaño natural y ocupa ese tamaño por `scale`; el hijo se dibuja escalado por lo mismo desde
-/// su esquina (`fitted`). Todo sale de la propia maquetación: lo que ocupa es lo que se ve. Las líneas de base se
-/// escalan igual, para que una fila alineada por la base siga alineada.
-private struct ScaledToFit: Layout {
-    let scale: CGFloat
+/// La caja de un importe: mide lo natural de su hijo × escala, con escala = min(1, ancho ofrecido / ancho natural)
+/// (nunca más ancha que lo ofrecido: no se sale de la fila). Coloca al hijo a su tamaño natural en su esquina; el hijo
+/// se dibuja escalado con `fitScale(in:)`, que lee esta misma caja (`fitSpace`). Las líneas de base se escalan igual,
+/// para que una fila alineada por la base siga alineada.
+private struct FitBox: Layout {
+    static func scale(natural: CGFloat, offered: CGFloat?) -> CGFloat {
+        guard let offered, offered.isFinite, natural > 0 else { return 1 }
+        return max(0, min(1, offered / natural))
+    }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let child = subviews.first else { return .zero }
         let natural = child.sizeThatFits(.unspecified)
-        return CGSize(width: natural.width * scale, height: natural.height * scale)
+        let s = Self.scale(natural: natural.width, offered: proposal.width)
+        return CGSize(width: natural.width * s, height: natural.height * s)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
@@ -452,8 +488,21 @@ private struct ScaledToFit: Layout {
         of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
     ) -> CGFloat? {
         guard let child = subviews.first else { return nil }
-        return bounds.minY + child.dimensions(in: .unspecified)[guide] * scale
+        let natural = child.sizeThatFits(.unspecified)
+        let s = natural.width > 0 ? bounds.width / natural.width : 1
+        return bounds.minY + child.dimensions(in: .unspecified)[guide] * s
     }
+}
+
+/// El espacio de coordenadas de cada `FitBox` (el más cercano gana: cada importe lee el suyo).
+private let fitSpace = "RollingAmount.fit"
+
+/// La escala con que se dibuja el hijo de una `FitBox`: ancho de la caja / ancho natural del hijo. En `visualEffect`
+/// (fuera del actor principal), así que es una función libre.
+private func fitScale(in proxy: GeometryProxy) -> CGFloat {
+    let natural = proxy.size.width
+    guard natural > 0, let box = proxy.bounds(of: .named(fitSpace)) else { return 1 }
+    return max(0, min(1, box.width / natural))
 }
 
 /// `tracking` solo de la cifra protagonista (−3 % del cuerpo de los euros).

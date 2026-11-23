@@ -450,6 +450,10 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(rowInk.greenMinX - rowInk.greyMaxX, 8, "Título e importe casi se tocan: \(rowInk)")
         XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 19, "El importe se sale del margen: \(rowInk)")
         XCTAssertEqual(any("gallery.row.long").label, "12.345,67 euros")
+        // El marco del importe (VoiceOver, toques) es lo que se ve: dentro del margen y a la derecha del título.
+        let amount = any("gallery.row.long").frame
+        XCTAssertLessThanOrEqual(amount.maxX, window.maxX - 19, "El marco del importe se sale: \(amount)")
+        XCTAssertGreaterThanOrEqual(amount.minX, rowInk.greyMaxX + 4, "El marco del importe pisa el título: \(amount), \(rowInk)")
     }
 
     /// K21: con el texto más grande, el importe de una fila encoge SOLO lo que el título necesita. Escala de cada importe =

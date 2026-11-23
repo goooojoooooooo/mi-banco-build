@@ -94,6 +94,8 @@ struct RollingDigits: View {
     @State private var popped: Int
     @State private var transition: Task<Void, Never>?
     @State private var seed = Int.random(in: 1...1_000_000)
+    @State private var idealWidth: CGFloat = 0
+    @State private var availableWidth: CGFloat = 0
     @ScaledMetric(relativeTo: .largeTitle) private var heroScale = 1.0
 
     // MARK: Cuerpo
@@ -290,32 +292,46 @@ struct RollingDigits: View {
         reveal.drawn == .dots ? index < popped : true
     }
 
-    /// Si no cabe, el importe se encoge entero, nunca celda a celda: la primera escala de `fitSteps` (de 1 a 0,5, de 5 en
-    /// 5 %) cuyo ancho cabe. Cada escala es una caja de maquetación (`ScaledToFit`) que ocupa exactamente lo que se dibuja,
-    /// así que lo que se ve es lo que mide (antes la escala salía de medidas con `onGeometryChange` y el dibujo invadía
-    /// ~10 pt el hueco del título).
+    /// Si no cabe, el importe se encoge entero (hasta la mitad, como `minimumScaleFactor(0.5)`), nunca celda a celda.
     /// - El protagonista ocupa todo el ancho y se encoge hacia la izquierda.
     /// - Una línea (`.plain`) pide su ancho natural y acepta hasta la mitad: en una fila con el texto más grande deja
-    ///   sitio al título (con `fixedSize()` el importe se quedaba con ~268 pt y al título le quedaban ~120).
+    ///   sitio al título (con `fixedSize()` se quedaba con ~310 pt y al título le quedaban 31).
     @ViewBuilder private func fitted<V: View>(_ view: V) -> some View {
-        let fitting = ViewThatFits(in: .horizontal) {
-            ForEach(Self.fitSteps, id: \.self) { scale in
-                ScaledToFit(scale: scale) {
-                    view
-                        .fixedSize()
-                        .scaleEffect(scale, anchor: .topLeading)
-                }
-            }
-        }
         if heroEuros != nil {
-            fitting.frame(maxWidth: .infinity, alignment: .leading)
+            view
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
+                .scaleEffect(fitScale, anchor: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
         } else {
-            fitting
+            // Si cabe, exactamente como antes (`fixedSize`, sin marcos ni medidas en medio: el borde derecho de una
+            // columna de importes queda alineado). Solo si no cabe, la versión que se encoge, pegada a la derecha.
+            ViewThatFits(in: .horizontal) {
+                view
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
+                view
+                    .fixedSize()
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
+                    .scaleEffect(fitScale, anchor: .trailing)
+                    .frame(
+                        minWidth: idealWidth > 0 ? idealWidth * Self.minFit : nil,
+                        idealWidth: idealWidth > 0 ? idealWidth : nil,
+                        maxWidth: idealWidth > 0 ? idealWidth : nil,
+                        alignment: .trailing)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
+            }
         }
     }
 
-    /// Las escalas que se prueban, de mayor a menor; la última se usa aunque no quepa.
-    private static let fitSteps: [CGFloat] = [1, 0.95, 0.9, 0.85, 0.8, 0.75, 0.7, 0.65, 0.6, 0.55, 0.5]
+    /// Lo más que se encoge un importe que no cabe.
+    private static let minFit: CGFloat = 0.5
+
+    private var fitScale: CGFloat {
+        guard idealWidth > 0, availableWidth > 0 else { return 1 }
+        return min(1, max(Self.minFit, availableWidth / idealWidth))
+    }
 
     // MARK: Estados
 
@@ -427,31 +443,6 @@ struct RollingDigits: View {
     }
 }
 
-/// Coloca a su hijo a su tamaño natural y ocupa ese tamaño por `scale`; el hijo se dibuja escalado por lo mismo desde
-/// su esquina (`fitted`). Todo sale de la propia maquetación: lo que ocupa es lo que se ve. Las líneas de base se
-/// escalan igual, para que una fila alineada por la base siga alineada.
-private struct ScaledToFit: Layout {
-    let scale: CGFloat
-
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        guard let child = subviews.first else { return .zero }
-        let natural = child.sizeThatFits(.unspecified)
-        return CGSize(width: natural.width * scale, height: natural.height * scale)
-    }
-
-    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        guard let child = subviews.first else { return }
-        child.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(child.sizeThatFits(.unspecified)))
-    }
-
-    func explicitAlignment(
-        of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
-    ) -> CGFloat? {
-        guard let child = subviews.first else { return nil }
-        return bounds.minY + child.dimensions(in: .unspecified)[guide] * scale
-    }
-}
-
 /// `tracking` solo de la cifra protagonista (−3 % del cuerpo de los euros).
 private struct HeroTracking: ViewModifier {
     let euros: CGFloat?
@@ -463,8 +454,6 @@ private struct HeroTracking: ViewModifier {
 
 /// Un dígito: tira «0…9,0» recortada a una línea y desplazada a `position`; una copia ya desenfocada cuya opacidad
 /// (`blur`, 0…1) sigue a la velocidad. El desenfoque es fijo; lo único que cambia es el desplazamiento y la opacidad.
-/// La tira se pinta en un `Canvas` del tamaño de la celda (solo las cifras que asoman), no como 11 vistas desplazadas:
-/// la geometría de esas vistas, aunque recortada, hacía el marco del importe (VoiceOver, toques) de hasta 16 líneas.
 private struct DigitCell: View {
     let position: Double
     let blur: Double
@@ -473,34 +462,17 @@ private struct DigitCell: View {
     var body: some View {
         let f = position.truncatingRemainder(dividingBy: 10)
         let place = f < 0 ? f + 10 : f
-        let blur = blur
-        let blurRadius = blurRadius
         Text("0")
             .hidden()
-            .overlay {
-                Canvas { context, size in
-                    // La línea k de la tira dice k mod 10 y está a (k − place) líneas de la celda.
-                    func strip(_ layer: GraphicsContext) {
-                        let line = size.height
-                        for k in 0...10 {
-                            let y = (CGFloat(k) - CGFloat(place)) * line
-                            guard y > -line, y < line else { continue }
-                            var digit = layer.resolve(Text(String(k % 10)))
-                            // El color de quien coloca el importe (B-1), como en las demás celdas.
-                            digit.shading = .foreground
-                            layer.draw(digit, at: CGPoint(x: size.width / 2, y: y + line / 2), anchor: .center)
-                        }
-                    }
-                    var sharp = context
-                    sharp.opacity = 1 - blur * 0.7
-                    strip(sharp)
+            .overlay(alignment: .top) {
+                ZStack(alignment: .top) {
+                    strip.opacity(1 - blur * 0.7)
                     if blur > 0.001 {
-                        context.drawLayer { layer in
-                            layer.addFilter(.blur(radius: blurRadius))
-                            layer.opacity = blur
-                            strip(layer)
-                        }
+                        strip.blur(radius: blurRadius).opacity(blur)
                     }
+                }
+                .visualEffect { content, proxy in
+                    content.offset(y: -CGFloat(place) * proxy.size.height / 11)
                 }
             }
             .clipped()
@@ -509,6 +481,13 @@ private struct DigitCell: View {
                     stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.13),
                             .init(color: .black, location: 0.87), .init(color: .clear, location: 1)],
                     startPoint: .top, endPoint: .bottom))
+    }
+
+    private var strip: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<11, id: \.self) { Text(String($0 % 10)) }
+        }
+        .fixedSize()
     }
 }
 

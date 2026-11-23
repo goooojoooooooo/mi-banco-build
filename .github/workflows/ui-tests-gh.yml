@@ -4,7 +4,7 @@ run-name: ui-tests-gh ${{ github.ref_name }} ${{ inputs.runner }}
 on:
   push:
     branches: [ci-exp-gh]
-    paths: [".github/registro-no-existe"]
+    paths: [".github/workflows/ui-tests-gh.yml"]
   workflow_dispatch:
     inputs:
       runner:

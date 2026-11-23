@@ -32,7 +32,12 @@ private struct MotionGalleryOverlay: ViewModifier {
 
     func body(content: Content) -> some View {
         // Con la galería, la app de debajo ni se monta (así no deja elementos de accesibilidad ni tareas).
-        if MotionGalleryLaunch.isActive {
+        if MotionGalleryLaunch.isActive, ProcessInfo.processInfo.arguments.contains("-MiBancoRowHitProbe") {
+            RowHitProbe()
+                .motionEnvironment()
+                .environment(preferences)
+                .background(Color.black.ignoresSafeArea())
+        } else if MotionGalleryLaunch.isActive {
             MotionGallery()
                 .motionEnvironment()
                 // `-MiBancoMotionGalleryNoPrefs`: el entorno sin preferencias (el ojo guardado sigue mandando).
@@ -323,6 +328,53 @@ struct MotionGallery: View {
                 }
             }
         }
+    }
+}
+
+/// DIAGNÓSTICO TEMPORAL: filas-botón separadas por huecos vacíos, para medir dónde reciben toques.
+struct RowHitProbe: View {
+    @State private var taps = [0, 0, 0, 0]
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Color.clear.frame(height: 80)
+                ForEach(0..<4, id: \.self) { i in
+                    Button {
+                        taps[i] += 1
+                    } label: {
+                        label(i).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("probe.\(i)")
+                    .accessibilityValue("\(taps[i])")
+                    Color.clear.frame(height: 100)
+                }
+            }
+            .padding(.horizontal, Theme.Space.gutter)
+        }
+        .foregroundStyle(Theme.label)
+    }
+
+    @ViewBuilder private func label(_ i: Int) -> some View {
+        HStack {
+            Text(i == 3 ? "Nómina de noviembre" : "Ahorro")
+                .titan(.subtitle)
+                .foregroundStyle(Theme.label2)
+            Spacer(minLength: 12)
+            switch i {
+            case 0:
+                Text("500,00 €").titan(.row)
+            case 1:
+                RollingAmount(cents: 50_000, countsUp: false, style: .plain(sign: false)).titan(.row)
+            case 2:
+                RollingAmount(cents: 50_000, countsUp: false, style: .plain(sign: false)).titan(.row)
+                    .allowsHitTesting(false)
+            default:
+                RollingAmount(cents: 1_234_567, countsUp: false, style: .plain(sign: true)).titan(.row)
+            }
+        }
+        .frame(minHeight: 44)
     }
 }
 #endif

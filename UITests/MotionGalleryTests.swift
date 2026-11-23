@@ -509,3 +509,49 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertFalse(app.buttons["Sutil"].isSelected)
     }
 }
+
+/// DIAGNÓSTICO TEMPORAL: dónde reciben toques las filas-botón (0 texto, 1 importe, 2 importe sin toques, 3 largo).
+final class RowHitProbeTests: XCTestCase {
+    var app: XCUIApplication!
+
+    private func probe(_ extra: [String], _ tag: String) {
+        app = XCUIApplication()
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoMotionGallery", "-MiBancoRowHitProbe",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"] + extra
+        app.launch()
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        var lines: [String] = []
+        for i in 0..<4 {
+            let button = app.buttons["probe.\(i)"]
+            XCTAssertTrue(button.waitForExistence(timeout: 15))
+            var swipes = 0
+            while button.frame.minY < 120 || button.frame.maxY > app.windows.firstMatch.frame.maxY - 120, swipes < 8 {
+                if button.frame.minY < 120 { app.swipeDown() } else { app.swipeUp() }
+                swipes += 1
+            }
+            Thread.sleep(forTimeInterval: 0.6)
+            let f = button.frame
+            let kids = button.descendants(matching: .any).allElementsBoundByIndex.map { "\($0.elementType.rawValue):\($0.label):\($0.frame)" }
+            lines.append("PROBE \(tag) row=\(i) frame=\(f) kids=\(kids)")
+            for x in [f.minX + 20, f.maxX - 20] {
+                var row: [String] = []
+                for dy: CGFloat in [-44, -36, -28, -24, -20, -16, -12, -8, -4, 4, 8, 12, 16, 20, 24, 28, 36, 44] {
+                    let y = dy < 0 ? f.minY + dy : f.maxY + dy
+                    let before = button.value as? String ?? ""
+                    origin.withOffset(CGVector(dx: x, dy: y)).tap()
+                    Thread.sleep(forTimeInterval: 0.35)
+                    let after = button.value as? String ?? ""
+                    row.append("\(Int(dy))=\(before == after ? "no" : "SI")")
+                }
+                lines.append("PROBE \(tag) row=\(i) x=\(Int(x)) " + row.joined(separator: " "))
+            }
+        }
+        for l in lines { print(l) }
+        XCTContext.runActivity(named: lines.joined(separator: "\n")) { _ in }
+    }
+
+    func testProbeDefault() { probe([], "normal") }
+    func testProbeHuge() {
+        probe(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"], "xxxl")
+    }
+}

@@ -150,11 +150,12 @@ final class BanksUITests: XCTestCase {
     func testBankRowTimeIsLive() {
         let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoBankSyncAgo", "240"])
         // Entre las 00:00 y las 04:00 de Madrid, hace 4 h fue ayer y la regla dice «ayer a las …» (no «hace 4 h»).
-        let expected = Self.sameMadridDay(minutesAgo: 240)
-            ? NSPredicate(format: "label == %@", "Actualizado hace 4 h · exacto")
-            : NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@", "Actualizado ayer a las ", " · exacto")
+        let row = Self.sameMadridDay(minutesAgo: 240)
+            ? app.staticTexts.matching(NSPredicate(format: "label == %@", "Actualizado hace 4 h · exacto")).firstMatch
+            : app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@",
+                                                   "Actualizado ayer a las ", " · exacto")).firstMatch
         XCTAssertTrue(
-            app.staticTexts.matching(expected).firstMatch.waitForExistence(timeout: 15),
+            row.waitForExistence(timeout: 15),
             "U45: la fila de Revolut debe mostrar «Actualizado hace 4 h · exacto» (o «ayer a las …» de madrugada)"
         )
     }
@@ -180,10 +181,10 @@ final class BanksUITests: XCTestCase {
         // cambio de minuto: hasta ~2 min sin tocar nada.
         // Pasada la hora, la regla dice «hace 1 h» si sigue siendo el mismo día en Madrid y «ayer a las …» si la
         // actualización fue antes de medianoche: en los dos casos la fila tiene que cambiar sola.
-        let after = NSPredicate(format: "label == %@ OR (label BEGINSWITH %@ AND label ENDSWITH %@)",
-                                "Actualizado hace 1 h · exacto", "Actualizado ayer a las ", " · exacto")
+        let after = app.staticTexts.matching(NSPredicate(format: "label == %@ OR (label BEGINSWITH %@ AND label ENDSWITH %@)",
+                                                         "Actualizado hace 1 h · exacto", "Actualizado ayer a las ", " · exacto"))
         XCTAssertTrue(
-            app.staticTexts.matching(after).firstMatch.waitForExistence(timeout: 150),
+            after.firstMatch.waitForExistence(timeout: 150),
             "U45: la fila no siguió al reloj con la pantalla abierta"
         )
     }

@@ -365,35 +365,36 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
 
     @Test func inversionesResumenMoversYPosicionConcreta() throws {
         let fx = richFixture()
-        let note = "Solo te enseño tus datos; no te digo qué comprar ni vender."
+        // U89: la nota es la ÚLTIMA línea, con el texto corto; el dato va primero.
+        let note = "Son datos, no una recomendación."
         let overview = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         let lines = plainLines(overview)
-        // U69(b) + U5: nota fija al inicio y sujeto + punto final en el resumen de cartera del asistente.
+        // U89 + U5: sujeto + punto final en el resumen de cartera del asistente y la nota al final.
         try #require(lines.count >= 3)
-        #expect(lines[0] == note)
-        #expect(lines[1] == nb("Tus inversiones valen 1.510,00 €: +6,00 € hoy (+0,4 %)."))
-        #expect(lines[2] == nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."))
+        #expect(lines[0] == nb("Tus inversiones valen 1.510,00 €: +6,00 € hoy (+0,4 %)."))
+        #expect(lines[1] == nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."))
+        #expect(lines.last == note)
         #expect(overview.lines.allSatisfy { $0.action == .openInvestments })
 
         // Posición concreta: Apple (con cambio negativo usando U+2212).
         let apple = answerQuestion("¿Cómo va Apple?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         let appleLines = plainLines(apple)
         try #require(appleLines.count >= 3)
-        #expect(appleLines[0] == note)
-        #expect(appleLines[1] == nb("Apple: 600,00 € (\u{2212}6,00 € hoy, \u{2212}1,0 %)."))
-        #expect(appleLines[2].hasPrefix(nb("Desde la compra: +59,00 € (+10,9 %)")))
+        #expect(appleLines[0] == nb("Apple: 600,00 € (\u{2212}6,00 € hoy, \u{2212}1,0 %)."))
+        #expect(appleLines[1].hasPrefix(nb("Desde la compra: +59,00 € (+10,9 %)")))
+        #expect(appleLines.last == note)
 
         // Posición con coste incompleto (ETH adquirido a coste 0): NO inventa ganancia (J1).
         let eth = answerQuestion("¿Cómo va Ethereum?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
         let ethLines = plainLines(eth)
         try #require(ethLines.count >= 2)
-        #expect(ethLines[0] == note)
-        #expect(ethLines[1] == nb("Ethereum: 30,00 €."))
+        #expect(ethLines[0] == nb("Ethereum: 30,00 €."))
+        #expect(ethLines.last == note)
         #expect(!ethLines.joined().contains("Desde la compra"))
 
         // Solo movers.
         let movers = answerQuestion("¿Qué es lo que más ha subido hoy?", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
-        #expect(plainLines(movers) == [note, nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %).")])
+        #expect(plainLines(movers) == [nb("Lo que más subió: iShares Core MSCI World (Acc) (+1,4 %). Lo que más bajó: Apple (\u{2212}1,0 %)."), note])
 
         // Minor 4: cartera con operaciones pero todas vendidas -> nota fija + «No tienes posiciones abiertas en tu cartera.»
         var closed = Portfolio()
@@ -404,7 +405,7 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                                   assetClass: "STOCK", shares: -2, cashCents: 34_000, priceEUR: 170),
         ]
         let closedAns = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: closed, book: fx.book, now: fx.now, calendar: cal)
-        #expect(plainLines(closedAns) == [note, "No tienes posiciones abiertas en tu cartera."])
+        #expect(plainLines(closedAns) == ["No tienes posiciones abiertas en tu cartera.", note])
 
         // Minor 3: fallback de posición desconocida con precios faltantes dice «de las que tienen precio».
         var partialPortfolio = fx.portfolio
@@ -413,12 +414,13 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                                     state: fx.state, portfolio: partialPortfolio, book: fx.book, now: fx.now, calendar: cal)
         let notFoundLines = plainLines(notFound)
         try #require(notFoundLines.count >= 3)
-        #expect(notFoundLines[0] == note)
-        #expect(notFoundLines[2].contains("de las que tienen precio."))
+        #expect(notFoundLines[0] == "No encuentro esa posición en tu cartera.")
+        #expect(notFoundLines[1].contains("de las que tienen precio."))
+        #expect(notFoundLines.last == note)
 
         // Sin cartera.
         let empty = answerQuestion("¿Cómo van mis inversiones?", state: fx.state, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
-        #expect(plainLines(empty) == [note, "Aún no tienes inversiones importadas."])
+        #expect(plainLines(empty) == ["Aún no tienes inversiones importadas.", note])
     }
 
     @Test func queHaPasadoDesdeAyerReutilizaElResumenYAvisaSiHayMasAvisos() throws {
@@ -452,11 +454,20 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
             #expect(!hasTradeVerb(extra), "\(extra)")
         }
 
-        // Sin cartera: solo la negativa literal y sin chip de inversiones (Minor 5).
-        let noPortfolio = answerQuestion("¿Qué acciones compro?", state: fx.state, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
-        #expect(noPortfolio.isAdviceRefusal)
-        #expect(plainLines(noPortfolio) == [investmentAdviceRefusal])
-        #expect(!noPortfolio.chips.contains { $0.id == "investments" })
+        // U84 (cambia Minor 5 por U69(a)): sin cartera la negativa NO va sola; detrás va la respuesta de inversiones, y sin
+        // chip de inversiones. Si la intención sin freno es desconocida, la negativa con las fichas sugeridas (U83).
+        var routedToInvestments = 0
+        for q in ["¿Qué acciones compro?", "¿Compro bitcoin?"] {
+            let noPortfolio = answerQuestion(q, state: fx.state, portfolio: nil, book: fx.book, now: fx.now, calendar: cal)
+            #expect(noPortfolio.isAdviceRefusal, "\(q)")
+            #expect(!noPortfolio.chips.contains { $0.id == "investments" }, "\(q)")
+            let underlying = routeAssistantQuestionWithoutAdviceGate(q, state: fx.state, portfolio: nil, now: fx.now, calendar: cal)
+            if case .investments = underlying {
+                routedToInvestments += 1
+                #expect(plainLines(noPortfolio) == [investmentAdviceRefusal, "Aún no tienes inversiones importadas."], "\(q)")
+            }
+        }
+        #expect(routedToInvestments >= 1, "U84: ninguna de las preguntas llega a inversiones")
     }
 
     @Test func preguntaDesconocidaDevuelveTextoFijoYFichas() {
@@ -775,7 +786,7 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
 
     @Test func u69NegativaNuncaSustituyeDatosYNotaFijaEnInversiones() throws {
         let fx = richFixture()
-        let note = "Solo te enseño tus datos; no te digo qué comprar ni vender."
+        let note = "Son datos, no una recomendación."
 
         // (a) Una pregunta que dispara el filtro de consejo PERO también pide un dato concreto del libro (presupuesto, gasto, saldo…)
         // devuelve `investmentAdviceRefusal` como primera línea Y DESPUÉS los datos reales de esa intención (sin sustituirlos).
@@ -803,14 +814,16 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         #expect(adviceInvLines[0] == investmentAdviceRefusal)
         #expect(!adviceInvLines.contains(note))
 
-        // (b) Toda respuesta de inversiones (también en modo privado `.masked`) empieza por `note` y nunca filtra cifras.
+        // (b) + U89: toda respuesta de inversiones (también en modo privado `.masked`) lleva la nota como ÚLTIMA línea (o la
+        // negativa delante y entonces sin nota), nunca empieza por la nota y nunca filtra cifras.
         for q in ["Mis inversiones", "¿Qué acciones tengo?", "¿Cómo va Apple?", "¿Qué es lo que más ha subido hoy?"] {
             let ans = answerQuestion(q, state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
             let lines = plainLines(ans)
             try #require(lines.count >= 2, "Sin datos para \(q): \(lines)")
-            #expect(lines[0] == note || lines[0] == investmentAdviceRefusal, "\(q): \(lines[0])")
-            let maskedFirst = render(try #require(ans.lines.first).parts, .masked)
-            #expect(maskedFirst == note || maskedFirst == investmentAdviceRefusal)
+            #expect(lines[0] != note, "\(q): la nota no va delante")
+            #expect(lines.last == note || lines[0] == investmentAdviceRefusal, "\(q): \(lines)")
+            let maskedLast = render(try #require(ans.lines.last).parts, .masked)
+            #expect(maskedLast == note || lines[0] == investmentAdviceRefusal)
             for line in ans.lines {
                 let m = render(line.parts, .masked)
                 #expect(!m.contains("€") && !m.contains("%"), "Fuga en privado: \(m)")
@@ -884,17 +897,15 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                 let data = ans.lines.filter { $0.id != "advice-refusal" && $0.id != "inv-data-only" }
                 let underlying = routeAssistantQuestionWithoutAdviceGate(q, state: fx.state, portfolio: portfolio,
                                                                          now: fx.now, calendar: cal)
-                let hasOpenPortfolio = portfolio.flatMap { portfolioSummary($0, now: fx.now, calendar: cal) } != nil
-                let investmentsWithoutPortfolio: Bool = {
-                    if case .investments = underlying { return !hasOpenPortfolio }
-                    return false
-                }()
-                if underlying == .unknown || (ans.isAdviceRefusal && investmentsWithoutPortfolio) {
-                    // Sin intención, o inversiones sin cartera: la negativa (Minor 5) con sus fichas.
+                if underlying == .unknown {
+                    // U83: sin intención, detrás de la negativa van las fichas de preguntas sugeridas, no la cartera.
                     if ans.isAdviceRefusal {
-                        #expect(!data.isEmpty || !ans.chips.isEmpty, "[\(tag)] \(q): la negativa sola, sin datos ni fichas")
+                        #expect(data.isEmpty, "[\(tag)] \(q): datos ajenos a la pregunta: \(plainLines(ans))")
+                        let suggested = suggestedAssistantChips(state: fx.state, portfolio: portfolio, now: fx.now, calendar: cal)
+                        #expect(ans.chips == suggested, "[\(tag)] \(q): fichas que no son las sugeridas")
                     }
                 } else {
+                    // U84: también inversiones sin cartera llevan su respuesta («Aún no tienes inversiones importadas.»).
                     let expected = answerIntent(underlying, state: fx.state, portfolio: portfolio, book: fx.book,
                                                 now: fx.now, calendar: cal).lines.filter { $0.id != "inv-data-only" }
                     #expect(!data.isEmpty, "[\(tag)] \(q): sin datos de \(underlying)")
@@ -921,19 +932,27 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                 routedToInvestments += 1
                 let ans = answerQuestion(q, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
                 let first = try #require(ans.lines.first, "[\(tag)] \(q)")
+                let last = try #require(ans.lines.last, "[\(tag)] \(q)")
                 for style in [RenderStyle.plain, .masked] {
-                    let text = render(first.parts, style)
-                    #expect(text == investmentDataOnlyNote || text == investmentAdviceRefusal, "[\(tag)] \(q): \(text)")
+                    // U89: la negativa va delante (sin nota) o el dato va delante y la nota es la última línea.
+                    if ans.isAdviceRefusal {
+                        #expect(render(first.parts, style) == investmentAdviceRefusal, "[\(tag)] \(q)")
+                        #expect(!ans.lines.contains { $0.id == investmentDataOnlyLineID }, "[\(tag)] \(q): nota tras la negativa")
+                    } else {
+                        #expect(render(first.parts, style) != investmentDataOnlyNote, "[\(tag)] \(q): la nota va delante")
+                        #expect(render(last.parts, style) == investmentDataOnlyNote, "[\(tag)] \(q): falta la nota al final")
+                    }
                 }
-                // Con el ojo cerrado la voz también empieza por la nota o la negativa y no dice ninguna cifra.
+                // U89: la voz no lee la nota; con el ojo cerrado no dice ninguna cifra.
                 let spoken = spokenAssistantAnswer(ans, privateMode: true)
-                #expect(spoken.hasPrefix(investmentDataOnlyNote) || spoken.hasPrefix(investmentAdviceRefusal), "[\(tag)] \(q): \(spoken)")
+                #expect(!spoken.contains(investmentDataOnlyNote), "[\(tag)] \(q): \(spoken)")
+                #expect(!spokenAssistantAnswer(ans, privateMode: false).contains(investmentDataOnlyNote), "[\(tag)] \(q)")
                 #expect(!spoken.contains("€") && !spoken.contains("%"), "[\(tag)] \(q): \(spoken)")
             }
         }
         #expect(routedToInvestments >= 20, "Muy pocas preguntas llegan a inversiones: \(routedToInvestments)")
 
-        // La intención directa (la que elige el modelo del dispositivo) también lleva la nota delante y datos detrás.
+        // La intención directa (la que elige el modelo del dispositivo) también: datos delante y la nota al final (U89).
         let intents: [AssistantIntent] = [
             .investments(positionQuery: nil, moversOnly: false), .investments(positionQuery: nil, moversOnly: true),
             .investments(positionQuery: "Apple", moversOnly: false), .investments(positionQuery: "Nvidia", moversOnly: false),
@@ -941,10 +960,12 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
         for intent in intents {
             for portfolio in [fx.portfolio as Portfolio?, nil] {
                 let ans = answerIntent(intent, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
-                #expect(plainLines(ans).first == investmentDataOnlyNote, "\(intent)")
+                #expect(plainLines(ans).last == investmentDataOnlyNote, "\(intent)")
+                #expect(plainLines(ans).first != investmentDataOnlyNote, "\(intent)")
                 #expect(plainLines(ans).count >= 2, "\(intent): la nota sola, sin datos")
             }
         }
+        #expect(investmentDataOnlyNote == "Son datos, no una recomendación.")
     }
 
     @Test func u69ConsejosQuePasabanEmpiezanPorLaNegativa() {
@@ -957,6 +978,130 @@ private func plainLines(_ answer: AssistantAnswer) -> [String] {
                 #expect(plainLines(ans).first == investmentAdviceRefusal, "[\(tag)] \(q): \(plainLines(ans))")
                 #expect(!plainLines(ans).contains(investmentDataOnlyNote), "[\(tag)] \(q)")
             }
+        }
+    }
+
+    // MARK: Ronda 3 (U81–U89)
+
+    /// U81: si el modelo del dispositivo dice «consejo», la negativa va delante y DETRÁS los datos de la intención por reglas.
+    @Test func u81ConsejoDelModeloNoQuitaLosDatos() throws {
+        let fx = richFixture()
+        for q in ["¿Cuánto me cuesta mantener la cuenta de imagin?", "¿Cuánto llevo en Mercadona?"] {
+            let ans = answerQuestion(q, state: fx.state, portfolio: fx.portfolio, book: fx.book,
+                                     modelIntent: .adviceRequest(positionQuery: nil), now: fx.now, calendar: cal)
+            #expect(ans.isAdviceRefusal, "\(q)")
+            #expect(plainLines(ans).first == investmentAdviceRefusal, "\(q)")
+            let underlying = routeAssistantQuestionWithoutAdviceGate(q, state: fx.state, portfolio: fx.portfolio,
+                                                                     now: fx.now, calendar: cal)
+            if underlying == .unknown {
+                #expect(plainLines(ans) == [investmentAdviceRefusal], "\(q): datos ajenos tras la negativa")
+            } else {
+                let expected = answerIntent(underlying, state: fx.state, portfolio: fx.portfolio, book: fx.book,
+                                            now: fx.now, calendar: cal).lines.filter { $0.id != investmentDataOnlyLineID }
+                #expect(Array(ans.lines.dropFirst()) == expected, "\(q): \(plainLines(ans))")
+            }
+        }
+        let merca = answerQuestion("¿Cuánto llevo en Mercadona?", state: fx.state, portfolio: fx.portfolio, book: fx.book,
+                                   modelIntent: .adviceRequest(positionQuery: nil), now: fx.now, calendar: cal)
+        #expect(plainLines(merca).dropFirst().contains { $0.contains("Mercadona") && $0.contains(nb("73,50 €")) },
+                "\(plainLines(merca))")
+        #expect(!plainLines(merca).contains { $0.hasPrefix("Tus inversiones valen") })
+    }
+
+    /// U83: con intención desconocida, tras la negativa van las fichas sugeridas, no la cartera ni las fichas fijas.
+    @Test func u83NegativaSinIntencionLlevaLasFichasSugeridas() throws {
+        let fx = richFixture()
+        for portfolio in [fx.portfolio as Portfolio?, nil] {
+            for q in ["¿me conviene meter más?", "¿Merece la pena el gimnasio?"] {
+                let underlying = routeAssistantQuestionWithoutAdviceGate(q, state: fx.state, portfolio: portfolio,
+                                                                         now: fx.now, calendar: cal)
+                try #require(underlying == .unknown, "\(q): \(underlying)")
+                let ans = answerQuestion(q, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
+                #expect(ans.isAdviceRefusal, "\(q)")
+                #expect(plainLines(ans) == [investmentAdviceRefusal], "\(q): \(plainLines(ans))")
+                #expect(ans.chips == suggestedAssistantChips(state: fx.state, portfolio: portfolio, now: fx.now, calendar: cal), "\(q)")
+            }
+        }
+    }
+
+    /// U85: VoiceOver anuncia la primera línea que no es la nota ni la negativa; si solo hay esas, la que haya.
+    @Test func u85VoiceOverAnunciaElDato() throws {
+        let fx = richFixture()
+        let budget = answerQuestion("¿Debería comprar menos para mi presupuesto de Comer fuera?", state: fx.state,
+                                    portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        try #require(budget.lines.count >= 2)
+        #expect(assistantAnnouncedLine(budget) == budget.lines[1])
+        let inv = answerQuestion("Mis inversiones", state: fx.state, portfolio: fx.portfolio, book: fx.book, now: fx.now, calendar: cal)
+        let announced = try #require(assistantAnnouncedLine(inv))
+        #expect(announced.id != investmentDataOnlyLineID && announced.id != "advice-refusal")
+        #expect(render(announced.parts, .plain).hasPrefix("Tus inversiones valen"))
+
+        let refusalLine = BriefingLine(id: "advice-refusal", parts: [.text(investmentAdviceRefusal)])
+        let noteLine = BriefingLine(id: investmentDataOnlyLineID, parts: [.text(investmentDataOnlyNote)])
+        let onlyRefusal = AssistantAnswer(intent: .adviceRequest(positionQuery: nil), lines: [refusalLine], isAdviceRefusal: true)
+        #expect(assistantAnnouncedLine(onlyRefusal) == refusalLine)
+        let onlyNote = AssistantAnswer(intent: .investments(positionQuery: nil, moversOnly: false), lines: [noteLine])
+        #expect(assistantAnnouncedLine(onlyNote) == noteLine)
+        let dataThenNote = AssistantAnswer(intent: .investments(positionQuery: nil, moversOnly: false),
+                                           lines: [BriefingLine(id: "d", parts: [.text("Dato.")]), noteLine])
+        #expect(assistantAnnouncedLine(dataThenNote)?.id == "d")
+        #expect(assistantAnnouncedLine(AssistantAnswer(intent: .unknown, lines: [])) == nil)
+    }
+
+    /// U86: con el ojo cerrado, la voz lee detrás de la negativa las líneas sin cifras.
+    @Test func u86VozPrivadaLeeLasLineasSinCifrasTrasLaNegativa() {
+        let refusalLine = BriefingLine(id: "advice-refusal", parts: [.text(investmentAdviceRefusal)])
+        let period = BriefingLine(id: "unsupported-period",
+                                  parts: [.text("Aún no sé contarte el gasto por días, semanas o años; sí por meses.")])
+        let figure = BriefingLine(id: "fig", parts: [.text("Llevas "), .amount(12_345), .text(".")])
+        let privacy = "Tienes el modo privado activado, así que no leo importes."
+
+        let withoutFigures = AssistantAnswer(intent: .adviceRequest(positionQuery: nil), lines: [refusalLine, period],
+                                             isAdviceRefusal: true)
+        #expect(spokenAssistantAnswer(withoutFigures, privateMode: true)
+                == "\(investmentAdviceRefusal) Aún no sé contarte el gasto por días, semanas o años; sí por meses.")
+
+        let mixed = AssistantAnswer(intent: .adviceRequest(positionQuery: nil), lines: [refusalLine, period, figure],
+                                    isAdviceRefusal: true)
+        let spoken = spokenAssistantAnswer(mixed, privateMode: true)
+        #expect(spoken == "\(investmentAdviceRefusal) Aún no sé contarte el gasto por días, semanas o años; sí por meses. \(privacy)")
+        #expect(!spoken.contains("123") && !spoken.contains("euros"))
+    }
+
+    /// U87: si la pregunta nombra algo de inversión y la intención no es la de inversiones, la negativa va delante y
+    /// después los datos de esa intención; sin sujeto de inversión, sin negativa.
+    @Test func u87SujetoDeInversionConOtraIntencionLlevaLaNegativa() throws {
+        let fx = richFixture()
+        for portfolio in [fx.portfolio as Portfolio?, nil] {
+            let tag = portfolio == nil ? "sin cartera" : "con cartera"
+            let nvidia = "¿Cuánto me queda libre para meterle a Nvidia?"
+            let freeAns = answerQuestion(nvidia, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
+            #expect(freeAns.isAdviceRefusal, "[\(tag)]")
+            #expect(plainLines(freeAns).first == investmentAdviceRefusal, "[\(tag)] \(plainLines(freeAns))")
+            let freeLines = answerIntent(.freeMoney, state: fx.state, portfolio: portfolio, book: fx.book,
+                                         now: fx.now, calendar: cal).lines
+            #expect(Array(freeAns.lines.dropFirst()) == freeLines, "[\(tag)] \(plainLines(freeAns))")
+
+            let gold = "¿Qué me cobran mañana si compro oro?"
+            let goldAns = answerQuestion(gold, state: fx.state, portfolio: portfolio, book: fx.book, now: fx.now, calendar: cal)
+            #expect(plainLines(goldAns).first == investmentAdviceRefusal, "[\(tag)] \(plainLines(goldAns))")
+            let goldUnderlying = routeAssistantQuestionWithoutAdviceGate(gold, state: fx.state, portfolio: portfolio,
+                                                                         now: fx.now, calendar: cal)
+            if case .upcomingCharges = goldUnderlying {} else { Issue.record("[\(tag)] \(gold): \(goldUnderlying)") }
+            let upcoming = answerIntent(goldUnderlying, state: fx.state, portfolio: portfolio, book: fx.book,
+                                        now: fx.now, calendar: cal).lines
+            #expect(Array(goldAns.lines.dropFirst()) == upcoming, "[\(tag)] \(plainLines(goldAns))")
+
+            let plain = answerQuestion("¿Cuánto me queda libre?", state: fx.state, portfolio: portfolio, book: fx.book,
+                                       now: fx.now, calendar: cal)
+            #expect(!plain.isAdviceRefusal, "[\(tag)]")
+            #expect(!plainLines(plain).contains(investmentAdviceRefusal), "[\(tag)]")
+            #expect(plain.intent == .freeMoney, "[\(tag)] \(plain.intent)")
+
+            // También cuando la intención la elige el modelo del dispositivo.
+            let viaModel = answerQuestion(nvidia, state: fx.state, portfolio: portfolio, book: fx.book,
+                                          modelIntent: .freeMoney, now: fx.now, calendar: cal)
+            #expect(plainLines(viaModel).first == investmentAdviceRefusal, "[\(tag)] modelo: \(plainLines(viaModel))")
         }
     }
 }

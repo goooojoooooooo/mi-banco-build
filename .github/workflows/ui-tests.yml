@@ -11,6 +11,10 @@ on:
         description: "En un iPhone de 393 pt (iPhone 15/16), como en screenshots.yml"
         type: boolean
         default: false
+      parallel_workers:
+        description: "Pruebas en paralelo: numero de simuladores (>=2); vacio = en serie como hasta ahora"
+        required: false
+        default: ""
       runner:
         description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
@@ -66,6 +70,7 @@ jobs:
       - name: Pruebas de toques
         env:
           TEST_CLASS: ${{ github.event.inputs.test_class }}
+          PARALLEL_WORKERS: ${{ github.event.inputs.parallel_workers }}
         run: |
           mkdir -p build
           set +e
@@ -76,6 +81,12 @@ jobs:
             SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
           else
             SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests"
+          fi
+          if [ -n "$PARALLEL_WORKERS" ]; then
+            case "$PARALLEL_WORKERS" in
+              *[!0-9]*|0|1) echo "parallel_workers debe ser un numero >= 2"; echo "2" > build/status.txt; exit 1 ;;
+            esac
+            SELECT="$SELECT -parallel-testing-enabled YES -parallel-testing-worker-count $PARALLEL_WORKERS -maximum-parallel-testing-workers $PARALLEL_WORKERS"
           fi
           echo "SELECT=$SELECT" >> "$GITHUB_ENV"
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
@@ -89,7 +100,7 @@ jobs:
       # y se repite una sola vez la misma orden de «Pruebas de toques».
       - name: Reintento si las pruebas no llegaron a empezar
         run: |
-          if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test Case " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
+          if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test [Cc]ase " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
             exit 0
           fi
           echo "== Las pruebas no llegaron a empezar =="
@@ -108,7 +119,7 @@ jobs:
       - name: Resumen por prueba
         run: |
           echo "== Resultado por prueba =="
-          grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
+          grep -E "^Test [Cc]ase .* (passed|failed)" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # R31: lo que dejó la prueba de un solo toque por pestaña (rojo o verde): del log y, si no, del xcresult.
           echo "== R24: Cambio de pestaña con un solo toque =="

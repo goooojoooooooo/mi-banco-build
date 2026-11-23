@@ -4,7 +4,8 @@ import SwiftUI
 /// - Si el título a su ancho ideal, `spacing` y el importe a su tamaño natural caben, el importe va a tamaño completo y
 ///   pegado a la derecha (la columna de importes queda igual en todas las filas que caben).
 /// - Si no caben, el importe encoge SOLO lo que el título necesita, hasta `minimumAmountScale` (la mitad).
-/// - De ahí para abajo cede el título (se parte en varias líneas); el importe nunca se sale de la fila.
+/// - De ahí para abajo cede el título (se parte en varias líneas); el importe nunca se sale de la fila. El ancho que el
+///   título partido no usa vuelve al importe (K25).
 /// Con un `HStack` y un `Spacer` el reparto lo hacía el `HStack`, que ofrecía al importe media fila primero: con el texto
 /// más grande «+1.250,00 €» salía a ~0,70 con 82 pt vacíos (K21). Los dos hijos van centrados en vertical.
 struct AmountRowLayout: Layout {
@@ -30,10 +31,18 @@ struct AmountRowLayout: Layout {
             amountWidth = min(natural.width, max(natural.width * minimumAmountScale, width - spacing - titleIdeal.width))
         }
         amountWidth = max(0, min(amountWidth, width))
-        let amountSize = amount.sizeThatFits(ProposedViewSize(width: amountWidth, height: nil))
+        var amountSize = amount.sizeThatFits(ProposedViewSize(width: amountWidth, height: nil))
         let titleWidth = max(0, width - spacing - amountSize.width)
         var titleSize = title.sizeThatFits(ProposedViewSize(width: titleWidth, height: nil))
         titleSize.width = min(titleSize.width, titleWidth)
+        // Segundo paso (K25): un título que se ha partido usa solo el ancho de su línea más larga; lo que sobra vuelve al
+        // importe (hasta su tamaño natural). Estable: el título ya partido cabe en su propio ancho y no se parte distinto.
+        if titleSize.width + 0.5 < titleWidth {
+            let regained = min(natural.width, max(0, width - spacing - titleSize.width))
+            if regained > amountSize.width {
+                amountSize = amount.sizeThatFits(ProposedViewSize(width: regained, height: nil))
+            }
+        }
         return Split(title: titleSize, amount: amountSize)
     }
 

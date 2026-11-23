@@ -113,14 +113,16 @@ final class MoveMoneyUITests: XCTestCase {
 
         let copyButton = app.buttons["Copiar IBAN"]
         XCTAssertTrue(copyButton.waitForExistence(timeout: 10), "Falta la acción rápida Copiar IBAN")
+        // Leer `UIPasteboard.general.string` desde el proceso de pruebas pide permiso para pegar (lo escribió otra app) y
+        // se queda esperando una respuesta que nadie da: la prueba se colgaba 7 min y xcodebuild acababa con 65. Se mira
+        // sin leer el contenido: el contador de cambios sube y hay texto. El IBAN sin espacios lo fija `normalizeIBAN` en Core.
+        let changesBefore = UIPasteboard.general.changeCount
         copyButton.tap()
 
         let toast = app.staticTexts["IBAN copiado · se borra en 3 min"]
         XCTAssertTrue(toast.waitForExistence(timeout: 5), "No apareció el aviso de IBAN copiado")
-        // U24: si el simulador permite leer el portapapeles entre procesos, exigir el IBAN normalizado sin espacios.
-        if let pasted = UIPasteboard.general.string {
-            XCTAssertEqual(pasted, "ES9121000418450200051332", "U24: el portapapeles no recibió el IBAN sin espacios")
-        }
+        XCTAssertGreaterThan(UIPasteboard.general.changeCount, changesBefore, "U24: Copiar IBAN no escribió en el portapapeles")
+        XCTAssertTrue(UIPasteboard.general.hasStrings, "U24: el portapapeles no tiene texto tras Copiar IBAN")
     }
 
     func testAccountsScreen() throws {

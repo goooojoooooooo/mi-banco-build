@@ -77,7 +77,8 @@ jobs:
         run: |
           test -f build/status.txt || echo "124" > build/status.txt
           echo "== Resultado por prueba =="
-          grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
+          # Una prueba que se pasa de su tope no deja «passed/failed»: se ve por «exceeded …» y por el reinicio.
+          grep -E "^Test Case .* (passed|failed)|exceeded execution time allowance|Restarting after unexpected exit" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           echo "xcodebuild exit: $(cat build/status.txt)"
           if [ "$(cat build/status.txt)" != "0" ]; then

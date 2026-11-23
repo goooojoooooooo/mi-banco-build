@@ -509,17 +509,42 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertEqual(any("gallery.row.huge").label, "1.234.567,89 euros")
     }
 
-    /// K22: cada importe monta UNA cara con cifras reales (una `TimelineView`), no una por escalón de encogido. La
-    /// galería cuenta las caras vivas; con el ojo abierto hay tantas como importes (cada uno con su etiqueta «… euros»).
+    /// K22: cada importe monta UNA cara con cifras reales (una `TimelineView`), no una por escalón de encogido, y UNA
+    /// copia de medida (texto oculto, sin `TimelineView`: el hueco que comparte la máscara, K23); en reposo las caras no
+    /// dibujan fotogramas (la `TimelineView` solo corre mientras rueda).
+    /// Los importes se cuentan uno a uno por su identificador: una fila-botón repite su importe en la etiqueta del botón
+    /// («Hucha, 123,45 euros»), que no es un importe aparte (por eso contar etiquetas con cifras daba 12 para 9).
     func testEachAmountMountsOneLiveFace() throws {
         launchGallery()
         XCTAssertTrue(waitUntil { self.amountLabel() == "3.774,75 euros" })
-        let amounts = moneyLabelCount()
-        XCTAssertGreaterThanOrEqual(amounts, 9, "La galería debería tener al menos 9 importes: \(amounts)")
+        let ids = ["gallery.amount", "gallery.row.expense", "gallery.row.income", "gallery.row.plain", "gallery.row.long",
+                   "gallery.row.huge", "gallery.row.buttonAboveAmount", "gallery.row.buttonAmount", "gallery.row.buttonBelowAmount"]
+        for id in ids {
+            XCTAssertTrue(any(id).label.hasSuffix(" euros"), "\(id) no es un importe a la vista: «\(any(id).label)»")
+        }
+        // Toda etiqueta con cifras es uno de esos importes o un botón que lleva uno dentro.
+        let money = NSPredicate(format: "label MATCHES %@", #".*[0-9]{1,3}(\.[0-9]{3})*,[0-9]{2}.*"#)
+        let buttons = app.buttons.matching(money).count
+        XCTAssertEqual(moneyLabelCount(), ids.count + buttons,
+                       "Etiquetas con cifras: \(moneyLabelCount()), importes \(ids.count), botones con importe \(buttons)")
+        // Que acabe de rodar el protagonista (cuenta desde 0 al abrir).
+        Thread.sleep(forTimeInterval: 2)
         tap("gallery.census")
-        let value = app.staticTexts["gallery.census.value"]
-        XCTAssertTrue(waitUntil { value.label != "-1" }, "El recuento no cambió")
-        XCTAssertEqual(Int(value.label), amounts, "Caras vivas \(value.label) para \(amounts) importes")
+        let faces = app.staticTexts["gallery.census.value"]
+        let slots = app.staticTexts["gallery.census.slots"]
+        let frames = app.staticTexts["gallery.census.frames"]
+        XCTAssertTrue(waitUntil { faces.label != "-1" }, "El recuento no cambió")
+        XCTAssertEqual(Int(faces.label), ids.count, "Caras vivas \(faces.label) para \(ids.count) importes")
+        XCTAssertEqual(Int(slots.label), ids.count, "Copias de medida \(slots.label) para \(ids.count) importes")
+        // En reposo: en 1,5 s, como mucho el redibujado que provoca el propio toque del recuento (≤ 2 por cara); una sola
+        // `TimelineView` en marcha sumaría ~90.
+        let before = Int(frames.label) ?? -1
+        Thread.sleep(forTimeInterval: 1.5)
+        tap("gallery.census")
+        Thread.sleep(forTimeInterval: 0.5)
+        let after = Int(frames.label) ?? -1
+        XCTAssertGreaterThan(before, 0, "Las caras no dibujaron nada: \(before)")
+        XCTAssertLessThanOrEqual(after - before, 2 * ids.count, "Las caras dibujan en reposo: \(before) → \(after)")
     }
 
     /// K23: con el texto más grande, cerrar el ojo no deja ninguna cifra a la vista de VoiceOver en ningún momento y la

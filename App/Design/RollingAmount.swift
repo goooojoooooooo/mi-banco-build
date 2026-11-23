@@ -133,12 +133,13 @@ struct RollingDigits: View {
             ZStack {
                 TimelineView(.animation(paused: !rolling)) { context in
                     let t = rolling ? context.date.timeIntervalSince(planStart) : Double.infinity
+                    let _ = censusFrame()
                     row(figures, at: t)
                 }
+                .census(.face)
                 .id(motion.reduce ? shownValue : 0)
                 .transition(.opacity)
             }
-            .faceCensus()
             // Al cerrar el ojo las cifras se quitan al instante, aunque quien llama (o `ReduceFade`) anime el cambio:
             // nunca se funden encima de la máscara (K23). Al abrirlo sí aparecen fundiéndose.
             .transition(.asymmetric(insertion: .opacity, removal: .identity))
@@ -310,7 +311,8 @@ struct RollingDigits: View {
     @ViewBuilder private func fitted<V: View>(_ face: V) -> some View {
         let box = FitBox {
             ZStack(alignment: heroEuros != nil ? .leading : .trailing) {
-                slotRow(slotGlyphs).hidden()
+                // Copia de medida: solo texto, sin `TimelineView` ni temporizadores; no hace nada por fotograma.
+                slotRow(slotGlyphs).census(.slot).hidden()
                 face
             }
             .fixedSize()
@@ -590,35 +592,54 @@ private extension View {
 }
 
 #if DEBUG
-/// Solo DEBUG: cuántas caras con cifras reales (cada una con su `TimelineView`) hay montadas ahora. La galería lo
-/// enseña para comprobar que cada importe monta UNA sola (K22). Cuenta identidades vivas de SwiftUI: cada cara guarda
-/// en su `@State` una ficha que suma al crearse y resta al soltarse (las fichas de más que crea cada `init` de la
-/// vista se sueltan al momento).
+/// Solo DEBUG: lo que hay montado de cada importe, para que la galería compruebe que cada uno monta UNA cara con cifras
+/// reales (con su `TimelineView`), UNA copia de medida (solo texto, oculta) y que en reposo ninguna dibuja fotogramas
+/// (K22). Se cuenta con `onAppear`/`onDisappear` de cada identidad montada. Antes cada cara guardaba una ficha en su
+/// `@State`, pero el valor inicial de `@State` se crea en CADA `init` y SwiftUI se queda con la última vista, así que una
+/// cara redibujada al menos una vez contaba dos fichas (18 para 9 importes).
 enum RollingAmountCensus {
-    fileprivate static let count = Atomic<Int>(0)
-    static var liveFaces: Int { count.load(ordering: .relaxed) }
-}
-
-private final class FaceToken: Sendable {
-    init() { _ = RollingAmountCensus.count.add(1, ordering: .relaxed) }
-    deinit { _ = RollingAmountCensus.count.subtract(1, ordering: .relaxed) }
-}
-
-private struct FaceCensus: View {
-    @State private var token = FaceToken()
-    var body: some View { Color.clear.frame(width: 0, height: 0).accessibilityHidden(true) }
+    fileprivate static let faces = Atomic<Int>(0)
+    fileprivate static let slots = Atomic<Int>(0)
+    fileprivate static let frames = Atomic<Int>(0)
+    /// Caras con cifras reales montadas ahora (cada una con su `TimelineView`).
+    static var liveFaces: Int { faces.load(ordering: .relaxed) }
+    /// Copias de medida montadas ahora (texto oculto, sin `TimelineView`).
+    static var measuringSlots: Int { slots.load(ordering: .relaxed) }
+    /// Fotogramas dibujados por todas las caras desde el arranque.
+    static var faceFrames: Int { frames.load(ordering: .relaxed) }
 }
 #endif
 
+private enum CensusEntry { case face, slot }
+
 private extension View {
-    /// Solo DEBUG: apunta esta cara en `RollingAmountCensus`; en Release no hace nada.
-    @ViewBuilder func faceCensus() -> some View {
+    /// Solo DEBUG: apunta esta vista en `RollingAmountCensus` mientras está montada; en Release no hace nada.
+    @ViewBuilder func census(_ entry: CensusEntry) -> some View {
         #if DEBUG
-        background(FaceCensus())
+        // `Atomic` no se copia: cada rama usa el suyo directamente.
+        onAppear {
+            switch entry {
+            case .face: _ = RollingAmountCensus.faces.add(1, ordering: .relaxed)
+            case .slot: _ = RollingAmountCensus.slots.add(1, ordering: .relaxed)
+            }
+        }
+        .onDisappear {
+            switch entry {
+            case .face: _ = RollingAmountCensus.faces.subtract(1, ordering: .relaxed)
+            case .slot: _ = RollingAmountCensus.slots.subtract(1, ordering: .relaxed)
+            }
+        }
         #else
         self
         #endif
     }
+}
+
+/// Solo DEBUG: cuenta un fotograma de la `TimelineView` de una cara; en Release no hace nada.
+private func censusFrame() {
+    #if DEBUG
+    _ = RollingAmountCensus.frames.add(1, ordering: .relaxed)
+    #endif
 }
 
 /// Con Reducir movimiento, el cambio de lo que se dibuja (cifra ↔ puntos) se funde por sí solo. Sin `if/else` (cambiar

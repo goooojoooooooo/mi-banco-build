@@ -468,7 +468,6 @@ final class MotionGalleryTests: XCTestCase {
     /// `RollingAmount` y que una con el importe sin toques, cuentan hasta 20 pt fuera en un hueco vacío y nada a 24 pt).
     /// Por eso aquí los toques «de fuera» caen sobre vecinas de verdad, y el hueco vacío se prueba a 32 pt.
     private func assertRowButtonsKeepTheirTaps(_ extra: [String]) {
-        continueAfterFailure = true
         launchRows(extra)
         let above = app.buttons["gallery.row.buttonAbove"]
         let button = app.buttons["gallery.row.button"]

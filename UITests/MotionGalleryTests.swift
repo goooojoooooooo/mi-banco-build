@@ -493,6 +493,32 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(nomina.figureHeight / reference.figureHeight, 0.9, "«+1.250,00 €» encoge de más: \(report)")
     }
 
+    /// K25: con el texto más grande, si el título se parte, el importe recupera el ancho que el título partido deja sin
+    /// usar: en «Nómina de noviembre» el hueco de tinta título–importe es de 20 pt como mucho, o el importe va al menos a
+    /// 0,62 (alto de su tinta / alto de la de «−4,80 €»). Antes se quedaba a ~0,49 con ~66 pt vacíos.
+    func testWrappedTitleGivesBackItsUnusedWidthAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let cafe = app.staticTexts["Café"]
+        revealWhole(cafe)
+        let edge = app.windows.firstMatch.frame.maxX - 19
+        let c = cafe.frame
+        let reference = ink(in: CGRect(x: c.maxX + 1, y: c.minY, width: edge + 19 - c.maxX - 1, height: c.height))
+        XCTAssertGreaterThan(reference.figureHeight, 20, "No se ve «−4,80 €»: \(reference)")
+        let title = app.staticTexts["Nómina de noviembre"]
+        revealWhole(title)
+        let window = app.windows.firstMatch.frame
+        let t = title.frame
+        let rowInk = ink(in: CGRect(x: window.minX, y: t.minY, width: window.width, height: t.height))
+        let amountInk = ink(in: CGRect(x: t.maxX + 1, y: t.minY, width: edge + 19 - t.maxX - 1, height: t.height))
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        let gap = rowInk.greenMinX - rowInk.greyMaxX
+        let scale = amountInk.figureHeight / reference.figureHeight
+        XCTAssertGreaterThanOrEqual(gap, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, edge, "El importe se sale del margen: \(rowInk)")
+        XCTAssertTrue(gap <= 20 || scale >= 0.62,
+                      "Con el título partido el importe encoge de más: hueco \(gap) pt, escala \(scale) (\(amountInk))")
+    }
+
     /// K21 (y M-5): un importe enorme con un título largo baja hasta la mitad y, de ahí, cede el título (que se parte);
     /// el importe queda entero dentro de la fila, a 8 pt o más del título.
     func testHugeAmountStaysInsideItsRowAtLargestText() throws {

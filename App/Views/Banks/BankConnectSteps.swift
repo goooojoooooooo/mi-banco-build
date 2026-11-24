@@ -15,8 +15,8 @@ enum BankConnectStage: Equatable {
 }
 
 /// «Banco conectado» (momento 4 de los vídeos del dueño, final): el ✓ blanco salta de 0,4 a 1 con un destello de luz,
-/// el título, el estado y el saldo llegan con 70 ms entre ellos, el saldo cuenta desde 0 (nunca asoma la cifra final
-/// antes de contar) y los botones suben 44 pt al final. El ✓ es blanco, nunca verde. Con Reducir movimiento todo se
+/// el título, el estado y el saldo llegan con 70 ms entre ellos, el saldo cuenta desde 0 mientras su fila llega (nunca
+/// asoma la cifra final antes de contar) y los botones suben 44 pt al final. El ✓ es blanco, nunca verde. Con Reducir movimiento todo se
 /// funde; el ✓ y la vibración de éxito siguen. Con el ojo cerrado el saldo es la máscara del kit.
 struct BankConnectedFlash: View {
     let bank: BankID
@@ -80,8 +80,13 @@ struct BankConnectedFlash: View {
                 .accessibilityLabel("Saldo: \(spokenAmount(balanceCents, hidden: preferences.privateMode))")
                 .accessibilityIdentifier("bank-connected-balance")
                 .padding(.top, 16)
-                // El saldo empieza a contar cuando su fila ha llegado.
-                .risesIn(after: 0.44, onLanded: { counts = true })
+                .risesIn(after: 0.44)
+                // El saldo empieza a contar (desde 0) justo cuando su fila empieza a verse: rueda mientras llega y nunca
+                // se queda parado en ceros ni enseña la cifra final antes de contar.
+                .task {
+                    try? await Task.sleep(for: .seconds(motion.seconds(0.44)))
+                    counts = true
+                }
             }
 
             HStack(spacing: 10) {

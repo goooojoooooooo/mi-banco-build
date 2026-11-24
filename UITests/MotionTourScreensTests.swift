@@ -238,11 +238,13 @@ final class MotionTourScreensTests: MotionTourCase {
         alertsEnter("alerts-enter-eye", extra: ["-MiBancoDemoPrivate"])
     }
 
+    /// A cámara lenta ×10 (no ×4): el primer fotograma llega más de un segundo después del toque y a ×4 la entrada ya
+    /// estaba casi acabada.
     private func alertsEnter(_ name: String, extra: [String]) {
-        launch(extra)
+        launch(extra, scale: 10)
         rehearse(tab: "Avisos", until: app.navigationBars["Avisos"])
         press(tab: "Avisos")
-        burst(name, frames: 16, every: 0.2)
+        burst(name, frames: 18, every: 0.3)
         XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 10), "La ráfaga no es de Avisos: la pestaña no se abrió")
     }
 
@@ -273,8 +275,9 @@ final class MotionTourScreensTests: MotionTourCase {
     // MARK: - Ajustes: el ✓ de un saldo guardado; las filas de Bancos entran
 
     /// Guardar un saldo a mano: el ✓ se traza junto al campo y da un pequeño bote.
+    /// A cámara lenta ×12: el ✓ aparece (fundido), da su bote y se queda; a ×4 todo eso pasaba antes del primer fotograma.
     private func settingsSave(_ name: String, extra: [String]) {
-        launch(["-MiBancoDemoScreen", "ajustes"] + extra)
+        launch(["-MiBancoDemoScreen", "ajustes"] + extra, scale: 12)
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
         let field = app.textFields["Saldo de Revolut"]
         scrollDown(to: field)
@@ -284,7 +287,7 @@ final class MotionTourScreensTests: MotionTourCase {
         field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + "512,34")
         Thread.sleep(forTimeInterval: 0.5)
         field.typeText("\n")
-        burst(name, frames: 12, every: 0.2)
+        burst(name, frames: 14, every: 0.3)
     }
 
     func testSettingsSave() throws {
@@ -296,12 +299,13 @@ final class MotionTourScreensTests: MotionTourCase {
         settingsSave("settings-save-eye", extra: ["-MiBancoDemoPrivate"])
     }
 
-    /// Entrar en la pestaña Ajustes: las filas de Bancos llegan una tras otra.
+    /// Entrar en Ajustes por primera vez: las filas de Bancos llegan una tras otra (a cámara lenta ×10). Se ensaya con
+    /// otra pestaña (Gasto) para saber que la barra toma el toque; Ajustes no se ha abierto aún cuando empieza la ráfaga.
     func testBanksList() throws {
-        launch(["-MiBancoDemoBanks"])
-        rehearse(tab: "Ajustes", until: app.navigationBars["Ajustes"])
+        launch(["-MiBancoDemoBanks"], scale: 10)
+        rehearse(tab: "Gasto", until: element("gasto.total"))
         press(tab: "Ajustes")
-        burst("banks-list", frames: 12, every: 0.2)
+        burst("banks-list", frames: 16, every: 0.3)
         XCTAssertTrue(app.buttons["settings-bank-rev"].waitForExistence(timeout: 10), "La ráfaga no es de Ajustes")
     }
 
@@ -357,7 +361,8 @@ final class MotionTourScreensTests: MotionTourCase {
     private func drag(from: CGFloat, to: CGFloat) {
         let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
         let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
-        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 400, thenHoldForDuration: 0.25)
+        // Despacio y soltando en parado: con más velocidad la lista sigue sola al soltar y se salta medio recorrido.
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 70, thenHoldForDuration: 0.7)
     }
 
     /// La hoja sube a pasos cortos sobre la cabecera (que se queda atrás, se encoge y se apaga), sus esquinas se cuadran
@@ -370,15 +375,15 @@ final class MotionTourScreensTests: MotionTourCase {
         Thread.sleep(forTimeInterval: 7)
         let start = Date()
         frame(name, 1, since: start)
-        // Nueve pasos de unos 45 pt hacia arriba (el recorrido entero de la hoja son unos 300 pt).
-        for step in 0..<9 {
-            drag(from: 0.62, to: 0.62 - 0.047)
+        // Once pasos de unos 40 pt hacia arriba (el recorrido entero de la hoja son unos 300 pt).
+        for step in 0..<11 {
+            drag(from: 0.62, to: 0.62 - 0.042)
             frame(name, 2 + step, since: start)
         }
-        // Y de vuelta, en tres pasos largos.
-        for step in 0..<3 {
-            drag(from: 0.40, to: 0.40 + 0.16)
-            frame(name, 11 + step, since: start)
+        // Y de vuelta, en cuatro pasos largos.
+        for step in 0..<4 {
+            drag(from: 0.40, to: 0.40 + 0.13)
+            frame(name, 13 + step, since: start)
         }
         XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "Al bajar la hoja no volvió la cabecera")
     }

@@ -1,13 +1,62 @@
 import MiBancoCore
 import SwiftUI
 
+/// «Importar» que se transforma: cápsula blanca con su título → círculo con la rueda de carga mientras se guarda → ✓ que
+/// salta de 0,4 a 1 cuando el extracto está guardado. Es el mismo gesto que el `MorphingButton` del kit, hecho aquí
+/// porque el del kit parte su título en varias líneas mientras se encoge (se ve en la cámara lenta) y no avisa de cuándo
+/// ha terminado. El título va en una sola línea y no se encoge: se funde. Con Reducir movimiento la cápsula no cambia
+/// de forma: título, rueda y ✓ se funden. Un solo elemento para VoiceOver, que dice lo que está pasando.
+private struct ImportMorphButton: View {
+    enum Phase { case idle, working, done }
+    let phase: Phase
+    let action: () -> Void
+
+    @Environment(\.motion) private var motion
+
+    private var collapsed: Bool { phase != .idle && !motion.reduce }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                Text("Importar")
+                    .titan(.option)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.onTileSelected)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .opacity(phase == .idle ? 1 : 0)
+                if phase == .working {
+                    ProgressView()
+                        .tint(.black)
+                        .transition(.opacity)
+                }
+                if phase == .done {
+                    DrawnCheck(lineWidth: 2.8, color: .black)
+                        .frame(width: 22, height: 22)
+                        .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+                }
+            }
+            .frame(maxWidth: collapsed ? 52 : .infinity, minHeight: 52)
+            .background(Theme.tileSelected, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .disabled(phase != .idle)
+        .frame(maxWidth: .infinity)
+        .animation(motion.animation(.snap), value: phase)
+        .accessibilityLabel(phase == .done ? "Importado" : (phase == .working ? "Importando" : "Importar"))
+        .accessibilityIdentifier("import-confirm")
+    }
+}
+
 /// Vista previa e importación de un extracto CSV (Plan 2, tarea 12).
 /// Muestra el resumen de movimientos nuevos / ya existentes / ignorados, el periodo, el último saldo (tapado en modo
 /// privado) y las operaciones de inversión separadas del gasto (R12).
 ///
 /// Pasos con porcentaje (fase B, S10): Leer › Revisar › Importar. Leer y revisar el fichero es casi instantáneo, así que
 /// cada paso se enseña al menos 0,35 s (del kit); después aparece la vista previa (sus piezas entran una tras otra y el
-/// recuento cuenta) con el porcentaje parado en 67: el tercer paso espera a que el dueño toque «Importar». El 100 llega
+/// recuento cuenta) con el porcentaje parado en 67: el tercer paso espera a que el dueño toque «Importar» (el botón se
+/// transforma: rueda y ✓). El 100 llega
 /// solo cuando el extracto se ha guardado de verdad; si falla, el porcentaje se queda donde estaba.
 struct ImportStatementView: View {
     let model: LedgerModel
@@ -149,10 +198,10 @@ struct ImportStatementView: View {
 
                 VStack(spacing: 12) {
                     if canApply {
-                        // Se transforma: cápsula «Importar» → rueda → ✓ (el botón del kit).
-                        MorphingButton(title: "Importar", doneTitle: "Importado", action: { await apply() })
-                            .disabled(applied)
-                            .accessibilityIdentifier("import-confirm")
+                        // Se transforma: cápsula «Importar» → círculo con rueda → ✓.
+                        ImportMorphButton(phase: applied ? .done : (importing ? .working : .idle)) {
+                            Task { _ = await apply() }
+                        }
                     } else {
                         Text("Nada nuevo que importar")
                             .titan(.option)
@@ -217,7 +266,7 @@ struct ImportStatementView: View {
         }
     }
 
-    /// Guarda el extracto (tercer paso). Devuelve si se guardó: el botón enseña su ✓ o se sacude.
+    /// Guarda el extracto (tercer paso). Devuelve si se guardó: el botón enseña su ✓ o vuelve a «Importar» con el error.
     private func apply() async -> Bool {
         guard canApply, reviewed, !applied, !importing else { return false }
         // Un intento nuevo tras un fallo: el tercer paso vuelve a empezar en su suelo.

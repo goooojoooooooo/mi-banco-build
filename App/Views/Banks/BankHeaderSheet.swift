@@ -121,6 +121,9 @@ private struct BankHeaderLayer<Content: View>: View {
         let y = max(0, scroll.offset)
         content
             .frame(maxWidth: .infinity, alignment: .leading)
+            // La cabecera se mueve como una sola pieza: las entradas de sus partes (cada una con su muelle) no se
+            // mezclan con el desplazamiento del conjunto.
+            .geometryGroup()
             .scaleEffect(motion.reduce ? 1 : BankHeaderMath.headerScale(p, distanceScale: motion.level.distanceScale), anchor: .top)
             // Sube al 32 % de lo desplazado (paralaje); con Reducir movimiento se queda quieta bajo la hoja.
             .offset(y: motion.reduce ? y : 0.68 * y)
@@ -146,6 +149,9 @@ private struct BankSheetLayer<Content: View>: View {
             // Al menos el alto de la pantalla: acoplada, tapa la cabecera entera.
             .frame(maxWidth: .infinity, minHeight: scroll.viewport, alignment: .top)
             .background { BankSheetBackground(scroll: scroll) }
+            // La hoja sube como una sola pieza: sin esto, cada fila (que entra con su propio muelle y su retraso) se
+            // quedaba atrás o se adelantaba a la hoja mientras esta llegaba.
+            .geometryGroup()
             .offset(y: entered ? 0 : motion.distance(260))
             .opacity(entered || !motion.reduce ? 1 : 0)
     }

@@ -10,11 +10,11 @@ struct AlertRules: View {
     let mutedCount: Int
     var onMorningRuleChanged: () -> Void = {}
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var errorTick = 0
 
     private var revealTransition: AnyTransition {
-        reduceMotion
+        motion.reduce
             ? AnyTransition.opacity
             : AnyTransition.opacity.combined(with: AnyTransition.offset(y: -10))
     }
@@ -119,7 +119,8 @@ struct AlertRules: View {
     /// la fila del umbral aparece o se va con el muelle sin rebote.
     private func binding(_ key: AlertRule) -> Binding<Bool> {
         Binding(get: { key.isOn(in: settings) }, set: { on in
-            withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
+            // La fila del umbral aparece o se va con el muelle `row` del kit.
+            withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
                 do {
                     try model.updateAlertSettings { key.set(on, in: &$0) }
                     if key == .morningBriefing { onMorningRuleChanged() }
@@ -291,9 +292,12 @@ private struct ThresholdRow: View {
     @State private var errorTick = 0
     @FocusState private var focused: Bool
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
+
+    /// Con el ojo cerrado (y sin editar) el umbral no se dibuja: en su sitio va la máscara del kit.
+    private var masked: Bool { preferences.privateMode && !focused && !text.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.tight) {
@@ -303,15 +307,13 @@ private struct ThresholdRow: View {
                     .foregroundStyle(Theme.label2)
                 Spacer(minLength: Theme.Space.small)
                 if saved {
-                    DrawnCheck(lineWidth: 2, color: Theme.label)
-                        .frame(width: 16, height: 16)
+                    SavedCheck()
                         .transition(.opacity)
-                        .accessibilityLabel("Guardado")
                 }
                 TextField("100,00 €", text: textBinding)
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .foregroundStyle(Theme.label)
+                    .maskedAmountField(masked, alignment: .trailing)
                     .multilineTextAlignment(.trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -320,10 +322,9 @@ private struct ThresholdRow: View {
                     .padding(.horizontal, 10)
                     .frame(minWidth: 96, maxWidth: 128, minHeight: 40)
                     .background(Theme.fieldFill.opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                    .animation(Theme.Motion.quick, value: focused)
-                    .privateField(editing: focused)
+                    .animation(motion.calmAnimation(.pressIn), value: focused)
                     .accessibilityLabel(title)
-                    .accessibilityValue(preferences.privateMode && !focused && !text.isEmpty ? "importe oculto" : text)
+                    .accessibilityValue(masked ? "importe oculto" : text)
             }
             if let problem {
                 Text(problem)
@@ -371,7 +372,7 @@ private struct ThresholdRow: View {
             return
         }
         guard let value = parseBalanceInput(text), value > 0 else {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { problem = "Escribe un importe como 100" }
+            withAnimation(motion.fade) { problem = "Escribe un importe como 100" }
             errorTick += 1
             return
         }
@@ -386,17 +387,19 @@ private struct ThresholdRow: View {
             flashSaved()
         } catch {
             dirty = true
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { problem = "No se pudo guardar. Inténtalo de nuevo." }
+            withAnimation(motion.fade) { problem = "No se pudo guardar. Inténtalo de nuevo." }
             errorTick += 1
         }
     }
 
+    /// El ✓ se queda 1,4 s (del kit) junto al campo y se va con un fundido.
     private func flashSaved() {
-        withAnimation(Theme.Motion.quick) { saved = true }
+        withAnimation(motion.fade) { saved = true }
         saveTick += 1
+        let hold = motion.seconds(1.4)
         Task {
-            try? await Task.sleep(for: .seconds(1.4))
-            withAnimation(.easeOut(duration: 0.3)) { saved = false }
+            try? await Task.sleep(for: .seconds(hold))
+            withAnimation(motion.fade) { saved = false }
         }
     }
 }

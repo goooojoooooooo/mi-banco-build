@@ -1,4 +1,5 @@
 import SwiftUI
+import MiBancoCore
 
 /// Pasos de un proceso (Autorizar › Leer cuentas › Listo): nodos de 28 pt unidos por líneas que se rellenan.
 /// El paso actual entra con un pequeño rebote, los hechos se rellenan de blanco con su ✓ dibujado y cada línea se
@@ -6,10 +7,24 @@ import SwiftUI
 /// con fundidos. Cada nodo es un elemento de accesibilidad con su estado.
 /// Con tamaños de texto de accesibilidad los pasos pasan a una columna (nodo y título en una fila) para que los títulos
 /// no se pisen ni se recorten; en horizontal, cada título cabe en el ancho de su paso y puede ocupar dos líneas.
+///
+/// Opcionales (por defecto, nada cambia):
+/// - `caption`: una línea debajo que dice lo que se está haciendo; al cambiar se funde con una subida de 8 pt.
+/// - `percent` + `since`: a la derecha de esa línea, el porcentaje (`StepPercent`, Core) contado desde `since`, el
+///   instante en que empezó el paso en curso. Sigue el paso real: nunca alcanza el tope de un paso que no ha terminado.
+/// - `spins`: un arco que gira alrededor del nodo en curso. Solo gira mientras hay un paso en marcha.
+/// - `showsTitles = false`: solo los nodos y sus líneas (los títulos siguen en VoiceOver).
+/// - `identifier`: para las pruebas; el porcentaje es `<identifier>-percent` y la línea, `<identifier>-caption`.
 struct StepperProgress: View {
     let steps: [String]
     let current: Int
     let finished: Bool
+    var caption: String? = nil
+    var percent: StepPercent? = nil
+    var since = Date.distantPast
+    var spins = false
+    var showsTitles = true
+    var identifier: String? = nil
 
     @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -22,28 +37,67 @@ struct StepperProgress: View {
         motion.reduce ? motion.fade : .easeInOut(duration: motion.seconds(0.3))
     }
 
+    /// El arco gira solo en el nodo en curso y solo si el porcentaje (cuando lo hay) sigue en marcha.
+    private func spinning(_ i: Int) -> Bool {
+        spins && !finished && i == current && (percent?.isRunning ?? true)
+    }
+
     var body: some View {
-        Group {
-            if typeSize.isAccessibilitySize {
-                VStack(alignment: .leading, spacing: 14) {
-                    ForEach(steps.indices, id: \.self) { i in
-                        HStack(spacing: 12) {
-                            StepNode(title: steps[i], number: i + 1, phase: phase(i), label: .beside)
-                            Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 14) {
+            Group {
+                if typeSize.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(steps.indices, id: \.self) { i in
+                            HStack(spacing: 12) {
+                                StepNode(title: steps[i], number: i + 1, phase: phase(i), label: .beside, spinning: spinning(i))
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                } else {
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(steps.indices, id: \.self) { i in
+                            if i > 0 { link(filled: phase(i) != .pending).padding(.top, 13) }
+                            StepNode(title: steps[i], number: i + 1, phase: phase(i), label: showsTitles ? .below : .none,
+                                     spinning: spinning(i))
                         }
                     }
                 }
-            } else {
-                HStack(alignment: .top, spacing: 0) {
-                    ForEach(steps.indices, id: \.self) { i in
-                        if i > 0 { link(filled: phase(i) != .pending).padding(.top, 13) }
-                        StepNode(title: steps[i], number: i + 1, phase: phase(i), label: .below)
-                    }
-                }
             }
+            if caption != nil || percent != nil { captionRow }
         }
         .animation(transition, value: current)
         .animation(transition, value: finished)
+    }
+
+    // MARK: Línea de estado y porcentaje
+
+    private var captionRow: some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 12))
+        return layout {
+            ZStack(alignment: .leading) {
+                if let caption {
+                    Text(caption)
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .id(caption)
+                        .transition(motion.reduce
+                            ? .opacity
+                            : .asymmetric(insertion: .opacity.combined(with: .offset(y: motion.distance(8))), removal: .opacity))
+                        .accessibilityIdentifier(identifier.map { "\($0)-caption" } ?? "")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .animation(motion.calmAnimation(.enter), value: caption)
+            if let percent {
+                StepPercentText(percent: percent, since: since, stepNumber: min(current, steps.count - 1) + 1,
+                                stepCount: steps.count)
+                    .accessibilityIdentifier(identifier.map { "\($0)-percent" } ?? "")
+            }
+        }
     }
 
     private func link(filled: Bool) -> some View {
@@ -65,11 +119,12 @@ struct StepperProgress: View {
 
     private struct StepNode: View {
         enum Phase { case pending, current, done }
-        enum LabelPlace { case below, beside }
+        enum LabelPlace { case below, beside, none }
         let title: String
         let number: Int
         let phase: Phase
         let label: LabelPlace
+        var spinning = false
 
         @Environment(\.motion) private var motion
         @State private var pop: CGFloat = 1
@@ -89,16 +144,29 @@ struct StepperProgress: View {
                         node
                         caption
                     }
+                case .none:
+                    node
                 }
             }
             .onChange(of: phase) { _, new in
-                guard new == .current, !motion.reduce else { return }
-                pop = 0.7
-                withAnimation(.spring(response: motion.seconds(0.34), dampingFraction: 1 - min(0.62, 0.5 * motion.level.bounceScale))) {
-                    pop = 1
+                guard !motion.reduce else { return }
+                switch new {
+                case .current:
+                    pop = 0.7
+                    withAnimation(.spring(response: motion.seconds(0.34), dampingFraction: 1 - min(0.62, 0.5 * motion.level.bounceScale))) {
+                        pop = 1
+                    }
+                case .done:
+                    // El relleno blanco entra con un bote (0,36 s), como en la maqueta.
+                    pop = 0.72
+                    withAnimation(.spring(response: motion.seconds(0.36), dampingFraction: 1 - min(0.62, 0.45 * motion.level.bounceScale))) {
+                        pop = 1
+                    }
+                case .pending:
+                    break
                 }
             }
-            .animation(motion.reduce ? motion.fade : .easeInOut(duration: 0.2), value: phase)
+            .animation(motion.reduce ? motion.fade : .easeInOut(duration: motion.seconds(0.2)), value: phase)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Paso \(number): \(title)")
             .accessibilityValue(phase == .done ? "hecho" : (phase == .current ? "en curso" : "pendiente"))
@@ -109,9 +177,18 @@ struct StepperProgress: View {
                 Circle().fill(phase == .done ? Color.white : Color(hex: "#141416"))
                 Circle().strokeBorder(phase == .pending ? Color(hex: "#48484C") : Color.white,
                                       lineWidth: phase == .done ? 0 : 1.5)
+                    .opacity(spinning ? 0.28 : 1)
+                if spinning {
+                    Circle().fill(.white).frame(width: 6, height: 6)
+                        .transition(.opacity)
+                }
                 if phase == .done {
                     DrawnCheck(lineWidth: 3, color: .black)
                         .frame(width: 16, height: 16)
+                }
+                if spinning {
+                    StepSpinner()
+                        .transition(.opacity)
                 }
             }
             .frame(width: 28, height: 28)
@@ -123,6 +200,78 @@ struct StepperProgress: View {
                 .titan(.caption)
                 .foregroundStyle(phase == .pending ? Theme.label3 : Theme.label)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// El arco que gira alrededor del nodo en curso (un cuarto de vuelta de trazo, 420°/s como en la maqueta). La
+/// `TimelineView` solo existe mientras el nodo está en curso (quien la monta la quita al terminar el paso) y, con
+/// Reducir movimiento, el arco se queda quieto.
+private struct StepSpinner: View {
+    @Environment(\.motion) private var motion
+
+    var body: some View {
+        if motion.reduce {
+            arc
+        } else {
+            TimelineView(.animation) { context in
+                let degrees = context.date.timeIntervalSinceReferenceDate * 420 / (motion.level.timeScale * motion.timeMultiplier)
+                arc.rotationEffect(.degrees(degrees.truncatingRemainder(dividingBy: 360)))
+            }
+        }
+    }
+
+    private var arc: some View {
+        Circle()
+            .trim(from: 0, to: 0.26)
+            .stroke(.white, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+            .frame(width: 27, height: 27)
+            .accessibilityHidden(true)
+    }
+}
+
+/// «45 %»: el porcentaje de `StepPercent` contado desde `since` (cuando empezó el paso en curso). Se redibuja con una
+/// agenda FINITA de instantes (30 por segundo durante lo que tarda en asentarse); después, nada se mueve hasta que cambie
+/// el paso. Con Reducir movimiento no cuenta: enseña el suelo del paso y cambia con un fundido. Para VoiceOver y las
+/// pruebas: «Paso 2 de 3, 45 por ciento».
+struct StepPercentText: View {
+    let percent: StepPercent
+    let since: Date
+    let stepNumber: Int
+    let stepCount: Int
+
+    @Environment(\.motion) private var motion
+
+    /// Lo que estira el tiempo: la intensidad y la cámara lenta.
+    private var stretch: Double { max(0.05, motion.level.timeScale * motion.timeMultiplier) }
+
+    /// Los instantes en los que la cifra puede cambiar: 30 por segundo durante 3,2 s (a tiempo del kit) desde `since`.
+    private var schedule: [Date] {
+        guard percent.isRunning, !motion.reduce else { return [since] }
+        let frames = Int((3.2 * stretch * 30).rounded(.up))
+        return (0...min(frames, 3_000)).map { since.addingTimeInterval(Double($0) / 30) }
+    }
+
+    private func shown(at date: Date) -> Int {
+        guard percent.isRunning else { return percent.value(elapsed: 0) }
+        if motion.reduce { return percent.floor }
+        return percent.value(elapsed: date.timeIntervalSince(since) / stretch)
+    }
+
+    var body: some View {
+        TimelineView(.explicit(schedule)) { context in
+            // Una agenda ya pasada (se vuelve a la pantalla a mitad del paso) deja la fecha del último instante: se cuenta
+            // con la hora de verdad.
+            let value = shown(at: max(context.date, Date()))
+            Text("\(value)\u{00A0}%")
+                .titan(.subtitle)
+                .fontWeight(.semibold)
+                .monospacedDigit()
+                .foregroundStyle(Theme.label)
+                .contentTransition(motion.reduce ? .opacity : .identity)
+                .animation(motion.reduce ? motion.fade : nil, value: value)
+                .accessibilityLabel("Paso \(stepNumber) de \(stepCount), \(value) por ciento")
+                .accessibilityAddTraits(.updatesFrequently)
         }
     }
 }

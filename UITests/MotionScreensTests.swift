@@ -358,4 +358,314 @@ final class MotionScreensTests: XCTestCase {
             .waitForExistence(timeout: 8), "Con el ojo cerrado ningún aviso dice «importe oculto»")
         XCTAssertEqual(visibleAmounts(), [], "Avisos enseña importes con el ojo cerrado")
     }
+
+    // MARK: - Avisos y Ajustes: interruptores, umbrales y saldos (B4)
+
+    private let hittable = NSPredicate(format: "hittable == true")
+
+    /// El interruptor de una regla (los de Titanio, que se estiran) sigue encendiendo y apagando, y su umbral aparece y
+    /// se va con él.
+    func testToggleStillToggles() throws {
+        launch(["-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules"])
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 20), "No se ve Avisos")
+        let toggle = app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "Saldo bajo")).firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "Falta el interruptor de «Saldo bajo»")
+        scrollDown(to: toggle)
+        XCTAssertTrue(toggle.isHittable, "El interruptor de «Saldo bajo» no se puede tocar")
+        let field = app.textFields["Avisar por debajo de"]
+        XCTAssertEqual(value(toggle), "1", "La demo trae «Saldo bajo» encendido")
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Con la regla encendida falta su umbral")
+
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "0"), toggle, timeout: 5), "El interruptor no se apagó")
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), field, timeout: 5), "El umbral sigue con la regla apagada")
+
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "1"), toggle, timeout: 5), "El interruptor no se encendió")
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "El umbral no volvió al encender la regla")
+        XCTAssertTrue(waitFor(hittable, field, timeout: 5), "El umbral no se puede tocar")
+        XCTAssertTrue(value(field).contains("€"), "El umbral no enseña su importe: \(value(field))")
+    }
+
+    /// Con el ojo cerrado, los umbrales de Avisos y los saldos de Ajustes (el del banco conectado y los que se editan)
+    /// no enseñan ni dicen ninguna cifra.
+    func testPrivateModeHidesThresholdsAndBalances() throws {
+        continueAfterFailure = true
+        launch(["-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 20), "No se ve Avisos")
+        let threshold = app.textFields["Avisar por debajo de"]
+        scrollDown(to: threshold)
+        XCTAssertTrue(threshold.waitForExistence(timeout: 8), "Falta el umbral de «Saldo bajo»")
+        XCTAssertEqual(value(threshold), "importe oculto", "El umbral se lee con el ojo cerrado")
+        let large = app.textFields["Pago grande desde"]
+        scrollDown(to: large)
+        XCTAssertEqual(value(large), "importe oculto", "El umbral de pago grande se lee con el ojo cerrado")
+        XCTAssertEqual(visibleAmounts(), [], "Avisos enseña importes con el ojo cerrado")
+
+        app.terminate()
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        // Trade Republic no está conectado en la demo: su saldo es un campo que se edita.
+        let editable = app.textFields["Saldo de Trade Republic"]
+        scrollDown(to: editable)
+        XCTAssertTrue(editable.waitForExistence(timeout: 8), "Falta el saldo de Trade Republic")
+        XCTAssertEqual(value(editable), "importe oculto", "El saldo que se edita se lee con el ojo cerrado")
+        let connected = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "Saldo de Revolut: ")).firstMatch
+        XCTAssertTrue(connected.waitForExistence(timeout: 5), "Falta el saldo de Revolut (conectado)")
+        XCTAssertEqual(connected.label, "Saldo de Revolut: importe oculto")
+        XCTAssertEqual(visibleAmounts(), [], "Ajustes enseña importes con el ojo cerrado")
+    }
+
+    /// Guardar un saldo a mano sigue enseñando su ✓ («Guardado») junto al campo, y el campo se queda con el importe nuevo.
+    func testSavingABalanceShowsTheCheck() throws {
+        launch(["-MiBancoDemoScreen", "ajustes"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let field = app.textFields["Saldo de Revolut"]
+        scrollDown(to: field)
+        XCTAssertTrue(field.waitForExistence(timeout: 8), "Falta el saldo de Revolut")
+        let saved = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Guardado")).firstMatch
+        XCTAssertFalse(saved.exists, "El ✓ de guardado ya estaba antes de guardar")
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + "512,34\n")
+        XCTAssertTrue(saved.waitForExistence(timeout: 5), "Guardar el saldo no enseñó el ✓")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "512,34"), field, timeout: 5),
+                      "El campo no se quedó con el saldo nuevo: \(value(field))")
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), saved, timeout: 8), "El ✓ de guardado no se fue")
+    }
+
+    // MARK: - La pantalla de un banco: hoja sobre cabecera oscura (B5)
+
+    /// Abre la pantalla de un banco TOCANDO su fila en Ajustes › Bancos (la demo trae Revolut e imagin conectados).
+    private func openBank(_ id: String, _ extra: [String] = []) {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"] + extra)
+        let row = app.buttons["settings-bank-\(id)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "Falta la fila del banco en Ajustes")
+        XCTAssertTrue(waitFor(hittable, row, timeout: 5), "La fila del banco no se puede tocar")
+        row.tap()
+    }
+
+    /// Arrastra la pantalla en vertical, despacio y sin inercia (fracciones del alto de la pantalla).
+    private func drag(from: CGFloat, to: CGFloat) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 500, thenHoldForDuration: 0.3)
+    }
+
+    /// Abierta desde Ajustes, la cabecera (banco, saldo, estado, acciones) está desde el principio; la hoja enseña los
+    /// últimos movimientos de ESE banco; al subir la hoja, el título pequeño «Banco · saldo» se acopla en la barra y el
+    /// saldo grande deja de verse; al bajarla, vuelve. Y todo lo de antes sigue en la pantalla.
+    func testBankHeaderDocksTitle() throws {
+        openBank("rev")
+        let balance = element("bank-header-balance")
+        XCTAssertTrue(balance.waitForExistence(timeout: 10), "La cabecera del banco no enseña su saldo")
+        XCTAssertTrue(waitFor(hittable, balance, timeout: 5), "El saldo grande no está a la vista")
+        XCTAssertTrue(balance.label.hasPrefix("Saldo de Revolut: "), "El saldo no dice de quién es: \(balance.label)")
+        XCTAssertTrue(balance.label.hasSuffix(" euros"), "El saldo no dice su importe: \(balance.label)")
+        let spoken = balance.label.replacingOccurrences(of: "Saldo de Revolut: ", with: "")
+        let mini = element("bank-mini-title")
+        XCTAssertFalse(mini.exists, "El título pequeño ya está en la barra con la hoja abajo")
+        XCTAssertTrue(app.staticTexts["Actualizado hace 5 min · exacto"].exists, "Falta el estado del banco en la cabecera")
+        XCTAssertTrue(app.buttons["Actualizar ahora"].isHittable, "Falta «Actualizar ahora»")
+        XCTAssertTrue(app.buttons["bank-import-statement"].isHittable, "Falta «Importar extracto»")
+
+        // La hoja: «Movimientos» y los últimos de Revolut (como mucho ocho), ninguno de otro banco.
+        XCTAssertTrue(element("bank-movements-title").waitForExistence(timeout: 5), "La hoja no tiene «Movimientos»")
+        let rows = app.buttons.matching(identifier: "movementRow")
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "La hoja no enseña movimientos")
+        let labels = rows.allElementsBoundByIndex.map { $0.label }
+        XCTAssertLessThanOrEqual(labels.count, 8, "La hoja enseña más de ocho movimientos")
+        XCTAssertEqual(labels.filter { $0.contains("imagin") || $0.contains("Trade Republic") }, [],
+                       "La hoja de Revolut enseña movimientos de otro banco")
+
+        // Sube la hoja: el título pequeño se acopla y el saldo grande ya no se ve.
+        drag(from: 0.72, to: 0.18)
+        XCTAssertTrue(mini.waitForExistence(timeout: 5), "Al subir la hoja no aparece el título pequeño")
+        XCTAssertTrue(waitFor(hittable, mini, timeout: 5), "El título pequeño no está a la vista")
+        XCTAssertEqual(mini.label, "Revolut, \(spoken)", "El título pequeño no dice banco y saldo")
+        XCTAssertFalse(balance.exists && balance.isHittable, "El saldo grande sigue a la vista bajo el título pequeño")
+
+        // Baja la hoja: vuelve la cabecera y el título pequeño se va.
+        drag(from: 0.30, to: 0.90)
+        drag(from: 0.30, to: 0.90)
+        XCTAssertTrue(waitFor(hittable, balance, timeout: 8), "Al bajar la hoja el saldo grande no vuelve")
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), mini, timeout: 5), "El título pequeño sigue con la hoja abajo")
+
+        // Una fila abre su movimiento (la hoja única de la app) y se cierra.
+        let first = rows.firstMatch
+        XCTAssertTrue(waitFor(hittable, first, timeout: 5), "La primera fila no se puede tocar")
+        first.tap()
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8), "Tocar un movimiento no abrió su detalle")
+        close.tap()
+        XCTAssertTrue(waitFor(hittable, balance, timeout: 8), "No volvió a la pantalla del banco")
+        // Lo de siempre sigue en la pantalla.
+        XCTAssertTrue(app.buttons["Desconectar"].exists, "Falta «Desconectar»")
+        XCTAssertTrue(app.buttons["Olvidar clave y conexiones"].exists, "Falta «Olvidar clave y conexiones»")
+        XCTAssertTrue(app.staticTexts["Primera actualización: últimos 12 meses (lo que dé el banco)"].exists, "Falta el historial")
+    }
+
+    /// Si una tarjeta viene volando desde Inicio, la cabecera la espera; pero si no llega (hoy nadie la hace aterrizar),
+    /// la cabecera aparece igual: la pantalla nunca se queda sin cabecera. A cámara lenta ×8 el plazo dura unos 8 s.
+    func testBankHeaderWaitsForAFlightButNeverStaysHidden() throws {
+        openBank("rev", ["-MiBancoDemoFlightRequest", "-MiBancoMotionScale", "8"])
+        XCTAssertTrue(element("bank-movements-title").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
+        let balance = element("bank-header-balance")
+        XCTAssertFalse(balance.exists, "Con una tarjeta en vuelo la cabecera no la esperó")
+        XCTAssertFalse(app.buttons["bank-import-statement"].exists, "Con una tarjeta en vuelo las acciones ya estaban")
+        XCTAssertTrue(balance.waitForExistence(timeout: 30), "La cabecera se quedó escondida: el vuelo no aterrizó y no venció el plazo")
+        XCTAssertTrue(waitFor(hittable, app.buttons["bank-import-statement"], timeout: 10), "Las acciones no volvieron")
+    }
+
+    /// Con el ojo cerrado, la pantalla del banco no enseña ni dice ningún importe: ni en la cabecera, ni en la hoja, ni
+    /// en el título pequeño.
+    func testPrivateModeHidesAmountsInBankScreen() throws {
+        continueAfterFailure = true
+        openBank("rev", ["-MiBancoDemoPrivate"])
+        let balance = element("bank-header-balance")
+        XCTAssertTrue(balance.waitForExistence(timeout: 10), "La cabecera del banco no tiene saldo")
+        XCTAssertEqual(balance.label, "Saldo de Revolut: importe oculto")
+        XCTAssertTrue(app.buttons.matching(identifier: "movementRow").firstMatch.waitForExistence(timeout: 5),
+                      "La hoja no enseña movimientos")
+        XCTAssertEqual(visibleAmounts(), [], "La pantalla del banco enseña importes con el ojo cerrado")
+        drag(from: 0.72, to: 0.18)
+        let mini = element("bank-mini-title")
+        XCTAssertTrue(mini.waitForExistence(timeout: 5), "Al subir la hoja no aparece el título pequeño")
+        XCTAssertEqual(mini.label, "Revolut, importe oculto")
+        XCTAssertEqual(visibleAmounts(), [], "Con la hoja arriba se ven importes con el ojo cerrado")
+    }
+
+    // MARK: - Conectar un banco: pasos con porcentaje y «conectado» (B6, B7)
+
+    /// «Paso 2 de 3, 45 por ciento» -> (2, 45).
+    private func stepAndPercent(_ label: String) -> (step: Int, percent: Int)? {
+        let numbers = label.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
+        guard label.hasPrefix("Paso "), numbers.count == 3 else { return nil }
+        return (numbers[0], numbers[2])
+    }
+
+    /// El trámite entero con el banco de mentira de la demo: los tres pasos se recorren en orden, el porcentaje nunca
+    /// baja, nunca alcanza el tope de un paso que sigue en marcha (34, 67, 99) y solo llega a 100 con el banco conectado;
+    /// entonces sale «imagin, conectado» con su saldo, la lista se llena (esqueleto y luego filas) y «Listo» lo cierra.
+    func testConnectStepsReachDone() throws {
+        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "4", "-MiBancoDemoConnectFill", "6"])
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 10), "Falta «Renovar conexión»")
+        XCTAssertFalse(element("bank-steps-percent").exists, "Los pasos ya estaban antes de empezar")
+        renew.tap()
+
+        let percent = element("bank-steps-percent")
+        XCTAssertTrue(percent.waitForExistence(timeout: 5), "Renovar no enseñó los pasos con su porcentaje")
+        XCTAssertTrue(app.staticTexts["Esperando a imagin…"].waitForExistence(timeout: 3), "Falta lo que se está haciendo")
+        let title = element("bank-connected-title")
+        let floors = [1: 0, 2: 34, 3: 67]
+        let caps = [1: 34, 2: 67, 3: 99]
+        var seen: Set<Int> = []
+        var last = (step: 0, percent: -1)
+        let deadline = Date().addingTimeInterval(40)
+        while !title.exists, Date() < deadline {
+            guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+            guard now.percent < 100 else { break }
+            XCTAssertGreaterThanOrEqual(now.percent, floors[now.step] ?? 0, "El porcentaje va por debajo de su paso: \(now)")
+            XCTAssertLessThan(now.percent, caps[now.step] ?? 0, "El porcentaje alcanzó el tope de un paso sin terminar: \(now)")
+            XCTAssertGreaterThanOrEqual(now.step, last.step, "Los pasos fueron hacia atrás: \(last) -> \(now)")
+            XCTAssertGreaterThanOrEqual(now.percent, last.percent, "El porcentaje bajó: \(last) -> \(now)")
+            seen.insert(now.step)
+            last = now
+        }
+        XCTAssertTrue(title.waitForExistence(timeout: 10), "El trámite no llegó a «conectado»")
+        XCTAssertEqual(seen, [1, 2, 3], "No se vieron los tres pasos en marcha: \(seen.sorted())")
+        XCTAssertEqual(title.label, "imagin, conectado")
+        let balance = element("bank-connected-balance")
+        XCTAssertTrue(balance.waitForExistence(timeout: 5), "«Conectado» no enseña el saldo")
+        XCTAssertTrue(balance.label.hasPrefix("Saldo: "), "El saldo no dice lo que es: \(balance.label)")
+        XCTAssertTrue(balance.label.hasSuffix(" euros"), "El saldo no dice su importe: \(balance.label)")
+        XCTAssertFalse(percent.exists, "Los pasos siguen a la vista con el banco ya conectado")
+
+        // La lista se llena por primera vez: esqueleto (sin datos) y, después, las filas.
+        let skeleton = element("skeleton-rows")
+        XCTAssertTrue(skeleton.waitForExistence(timeout: 3), "Tras conectar no se ve el esqueleto de la lista")
+        XCTAssertFalse(app.buttons.matching(identifier: "movementRow").firstMatch.exists, "Hay filas debajo del esqueleto")
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), skeleton, timeout: 15), "El esqueleto no se fue")
+        XCTAssertTrue(app.buttons.matching(identifier: "movementRow").firstMatch.waitForExistence(timeout: 5),
+                      "Tras el esqueleto no llegaron las filas")
+
+        let done = app.buttons["bank-connected-done"]
+        XCTAssertTrue(waitFor(hittable, done, timeout: 8), "«Listo» no se puede tocar")
+        done.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), title, timeout: 5), "«Listo» no cerró «conectado»")
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 5), "No volvió la cabecera de siempre")
+        XCTAssertTrue(waitFor(hittable, app.buttons["bank-import-statement"], timeout: 5), "No volvieron las acciones")
+    }
+
+    /// «Ver movimientos» cierra «conectado» y sube la hoja (el título pequeño queda acoplado).
+    func testConnectedShowMovementsDocksTheSheet() throws {
+        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "0.4", "-MiBancoDemoConnectFill", "0.5"])
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 10), "Falta «Renovar conexión»")
+        renew.tap()
+        let show = app.buttons["bank-connected-show"]
+        XCTAssertTrue(show.waitForExistence(timeout: 15), "El trámite no llegó a «conectado»")
+        XCTAssertTrue(waitFor(hittable, show, timeout: 8), "«Ver movimientos» no se puede tocar")
+        show.tap()
+        XCTAssertTrue(element("bank-mini-title").waitForExistence(timeout: 8), "«Ver movimientos» no subió la hoja")
+        XCTAssertFalse(element("bank-connected-title").exists, "«Conectado» sigue abierto")
+    }
+
+    /// Con el ojo cerrado, «conectado» no enseña ni dice el saldo.
+    func testPrivateModeHidesTheConnectedBalance() throws {
+        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "0.4", "-MiBancoDemoPrivate"])
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 10), "Falta «Renovar conexión»")
+        renew.tap()
+        let balance = element("bank-connected-balance")
+        XCTAssertTrue(balance.waitForExistence(timeout: 15), "El trámite no llegó a «conectado»")
+        XCTAssertEqual(balance.label, "Saldo: importe oculto")
+        Thread.sleep(forTimeInterval: 2.5)
+        XCTAssertEqual(visibleAmounts(), [], "«Conectado» enseña importes con el ojo cerrado")
+    }
+
+    // MARK: - Importar un extracto: pasos y vista previa (B6)
+
+    /// Primero los pasos (Leer, Revisar) y DESPUÉS la vista previa; el porcentaje se queda en 67 mientras se espera al
+    /// dueño, sube al tocar «Importar» y la pantalla vuelve a la del banco.
+    func testImportStepsThenPreview() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport", "-MiBancoDemoImportSlow"])
+        let percent = element("import-steps-percent")
+        XCTAssertTrue(percent.waitForExistence(timeout: 20), "La importación no enseña sus pasos")
+        let summary = app.staticTexts["import-summary"]
+        let confirm = app.buttons["import-confirm"]
+        // Mientras se lee y se revisa (2 s por paso en esta prueba) no hay vista previa ni botón.
+        var early: Set<Int> = []
+        let reading = Date().addingTimeInterval(3)
+        while Date() < reading, !summary.exists {
+            guard let now = stepAndPercent(percent.label) else { continue }
+            XCTAssertLessThan(now.percent, 67, "El porcentaje pasó de 67 antes de la vista previa: \(now)")
+            XCTAssertLessThan(now.step, 3, "El tercer paso empezó antes de la vista previa")
+            early.insert(now.step)
+        }
+        XCTAssertTrue(early.contains(1), "No se vio el paso «Leer» en marcha: \(early.sorted())")
+        XCTAssertFalse(summary.exists, "La vista previa salió antes de terminar los pasos")
+        XCTAssertFalse(confirm.exists, "«Importar» salió antes de terminar los pasos")
+
+        XCTAssertTrue(summary.waitForExistence(timeout: 10), "Tras los pasos no llegó la vista previa")
+        XCTAssertEqual(summary.label, "3 movimientos nuevos, 3 filas ignoradas")
+        XCTAssertEqual(percent.label, "Paso 3 de 3, 67 por ciento", "Esperando al dueño el porcentaje no está en 67")
+        Thread.sleep(forTimeInterval: 2.5)
+        XCTAssertEqual(percent.label, "Paso 3 de 3, 67 por ciento", "El porcentaje subió solo, sin tocar «Importar»")
+
+        XCTAssertTrue(waitFor(hittable, confirm, timeout: 5), "«Importar» no se puede tocar")
+        XCTAssertTrue(confirm.isEnabled)
+        confirm.tap()
+        let bank = app.buttons["bank-import-statement"]
+        var afterTap: [Int] = []
+        let leaving = Date().addingTimeInterval(12)
+        while Date() < leaving, !bank.exists {
+            guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+            XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")
+            XCTAssertGreaterThanOrEqual(now.percent, afterTap.last ?? 0, "El porcentaje bajó al importar")
+            afterTap.append(now.percent)
+        }
+        XCTAssertTrue(bank.waitForExistence(timeout: 8), "Tras importar no volvió a la pantalla del banco")
+        XCTAssertTrue(afterTap.contains { $0 > 67 }, "Al importar el porcentaje no se movió de 67: \(afterTap)")
+    }
 }

@@ -11,8 +11,11 @@ struct AlertsView: View {
     let onOpen: (UUID) -> Void
     var onMorningRuleChanged: () -> Void = {}
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Al entrar en la pestaña, los avisos llegan uno tras otro.
+    /// El movimiento del kit: intensidad, cámara lenta y Reducir movimiento (el del sistema o el forzado para grabar).
+    @Environment(\.motion) private var motion
+    /// El cambio de pestaña que anuncia `RootView` (cuando lo haga): repite la entrada igual que `isVisible`.
+    @Environment(\.tabEntrance) private var tabEntrance
+    /// Al entrar en la pestaña, los avisos llegan uno tras otro desde la derecha.
     @State private var entrance = Entrance()
 
     var body: some View {
@@ -24,15 +27,16 @@ struct AlertsView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         if insights.isEmpty {
                             AlertsEmptyState()
-                                .staggeredEntrance(0)
+                                .motionEntrance(0)
                         } else {
                             GroupHeader("Novedades")
-                                .staggeredEntrance(0)
+                                .motionEntrance(0)
                             VStack(spacing: 0) {
                                 ForEach(Array(insights.enumerated()), id: \.element.id) { index, insight in
                                     InsightRow(insight: insight, isLast: index == insights.count - 1, onOpen: onOpen)
-                                        .staggeredEntrance(1 + index)
-                                        .transition(reduceMotion
+                                        // Cada aviso entra desde 40 pt a la derecha, uno tras otro.
+                                        .motionEntrance(1 + index, rise: 0, slide: 40)
+                                        .transition(motion.reduce
                                             ? AnyTransition.opacity
                                             : AnyTransition.asymmetric(insertion: AnyTransition.move(edge: .top).combined(with: .opacity),
                                                                        removal: AnyTransition.opacity))
@@ -50,7 +54,7 @@ struct AlertsView: View {
                             onMorningRuleChanged: onMorningRuleChanged
                         )
                             .id(AlertsAnchor.rules)
-                            .staggeredEntrance(min(1 + insights.count, 8))
+                            .motionEntrance(min(1 + insights.count, 8))
 
                         Text("Todo se calcula en tu iPhone con tus movimientos. Nada sale del teléfono.")
                             .titan(.meta)
@@ -59,7 +63,7 @@ struct AlertsView: View {
                             .padding(.top, 8)
                     }
                     // Solo la lista corta de avisos (≤ 12) anima su cambio; los avisos nuevos entran desde arriba.
-                    .animation(reduceMotion ? Animation.easeOut(duration: 0.2) : Theme.Motion.reveal, value: insights.map(\.id))
+                    .animation(motion.reduce ? motion.fade : motion.calmAnimation(.row), value: insights.map(\.id))
                     .padding(.bottom, Theme.Space.section)
                 }
                 .scrollIndicators(.hidden)
@@ -79,13 +83,22 @@ struct AlertsView: View {
         }
         .environment(\.entrance, entrance)
         .onChange(of: isVisible) { _, visible in
-            guard visible, !reduceMotion else { return }
-            let token = entrance.token + 1
-            entrance = Entrance(token: token, active: true, scope: .assembly)
-            Task {
-                try? await Task.sleep(for: .seconds(1.2))
-                if entrance.token == token { entrance.active = false }
-            }
+            if visible { playEntrance() }
+        }
+        .onChange(of: tabEntrance.token) { _, _ in
+            if isVisible, !tabEntrance.suppressed { playEntrance() }
+        }
+    }
+
+    /// La entrada por capas: los grupos llegan uno tras otro durante 1,2 s del kit. Con Reducir movimiento no hay entrada.
+    private func playEntrance() {
+        guard !motion.reduce else { return }
+        let token = entrance.token + 1
+        entrance = Entrance(token: token, active: true, scope: .assembly)
+        let window = motion.seconds(MotionEntranceWindow.seconds)
+        Task {
+            try? await Task.sleep(for: .seconds(window))
+            if entrance.token == token { entrance.active = false }
         }
     }
 }

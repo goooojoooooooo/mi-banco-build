@@ -55,8 +55,8 @@ final class MotionTourHomeTests: MotionTourCase {
 
     // MARK: A1 / A3 — cifras que ruedan y carrusel
 
-    /// Tocar un segmento: el carrusel se desliza con sus vecinos girados y el brillo cruzando; la tarjeta que llega da
-    /// su rebote de encaje y cuenta su saldo desde 0; el resumen de 7 días rueda al de esa tarjeta.
+    /// Tocar un segmento: el carrusel se desliza con sus vecinos girados y el brillo cruzando; la tarjeta que llega se
+    /// pasa un poco de su sitio y vuelve (el rebote de su muelle) y cuenta su saldo desde 0; el resumen de 7 días rueda al de esa tarjeta.
     private func glideBursts(_ suffix: String, extra: [String]) {
         launch(extra)
         waitForHome()
@@ -145,7 +145,7 @@ final class MotionTourHomeTests: MotionTourCase {
         burst("card-peek", frames: 20, every: 0.3)
     }
 
-    // MARK: Ronda de arreglos 1 — el deslizamiento a velocidad real y el rebote de encaje
+    // MARK: Ronda de arreglos 1 — el deslizamiento programado, fotografiado entero
 
     /// Ráfaga densa: como `burst`, pero captura la pantalla directamente (sin consultar antes el árbol de la app, que es
     /// lo que más tarda), primero todas las capturas y después los adjuntos, para sacar un fotograma cada pocas
@@ -183,13 +183,6 @@ final class MotionTourHomeTests: MotionTourCase {
             attachment.lifetime = .keepAlways
             add(attachment)
         }
-    }
-
-    /// Inicio a velocidad real (escala 1), ya montado.
-    private func launchRealTime(_ extra: [String]) {
-        launch(extra, scale: 1)
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "Inicio no aparece")
-        Thread.sleep(forTimeInterval: 3)
     }
 
     /// La zona del borde izquierdo de la tarjeta de delante (170 pt de ancho), con el título encima y el segmentado
@@ -248,24 +241,5 @@ final class MotionTourHomeTests: MotionTourCase {
 
     func testCarouselLandingSubtle() throws {
         glideBurst("carousel-landing-subtle", level: "subtle", scale: 1, frames: 20, every: 0.04, zoomed: true)
-    }
-
-    /// El rebote de encaje solo (`-MiBancoDemoCardMoment settle`: 0,35 s después de tocar el segmento ya elegido, la
-    /// tarjeta se pasa 4 pt × nivel hacia la derecha, crece a 1,012 y vuelve), a cámara lenta ×4 y ampliado sobre el
-    /// borde izquierdo de la tarjeta.
-    func testCardSettle() throws {
-        launch(["-MiBancoDemoCardMoment", "settle"])
-        waitForHome()
-        let zone = leftEdgeCrop()
-        segment("Todo").tap()
-        fastBurst("card-settle", frames: 24, every: 0.15, crop: zone.crop, screenWidth: zone.screenWidth)
-    }
-
-    /// El mismo rebote a velocidad real: lo que se llega a ver de verdad.
-    func testCardSettleRealTime() throws {
-        launchRealTime(["-MiBancoDemoCardMoment", "settle"])
-        let zone = leftEdgeCrop()
-        segment("Todo").tap()
-        fastBurst("card-settle-real", frames: 16, every: 0.05, crop: zone.crop, screenWidth: zone.screenWidth)
     }
 }

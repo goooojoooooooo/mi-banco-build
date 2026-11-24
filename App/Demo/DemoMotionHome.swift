@@ -12,15 +12,13 @@ extension DemoMode {
         case tilt
         /// La pista del primer día: la tarjeta asoma unos grados, como si fuera a voltearse.
         case peek
-        /// El rebote de encaje solo (4 pt hacia la derecha y vuelta), sin que el carrusel se deslice.
-        case settle
         /// Un deslizamiento programado a la tarjeta siguiente, 0,8 s después del toque (para fotografiarlo entero).
         case glide
         /// Lo mismo hasta la última tarjeta.
         case glideFar
     }
 
-    /// `-MiBancoDemoCardMoment lift|tilt|peek|settle|glide|glideFar` (solo con `-MiBancoDemo`): tocar el segmento que YA está elegido dispara
+    /// `-MiBancoDemoCardMoment lift|tilt|peek|glide|glideFar` (solo con `-MiBancoDemo`): tocar el segmento que YA está elegido dispara
     /// ese momento en la tarjeta de delante, para sacarlo en una ráfaga de fotogramas.
     static var cardMoment: CardMoment? {
         guard isActive else { return nil }

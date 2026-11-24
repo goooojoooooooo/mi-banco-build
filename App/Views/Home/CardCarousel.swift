@@ -8,12 +8,11 @@ import MiBancoCore
 /// Movimiento (desde `\.motion`: intensidad, Reducir movimiento y cámara lenta). El viaje de una tarjeta a otra lo hace
 /// siempre el scroll del sistema (interrumpible con el dedo); cuando es por programa lo lleva el muelle `snap`, y los
 /// fotogramas enseñan que el scroll lo sigue: se pasa y vuelve según la intensidad, y la cámara lenta lo alarga.
-/// - Un deslizamiento programado (segmentado, llegada) llega con el rebote de su muelle `snap`: se pasa y vuelve.
-/// - Cuando es el dedo quien lo deja en otra tarjeta, esa tarjeta da un rebote de encaje pequeño (4 pt en el sentido en
-///   que venía, escala 1,012).
+/// - Un deslizamiento programado (segmentado, llegada) llega con el rebote de su muelle `snap`: se pasa y vuelve. El
+///   del dedo frena con la física del sistema, sin nada añadido.
 /// - Mantener pulsada la tarjeta de delante 0,42 s la levanta (`.lift`); al soltar vuelve, y soltar no la voltea.
 /// - La primera vez que se ve Inicio, la tarjeta asoma unos grados (la pista de que se puede voltear).
-/// - Con Reducir movimiento: tarjetas planas, sin rebote ni levantar, y el cambio programado es un fundido.
+/// - Con Reducir movimiento: tarjetas planas, sin levantar, y el cambio programado es un fundido.
 struct CardCarousel: View {
     let snapshot: LedgerSnapshot
     var links: [BankID: BankLinkInfo] = [:]
@@ -38,9 +37,6 @@ struct CardCarousel: View {
     /// intermedias que informe el scroll ("Todo" → Trade Republic pasa por Revolut e imagin) no cambian la elegida.
     @State private var scrollTarget: AccountCard?
     @State private var scrollTargetToken = 0
-    /// Rebote de encaje: cuántas veces se ha parado el carrusel en cada tarjeta y en qué sentido venía la última vez.
-    @State private var settles: [AccountCard: Int] = [:]
-    @State private var settleDirection: CGFloat = 0
     /// La tarjeta levantada con una pulsación larga. Vuelve a `nil` al subir el dedo o si el sistema suelta el botón
     /// (por ejemplo, porque el carrusel empieza a deslizarse).
     @State private var pressLifted: AccountCard?
@@ -89,7 +85,7 @@ struct CardCarousel: View {
     // El cuerpo va en piezas (tarjeta, paginado, seguimiento, sincronía, sonda de pruebas): entero, el compilador no
     // llega a comprobar los tipos de una sola expresión tan larga.
 
-    /// Una tarjeta con su rebote de encaje y su «levantar» (la levanta mantener el dedo sobre su botón: ver `pressing`).
+    /// Una tarjeta con su «levantar» (la levanta mantener el dedo sobre su botón: ver `pressing`).
     private func cardView(_ card: AccountCard) -> some View {
         AccountCardView(
             card: card, balances: snapshot.balances,
@@ -107,7 +103,6 @@ struct CardCarousel: View {
             onPressing: { down in pressing(card, down) },
             onOpenBank: onOpenBank,
             onImportInvestments: onImportInvestments)
-            .modifier(SettleBounce(tick: settles[card, default: 0], direction: settleDirection))
             .lift(lifted == card)
     }
 
@@ -162,22 +157,18 @@ struct CardCarousel: View {
                 let count = CGFloat(max(cards.count, 1))
                 let step = (geometry.contentSize.width + CarouselMetrics.spacing) / count
                 return step > 0 ? (geometry.contentOffset.x + geometry.contentInsets.leading) / step : 0
-            } action: { old, position in
+            } action: { _, position in
                 guard position.isFinite else { return }
-                // Sentido en que se mueven las tarjetas (la posición sube = van hacia la izquierda), para el rebote de encaje.
-                if abs(position - old) > 0.0005 { motion.carouselDirection = position > old ? -1 : 1 }
                 motion.carouselPosition = position
                 let last = CGFloat(max(cards.count - 1, 0))
                 let over = position < -0.04 || position > last + 0.04
                 if over != motion.carouselOverscrolled { motion.carouselOverscrolled = over }
             }
-            // Quién mueve el carrusel (el dedo o un deslizamiento programado) y cuándo se para.
+            // El carrusel se para (tras el dedo o tras un deslizamiento programado).
             .onScrollPhaseChange { old, new in
                 #if DEBUG
                 probeFinger(old, new)
                 #endif
-                if new == .interacting { motion.carouselByFinger = true }
-                if new == .animating { motion.carouselByFinger = false }
                 if new == .idle, old != .idle { landed() }
             }
             .sensoryFeedback(Haptics.edge, trigger: motion.carouselOverscrolled) { _, new in new }
@@ -396,16 +387,11 @@ struct CardCarousel: View {
         // La tarjeta de delante cuenta su cifra aunque el aviso de visibilidad no llegue.
         seen.insert(current)
         if current != .all { scrolledID = current }
-        motion.carouselRest = CGFloat(current.index(in: cards))
     }
 
-    // MARK: - Encaje, levantar y pista
+    // MARK: - Parada, levantar y pista
 
-    /// El carrusel se ha parado. Si el DEDO lo ha dejado en otra tarjeta que la última vez, esa tarjeta da su rebote de
-    /// encaje en el sentido en que venía (el frenado del sistema llega a su sitio sin pasarse). Tras un deslizamiento
-    /// programado no: ese ya llega con el rebote de su muelle `snap` (se pasa y vuelve, más o menos según la
-    /// intensidad), y un segundo rebote después solo sería un tic a destiempo. Un toque (el dedo baja y sube sin mover
-    /// nada) no cuenta.
+    /// El carrusel se ha parado (tras el dedo o tras un deslizamiento programado): la red de seguridad de abajo.
     private func landed() {
         guard !cards.isEmpty else { return }
         let position = motion.carouselPosition
@@ -419,11 +405,6 @@ struct CardCarousel: View {
             #endif
             selection = cards[index]
         }
-        guard abs(position - motion.carouselRest) > 0.5 else { return }
-        motion.carouselRest = CGFloat(index)
-        guard !kit.reduce, motion.carouselByFinger else { return }
-        settleDirection = motion.carouselDirection
-        settles[cards[index], default: 0] += 1
     }
 
     /// Solo la tarjeta de delante, por su cara delantera (el reverso tiene sus propios botones), y nunca con Reducir
@@ -495,14 +476,6 @@ struct CardCarousel: View {
             Task {
                 try? await Task.sleep(for: .milliseconds(800))
                 withAnimation(kit.reduce ? nil : kit.animation(.snap)) { selection = target }
-            }
-        case .settle:
-            // El rebote de encaje solo, hacia la derecha, un instante después del toque (la ráfaga ya está en marcha).
-            let card = current
-            Task {
-                try? await Task.sleep(for: .milliseconds(350))
-                settleDirection = 1
-                settles[card, default: 0] += 1
             }
         case nil:
             break
@@ -601,41 +574,5 @@ struct CardCarousel: View {
         guard let info = snapshot.balances[bank] else { return "Cuenta, \(bank.displayName), sin saldo, \(position)" }
         let estimate = info.estimated ? ", estimado" : ""
         return "Cuenta, \(bank.displayName), \(spokenAmount(info.cents, hidden: hidden))\(estimate), \(position)"
-    }
-}
-
-/// El rebote de encaje de una tarjeta: al subir `tick`, se pasa 4 pt (× el recorrido del nivel) en el sentido en que
-/// venía y crece a 1,012, y vuelve a su sitio con el muelle `snap`. Una sola secuencia de fotogramas clave por parada;
-/// solo desplazamiento y escala.
-private struct SettleBounce: ViewModifier {
-    let tick: Int
-    let direction: CGFloat
-    @Environment(\.motion) private var motion
-
-    private struct Values {
-        var x: CGFloat = 0
-        var scale: CGFloat = 1
-    }
-
-    func body(content: Content) -> some View {
-        let spec = MotionMath.scaled(SpringToken.snap.base, level: motion.level, timeMultiplier: motion.timeMultiplier)
-        let spring = Spring(response: spec.response, dampingRatio: spec.dampingFraction)
-        let push = motion.distance(4) * direction
-        let kick = motion.seconds(0.08)
-        let rest = spec.response * 2
-        content.keyframeAnimator(initialValue: Values(), trigger: tick) { view, value in
-            view
-                .offset(x: value.x)
-                .scaleEffect(value.scale)
-        } keyframes: { _ in
-            KeyframeTrack(\.x) {
-                CubicKeyframe(push, duration: kick)
-                SpringKeyframe(0, duration: rest, spring: spring)
-            }
-            KeyframeTrack(\.scale) {
-                CubicKeyframe(1.012, duration: kick)
-                SpringKeyframe(1, duration: rest, spring: spring)
-            }
-        }
     }
 }

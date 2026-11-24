@@ -47,6 +47,8 @@ jobs:
             echo "El simulador no arranco en 10 minutos"
             exit 1
           fi
+      - name: Autoprueba de la agrupacion de fotogramas (cada comprobacion tiene que poder fallar)
+        run: python3 -I .github/scripts/motion_sheets.py selftest
       - name: Compilar para pruebas
         run: |
           mkdir -p build
@@ -131,54 +133,31 @@ jobs:
           if ! which ffmpeg; then brew install ffmpeg; fi
           ffmpeg -version | head -n 1
           mkdir -p build/frames build/sheets
-          # El manifiesto liga cada fichero exportado con el nombre del adjunto («<rafaga>-NN»); se agrupan por rafaga.
-          python3 - <<'PY'
-          import json, os, re, shutil
-          base = "build/attachments"
-          manifest = json.load(open(os.path.join(base, "manifest.json")))
-          groups = {}
-          for test in manifest:
-              for att in test.get("attachments", []):
-                  exported = att.get("exportedFileName")
-                  human = att.get("suggestedHumanReadableName") or exported or ""
-                  if not exported:
-                      continue
-                  stem = os.path.splitext(human)[0]
-                  # Xcode añade «_<indice>_<UUID>» al nombre sugerido.
-                  stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)
-                  m = re.match(r"^(.+)-(\d{2})$", stem)
-                  if not m:
-                      continue
-                  groups.setdefault(m.group(1), []).append((int(m.group(2)), os.path.join(base, exported)))
-          if not groups:
-              raise SystemExit("El manifiesto no tiene adjuntos con nombre <rafaga>-NN")
-          for name, items in sorted(groups.items()):
-              items.sort()
-              folder = os.path.join("build/frames", name)
-              os.makedirs(folder, exist_ok=True)
-              for i, (_, path) in enumerate(items, start=1):
-                  shutil.copy(path, os.path.join(folder, "f%03d.png" % i))
-              print(name, len(items), "fotogramas")
-          PY
+          # Agrupa por rafaga y falla si falta un fotograma, sobra uno, o una clase elegida no dejo ninguna rafaga.
+          python3 -I .github/scripts/motion_sheets.py group --attachments build/attachments --frames build/frames --classes "$TOUR_LIST"
           for dir in build/frames/*/; do
             name=$(basename "$dir")
-            n=$(ls "$dir" | wc -l | tr -d ' ')
+            n=$(ls "$dir"/f*.png | wc -l | tr -d ' ')
             cols=8; if [ "$n" -lt 8 ]; then cols=$n; fi
             rows=$(( (n + 7) / 8 ))
             ffmpeg -y -loglevel error -framerate 1 -i "$dir/f%03d.png" \
               -vf "scale=330:-1,tile=${cols}x${rows}:padding=4:margin=4:color=0x303030" -frames:v 1 "build/sheets/$name.png"
+            cp "$dir/times.txt" "build/sheets/$name.times.txt"
           done
           ls -l build/sheets
-          test -n "$(ls build/sheets/*.png 2>/dev/null)"
-          # Cada clase elegida tiene que haber dejado al menos una hoja (si no, la tuberia se rompio en silencio).
-          echo "Hojas: $(ls build/sheets | tr '\n' ' ')"
+          # Una hoja por rafaga, ni una menos ni una mas.
+          python3 -I .github/scripts/motion_sheets.py verify --frames build/frames --sheets build/sheets
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: motion
-          path: |
-            build/sheets
-            build/tour.mp4
+          path: build/sheets
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: motion-tour
+          path: build/tour.mp4
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: failure()

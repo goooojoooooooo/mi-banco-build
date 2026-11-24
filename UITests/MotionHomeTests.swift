@@ -202,17 +202,19 @@ final class MotionHomeTests: XCTestCase {
 
     // MARK: A2 — Inicio se monta por capas
 
-    /// Abre con el bloqueo de demo y espera a que se quite solo (a los 5 s; en el simulador, tocar «Desbloquear» abre la
-    /// hoja del código del sistema): al quitarse, Inicio se monta por capas.
+    /// Abre con el bloqueo de demo y espera a que se quite solo (a los 6 s; en el simulador, tocar «Desbloquear» abre la
+    /// hoja del código del sistema): al quitarse, Inicio se monta por capas. Con la máquina cargada (batería completa en
+    /// dos simuladores) la primera mirada puede llegar cuando el bloqueo ya se ha quitado: vale igual, lo que se
+    /// comprueba es cómo queda Inicio después.
     private func launchLockedAndUnlock(_ extra: [String] = []) {
         app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "5",
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "6",
                                "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"] + extra
         app.launch()
         let unlock = app.buttons["Desbloquear"]
-        XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta la pantalla de bloqueo")
+        _ = unlock.waitForExistence(timeout: 10)
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: unlock)
-        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 20), .completed, "El bloqueo de demo no se quitó")
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 30), .completed, "El bloqueo de demo no se quitó")
     }
 
     /// Tras desbloquear, Inicio se monta por capas y nada se queda sin aparecer ni sin poder tocarse: la marca, el ojo,

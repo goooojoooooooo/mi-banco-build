@@ -69,9 +69,9 @@ final class MotionScreensTests: XCTestCase {
 
     private func value(_ el: XCUIElement) -> String { (el.value as? String) ?? "" }
 
-    /// Cuántos elementos enseñan un importe con cifras («12,34 €», con el espacio duro de la app o uno normal).
+    /// Los elementos que enseñan un importe con cifras («12,34 €» o «303 €», con el espacio duro de la app o uno normal).
     private func visibleAmounts() -> [String] {
-        let predicate = NSPredicate(format: "label MATCHES %@", ".*[0-9],[0-9]{2}[\u{00A0} ]€.*")
+        let predicate = NSPredicate(format: "label MATCHES %@", ".*[0-9][\u{00A0} ]€.*")
         return app.descendants(matching: .any).matching(predicate).allElementsBoundByIndex.map { $0.label }
     }
 

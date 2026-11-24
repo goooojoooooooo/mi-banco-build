@@ -18,12 +18,12 @@ struct TransfersView: View {
                     .foregroundStyle(Theme.label2)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Theme.Space.gutter)
-                    .staggeredEntrance(0, rise: 8)
+                    .motionEntrance(0, rise: 8)
                     .accessibilityIdentifier("traspasos.explicacion")
                 ForEach(snapshot.transferEntries) { entry in
                     ListEntryView(entry: entry, logoDomain: domain(entry, snapshot), isFresh: false, zoom: zoom,
                                   onOpen: openDetail, onDeleteUnread: { _ in })
-                        .staggeredEntrance(1 + entry.order)
+                        .motionEntrance(1 + entry.order)
                 }
             }
             .padding(.bottom, Theme.Space.section)

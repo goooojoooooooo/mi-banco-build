@@ -34,26 +34,26 @@ struct SpendingView: View {
                             move(by: step, months: months, from: index)
                         }
                         .padding(.horizontal, 4)
-                        .staggeredEntrance(0, rise: 8)
+                        .motionEntrance(0, rise: 8)
 
                         SpendingTotal(cents: content.month.totalCents, monthName: content.title)
                             .padding(.horizontal, Theme.Space.gutter)
                             .padding(.top, 2)
-                            .staggeredEntrance(1)
+                            .motionEntrance(1)
 
                         // Lo que cambia con el mes: se funde y se desliza hacia donde vas; las filas entran escalonadas.
                         VStack(alignment: .leading, spacing: 0) {
                             SpendingSentences(comparison: content.comparison, forecast: content.forecast)
                                 .padding(.horizontal, Theme.Space.gutter)
                                 .padding(.top, 8)
-                                .staggeredEntrance(2, listIndex: 0)
+                                .motionEntrance(2, listIndex: 0)
 
                             // El gráfico del mes: se dibuja solo al entrar y al cambiar de mes (nada que dibujar sin gasto).
                             if !content.series.isEmpty {
                                 MonthChart(series: content.series, title: content.title, previousTitle: content.previousTitle)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 14)
-                                    .staggeredEntrance(2, listIndex: 0)
+                                    .motionEntrance(2, listIndex: 0)
                             }
 
                             // El presupuesto del mes («412 de 700 €  59 %»), solo en el mes en curso.
@@ -62,7 +62,7 @@ struct SpendingView: View {
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 14)
                                     .accessibilityIdentifier("gasto.presupuestoMes")
-                                    .staggeredEntrance(2, listIndex: 0)
+                                    .motionEntrance(2, listIndex: 0)
                             }
 
                             Text("Por categoría")
@@ -72,7 +72,7 @@ struct SpendingView: View {
                                 .padding(.top, Theme.Space.section)
                                 .padding(.bottom, 6)
                                 .accessibilityAddTraits(.isHeader)
-                                .staggeredEntrance(3, listIndex: 0)
+                                .motionEntrance(3, listIndex: 0)
 
                             if !content.rows.isEmpty {
                                 Text(content.markCaption)
@@ -81,7 +81,7 @@ struct SpendingView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.bottom, 4)
-                                    .staggeredEntrance(3, listIndex: 0)
+                                    .motionEntrance(3, listIndex: 0)
                                     .accessibilityHidden(true)
                                     .accessibilityIdentifier("gasto.marca")
                             }
@@ -92,7 +92,7 @@ struct SpendingView: View {
                                     .foregroundStyle(Theme.label2)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 8)
-                                    .staggeredEntrance(4, listIndex: 1)
+                                    .motionEntrance(4, listIndex: 1)
                                     .accessibilityIdentifier("gasto.vacio")
                             } else {
                                 ForEach(Array(content.rows.enumerated()), id: \.element.id) { i, row in
@@ -100,7 +100,7 @@ struct SpendingView: View {
                                         CategoryRow(row: row, index: i, markName: content.markName)
                                     }
                                     .buttonStyle(.row)
-                                    .staggeredEntrance(4 + i, listIndex: 1 + i)
+                                    .motionEntrance(4 + i, listIndex: 1 + i)
                                 }
                             }
                         }
@@ -109,7 +109,7 @@ struct SpendingView: View {
 
                         SpendingLinkRows(links: snapshot.spendingLinks)
                             .padding(.top, Theme.Space.section)
-                            .staggeredEntrance(5, listIndex: 3)
+                            .motionEntrance(5, listIndex: 3)
                     }
                 }
                 .padding(.bottom, Theme.Space.section)

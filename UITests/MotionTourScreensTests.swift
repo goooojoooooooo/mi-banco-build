@@ -94,12 +94,12 @@ final class MotionTourScreensTests: MotionTourCase {
     }
 
     func testSpendingMonth() throws {
-        spendingMonth("spending-month", extra: [], frames: 24, every: 0.4)
+        spendingMonth("spending-month", extra: [], frames: 30, every: 0.3)
     }
 
     /// Lo mismo con el ojo cerrado: puntos en vez de cifras en todos los fotogramas, y «•••» en la rejilla del gráfico.
     func testSpendingMonthEye() throws {
-        spendingMonth("spending-month-eye", extra: ["-MiBancoDemoPrivate"], frames: 24, every: 0.4)
+        spendingMonth("spending-month-eye", extra: ["-MiBancoDemoPrivate"], frames: 30, every: 0.3)
     }
 
     /// Con Reducir movimiento: sin rodar ni trazar; todo aparece ya en su sitio (fundidos).
@@ -207,14 +207,14 @@ final class MotionTourScreensTests: MotionTourCase {
 
     // MARK: - Próximos cobros: la entrada de siempre
 
-    /// Los días entran uno tras otro (la entrada estándar; aún va a tiempo real, así que los fotogramas van muy seguidos).
+    /// Los días entran uno tras otro: cada bloque sube y aparece (la entrada estándar, con los tiempos del kit).
     func testUpcomingCalendar() throws {
         launchGasto()
         let link = element("gasto.proximos")
         scrollDown(to: link)
         XCTAssertTrue(link.isHittable, "No se puede abrir Próximos cobros")
         link.tap()
-        burst("upcoming-calendar", frames: 10, every: 0.12)
+        burst("upcoming-calendar", frames: 12, every: 0.25)
         XCTAssertTrue(element("upcoming-calendar-scroll").waitForExistence(timeout: 10), "La ráfaga no es de Próximos cobros")
     }
 }

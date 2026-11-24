@@ -127,7 +127,7 @@ struct BudgetsView: View {
         .padding(.vertical, 10)
         .frame(minHeight: 64)
         .animation(reduceMotion ? nil : Theme.Motion.reveal, value: status != nil)
-        .staggeredEntrance(index, rise: 10)
+        .motionEntrance(index, rise: 10)
     }
 
     private func name(_ scope: BudgetScope) -> String {

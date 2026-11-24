@@ -236,16 +236,19 @@ extension InsightKind {
 /// Una frase con un importe dentro ("Pago grande: 320,00 € en MediaMarkt"): el importe es un `RollingAmount` (rueda desde
 /// 0 la primera vez que se ve y al entrar en la pestaña, y del valor anterior al nuevo si cambia); el resto del texto no se
 /// mueve. La frase se parte en palabras y se coloca como un párrafo (`SentenceFlow`), así el importe puede ir en medio y
-/// la frase sigue saltando de línea donde le toca. Con el modo privado, el importe son los puntos del kit («•••,•• €», nunca
-/// una cifra) y cualquier otro importe de la frase pasa a «•••». Sin importe, es un texto normal.
+/// la frase sigue saltando de línea donde le toca. Con el modo privado no se monta ninguna cifra: la frase es un texto con
+/// la máscara del kit («•••,•• €») en el sitio del importe y «•••» en cualquier otro. Sin importe, es un texto normal.
 /// Quien la usa pone la etiqueta de VoiceOver de la fila entera.
 private struct RollingSentence: View {
     let text: String
     let hidden: Bool
 
     var body: some View {
-        if let split = AmountSplit(text) {
-            let pieces = SentencePieces(split, hidden: hidden)
+        if hidden {
+            // Ninguna cifra montada: un texto normal con la máscara del kit en el sitio del importe.
+            Text(masked)
+        } else if let split = AmountSplit(text) {
+            let pieces = SentencePieces(split)
             SentenceFlow {
                 ForEach(Array(pieces.before.enumerated()), id: \.offset) { _, word in
                     Text(word)
@@ -260,22 +263,27 @@ private struct RollingSentence: View {
                 }
             }
         } else {
-            Text(hidden ? maskingAmounts(text) : text)
+            Text(text)
         }
+    }
+
+    /// "Pago grande: •••,•• € en MediaMarkt": la máscara del kit donde iba el importe y «•••» en los demás.
+    private var masked: String {
+        guard let split = AmountSplit(text) else { return maskingAmounts(text) }
+        return maskingAmounts(split.prefix) + maskedEUR(split.cents, sign: false) + maskingAmounts(split.suffix)
     }
 }
 
 /// Las piezas de una frase con importe: las palabras de antes (cada una con su espacio detrás), lo que va pegado al
-/// importe (hasta el primer espacio, incluido) y las palabras de después. Con `hidden`, los demás importes van tapados.
+/// importe (hasta el primer espacio, incluido) y las palabras de después.
 struct SentencePieces: Equatable {
     let before: [String]
     let glue: String
     let after: [String]
 
-    init(_ split: AmountSplit, hidden: Bool) {
-        let prefix = hidden ? maskingAmounts(split.prefix) : split.prefix
-        let suffix = hidden ? maskingAmounts(split.suffix) : split.suffix
-        before = Self.words(prefix)
+    init(_ split: AmountSplit) {
+        let suffix = split.suffix
+        before = Self.words(split.prefix)
         if let space = suffix.firstIndex(of: " ") {
             let cut = suffix.index(after: space)
             glue = String(suffix[..<cut])

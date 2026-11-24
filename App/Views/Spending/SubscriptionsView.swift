@@ -22,16 +22,16 @@ struct SubscriptionsView: View {
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.top, Theme.Space.small)
                         .accessibilityIdentifier("suscripciones.vacio")
-                        .staggeredEntrance(0, rise: 8)
+                        .motionEntrance(0, rise: 8)
                 } else {
                     SubscriptionsHeader(monthlyCents: snapshot.subscriptionsMonthlyCents,
                                         yearlyCents: snapshot.subscriptionsYearlyCents)
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.bottom, 10)
-                        .staggeredEntrance(0, rise: 8)
+                        .motionEntrance(0, rise: 8)
                     ForEach(Array(snapshot.subscriptions.enumerated()), id: \.element.id) { i, row in
                         SubscriptionRowView(row: row, isLast: i == snapshot.subscriptions.count - 1, index: i, hideAction: { hide(row) })
-                            .staggeredEntrance(1 + i)
+                            .motionEntrance(1 + i)
                             .transition(rowTransition)
                     }
                     // Ocultar una fila es un menú contextual: se dice aquí para que se pueda descubrir.
@@ -42,7 +42,7 @@ struct SubscriptionsView: View {
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.top, Theme.Space.row)
                         .accessibilityIdentifier("suscripciones.pie")
-                        .staggeredEntrance(1 + snapshot.subscriptions.count)
+                        .motionEntrance(1 + snapshot.subscriptions.count)
                 }
 
                 if !snapshot.hiddenSubscriptions.isEmpty {
@@ -114,10 +114,10 @@ struct HiddenSubscriptionsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Theme.Space.gutter)
                     .padding(.bottom, 8)
-                    .staggeredEntrance(0, rise: 8)
+                    .motionEntrance(0, rise: 8)
                 ForEach(Array(hidden.enumerated()), id: \.element.id) { i, row in
                     SubscriptionRowView(row: row, isLast: i == hidden.count - 1, restoreAction: { restore(row) })
-                        .staggeredEntrance(1 + i)
+                        .motionEntrance(1 + i)
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .trailing)))
                 }
             }
@@ -271,19 +271,7 @@ struct SubscriptionRowView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: stacked ? .leading : .trailing, spacing: 2) {
-                    Text(formatEUR(row.amountCents))
-                        .titan(.row)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .privateAmount()
-                    if let change = row.priceChange {
-                        Text(change)
-                            .titan(.meta)
-                            .foregroundStyle(row.priceWentUp ? Theme.warning : Theme.label2)
-                            .lineLimit(1)
-                            .privateAmount(radius: 6)
-                    }
+                    amountTexts
                 }
                 .padding(.leading, stacked ? tileSize + 14 : 0)
             }
@@ -334,19 +322,7 @@ struct SubscriptionRowView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(formatEUR(row.amountCents))
-                        .titan(.row)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .privateAmount()
-                    if let change = row.priceChange {
-                        Text(change)
-                            .titan(.meta)
-                            .foregroundStyle(row.priceWentUp ? Theme.warning : Theme.label2)
-                            .lineLimit(1)
-                            .privateAmount(radius: 6)
-                    }
+                    amountTexts
                 }
             }
         }
@@ -357,6 +333,27 @@ struct SubscriptionRowView: View {
             restoreAction?()
         }
         .accessibilityIdentifier(restoreAction == nil ? "suscripciones.fila" : "suscripciones.filaOculta")
+    }
+
+    /// El importe y, debajo, el cambio de precio. Con el ojo cerrado no se monta ninguna cifra: la máscara del kit
+    /// («•••,•• €») y «Sube ••• €», no un desenfoque.
+    @ViewBuilder private var amountTexts: some View {
+        let hidden = preferences.privateMode
+        Text(hidden ? maskedEUR(row.amountCents, sign: false) : formatEUR(row.amountCents))
+            .titan(.row)
+            .foregroundStyle(Theme.label)
+            .lineLimit(1)
+            .fixedSize()
+            .contentTransition(.identity)
+            .privacySensitive()
+        if let change = row.priceChange {
+            Text(hidden ? maskingAmounts(change) : change)
+                .titan(.meta)
+                .foregroundStyle(row.priceWentUp ? Theme.warning : Theme.label2)
+                .lineLimit(1)
+                .contentTransition(.identity)
+                .privacySensitive()
+        }
     }
 
     private var spoken: String {

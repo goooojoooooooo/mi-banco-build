@@ -19,7 +19,6 @@ struct BudgetBar: View {
     static let warnAt = 0.9
 
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.motion) private var motion
     /// Cruces del aviso vistos por esta barra (cada uno, una vibración).
     @State private var warnings = 0
 
@@ -31,22 +30,24 @@ struct BudgetBar: View {
     private var nearLimit: Bool { MotionMath.isOver(fraction, warnAt: Self.warnAt) }
 
     var body: some View {
+        // Con el ojo cerrado no se monta ninguna cifra: «••• de ••• €» y «•• %», no un desenfoque.
+        let hidden = preferences.privateMode
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(amounts)
+                Text(hidden ? "••• de •••\u{00A0}€" : amounts)
                     .titan(.callout)
                     .foregroundStyle(Theme.label2)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                 Spacer(minLength: 8)
-                Text("\(status.percent)\u{00A0}%")
+                Text(hidden ? "••\u{00A0}%" : "\(status.percent)\u{00A0}%")
                     .titan(.callout)
                     .fontWeight(.medium)
                     .foregroundStyle(nearLimit ? Theme.warning : Theme.label)
-                    .animation(motion.calmAnimation(.row), value: nearLimit)
             }
             .padding(.trailing, textTrailingInset)
-            .privateAmount(radius: 7)
+            .contentTransition(.identity)
+            .privacySensitive()
             // Presupuestos entran 0,38 s después de empezar y luego una tras otra (48 ms × 0,86ⁿ), como en la maqueta.
             FillBar(fraction: fraction, warnAt: Self.warnAt, label: name,
                     delay: 0.38 + MotionMath.staggerDelays(count: index + 1, firstGap: 0.048, decay: 0.86)[index],

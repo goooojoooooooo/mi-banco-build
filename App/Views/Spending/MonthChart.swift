@@ -22,8 +22,8 @@ struct MonthChart: View {
     @Environment(\.entrance) private var entrance
     /// La entrada por capas en la que el gráfico ya ha empezado a dibujarse; nil = aún no ha empezado nunca.
     @State private var landed: Int?
-    /// Cada dibujo lanza el anillo del punto de hoy.
-    @State private var pulse = 0
+    /// Cada dibujo lanza el salto del punto de hoy y (con efectos ricos) su anillo.
+    @State private var draw = 0
 
     private static let previousColor = Color(hex: "#5A5A5E")
 
@@ -63,7 +63,7 @@ struct MonthChart: View {
     private func start() {
         guard !motion.reduce else { return }
         landed = entrance.token
-        if motion.richEffects { pulse += 1 }
+        draw += 1
     }
 
     /// La animación de una pieza al dibujarse; al ponerse en blanco, ninguna.
@@ -79,6 +79,8 @@ struct MonthChart: View {
             }
             .foregroundStyle(Self.previousColor)
             .lineStyle(StrokeStyle(lineWidth: 1.4, lineCap: .round, dash: [3, 4]))
+            // Los puntos de Charts dirían cada importe: no existen para la accesibilidad (el gráfico se lee entero).
+            .accessibilityHidden(true)
         }
         .chartXScale(domain: 0...series.axisDays)
         .chartYScale(domain: 0...top)
@@ -128,7 +130,7 @@ struct MonthChart: View {
                     Circle()
                         .stroke(Theme.label, lineWidth: 1.2)
                         .frame(width: 8, height: 8)
-                        .keyframeAnimator(initialValue: RingPulse(), trigger: pulse) { content, value in
+                        .keyframeAnimator(initialValue: RingPulse(), trigger: motion.richEffects ? draw : 0) { content, value in
                             content.scaleEffect(value.scale).opacity(value.opacity)
                         } keyframes: { _ in
                             KeyframeTrack(\.opacity) {
@@ -142,12 +144,28 @@ struct MonthChart: View {
                             }
                         }
                         .position(end)
+                    // El punto de hoy: invisible hasta que llega la línea (1 s) y entonces salta de 0,2 a 1 con rebote. Va
+                    // por fotogramas clave (como el anillo) y no con un muelle implícito: un muelle que se repite antes
+                    // de haberse asentado se funde con el anterior y el punto se quedaba a la vista desde el principio.
+                    // En reposo (y con Reducir movimiento, que no lanza nada) está entero y a la vista.
                     Circle()
                         .fill(Theme.label)
                         .frame(width: 6.4, height: 6.4)
-                        .scaleEffect(on ? 1 : 0.2)
-                        .opacity(on ? 1 : 0)
-                        .animation(draws(motion.animation(.release).delay(motion.seconds(1.0))), value: on)
+                        .keyframeAnimator(initialValue: DotPop(), trigger: draw) { content, value in
+                            content.scaleEffect(value.scale).opacity(value.opacity)
+                        } keyframes: { _ in
+                            KeyframeTrack(\.opacity) {
+                                MoveKeyframe(0.0)
+                                LinearKeyframe(0.0, duration: motion.seconds(1.0))
+                                MoveKeyframe(1.0)
+                            }
+                            KeyframeTrack(\.scale) {
+                                MoveKeyframe(0.2)
+                                LinearKeyframe(0.2, duration: motion.seconds(1.0))
+                                SpringKeyframe(1.0, duration: motion.seconds(0.7),
+                                               spring: .bouncy(duration: motion.seconds(0.36), extraBounce: 0.2))
+                            }
+                        }
                         .position(end)
                 }
             }
@@ -162,6 +180,12 @@ struct MonthChart: View {
                 .foregroundStyle(Theme.label3)
         }
     }
+}
+
+/// Lo que se anima del punto de hoy (en reposo, entero y a la vista).
+private struct DotPop {
+    var scale = 1.0
+    var opacity = 1.0
 }
 
 /// Lo que se anima del anillo del punto de hoy.

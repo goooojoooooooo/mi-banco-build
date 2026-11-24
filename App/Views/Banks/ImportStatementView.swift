@@ -17,33 +17,40 @@ private struct ImportMorphButton: View {
 
     var body: some View {
         Button(action: action) {
-            ZStack {
-                Text("Importar")
-                    .titan(.option)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(Theme.onTileSelected)
-                    .lineLimit(1)
-                    .fixedSize()
-                    .opacity(phase == .idle ? 1 : 0)
-                if phase == .working {
-                    ProgressView()
-                        .tint(.black)
-                        .transition(.opacity)
+            // La cápsula se encoge hasta ser un círculo, centrada. El título, la rueda y el ✓ van en una capa aparte,
+            // centrada en el ancho entero de la fila (que no cambia): así no se mueven de sitio mientras la cápsula se
+            // encoge. El título es negro: lo que sobresale de la cápsula, sobre el fondo negro, no se ve.
+            Capsule()
+                .fill(Theme.tileSelected)
+                .frame(maxWidth: collapsed ? 52 : .infinity, minHeight: 52, maxHeight: 52)
+                .frame(maxWidth: .infinity)
+                .overlay {
+                    ZStack {
+                        Text("Importar")
+                            .titan(.option)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Theme.onTileSelected)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .opacity(phase == .idle ? 1 : 0)
+                        if phase == .working {
+                            ProgressView()
+                                .tint(.black)
+                                .transition(.opacity)
+                        }
+                        if phase == .done {
+                            DrawnCheck(lineWidth: 2.8, color: .black)
+                                .frame(width: 22, height: 22)
+                                .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+                        }
+                    }
                 }
-                if phase == .done {
-                    DrawnCheck(lineWidth: 2.8, color: .black)
-                        .frame(width: 22, height: 22)
-                        .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
-                }
-            }
-            .frame(maxWidth: collapsed ? 52 : .infinity, minHeight: 52)
-            .background(Theme.tileSelected, in: Capsule())
-            .contentShape(Capsule())
+                .contentShape(Rectangle())
         }
         .buttonStyle(.pressable)
         .disabled(phase != .idle)
-        .frame(maxWidth: .infinity)
-        .animation(motion.animation(.snap), value: phase)
+        // Sin rebote: con el muelle que se pasa, la cápsula se quedaba un instante más estrecha que el círculo.
+        .animation(motion.calmAnimation(.snap), value: phase)
         .accessibilityLabel(phase == .done ? "Importado" : (phase == .working ? "Importando" : "Importar"))
         .accessibilityIdentifier("import-confirm")
     }

@@ -63,7 +63,7 @@ struct MotionGallery: View {
     @State private var rowTaps = 0
     @State private var rowTapsAbove = 0
     @State private var rowTapsBelow = 0
-    @State private var liveFaces = -1
+    @State private var census = (faces: -1, slots: -1, frames: -1)
 
     private var motion: MotionContext {
         var m = baseMotion
@@ -213,18 +213,28 @@ struct MotionGallery: View {
         }
     }
 
-    /// Cuántas caras con cifras reales (cada una con su `TimelineView`) hay montadas: una por importe (K22). Al final de
-    /// la galería, para no poner un botón en el hueco bajo las filas (las pruebas de toques lo quieren vacío).
+    /// Cuántas caras con cifras reales (cada una con su `TimelineView`) y cuántas copias de medida (texto oculto, sin
+    /// `TimelineView`) hay montadas: una de cada por importe; y cuántos fotogramas han dibujado las caras (en reposo, no
+    /// suben) (K22). Al final de la galería, para no poner un botón en el hueco bajo las filas (las pruebas de toques lo
+    /// quieren vacío). `verbatim`: sin separador de miles.
     private var censusSection: some View {
         section("Recuento") {
             HStack(spacing: 10) {
-                chip("Contar caras", id: "gallery.census") { liveFaces = RollingAmountCensus.liveFaces }
-                Text("\(liveFaces)")
-                    .titan(.subtitle)
-                    .foregroundStyle(Theme.label2)
-                    .accessibilityIdentifier("gallery.census.value")
+                chip("Contar caras", id: "gallery.census") {
+                    census = (RollingAmountCensus.liveFaces, RollingAmountCensus.measuringSlots, RollingAmountCensus.faceFrames)
+                }
+                censusValue(census.faces, id: "gallery.census.value")
+                censusValue(census.slots, id: "gallery.census.slots")
+                censusValue(census.frames, id: "gallery.census.frames")
             }
         }
+    }
+
+    private func censusValue(_ value: Int, id: String) -> some View {
+        Text(verbatim: String(value))
+            .titan(.subtitle)
+            .foregroundStyle(Theme.label2)
+            .accessibilityIdentifier(id)
     }
 
     /// Una fila-botón con importe; su valor de accesibilidad cuenta los toques. El importe dentro lleva el identificador

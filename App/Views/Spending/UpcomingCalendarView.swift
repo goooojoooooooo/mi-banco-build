@@ -41,6 +41,7 @@ struct UpcomingCalendarView: View {
                     .foregroundStyle(Theme.label2)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
+                    .motionEntrance(0, rise: 8)
 
                 if !hasAnyActivity {
                     VStack(alignment: .leading, spacing: 8) {
@@ -55,14 +56,19 @@ struct UpcomingCalendarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(18)
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+                    .motionEntrance(1)
                 } else {
-                    ForEach(blocks) { block in
-                        switch block {
-                        case .day(let day):
-                            daySection(day, allDays: days, topUps: topUpsByDay[day.day] ?? [], now: now, calendar: cal)
-                        case .quietSpan(let first, let nextActive):
-                            quietSpanRow(first: first, nextActive: nextActive, now: now, calendar: cal)
+                    // La entrada de siempre: cada día sube y aparece tras el anterior (los que pasan del tope, ya colocados).
+                    ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
+                        Group {
+                            switch block {
+                            case .day(let day):
+                                daySection(day, allDays: days, topUps: topUpsByDay[day.day] ?? [], now: now, calendar: cal)
+                            case .quietSpan(let first, let nextActive):
+                                quietSpanRow(first: first, nextActive: nextActive, now: now, calendar: cal)
+                            }
                         }
+                        .motionEntrance(1 + index)
                     }
                 }
             }
@@ -74,6 +80,7 @@ struct UpcomingCalendarView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Próximos cobros")
         .navigationBarTitleDisplayMode(.inline)
+        .assemblesOnFirstAppear()
     }
 
     private func buildBlocks(days: [UpcomingDay]) -> [CalendarBlock] {
@@ -203,10 +210,13 @@ struct UpcomingCalendarView: View {
                 }
             }
             Spacer(minLength: 8)
-            Text("\u{2212}\(formatEUR(charge.cents))")
+            // Con el ojo cerrado no se monta ninguna cifra: la máscara del kit («−•••,•• €»), no un desenfoque.
+            Text(hidden ? maskedEUR(-charge.cents, sign: false) : "\u{2212}\(formatEUR(charge.cents))")
                 .titan(.option)
                 .foregroundStyle(Theme.label)
-                .privateAmount(spoken: "\u{2212}\(formatEUR(charge.cents))")
+                .contentTransition(.identity)
+                .privacySensitive()
+                .accessibilityLabel(hidden ? "importe oculto" : "\u{2212}\(formatEUR(charge.cents))")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -233,10 +243,11 @@ struct UpcomingCalendarView: View {
                     .foregroundStyle(Theme.label3)
             }
             Spacer(minLength: 8)
-            Text("+\(formatEUR(income.cents))")
+            Text(hidden ? maskedEUR(income.cents, sign: true) : "+\(formatEUR(income.cents))")
                 .titan(.option)
                 .foregroundStyle(Theme.income)
-                .privateAmount()
+                .contentTransition(.identity)
+                .privacySensitive()
                 .accessibilityLabel(hidden ? "importe oculto" : "+\(formatEUR(income.cents))")
         }
         .padding(.horizontal, 14)
@@ -370,13 +381,15 @@ struct UpcomingCalendarView: View {
                             Text(bank.shortName)
                                 .titan(.caption)
                                 .foregroundStyle(Theme.label3)
-                            Text(text)
+                            // Con el ojo cerrado, la máscara (con su «≈» si el saldo es estimado), nunca la cifra.
+                            Text(hidden ? (estimated ? "≈\u{00A0}" : "") + maskedEUR(cents, sign: false) : text)
                                 .titan(.meta)
                                 .fontWeight(.medium)
                                 .foregroundStyle(below ? Theme.warning : Theme.label2)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
-                                .privateAmount()
+                                .contentTransition(.identity)
+                                .privacySensitive()
                                 .accessibilityLabel(hidden ? "importe oculto" : text)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)

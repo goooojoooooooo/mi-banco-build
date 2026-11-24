@@ -25,6 +25,8 @@ struct SettingsView: View {
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// El movimiento tal como lo ve el kit: la fila «Animaciones» dice el nivel que de verdad está en uso.
+    @Environment(\.motion) private var motion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
     /// Bancos recién guardados: un ✓ que se traza junto al campo.
@@ -191,6 +193,22 @@ struct SettingsView: View {
                     SettingsFooter("Al volver a la app te pedirá Face ID o tu código. El ojo de Inicio es el mismo modo privado.")
                 }
 
+                // Intensidad del movimiento: el segmentado del kit, a todo el ancho de su grupo. Cambia al instante en
+                // toda la app (`MotionEnvironment` lee esta preferencia) y se recuerda.
+                Section {
+                    TitanSegmented(selection: motionLevelBinding, options: Self.motionLevels)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("Animaciones")
+                        .accessibilityValue(Self.motionTitle(motion.level))
+                        .accessibilityIdentifier("settings-motion-level")
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                        .listRowBackground(Theme.grouped)
+                } header: {
+                    SettingsHeader("Animaciones")
+                } footer: {
+                    SettingsFooter("Con Reducir movimiento activado en el iPhone, la app usa fundidos tranquilos.")
+                }
+
                 InvestmentsSection(portfolio: portfolio, importTradeRepublic: importTradeRepublic)
 
                 AssistantSettingsSection(briefing: briefing)
@@ -270,6 +288,23 @@ struct SettingsView: View {
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
         .sensoryFeedback(.success, trigger: saveCount)
         .sensoryFeedback(.error, trigger: errorCount)
+    }
+
+    /// Los tres niveles, del más tranquilo al que aprobó el dueño.
+    private static let motionLevels: [(value: MotionLevel, title: String)] = [
+        (.subtle, "Sutil"), (.balanced, "Equilibrado"), (.expressive, "Expresivo"),
+    ]
+
+    private static func motionTitle(_ level: MotionLevel) -> String {
+        switch level {
+        case .subtle: "Sutil"
+        case .balanced: "Equilibrado"
+        case .expressive: "Expresivo"
+        }
+    }
+
+    private var motionLevelBinding: Binding<MotionLevel> {
+        Binding(get: { preferences.motionLevel }, set: { preferences.motionLevel = $0 })
     }
 
     /// El interruptor y el ojo de Inicio son el mismo estado, con la misma animación.

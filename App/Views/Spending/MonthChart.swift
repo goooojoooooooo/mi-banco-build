@@ -111,7 +111,7 @@ struct MonthChart: View {
         if let anchor = proxy.plotFrame {
             let frame = geo[anchor]
             let points = series.current.compactMap { point in
-                proxy.position(forX: point.day, y: point.cents).map { CGPoint(x: frame.minX + $0.x, y: frame.minY + $0.y) }
+                proxy.position(for: (x: point.day, y: point.cents)).map { CGPoint(x: frame.minX + $0.x, y: frame.minY + $0.y) }
             }
             if points.count > 1, let end = points.last {
                 ZStack {

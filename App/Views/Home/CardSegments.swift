@@ -8,7 +8,7 @@ struct CardSegments: View {
     @Binding var selection: AccountCard?
     let motion: HomeMotion
 
-    @Environment(\.motion) private var kit
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HStack(spacing: 0) {
@@ -43,14 +43,7 @@ struct CardSegments: View {
     }
 
     private func select(_ card: AccountCard) {
-        #if DEBUG
-        // Solo demo (`-MiBancoDemoCardMoment`): tocar el segmento que ya está elegido dispara ese momento de la tarjeta.
-        if card == (selection ?? .all), DemoMode.cardMoment != nil {
-            motion.demoMomentTick += 1
-            return
-        }
-        #endif
-        withAnimation(kit.reduce ? nil : kit.animation(.snap)) { selection = card }
+        withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { selection = card }
     }
 }
 

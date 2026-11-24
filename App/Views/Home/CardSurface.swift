@@ -6,14 +6,10 @@ import SwiftUI
 /// 3. Cepillado de 1 px al 1,6 %.
 /// 4. Sombra interior abajo, para dar peso.
 /// Las capas 1 y 2 se mueven con `visualEffect` (posición en el carrusel), así que arrastrar no vuelve a evaluar
-/// ningún `body`: el brillo y el canto van con el dedo porque la tarjeta va con el dedo. Además siguen la inclinación
-/// física del teléfono (`\.cardTilt`, solo en Inicio): el brillo se desplaza y el canto gira un poco más.
-/// Con Reducir movimiento se quedan quietas; con Bajo consumo el brillo no se dibuja y nada sigue la inclinación.
+/// ningún `body`. Con Reducir movimiento se quedan quietas.
 struct CardSurface: View {
     let material: CardMaterial
     var moves = true
-
-    @Environment(\.cardTilt) private var tilt
 
     private var shape: RoundedRectangle { RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous) }
 
@@ -21,36 +17,21 @@ struct CardSurface: View {
         shape
             .fill(material.gradient)
             .overlay { BrushedGrain().clipShape(shape) }
-            .overlay { CardSheen(moves: moves, tilt: tilt).clipShape(shape) }
+            .overlay { sheen.clipShape(shape) }
             .overlay {
                 LinearGradient(stops: [.init(color: .clear, location: 0.55), .init(color: .black.opacity(0.22), location: 1)],
                                startPoint: .top, endPoint: .bottom)
                     .clipShape(shape)
             }
-            .overlay { CardEdge(moves: moves, tilt: tilt).mask { shape.strokeBorder(lineWidth: 1) } }
+            .overlay { edge }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
 
-    /// Cuántas tarjetas separan esta del sitio de reposo (0 = centrada, 1 = la siguiente a la derecha).
-    nonisolated static func distance(_ proxy: GeometryProxy) -> CGFloat {
-        let frame = proxy.frame(in: .scrollView(axis: .horizontal))
-        let step = proxy.size.width + CarouselMetrics.spacing
-        return step > 0 ? (frame.minX - CarouselMetrics.inset) / step : 0
-    }
-}
-
-/// Brillo: franja a 112° sobre un lienzo 2,6 veces más ancho que la tarjeta, como `background-size: 260%`. Se desplaza
-/// 0,6 anchos por tarjeta de recorrido y 0,27 anchos con la inclinación a tope. Solo esta vista lee la inclinación.
-private struct CardSheen: View {
-    let moves: Bool
-    let tilt: MotionTilt?
-    @Environment(\.motion) private var motion
-
-    var body: some View {
-        let follows = moves && !motion.reduce
-        let lean: CGFloat = follows && motion.richEffects ? CGFloat(tilt?.x ?? 0) : 0
-        LinearGradient(
+    /// Franja a 112° sobre un lienzo 2,6 veces más ancho que la tarjeta, como `background-size: 260%`.
+    private var sheen: some View {
+        let moves = moves
+        return LinearGradient(
             stops: [
                 .init(color: .white.opacity(0), location: 0.32),
                 .init(color: .white.opacity(0.075), location: 0.46),
@@ -61,23 +42,14 @@ private struct CardSheen: View {
             .scaleEffect(x: 2.6, y: 1)
             .visualEffect { content, proxy in
                 let width = proxy.size.width
-                let distance = follows ? CardSurface.distance(proxy) : 0
-                return content.offset(x: width * (-0.16 + 0.6 * distance + 0.27 * lean))
+                let distance = moves ? CardSurface.distance(proxy) : 0
+                return content.offset(x: width * (-0.16 + 0.6 * distance))
             }
-            .opacity(motion.lowPower ? 0 : 1)
     }
-}
 
-/// Canto: su luz gira 25° por tarjeta de recorrido y 30° con la inclinación a tope.
-private struct CardEdge: View {
-    let moves: Bool
-    let tilt: MotionTilt?
-    @Environment(\.motion) private var motion
-
-    var body: some View {
-        let follows = moves && !motion.reduce
-        let lean: CGFloat = follows && motion.richEffects ? CGFloat(tilt?.x ?? 0) : 0
-        LinearGradient(
+    private var edge: some View {
+        let moves = moves
+        return LinearGradient(
             stops: [
                 .init(color: .white.opacity(0.30), location: 0),
                 .init(color: .white.opacity(0.06), location: 0.28),
@@ -87,9 +59,17 @@ private struct CardEdge: View {
             startPoint: .top, endPoint: .bottom)
             .scaleEffect(1.8)
             .visualEffect { content, proxy in
-                let distance = follows ? CardSurface.distance(proxy) : 0
-                return content.rotationEffect(.degrees(Double(-15 - 25 * distance - 30 * lean)))
+                let distance = moves ? CardSurface.distance(proxy) : 0
+                return content.rotationEffect(.degrees(Double(-15 - 25 * distance)))
             }
+            .mask { shape.strokeBorder(lineWidth: 1) }
+    }
+
+    /// Cuántas tarjetas separan esta del sitio de reposo (0 = centrada, 1 = la siguiente a la derecha).
+    nonisolated static func distance(_ proxy: GeometryProxy) -> CGFloat {
+        let frame = proxy.frame(in: .scrollView(axis: .horizontal))
+        let step = proxy.size.width + CarouselMetrics.spacing
+        return step > 0 ? (frame.minX - CarouselMetrics.inset) / step : 0
     }
 }
 

@@ -1,9 +1,8 @@
 import SwiftUI
 import MiBancoCore
 
-/// Una tarjeta del carrusel con sus dos caras. Tocarla la voltea en 3D con peso (muelle de 0,55 s con rebote; a mitad de
-/// giro la tarjeta crece un 5 %, se oscurece y un brillo la cruza); detrás: si el saldo es exacto o estimado, desde
-/// cuándo, lo gastado este mes y "Editar saldo". La de delante acompaña un poco a la inclinación del teléfono.
+/// Una tarjeta del carrusel con sus dos caras. Tocarla la voltea en 3D (muelle de 0,55 s, rebote 0,18);
+/// detrás: si el saldo es exacto o estimado, desde cuándo, lo gastado este mes y "Editar saldo".
 struct AccountCardView: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
@@ -15,25 +14,12 @@ struct AccountCardView: View {
     let flipped: Bool
     /// La cifra protagonista cuenta desde 0 la primera vez que la tarjeta se ve.
     let revealed: Bool
-    /// Cada vez que sube, la tarjeta asoma unos grados y vuelve (la pista de que se puede voltear), tras `peekDelay` s.
-    var peek = 0
-    var peekDelay = 0.0
-    /// La tarjeta de delante: la única que acompaña a la inclinación del teléfono.
-    var isFront = false
     let onFlip: () -> Void
     let onEdit: () -> Void
     var onOpenBank: (BankID) -> Void = { _ in }
     var onImportInvestments: () -> Void = {}
 
-    @Environment(\.motion) private var motion
-
-    /// El volteo: 0,55 s con rebote 0,2 (como la maqueta), escalado por la intensidad; con Reducir movimiento, un fundido.
-    private var flipAnimation: Animation {
-        guard !motion.reduce else { return motion.fade }
-        let spec = MotionMath.scaled(SpringSpec(response: 0.55, dampingFraction: 0.8),
-                                     level: motion.level, timeMultiplier: motion.timeMultiplier)
-        return .spring(response: spec.response, dampingFraction: spec.dampingFraction)
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         // La cara delantera es un botón (se hunde al tocar); la trasera lleva su propio botón de acción,
@@ -49,7 +35,6 @@ struct AccountCardView: View {
                 )
             }
             .buttonStyle(PressableButtonStyle(scale: 0.985))
-            .accessibilityIdentifier("card-front-\(card.rawValue)")
             .modifier(FlipFace(angle: flipped ? 180 : 0, isBack: false))
 
             CardBack(
@@ -68,20 +53,16 @@ struct AccountCardView: View {
                 .onTapGesture(perform: onFlip)
                 .modifier(FlipFace(angle: flipped ? 180 : 0, isBack: true))
         }
-        .animation(flipAnimation, value: flipped)
-        .modifier(FlipPeek(trigger: peek, delay: peekDelay))
-        .modifier(TiltedCard(active: isFront && !flipped))
+        .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.flip, value: flipped)
     }
 }
 
 /// Una cara del volteo: gira alrededor del eje Y con perspectiva y solo se ve (y se toca) mientras mira hacia delante.
-/// Con peso: de canto (90°) la tarjeta está un 5 % más grande (× el recorrido del nivel), lleva encima una sombra negra
-/// del 50 % y un brillo que la cruza de lado a lado durante el giro. Solo cambian escala, giro y opacidades.
-/// Con Reducir movimiento no gira ni crece: las dos caras se funden.
+/// Con Reducir movimiento no gira: las dos caras se funden.
 private struct FlipFace: ViewModifier, Animatable {
     var angle: Double
     let isBack: Bool
-    @Environment(\.motion) private var motion
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     nonisolated var animatableData: Double {
         get { angle }
@@ -91,59 +72,11 @@ private struct FlipFace: ViewModifier, Animatable {
     func body(content: Content) -> some View {
         let a = isBack ? angle - 180 : angle
         let facing = abs(a) < 90
-        let reduce = motion.reduce
-        // 0 con la tarjeta de cara, 1 de canto.
-        let edgeOn = reduce ? 0 : abs(sin(angle * .pi / 180))
-        let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
         content
-            .overlay {
-                ZStack {
-                    if motion.richEffects {
-                        SheenOverlay(phase: CGFloat(min(max(angle / 180, 0), 1)), tilt: 0)
-                            .opacity(edgeOn)
-                    }
-                    shape.fill(.black.opacity(0.5 * edgeOn))
-                }
-                .clipShape(shape)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-            .scaleEffect(1 + 0.05 * motion.level.distanceScale * edgeOn)
-            .rotation3DEffect(.degrees(reduce ? 0 : a), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
-            .opacity(reduce ? 1 - abs(a) / 180 : (facing ? 1 : 0))
+            .rotation3DEffect(.degrees(reduceMotion ? 0 : a), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
+            .opacity(reduceMotion ? 1 - abs(a) / 180 : (facing ? 1 : 0))
             .allowsHitTesting(facing)
             .accessibilityHidden(!facing)
-    }
-}
-
-/// La pista de que la tarjeta se voltea: asoma 8° (× el recorrido del nivel) y vuelve con un rebote suave. Una sola
-/// secuencia de fotogramas clave (espera, asoma, vuelve): nada encadenado con temporizadores, y los tiempos salen de
-/// `\.motion`. Quien la dispara decide cuándo (una sola vez, la primera vez que se ve Inicio).
-private struct FlipPeek: ViewModifier {
-    let trigger: Int
-    let delay: Double
-    @Environment(\.motion) private var motion
-
-    private struct Values {
-        var angle = 0.0
-    }
-
-    func body(content: Content) -> some View {
-        let angle = 8 * min(1.5, motion.level.distanceScale)
-        let wait = max(0.01, delay)
-        let out = motion.seconds(0.26)
-        let spec = MotionMath.scaled(SpringToken.liftOut.base, level: motion.level, timeMultiplier: motion.timeMultiplier)
-        let spring = Spring(response: spec.response, dampingRatio: spec.dampingFraction)
-        let back = spec.response * 2.2
-        content.keyframeAnimator(initialValue: Values(), trigger: trigger) { view, value in
-            view.rotation3DEffect(.degrees(value.angle), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
-        } keyframes: { _ in
-            KeyframeTrack(\.angle) {
-                LinearKeyframe(0.0, duration: wait)
-                CubicKeyframe(angle, duration: out)
-                SpringKeyframe(0.0, duration: back, spring: spring)
-            }
-        }
     }
 }
 
@@ -166,7 +99,6 @@ private struct CardFront: View {
             Group {
                 if let cents = heroCents {
                     HeroBalance(cents: cents, revealed: revealed, centsColor: secondary)
-                        .accessibilityIdentifier("card-hero-\(card.rawValue)")
                 } else {
                     // Sin saldo o sin precios: una raya, nunca "0,00 €".
                     Text("—")
@@ -187,10 +119,9 @@ private struct CardFront: View {
                         .titan(.meta)
                         .foregroundStyle(secondary)
                     if let total {
-                        // Rueda como la cifra grande; con el ojo cerrado dibuja «•••,•• €» (nunca la cifra).
-                        RollingAmount(cents: total, revealed: revealed)
+                        CountingAmount(cents: total, revealed: revealed)
                             .titan(.cardTitle)
-                            .accessibilityIdentifier("card-total-\(card.rawValue)")
+                            .privateAmount()
                     } else {
                         Text("—").titan(.cardTitle)
                     }
@@ -352,10 +283,11 @@ private struct CardFront: View {
                     .titan(.meta)
                     .foregroundStyle(secondary)
                     if let info = balances[bank] {
-                        // Si no cabe en su columna se encoge entero (lo hace el propio importe).
-                        RollingAmount(cents: info.cents, revealed: revealed)
+                        CountingAmount(cents: info.cents, revealed: revealed)
                             .titan(.cardBalance)
-                            .accessibilityIdentifier("card-bank-\(bank.rawValue)")
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .privateAmount()
                             .padding(.top, 5)
                         Text(DateText.balanceStatus(info))
                             .titan(.caption)
@@ -387,7 +319,6 @@ private struct CardBack: View {
 
     @Environment(\.colorSchemeContrast) private var contrast
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.motion) private var motion
     @State private var refreshing = false
     @State private var refreshedCheck = false
 
@@ -421,14 +352,10 @@ private struct CardBack: View {
                     Text(title)
                         .titan(.cardTitle)
                         .padding(.top, 14)
-                    // «Actualizado hace 5 min · exacto»: al cambiar (cada minuto, o al actualizar) las cifras ruedan en su
-                    // sitio; con Reducir movimiento, un fundido. Son minutos, no importes.
-                    let status = explanation(liveLines: liveLines)
-                    Text(status)
+                    Text(explanation(liveLines: liveLines))
                         .titan(.subtitle)
                         .foregroundStyle(secondary)
-                        .contentTransition(motion.reduce ? .opacity : .numericText())
-                        .animation(motion.calmAnimation(.snap), value: status)
+                        .contentTransition(.numericText())
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 4)
 
@@ -445,9 +372,9 @@ private struct CardBack: View {
                     HStack(alignment: .bottom, spacing: Theme.Space.row) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Gastado este mes").titan(.meta).foregroundStyle(secondary)
-                            RollingAmount(cents: monthSpent, revealed: flipped)
+                            CountingAmount(cents: monthSpent, revealed: flipped)
                                 .titan(.cardTitle)
-                                .accessibilityIdentifier("card-month-\(card.rawValue)")
+                                .privateAmount()
                         }
                         Spacer(minLength: 0)
                         trailingActionButton(liveLines: liveLines)
@@ -678,17 +605,21 @@ private struct CardBack: View {
     }
 }
 
-/// La cifra grande de la tarjeta: euros a 50 pt y céntimos a 26 pt en gris de tarjeta. Rueda como un cuentakilómetros
-/// (`RollingAmount`): cuenta desde 0 la primera vez que se ve, rueda en cada cambio y, con el ojo cerrado, dibuja
-/// «•••,•• €» (nunca la cifra). El propio importe crece con Dynamic Type (hasta ×1,35) y, si no cabe, se encoge entero.
+/// La cifra grande de la tarjeta: euros a 50 pt y céntimos a 26 pt en gris de tarjeta; escalan juntos con
+/// Dynamic Type y, si no caben, se reducen juntos (los decimales mantienen su proporción).
 struct HeroBalance: View {
     let cents: Int
     var revealed = true
     var centsColor = Theme.card2
+    @ScaledMetric(relativeTo: .largeTitle) private var euroSize: CGFloat = 50
+    @ScaledMetric(relativeTo: .largeTitle) private var centSize: CGFloat = 26
 
     var body: some View {
-        RollingAmount(cents: cents, revealed: revealed,
-                      style: .hero(euros: 50, cents: 26, centsColor: centsColor))
+        CountingAmount(cents: cents, revealed: revealed,
+                       style: .hero(euros: euroSize, cents: centSize, centsColor: centsColor))
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .privateAmount(radius: 14)
     }
 }
 

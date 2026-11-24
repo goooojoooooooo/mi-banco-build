@@ -20,7 +20,7 @@ struct HomeEmptyState: View {
             .frame(maxWidth: .infinity, minHeight: 200, alignment: .topLeading)
             .background(CardSurface(material: .all, moves: false))
             .padding(.horizontal, CarouselMetrics.inset)
-            .homeEntrance(.carousel)
+            .staggeredEntrance(1, rise: 36)
 
             VStack(alignment: .leading, spacing: Theme.Space.small) {
                 Text("Configura el saldo de tus bancos para empezar")
@@ -46,7 +46,7 @@ struct HomeEmptyState: View {
             }
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.top, Theme.Space.section)
-            .homeEntrance(.row(0))
+            .staggeredEntrance(2)
         }
         .padding(.top, Theme.Space.small)
     }

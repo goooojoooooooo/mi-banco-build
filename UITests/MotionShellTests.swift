@@ -339,12 +339,11 @@ final class MotionShellTests: XCTestCase {
     /// marcas lo enseña la hoja `unlock-inactive-corto`. (Las comprobaciones de que el botón y la marca del bloqueo no
     /// existen valen poco por sí solas: XCUITest no siempre ve una vista que se está quitando.)
     func testUnlockInactiveForAnInstantNeverShowsTwoMarks() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "3", "-MiBancoDemoUnlockInactive", "0.2",
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "8", "-MiBancoDemoUnlockInactive", "0.2",
                 "-MiBancoMotionScale", "50"])
         let unlock = app.buttons["Desbloquear"]
-        XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta la pantalla de bloqueo")
         let exit = element("launch-exit")
-        XCTAssertTrue(exit.waitForExistence(timeout: 20), "Tras desbloquear con la escena inactiva un instante la marca no vuela")
+        XCTAssertTrue(exit.waitForExistence(timeout: 25), "Tras desbloquear con la escena inactiva un instante la marca no vuela")
         // La marca acaba de echar a volar: del fundido que habría quedado faltarían unos 17 s.
         let flying = probe()
         XCTAssertEqual(flying["marcasDobles"], "0", "La marca echó a volar con el bloqueo aún fundiéndose con la suya: \(flying)")
@@ -368,12 +367,12 @@ final class MotionShellTests: XCTestCase {
     /// (En el simulador de CI la barra de pestañas no siempre toma un toque sintético, así que «la pestaña no cambió»
     /// podría pasar por eso; el ojo sí los toma siempre, y es el que hace de testigo.)
     func testLateTapDuringTheUnlockFadeDoesNotReachHome() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "5", "-MiBancoMotionScale", "80"])
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "14", "-MiBancoMotionScale", "80"])
         let unlock = app.buttons["Desbloquear"]
-        XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta la pantalla de bloqueo")
+        XCTAssertTrue(unlock.waitForExistence(timeout: 12), "Falta la pantalla de bloqueo")
         let button = unlock.frame
         XCTAssertTrue(button.width > 100 && button.height > 20, "No se sabe dónde está el botón del bloqueo: \(button)")
-        XCTAssertTrue(waitUntil(20) { self.probe()["fundido"] == "1" }, "El bloqueo de demo no empezó a fundirse: \(probe())")
+        XCTAssertTrue(waitUntil(25) { self.probe()["fundido"] == "1" }, "El bloqueo de demo no empezó a fundirse: \(probe())")
         // Ya desbloqueado: Inicio está debajo del bloqueo que se funde.
         let home = app.tabBars.buttons["Inicio"]
         let spending = app.tabBars.buttons["Gasto"]

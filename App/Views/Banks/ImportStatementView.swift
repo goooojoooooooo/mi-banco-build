@@ -163,6 +163,9 @@ struct ImportStatementView: View {
                                 .foregroundStyle(Theme.label)
                                 .contentTransition(.identity)
                                 .privacySensitive()
+                                // Las pruebas de toque ven este texto aunque su fila ignore a sus hijos: su etiqueta
+                                // tampoco lleva importe (ni el símbolo del euro) con el ojo cerrado.
+                                .accessibilityLabel(hidden ? "importe oculto" : formattedBalance)
                         }
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Saldo del extracto: \(spokenAmount(latest.cents, hidden: hidden))")

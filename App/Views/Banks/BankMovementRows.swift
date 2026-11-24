@@ -76,6 +76,7 @@ private struct BankMovementRow: View {
                     .fixedSize()
                     .contentTransition(.identity)
                     .privacySensitive()
+                    .accessibilityLabel(hidden ? "importe oculto" : signed)
                     .padding(.leading, stacked ? tileSize + 14 : 0)
             }
             .padding(.horizontal, Theme.Space.gutter)

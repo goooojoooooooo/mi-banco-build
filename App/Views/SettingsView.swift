@@ -613,6 +613,7 @@ private struct MaskedAmountField: ViewModifier {
                         .lineLimit(1)
                         .fixedSize()
                         .allowsHitTesting(false)
+                        .accessibilityLabel("importe oculto")
                         .accessibilityHidden(true)
                 }
             }

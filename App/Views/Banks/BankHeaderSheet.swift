@@ -239,6 +239,7 @@ private struct BankMiniTitle: View {
                         .lineLimit(1)
                         .contentTransition(.identity)
                         .privacySensitive()
+                        .accessibilityLabel(hidden ? "importe oculto" : formatEUR(balanceCents))
                 }
             }
             // La barra es una guía de orientación: con letra enorme se queda en un tamaño que cabe en ella.

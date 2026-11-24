@@ -5,8 +5,9 @@ import MiBancoCore
 /// (`viewAligned`), los vecinos asomando 32 pt, girados en 3D (±22° × el recorrido del nivel, perspectiva 0,6), al 92 %
 /// y apagados (0,25 × el recorrido del nivel). La posición continua (para el indicador del segmentado y el brillo) sale de la geometría del scroll,
 /// nunca del `body`. Para VoiceOver es un solo elemento ajustable: "Cuenta, Revolut, 340,20 euros, 2 de 4".
-/// Movimiento (desde `\.motion`: intensidad, Reducir movimiento y cámara lenta; la única excepción es la DURACIÓN del
-/// deslizamiento de una tarjeta a otra, que es la del scroll del sistema, tanto con el dedo como por programa):
+/// Movimiento (desde `\.motion`: intensidad, Reducir movimiento y cámara lenta). El viaje de una tarjeta a otra lo hace
+/// siempre el scroll del sistema (interrumpible con el dedo); cuando es por programa lo lleva el muelle `snap`, y los
+/// fotogramas enseñan que el scroll lo sigue: se pasa y vuelve según la intensidad, y la cámara lenta lo alarga.
 /// - Un deslizamiento programado (segmentado, llegada) llega con el rebote de su muelle `snap`: se pasa y vuelve.
 /// - Cuando es el dedo quien lo deja en otra tarjeta, esa tarjeta da un rebote de encaje pequeño (4 pt en el sentido en
 ///   que venía, escala 1,012).
@@ -116,7 +117,7 @@ struct CardCarousel: View {
         // Cuánto giran y cuánto se apagan las vecinas sigue a la intensidad: ±22° × el recorrido del nivel (13° en
         // Sutil, 22° en Equilibrado, 32° en Expresivo; tope de 34° de la maqueta) y un apagado de 0,25 × el recorrido
         // (0,15 / 0,25 / 0,33, con tope ×1,3). El viaje en sí lo hace el scroll del sistema (su física, interrumpible
-        // con el dedo), así que su duración no cambia con el nivel ni con la cámara lenta.
+        // con el dedo), llevado por el muelle `snap` cuando es por programa (ver `glide(to:)`).
         let turn: Double = 22 * kit.level.distanceScale
         let dim: Double = 0.25 * min(1.3, kit.level.distanceScale)
         return ScrollView(.horizontal) {

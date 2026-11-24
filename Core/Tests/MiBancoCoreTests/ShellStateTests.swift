@@ -16,6 +16,7 @@ import Testing
             .unlockSucceeded, .scene(.active), .scene(.inactive), .scene(.background),
             .launchAssembled, .launchFinished, .safetyFired,
             .exitFinished(id: state.exitCount), .exitFinished(id: state.exitCount - 1),
+            .lockFadeFinished,
         ]
         for setting in settings {
             events.append(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
@@ -265,6 +266,105 @@ import Testing
         for state in Self.states where !state.showsLock {
             #expect(!state.fliesOnUnlock)
         }
+    }
+
+    // MARK: N-1 · Desbloquear con la escena aún inactiva: el bloqueo no se funde, lo releva la tapa
+
+    /// En primer plano el bloqueo se funde sobre Inicio. Fuera de primer plano (Face ID aún tiene la escena inactiva)
+    /// se quita de golpe, porque la tapa se pone encima en esa misma actualización: debajo no queda un bloqueo a medio
+    /// fundir que pueda asomar si la escena vuelve a activa antes de que el fundido hubiera terminado.
+    @Test func unlockOutsideTheForegroundIsCoveredAndNeverFades() {
+        #expect(Self.states.contains { $0.showsLock && $0.scene == .active })
+        #expect(Self.states.contains { $0.showsLock && $0.scene == .inactive })
+        for state in Self.states where state.showsLock {
+            var unlocked = state
+            unlocked.apply(.unlockSucceeded)
+            if state.scene == .active {
+                #expect(state.lockExitOnUnlock == .fades)
+                #expect(unlocked.lockFading)
+                #expect(!unlocked.showsCover)
+            } else {
+                #expect(state.lockExitOnUnlock == .covered, "fuera de primer plano el bloqueo se fundiría: \(state)")
+                #expect(!unlocked.lockFading, "queda un bloqueo fundiéndose debajo de la tapa: \(state)")
+                #expect(unlocked.showsCover)
+            }
+        }
+        for state in Self.states where !state.showsLock {
+            #expect(state.lockExitOnUnlock == nil)
+        }
+    }
+
+    /// El vuelo que esperaba a primer plano nunca arranca con un bloqueo aún fundiéndose debajo (serían dos marcas: la
+    /// del bloqueo a medio apagar y la que vuela).
+    @Test func aDeferredFlightNeverStartsOverAFadingLock() {
+        #expect(Self.states.contains { $0.lockFading })
+        for state in Self.states where state.pendingFlight != nil {
+            #expect(!state.lockFading, "vuelo pendiente con un bloqueo fundiéndose: \(state)")
+        }
+        var deferredFlights = 0
+        for step in Self.steps where step.before.pendingFlight != nil && step.after.exit != nil {
+            deferredFlights += 1
+            #expect(step.event == .scene(.active))
+            #expect(!step.after.lockFading, "la marca echó a volar sobre un bloqueo a medio fundir")
+        }
+        #expect(deferredFlights > 0)
+        // La secuencia de la revisión: éxito de Face ID con la escena inactiva y, un instante después (menos de lo que
+        // dura un fundido), la escena vuelve a activa.
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        state.apply(.scene(.inactive))
+        #expect(state.lockExitOnUnlock == .covered)
+        state.apply(.unlockSucceeded)
+        #expect(state.showsCover && !state.lockFading && state.pendingFlight == true)
+        state.apply(.scene(.active))
+        #expect(state.shownExit?.cold == true)
+        #expect(!state.lockFading && !state.showsCover)
+        #expect(state.revealToken == 1)
+        #expect(state.homeTakesTouches)
+    }
+
+    // MARK: Toque tardío · mientras el bloqueo se funde, Inicio no recibe toques
+
+    @Test func homeTakesNoTouchesUntilTheLockIsGone() throws {
+        for state in Self.states {
+            #expect(state.homeTakesTouches == (!state.showsLock && !state.lockFading), "\(state)")
+            guard state.lockFading else { continue }
+            // Un bloqueo que se funde ya no es el bloqueo: está desbloqueado.
+            #expect(!state.showsLock)
+            // Y siempre tiene salida: al acabar el fundido, Inicio se puede tocar.
+            var done = state
+            done.apply(.lockFadeFinished)
+            #expect(!done.lockFading && done.homeTakesTouches)
+        }
+        for step in Self.steps {
+            if !step.before.lockFading && step.after.lockFading {
+                #expect(step.event == .unlockSucceeded && step.before.showsLock && step.before.scene == .active,
+                        "un bloqueo empezó a fundirse con \(step.event)")
+            }
+            if step.before.lockFading && !step.after.lockFading {
+                // Solo deja de fundirse porque el fundido acabó o porque el bloqueo vuelve a estar delante, entero.
+                #expect(step.event == .lockFadeFinished || step.after.showsLock, "el fundido se dio por acabado con \(step.event)")
+            }
+        }
+        // La secuencia del toque tardío: desbloqueo en primer plano; mientras dura el fundido nada devuelve los toques a
+        // Inicio (ni que la marca termine de volar ni un cambio de fase); cuando acaba, sí.
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        #expect(!state.homeTakesTouches)
+        state.apply(.unlockSucceeded)
+        #expect(!state.showsLock && state.lockFading)
+        #expect(!state.homeTakesTouches, "con el bloqueo fundiéndose, un toque llegaría a Inicio")
+        let flight = try #require(state.exit?.id)
+        state.apply(.exitFinished(id: flight))
+        #expect(!state.homeTakesTouches)
+        state.apply(.scene(.inactive))
+        state.apply(.scene(.active))
+        #expect(!state.homeTakesTouches)
+        state.apply(.lockFadeFinished)
+        #expect(state.homeTakesTouches)
+        // Sin bloqueo nunca hay fundido: Inicio se toca en cuanto el arranque lo deja (eso lo mide la capa del arranque).
+        var open = ShellState(lockApplies: false, relocksOnBackground: false)
+        #expect(open.homeTakesTouches && !open.lockFading)
+        open.apply(.lockFadeFinished)
+        #expect(open.homeTakesTouches)
     }
 
     // MARK: (e) El bloqueo solo lo quita el desbloqueo

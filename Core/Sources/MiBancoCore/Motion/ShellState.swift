@@ -35,6 +35,16 @@ public struct ShellState: Equatable, Hashable, Sendable {
         case exitFinished(id: Int)
         /// Cambia el ajuste del bloqueo: si el bloqueo se enseña cuando toca y si la app se bloquea al ir a segundo plano.
         case lockSettingChanged(lockApplies: Bool, relocksOnBackground: Bool)
+        /// El fundido con el que se iba el bloqueo, ya desbloqueado, ha terminado: ya no queda nada suyo en pantalla.
+        case lockFadeFinished
+    }
+
+    /// Cómo deja la pantalla el bloqueo al desbloquear.
+    public enum LockExit: Hashable, Sendable {
+        /// Se funde sobre Inicio (es lo único que se anima en la carcasa).
+        case fades
+        /// Se quita de golpe: la tapa del selector de apps se pone encima en esa misma actualización.
+        case covered
     }
 
     /// La marca del bloqueo volando a su ranura de la barra superior.
@@ -67,6 +77,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public internal(set) var pendingFlight: Bool?
     public internal(set) var exit: Exit?
     public internal(set) var exitCount = 0
+    /// El bloqueo, ya desbloqueado, se está fundiendo sobre Inicio. Dura lo que el fundido (`lockFadeFinished`).
+    public internal(set) var lockFading = false
     /// Un cambio del ajuste que llegó con el bloqueo delante: se aplica al desbloquear (nunca quita el bloqueo).
     var settingAfterUnlock: Setting?
 
@@ -111,6 +123,15 @@ public struct ShellState: Equatable, Hashable, Sendable {
     /// lo pregunta para soltar su marca justo cuando la que vuela la releva.
     public var fliesOnUnlock: Bool { showsLock && scene == .active }
 
+    /// Si se desbloqueara ahora mismo, cómo se iría el bloqueo (nil: no hay bloqueo delante).
+    public var lockExitOnUnlock: LockExit? {
+        guard showsLock else { return nil }
+        return .fades
+    }
+
+    /// Inicio recibe los toques.
+    public var homeTakesTouches: Bool { !showsLock }
+
     /// Las capas que hay ahora, de abajo arriba. La última es la que se ve encima.
     public var layers: [Layer] {
         var layers: [Layer] = [.home]
@@ -147,6 +168,7 @@ public struct ShellState: Equatable, Hashable, Sendable {
             coldStart = false
             // Inicio se monta YA, esté o no la escena en primer plano (si no lo está, debajo de la tapa).
             revealToken += 1
+            lockFading = true
             if scene == .active {
                 startExit(cold: cold)
             } else {
@@ -169,6 +191,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
                 // Tras pasar por segundo plano ya no hay vuelo pendiente (con bloqueo, además, la app se bloquea).
                 pendingFlight = nil
                 if relocksOnBackground { locked = true }
+                // El bloqueo vuelve a estar delante, entero: del que se fundía no queda nada.
+                if showsLock { lockFading = false }
             }
 
         case .launchAssembled:
@@ -192,6 +216,9 @@ public struct ShellState: Equatable, Hashable, Sendable {
             // Cambiar el ajuste solo es posible con la app ya desbloqueada: no se vuelve a pedir Face ID.
             locked = false
             launching = false
+
+        case .lockFadeFinished:
+            lockFading = false
         }
     }
 

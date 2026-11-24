@@ -13,8 +13,10 @@ struct LockView: View {
     @Binding var locked: Bool
     /// Arranque en frío: las piezas se montan sobre la marca. Si no, la marca está quieta desde el principio.
     var playsLaunch = false
+    /// Se pregunta en el instante de desbloquear: ¿la marca echa a volar ahora mismo hacia Inicio? Si sí, este bloqueo
+    /// deja de dibujar la suya en ese instante (la que vuela sale del mismo sitio): nunca se ven dos.
+    var flightTakesTheMark: () -> Bool = { false }
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motion) private var motion
     @State private var authenticating = false
     /// Un intento automático por bloqueo (esta vista solo existe mientras está bloqueado).
@@ -25,6 +27,11 @@ struct LockView: View {
     @State private var launchFinished = false
     @State private var markFrame: CGRect = .zero
     @State private var clicks = 0
+    /// La marca ya la lleva la que vuela (solo dibujo; se pone al desbloquear).
+    @State private var markHandedOff = false
+    /// Se desbloqueó antes de que la marca terminara de montarse: el nombre y el lema, que aún no habían salido, ya no
+    /// salen (no aparecen de golpe para fundirse enseguida).
+    @State private var textsDropped = false
 
     private static let markSize: CGFloat = 76
 
@@ -38,9 +45,12 @@ struct LockView: View {
             timeline: timeline, act: .lock, start: launchStart, finished: markSettled,
             timeMultiplier: motion.timeMultiplier
         ) { frame in
-            LockFace(nameOpacity: frame.name, nameSpread: CGFloat(1 - frame.name), taglineOpacity: frame.name) {
+            LockFace(
+                nameOpacity: textsDropped ? 0 : frame.name, nameSpread: CGFloat(1 - frame.name),
+                taglineOpacity: textsDropped ? 0 : frame.name
+            ) {
                 LaunchMark(frame: frame, size: Self.markSize)
-                    .opacity(frame.mark)
+                    .opacity(markHandedOff ? 0 : frame.mark)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { markFrame = $0 }
             } action: {
                 Button(action: unlock) {
@@ -75,14 +85,17 @@ struct LockView: View {
         // Un toque en cualquier parte deja la marca terminada. Solo cambia el dibujo: no toca `locked`.
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { launchFinished = true })
-        .launchProbe("lock-mark", value: !playsLaunch ? "fija" : (launchFinished ? "completa" : "piezas"))
+        .launchProbe("lock-mark", value: launchFinished ? "completa" : (playsLaunch ? "piezas" : "fija"))
         .sensoryFeedback(Haptics.lock, trigger: clicks)
         .task { await assembleMark(timeline) }
         .task {
             #if DEBUG
             if DemoMode.holdsLock {
-                // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación.
-                try? await Task.sleep(for: .seconds(DemoMode.lockSeconds))
+                // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación. (Si una prueba
+                // retrasa el arranque para grabarlo, el bloqueo de demo espera lo mismo; la espera es exacta para que
+                // las grabaciones sepan cuándo ocurre.)
+                try? await Task.sleep(
+                    for: .seconds(DemoMode.lockSeconds + DemoMode.launchHoldSeconds), tolerance: .milliseconds(20))
                 unlockWithFade()
                 return
             }
@@ -150,9 +163,22 @@ struct LockView: View {
         if ok { unlockWithFade() } else { failures += 1 }
     }
 
-    /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto.
+    /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto. El fundido lee `\.motion`:
+    /// obedece la intensidad, Reducir movimiento (también el forzado al grabar) y la cámara lenta.
     private func unlockWithFade() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.unlock) { locked = false }
+        // Antes de fundirse, y sin animación, el DIBUJO queda como lo va a recoger la salida: la marca terminada (ni
+        // mitades en el aire ni líneas de velocidad, aunque Face ID haya sido más rápido que las piezas) y, si la marca
+        // echa a volar ahora, este bloqueo deja de dibujar la suya. Nada de esto toca `locked`.
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) {
+            let takesTheMark = LaunchTimeline(motion).exitDuration != nil && flightTakesTheMark()
+            // Si la marca aún se estaba montando y ahora sale volando, el nombre y el lema ya no llegan a salir.
+            if playsLaunch, !launchFinished, takesTheMark { textsDropped = true }
+            launchFinished = true
+            if takesTheMark { markHandedOff = true }
+        }
+        withAnimation(motion.reduce ? motion.fade : .smooth(duration: motion.seconds(0.3))) { locked = false }
     }
 }
 

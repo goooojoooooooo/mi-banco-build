@@ -87,7 +87,7 @@ public struct ShellState: Equatable, Hashable, Sendable {
 
     /// La tapa opaca del selector de apps: siempre que la escena no esté activa y el bloqueo no esté ya delante,
     /// con el bloqueo activado o sin él. Nunca va encima del bloqueo (así no tapa su botón ni su marca).
-    public var showsCover: Bool { lockApplies && Self.showsCover(scene: scene, showsLock: showsLock) }
+    public var showsCover: Bool { Self.showsCover(scene: scene, showsLock: showsLock) }
 
     /// La misma regla para quien la calcula con la fase de escena de este mismo instante (la vista la lee del entorno,
     /// para que la tapa esté puesta en la misma actualización en que cambia la fase).
@@ -145,9 +145,9 @@ public struct ShellState: Equatable, Hashable, Sendable {
             }
             guard lockWasShowing else { return }
             coldStart = false
-            // (Comportamiento de f9eabdc, antes de la ronda de arreglos: el montaje espera a primer plano.)
+            // Inicio se monta YA, esté o no la escena en primer plano (si no lo está, debajo de la tapa).
+            revealToken += 1
             if scene == .active {
-                revealToken += 1
                 startExit(cold: cold)
             } else {
                 pendingFlight = cold
@@ -160,7 +160,6 @@ public struct ShellState: Equatable, Hashable, Sendable {
                 // Se desbloqueó con la escena inactiva: ahora sí vuela la marca. Inicio NO se vuelve a montar.
                 if let cold = pendingFlight, !showsLock {
                     pendingFlight = nil
-                    revealToken += 1
                     startExit(cold: cold)
                 }
             case .inactive:

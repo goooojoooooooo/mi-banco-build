@@ -147,15 +147,15 @@ struct LaunchSequence: View {
 /// La salida del bloqueo: la marca del bloqueo vuela a su ranura de la barra superior mientras Inicio se monta. En el
 /// arranque en frío, además, cruzan las dos bandas. Es el tramo final del mismo guion (0,38 s; en Expresivo, 0,43 s).
 ///
-/// Solo existe con la app ya desbloqueada (`AppShellView` no la monta con el bloqueo puesto y la quita al instante si
-/// se vuelve a bloquear o la app sale de primer plano). No recibe toques, no tiene nada que leer y se quita sola.
+/// Solo existe con la app ya desbloqueada (lo decide `ShellState`: nunca con el bloqueo puesto, y se quita al instante
+/// si la app se vuelve a bloquear o sale de primer plano). No recibe toques, no tiene nada que leer y se quita sola.
+/// Su primer fotograma es la marca entera justo donde estaba la del bloqueo, que en ese mismo instante deja de
+/// dibujar la suya (`LockView.unlockWithFade`): nunca se ven dos marcas.
 struct LaunchExit: View {
     /// Marco de la marca del bloqueo, en coordenadas de pantalla: de ahí sale.
     let from: CGRect
     /// Arranque en frío: cruzan las bandas y, si Inicio aún no ha apuntado su ranura, la marca vuela a donde estará.
     let cold: Bool
-    /// El bloqueo se está fundiendo justo debajo: un parche negro tapa su marca para que no se vea doble.
-    let coversLockMark: Bool
     let onFinish: () -> Void
 
     @Environment(\.motion) private var motion
@@ -202,13 +202,6 @@ struct LaunchExit: View {
             Color.clear
             if cold {
                 LaunchSkyCanvas(frame: frame, center: home)
-            }
-            if coversLockMark {
-                RoundedRectangle(cornerRadius: 31 * from.width / 120 + 3, style: .continuous)
-                    .fill(Theme.canvas)
-                    .frame(width: from.width + 6, height: from.height + 6)
-                    .position(home)
-                    .opacity(frame.black)
             }
             AppMark(size: from.width)
                 .scaleEffect(1 + (target.side / max(from.width, 1) - 1) * flight)

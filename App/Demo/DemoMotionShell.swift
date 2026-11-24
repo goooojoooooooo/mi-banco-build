@@ -15,6 +15,15 @@ extension DemoMode {
         }
         return min(max(seconds, 0), 60)
     }
+
+    /// `-MiBancoDemoUnlockInactive <s>`: tras el desbloqueo en frío de la demo, la carcasa hace como que la escena sigue
+    /// inactiva estos segundos reales y luego vuelve a activa. Es el orden de Face ID en el iPhone (el éxito llega con la
+    /// escena aún inactiva), que el simulador no reproduce. nil = sin simular.
+    static var unlockInactiveSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoUnlockInactive").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
 }
 
 /// Solo DEBUG: lo que ha hecho el arranque, para que las pruebas de toque lo lean (no hay otra forma fiable de saber, desde
@@ -37,6 +46,8 @@ extension DemoMode {
     var lockStatic = 0
     /// Veces que la marca ha volado a su ranura tras desbloquear.
     var exits = 0
+    /// Veces que Inicio ha recibido la orden de montarse por capas (`ShellState.revealToken`).
+    var reveals = 0
     /// Cuándo empieza (o empezó) el último arranque o montaje del bloqueo: segundos desde 1970, para que una prueba que
     /// lo graba sepa cuándo hacer la primera captura.
     var startsAt: Double?
@@ -46,7 +57,7 @@ extension DemoMode {
         [
             "arranques=\(launches)", "estilo=\(style)", "saltos=\(skips)",
             "libre=\(freeAfterMs.map { String($0) } ?? "-")", "fin=\(finishedAfterMs.map { String($0) } ?? "-")",
-            "bloqueoPiezas=\(lockPlays)", "bloqueoQuieto=\(lockStatic)", "salidas=\(exits)",
+            "bloqueoPiezas=\(lockPlays)", "bloqueoQuieto=\(lockStatic)", "salidas=\(exits)", "montajes=\(reveals)",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")
     }

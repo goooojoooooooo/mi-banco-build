@@ -168,16 +168,17 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(unlock.exists, "El toque en la pantalla quitó el bloqueo")
         XCTAssertEqual(probe()["arranques"], "0", "Con bloqueo no debe montarse la capa del arranque")
 
-        // Al acabar el bloqueo de demo: Inicio vuelve, la marca vuela (a ×40 tarda 17 s) y mientras tanto Inicio responde.
-        XCTAssertTrue(waitUntil(60) { !unlock.exists }, "El bloqueo de demo no se quitó")
+        // Al acabar el bloqueo de demo la marca echa a volar (a ×40 tarda 17 s) mientras el bloqueo se funde (13 s: su
+        // fundido obedece la cámara lenta). Inicio vuelve y responde.
         let exit = element("launch-exit")
-        XCTAssertTrue(exit.waitForExistence(timeout: 5), "Tras desbloquear en frío la marca no vuela")
+        XCTAssertTrue(exit.waitForExistence(timeout: 60), "Tras desbloquear en frío la marca no vuela")
         XCTAssertEqual(exit.value as? String, "frio")
         XCTAssertFalse(element("launch-layer").exists, "Tras desbloquear se montó la capa del arranque")
+        XCTAssertTrue(waitUntil(40) { !unlock.exists }, "El bloqueo de demo no terminó de quitarse")
         // El toque de antes no atravesó el bloqueo: el ojo sigue sin haberse tocado.
         XCTAssertTrue(eye.exists, "El toque sobre el bloqueo llegó al ojo de Inicio")
         XCTAssertFalse(app.buttons["Mostrar importes"].exists, "El toque sobre el bloqueo llegó al ojo de Inicio")
-        assertHomeResponds("Mientras la marca vuela, Inicio no responde")
+        assertHomeResponds("Tras desbloquear, Inicio no responde")
         let after = probe()
         XCTAssertEqual(after["arranques"], "0", "Tras desbloquear se montó la capa del arranque: \(after)")
         XCTAssertEqual(after["salidas"], "1")
@@ -260,6 +261,54 @@ final class MotionShellTests: XCTestCase {
             assertHomeResponds("\(arguments): Inicio no responde tras el fundido")
             app.terminate()
         }
+    }
+
+    /// I-2: Face ID suele ser más rápido que las piezas. Si el desbloqueo llega con la marca del bloqueo a medio montar,
+    /// el bloqueo que se funde enseña ya la marca TERMINADA (ni mitades ni líneas) y la marca echa a volar: en el momento
+    /// en que existe la marca que vuela, la del bloqueo dice «completa». A ×50 las piezas tardarían 55 s en montarse y el
+    /// bloqueo tarda 17 s en fundirse (su fundido obedece la cámara lenta), así que da tiempo a leerlo.
+    func testUnlockBeforeThePiecesFinishHandsOverAFinishedMark() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "0.4", "-MiBancoMotionScale", "50"])
+        let exit = element("launch-exit")
+        XCTAssertTrue(exit.waitForExistence(timeout: 20), "Tras desbloquear a mitad de las piezas la marca no vuela")
+        let mark = element("lock-mark")
+        XCTAssertTrue(mark.exists, "El bloqueo ya no está: su fundido no obedece la cámara lenta, o la prueba llegó tarde")
+        XCTAssertEqual(mark.value as? String, "completa",
+                       "El bloqueo se funde con la marca a medio montar mientras la marca entera ya vuela")
+        XCTAssertFalse(element("launch-layer").exists, "Se montó la capa del arranque sin bloqueo")
+        let result = probe()
+        XCTAssertEqual(result["bloqueoPiezas"], "1", "El bloqueo no llegó a montar las piezas: \(result)")
+        XCTAssertEqual(result["salidas"], "1", "La marca no voló exactamente una vez: \(result)")
+        XCTAssertEqual(result["montajes"], "1", "Inicio no se montó exactamente una vez: \(result)")
+        XCTAssertTrue(waitUntil(30) { !mark.exists }, "El bloqueo no terminó de quitarse")
+        assertHomeResponds("Tras desbloquear a mitad de las piezas, Inicio no responde")
+    }
+
+    /// I-1: el orden de Face ID en el iPhone — el éxito llega con la escena aún inactiva y solo después vuelve a activa
+    /// (aquí lo simula la bandera de demo durante 10 s). Mientras está inactiva: la tapa del selector de apps está
+    /// puesta (no antes, encima del bloqueo), Inicio YA ha recibido la orden de montarse (una vez, debajo de la tapa),
+    /// no se puede tocar y la marca aún no vuela. Al volver a activa: la tapa se quita, la marca vuela e Inicio NO se
+    /// vuelve a montar.
+    func testUnlockWhileInactiveBuildsHomeUnderTheCover() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "12", "-MiBancoDemoUnlockInactive", "10"])
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta la pantalla de bloqueo")
+        let cover = element("privacy-cover")
+        XCTAssertFalse(cover.exists, "La tapa del selector de apps está puesta encima del bloqueo")
+        XCTAssertEqual(probe()["montajes"], "0", "Inicio se montó antes de desbloquear")
+        XCTAssertTrue(cover.waitForExistence(timeout: 15), "Tras desbloquear con la escena inactiva no aparece la tapa")
+        let under = probe()
+        XCTAssertEqual(under["montajes"], "1", "Con la tapa puesta Inicio aún no ha recibido la orden de montarse: \(under)")
+        XCTAssertEqual(under["salidas"], "0", "La marca voló con la escena inactiva: \(under)")
+        XCTAssertFalse(element("launch-exit").exists, "La marca vuela con la tapa puesta")
+        let eye = app.buttons["Ocultar importes"]
+        XCTAssertFalse(eye.exists && eye.isHittable, "Inicio se puede tocar con la tapa puesta")
+        XCTAssertTrue(waitUntil(20) { !cover.exists }, "La tapa no se quitó al volver a primer plano")
+        XCTAssertTrue(waitUntil(5) { self.probe()["salidas"] == "1" }, "Al volver a primer plano la marca no voló: \(probe())")
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(probe()["montajes"], "1", "Inicio se volvió a montar al volver a primer plano: \(probe())")
+        XCTAssertFalse(cover.exists, "La tapa volvió a aparecer")
+        assertHomeResponds("Tras volver a primer plano, Inicio no responde")
     }
 
     // MARK: - C1 · Importes que ruedan en las hojas

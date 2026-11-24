@@ -111,6 +111,31 @@ final class MotionTourShellTests: MotionTourCase {
         burst("unlock", frames: 30, every: 0.2)
     }
 
+    /// I-2, como pide la revisión: el bloqueo de demo se quita a los 0,4 s de empezar las piezas (a ×8 apenas han
+    /// asomado). El bloqueo se funde (2,7 s a ×8) ya sin piezas ni líneas y la marca entera vuela: nunca dos marcas.
+    func testUnlockEarly() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "0.4", "-MiBancoDemoLaunchHold", "25"], scale: 8)
+        try sleepUntilLaunchStarts(lead: 0.3)
+        burst("unlock-early", frames: 36, every: 0.2)
+    }
+
+    /// I-2 en su peor momento: el desbloqueo llega con las dos mitades en el aire entre las líneas (2,4 s a ×8 = 0,27 s
+    /// del guion).
+    func testUnlockMidFlight() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "2.4", "-MiBancoDemoLaunchHold", "25"], scale: 8)
+        try sleepUntilLaunchStarts(lead: 0.3)
+        burst("unlock-early-mitad", frames: 44, every: 0.2)
+    }
+
+    /// I-1: el éxito de Face ID llega con la escena aún inactiva (la bandera lo simula durante 2 s). El bloqueo deja
+    /// paso a la tapa de golpe (nunca los dos a medias), Inicio se monta debajo y, al volver a activa, la tapa se quita
+    /// de golpe y la marca vuela sobre un Inicio que no vuelve a empezar de cero.
+    func testUnlockWhileInactive() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "12", "-MiBancoDemoUnlockInactive", "2"])
+        try sleepUntilLaunchStarts(lead: -11.6)
+        burst("unlock-inactive", frames: 30, every: 0.2)
+    }
+
     /// Re-bloqueo (volver de segundo plano): la marca sale quieta y entera, sin piezas.
     func testRelockIsStatic() throws {
         launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "10"])

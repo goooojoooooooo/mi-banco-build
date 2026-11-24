@@ -606,6 +606,47 @@ final class MotionShellTests: XCTestCase {
         }
     }
 
+    /// Lote 2 (2.5): la hoja de una posición con el ojo cerrado no monta ningún importe, precio ni número de acciones:
+    /// dentro de la hoja ninguna etiqueta ni valor tiene forma de importe, y las acciones dicen «importe oculto».
+    func testPositionSheetMountsNoAmountWithTheEyeClosed() throws {
+        launch(["-MiBancoDemoPosition", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 30), "No se abrió la hoja de la posición")
+        let sheet = app.scrollViews["position-scroll"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 8), "Falta la hoja de la posición")
+        func leaks() -> [String] {
+            sheet.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
+                let texts = [el.label, el.value as? String ?? ""]
+                return texts.filter { text in
+                    moneyShaped(text) || text.contains("%")
+                        || (text.contains("acc.") && text.range(of: #"\d"#, options: .regularExpression) != nil)
+                }
+            }
+        }
+        XCTAssertEqual(leaks(), [], "Con el ojo cerrado la hoja de la posición monta datos privados")
+        XCTAssertTrue(sheet.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "importe oculto")).count > 0,
+                      "Ningún dato de la hoja dice «importe oculto»: ¿está vacía?")
+        sheet.swipeUp()
+        XCTAssertEqual(leaks(), [], "Con el ojo cerrado la hoja de la posición monta datos privados (parte de abajo)")
+    }
+
+    /// Lote 2 (2.5): el resumen con el ojo cerrado no monta ninguna cifra de dinero en ninguna línea, y el botón del
+    /// consejo no lleva importe.
+    func testBriefingMountsNoAmountWithTheEyeClosed() throws {
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 20), "La hoja del resumen no se abrió")
+        let sheet = app.scrollViews["briefing-scroll"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 8), "Falta la hoja del resumen")
+        func leaks() -> [String] {
+            sheet.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
+                [el.label, el.value as? String ?? ""].filter { moneyShaped($0) }
+            }
+        }
+        XCTAssertTrue(sheet.descendants(matching: .any).count > 3, "El resumen está vacío")
+        XCTAssertEqual(leaks(), [], "Con el ojo cerrado el resumen monta importes")
+        sheet.swipeUp()
+        XCTAssertEqual(leaks(), [], "Con el ojo cerrado el resumen monta importes (parte de abajo)")
+    }
+
     /// La línea del total del resumen sigue leyéndose como UNA frase entera con su importe, aunque el importe ruede
     /// dentro, y es texto (no un botón nuevo ni nada tocable de más).
     func testBriefingTotalIsOneSentence() throws {

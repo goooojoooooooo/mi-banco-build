@@ -93,8 +93,10 @@ public enum DigitRoll {
     /// Cuánto se ve cada columna (0…1) mientras rueda, para que un grupo de millares nunca aparezca como un cero a la
     /// izquierda («0.145,19 €» al abrir el ojo, «0.000,00 €» al empezar a contar): una columna a la izquierda de las
     /// `alwaysShown` últimas (unidades y céntimos: 3; euros enteros: 1) no se dibuja mientras ella y todas las de su
-    /// izquierda están en el cero, y aparece según sale de él (entera a medio dígito). El punto de millar que la sigue
-    /// lleva su misma opacidad. Asentado en una cifra de verdad (que no empieza por cero) todo vale 1.
+    /// izquierda están en el cero o saliendo de él, y aparece cuando su tira ya enseña sobre todo la cifra siguiente
+    /// (de 0,5 a 0,9 dígitos de distancia del cero): así tampoco asoma un «0» tenue al empezar a rodar, ni los ceros de
+    /// las columnas de su derecha que aún no han salido. El punto de millar que la sigue lleva su misma opacidad.
+    /// Asentado en una cifra de verdad (que no empieza por cero) todo vale 1.
     public static func leadingVisibility(positions: [Double], alwaysShown: Int) -> [Double] {
         let free = max(0, positions.count - max(0, alwaysShown))
         var shown = 0.0
@@ -102,7 +104,7 @@ public enum DigitRoll {
             guard index < free else { return 1 }
             let place = mod10(position)
             let away = min(place, 10 - place)
-            shown = max(shown, min(1, away / 0.5))
+            shown = max(shown, min(1, max(0, (away - 0.5) / 0.4)))
             return shown
         }
     }

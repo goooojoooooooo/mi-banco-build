@@ -94,9 +94,14 @@ import Testing
     /// Mientras sigue en el cero no se dibuja (ni su punto de millar): nunca «0.145,19 €».
     @Test func aNewThousandsColumnIsNotDrawnWhileItIsZero() {
         #expect(DigitRoll.leadingVisibility(positions: [0, 4.2, 1, 7, 3, 9], alwaysShown: 3) == [0, 1, 1, 1, 1, 1])
-        // Aparece según sale del cero: a medio dígito ya está entera, y sin saltos por el camino.
-        #expect(DigitRoll.leadingVisibility(positions: [0.25, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 0.5)
-        #expect(DigitRoll.leadingVisibility(positions: [0.5, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 1)
+        // Saliendo del cero aún no se ve (la tira todavía enseña sobre todo el «0»): ni un cero tenue. Aparece de 0,5 a
+        // 0,9 dígitos de distancia, sin saltos por el camino.
+        #expect(DigitRoll.leadingVisibility(positions: [0.25, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 0)
+        #expect(DigitRoll.leadingVisibility(positions: [0.5, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 0)
+        #expect(abs(DigitRoll.leadingVisibility(positions: [0.7, 4, 1, 7, 3, 9], alwaysShown: 3)[0] - 0.5) < 1e-9)
+        #expect(DigitRoll.leadingVisibility(positions: [0.9, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 1)
+        // Mientras la primera columna no se ve, tampoco los ceros de las siguientes que aún no han salido.
+        #expect(DigitRoll.leadingVisibility(positions: [0.3, 0, 0, 0, 0, 0], alwaysShown: 3) == [0, 0, 0, 1, 1, 1])
         var previous = 0.0
         for step in 0...300 {
             let now = DigitRoll.leadingVisibility(positions: [Double(step) / 100, 0, 0, 0], alwaysShown: 3)[0]
@@ -104,7 +109,8 @@ import Testing
             previous = now
         }
         // También si llega al cero dando la vuelta a la tira (9,9 está a una décima del 0).
-        #expect(abs(DigitRoll.leadingVisibility(positions: [9.9, 1, 2, 3], alwaysShown: 3)[0] - 0.2) < 1e-9)
+        #expect(DigitRoll.leadingVisibility(positions: [9.9, 1, 2, 3], alwaysShown: 3)[0] == 0)
+        #expect(abs(DigitRoll.leadingVisibility(positions: [9.3, 1, 2, 3], alwaysShown: 3)[0] - 0.5) < 1e-9)
     }
 
     /// Al empezar a contar desde cero no se ve «0.000,00 €»: solo «0,00 €»; los millares aparecen al rodar.
@@ -120,7 +126,7 @@ import Testing
             for index in 0..<3 where visibility[index] > 0.99 {
                 let anyAway = positions[0...index].contains { p in
                     let place = p.truncatingRemainder(dividingBy: 10)
-                    return min(place, 10 - place) >= 0.49
+                    return min(place, 10 - place) >= 0.89
                 }
                 #expect(anyAway, "cero a la izquierda a la vista en t = \(time): \(positions)")
             }

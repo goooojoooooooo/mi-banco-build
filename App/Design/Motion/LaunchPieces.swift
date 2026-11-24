@@ -16,6 +16,10 @@ enum LaunchAct: Equatable {
 
 /// Cuándo empieza un tramo del arranque: ahora. (Solo en la demo de grabación: tras la espera que pida la prueba.)
 enum LaunchClock {
+    /// Los avisos del guion (encajar, montar Inicio, dejar pasar los toques, quitar la capa) se esperan con este
+    /// margen: sin él, el sistema puede retrasar una espera hasta un 10 % de su duración.
+    static let tolerance: Duration = .milliseconds(4)
+
     static func startDate() -> Date {
         #if DEBUG
         return Date().addingTimeInterval(DemoMode.launchHoldSeconds)

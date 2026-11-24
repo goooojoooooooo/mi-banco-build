@@ -38,7 +38,7 @@ struct LockView: View {
             timeline: timeline, act: .lock, start: launchStart, finished: markSettled,
             timeMultiplier: motion.timeMultiplier
         ) { frame in
-            LockFace(nameOpacity: frame.name, nameSpread: CGFloat(1 - frame.name)) {
+            LockFace(nameOpacity: frame.name, nameSpread: CGFloat(1 - frame.name), taglineOpacity: frame.name) {
                 LaunchMark(frame: frame, size: Self.markSize)
                     .opacity(frame.mark)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { markFrame = $0 }
@@ -110,7 +110,7 @@ struct LockView: View {
         let began = launchStart
         func wait(until elapsed: Double) async -> Bool {
             let remaining = elapsed * multiplier - Date().timeIntervalSince(began)
-            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining), tolerance: LaunchClock.tolerance) }
             return !Task.isCancelled && !launchFinished
         }
         if let lockAt = timeline.piecesLockAt {
@@ -164,7 +164,8 @@ struct LockFace<Mark: View, Action: View>: View {
     var nameOpacity: Double = 1
     /// 1 = letras separadas (0,24 em de más), 0 = como siempre.
     var nameSpread: CGFloat = 0
-    var showsTagline = true
+    /// El lema aparece con el nombre mientras la marca se monta; la tapa del selector de apps no lo enseña (0).
+    var taglineOpacity: Double = 1
     @ViewBuilder let mark: Mark
     @ViewBuilder let action: Action
     @Environment(\.launchAnchor) private var anchor
@@ -186,8 +187,7 @@ struct LockFace<Mark: View, Action: View>: View {
                 .foregroundStyle(Theme.label2)
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
-                .opacity(showsTagline ? 1 : 0)
-                .accessibilityHidden(!showsTagline)
+                .opacity(taglineOpacity)
             Spacer()
             action
                 .padding(.horizontal, Theme.Space.gutter + 8)

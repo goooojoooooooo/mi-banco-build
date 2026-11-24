@@ -32,7 +32,8 @@ final class MotionTourShellTests: MotionTourCase {
         return condition()
     }
 
-    /// Duerme hasta `lead` segundos antes (o `-lead` después) de que empiece el arranque que la app tiene en espera.
+    /// Duerme hasta `lead` segundos antes (o `-lead` después) de que empiece el arranque que la app tiene en espera
+    /// (o las piezas del bloqueo).
     private func sleepUntilLaunchStarts(lead: TimeInterval) throws {
         var startsAt: Double?
         XCTAssertTrue(waitUntil(20) {
@@ -100,15 +101,14 @@ final class MotionTourShellTests: MotionTourCase {
         burst("lock", frames: 24, every: 0.22)
     }
 
-    /// Al desbloquear en frío (a ×16): el bloqueo se funde, las bandas cruzan, la marca vuela a la barra superior e Inicio
-    /// se monta. El desbloqueo lo hace el botón (en el simulador no hay código, así que entra sin Face ID).
+    /// Al desbloquear en frío (a ×8, 3,4 s): el bloqueo se funde, las bandas cruzan, la marca vuela hacia la barra
+    /// superior e Inicio se monta. Desbloquea el temporizador del bloqueo de demo (el botón pediría el código del iPhone).
     func testUnlockFlight() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "90"], scale: 16)
-        let unlock = app.buttons["Desbloquear"]
-        XCTAssertTrue(unlock.waitForExistence(timeout: 20), "Falta la pantalla de bloqueo")
-        XCTAssertTrue(waitUntil(45) { (self.element("lock-mark").value as? String) == "completa" }, "La marca del bloqueo no terminó de montarse")
-        unlock.tap()
-        burst("unlock", frames: 22, every: 0.33)
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "14"], scale: 8)
+        // El bloqueo de demo se quita a los 14 s de montarse, o algo después (las piezas, a ×8, tardan 8,8 s): se
+        // empieza a capturar justo antes y se cubren 6 s.
+        try sleepUntilLaunchStarts(lead: -13.7)
+        burst("unlock", frames: 30, every: 0.2)
     }
 
     /// Re-bloqueo (volver de segundo plano): la marca sale quieta y entera, sin piezas.

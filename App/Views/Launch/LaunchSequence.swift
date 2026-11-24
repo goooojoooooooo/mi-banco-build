@@ -69,13 +69,14 @@ struct LaunchSequence: View {
         let target = LaunchGeometry.markTarget(in: slot)
         let nameHome = CGPoint(x: center.x, y: center.y + Self.markSize / 2 + 28)
         let tracking = CGFloat(0.42 - 0.24 * frame.name) * Self.nameSize
+        let landing = LaunchGeometry.landingOpacity(flight: flight, hasSlot: anchor?.brandFrame != nil)
         return ZStack {
             Theme.canvas.opacity(frame.black)
             LaunchSkyCanvas(frame: frame, center: center)
             LaunchMark(frame: frame, size: Self.markSize)
                 .scaleEffect(1 + (target.side / Self.markSize - 1) * flight)
                 .position(LaunchGeometry.lerp(center, target.center, flight))
-                .opacity(frame.mark)
+                .opacity(frame.mark * landing)
             Text(AppIdentity.displayName.uppercased())
                 .font(.system(size: Self.nameSize, weight: .semibold))
                 .tracking(tracking)
@@ -113,7 +114,7 @@ struct LaunchSequence: View {
         let skipped = skippedAt.map { max(0, $0.timeIntervalSince(began)) / multiplier }
         func wait(until elapsed: Double) async -> Bool {
             let remaining = elapsed * multiplier - Date().timeIntervalSince(began)
-            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining)) }
+            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining), tolerance: LaunchClock.tolerance) }
             return !Task.isCancelled
         }
         if skipped == nil, let lockAt = timeline.piecesLockAt {
@@ -181,7 +182,7 @@ struct LaunchExit: View {
         .task {
             // Con solo fundido (Sutil, Reducir movimiento) no hay vuelo: se quita enseguida.
             let seconds = (timeline.exitDuration ?? 0) * max(motion.timeMultiplier, 0.01)
-            if seconds > 0 { try? await Task.sleep(for: .seconds(seconds)) }
+            if seconds > 0 { try? await Task.sleep(for: .seconds(seconds), tolerance: LaunchClock.tolerance) }
             guard !Task.isCancelled else { return }
             onFinish()
         }
@@ -212,7 +213,7 @@ struct LaunchExit: View {
             AppMark(size: from.width)
                 .scaleEffect(1 + (target.side / max(from.width, 1) - 1) * flight)
                 .position(LaunchGeometry.lerp(home, target.center, flight))
-                .opacity(frame.mark)
+                .opacity(frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: anchor?.brandFrame != nil))
         }
         .accessibilityHidden(true)
     }
@@ -235,6 +236,12 @@ enum LaunchGeometry {
     static func nameTarget(in slot: CGRect) -> CGPoint {
         let side = min(slot.height, slot.width)
         return CGPoint(x: slot.minX + side + (slot.width - side) / 2, y: slot.midY)
+    }
+
+    /// Con la ranura de Inicio a la vista, la marca llega entera hasta ella. Si aún no hay ranura (vuela hacia donde
+    /// estará), se va deshaciendo por el camino: no aterriza encima de nada.
+    static func landingOpacity(flight: CGFloat, hasSlot: Bool) -> Double {
+        hasSlot ? 1 : Double(max(0, min(1, 1 - (flight - 0.25) / 0.6)))
     }
 
     static func lerp(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {

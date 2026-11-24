@@ -288,7 +288,7 @@ private struct AppShellView: View {
     /// La misma cara que el bloqueo (la marca en el mismo sitio y el nombre debajo), sin lema ni botón: al quitarse, la
     /// marca que vuela sale exactamente de donde estaba.
     private var privacyCover: some View {
-        LockFace(showsTagline: false) {
+        LockFace(taglineOpacity: 0) {
             AppMark(size: 76)
         } action: {
             Color.clear.frame(height: 52)

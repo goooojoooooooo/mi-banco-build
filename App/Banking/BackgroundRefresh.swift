@@ -19,6 +19,15 @@ enum BackgroundRefresh {
     static func run() async {
         schedule()
         _ = await BankSync.shared.refresh(trigger: .background)
+        if !Task.isCancelled {
+            await PortfolioModel.refreshPricesInBackground()
+        }
+        if !Task.isCancelled, let state = try? SharedStore.make().load() {
+            await MorningBriefingNotifier.reschedule(
+                settings: state.alertSettings,
+                shownToday: BriefingModel.storedShownToday()
+            )
+        }
         schedule()
     }
 }

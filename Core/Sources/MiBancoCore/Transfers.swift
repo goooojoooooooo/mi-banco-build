@@ -186,10 +186,17 @@ public func spendingExclusions(in state: LedgerState, now: Date, ownTransfers: S
         .union(probableTwinCaptureIDs(in: state.movements, skipping: transfers.union(unconfirmed)))
 }
 
-/// Palabras que marcan una operación que no es un pago con tarjeta (R40): una fila así no puede ser la pareja de un
-/// capturado. Coincidencia por palabra entera, sin mayúsculas ni tildes.
+/// Palabras que marcan una operación que no es un pago con tarjeta (R40, R43): una fila así no puede ser la pareja de un
+/// capturado. Coincidencia por palabra entera (singular o plural +s/+es), sin mayúsculas ni tildes.
 private let nonCardWords: Set<String> = [
-    "recibo", "domiciliacion", "adeudo", "transferencia", "traspaso", "bizum", "cajero", "comision",
+    "recibo", "recibos",
+    "domiciliacion", "domiciliaciones",
+    "adeudo", "adeudos",
+    "transferencia", "transferencias",
+    "traspaso", "traspasos",
+    "bizum", "bizums",
+    "cajero", "cajeros",
+    "comision", "comisiones",
 ]
 
 private func marksNonCardOperation(_ text: String?) -> Bool {

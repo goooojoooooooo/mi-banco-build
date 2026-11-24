@@ -46,22 +46,13 @@ check_registros() {
 
 # b) Fines de linea: ningun fichero versionado con CRLF en el indice.
 check_crlf() {
-  local res
-  local todos tolerados fallos_l
+  local todos
   # safe.directory: en el contenedor de CI el repo pertenece a otro usuario.
   local eol
   eol=$(git -c safe.directory="$PWD" ls-files --eol) || { fallo "No se pudo ejecutar git ls-files --eol" "(¿no es un repositorio git?)"; return 0; }
   todos=$(grep -E '^i/crlf' <<<"$eol" | cut -f2 || true)
-  # TODO(gates): CRLF heredado en un informe de docs (caso real, no tocado aqui):
-  # normalizar a LF y quitar esta excepcion.
-  tolerados=$(grep -xF 'docs/traspaso/informes/integracion2a-arreglos2-informe.md' <<<"$todos" || true)
-  fallos_l=$(grep -vxF 'docs/traspaso/informes/integracion2a-arreglos2-informe.md' <<<"$todos" || true)
-  if [ -n "$tolerados" ]; then
-    mapfile -t l <<<"$tolerados"
-    aviso "CRLF heredado tolerado temporalmente (TODO(gates): pasar a LF)" "${l[@]}"
-  fi
-  if [ -n "$fallos_l" ]; then
-    mapfile -t l <<<"$fallos_l"
+  if [ -n "$todos" ]; then
+    mapfile -t l <<<"$todos"
     fallo "Ficheros versionados con fin de linea CRLF en el indice (deben ser LF)" "${l[@]}"
   fi
 }
@@ -165,6 +156,50 @@ check_demomode() {
   fi
 }
 
+# g) Nombre visible: el de Core (appDisplayName, «Onyx»). Ni «Mi Banco» en el codigo de la app ni en la pagina de vuelta
+#    del banco; ninguna cadena con "mibanco" salvo los identificadores que NO cambian (lista cerrada: argumentos de
+#    lanzamiento, ids com.mibanco..., grupo compartido, esquema, etiqueta y nombres de fichero de la copia, preferencias
+#    de la demo, la direccion de vuelta registrada en Enable Banking); y CFBundleDisplayName de project.yml igual al nombre de Core.
+NOMBRE_FUENTE=Core/Sources/MiBancoCore/AppName.swift
+NOMBRE_IDENTIFICADORES='^[^:]+:[0-9]+:"(-MiBanco[A-Za-z]*|com\.mibanco\.[A-Za-z.]+|group\.com\.mibanco\.shared|mibanco|MiBanco|MiBanco-[^"]*|MiBancoDemoPreferences|https://goooojoooooooo\.github\.io/mi-banco-build/cb/)"$'
+
+check_nombre() {
+  local dirs=() d res nombre
+  while IFS= read -r d; do dirs+=("$d"); done < <(existentes "${APP_DIRS[@]}" Redirect)
+  if [ ${#dirs[@]} -gt 0 ]; then
+    res=$(grep -rnIi 'mi banco' "${dirs[@]}" | cut -d: -f1,2 || true)
+    if [ -n "$res" ]; then
+      mapfile -t l <<<"$res"
+      fallo "El nombre viejo «Mi Banco» en el codigo de la app (el nombre visible es appDisplayName de Core)" "${l[@]}"
+    fi
+    res=$(grep -rnIoiE --include='*.swift' '"[^"]*mi-?banco[^"]*"' "${dirs[@]}" \
+      | grep -vE "$NOMBRE_IDENTIFICADORES" | cut -d: -f1,2 || true)
+    if [ -n "$res" ]; then
+      mapfile -t l <<<"$res"
+      fallo "Cadenas con \"MiBanco\"/\"mibanco\" que no son identificadores conocidos (el nombre visible es appDisplayName)" "${l[@]}"
+    fi
+  fi
+  [ -f project.yml ] || return 0
+  nombre=""
+  if [ -f "$NOMBRE_FUENTE" ]; then
+    nombre=$(sed -nE 's/^public let appDisplayName = "([^"]+)"[[:space:]]*$/\1/p' "$NOMBRE_FUENTE")
+  fi
+  if [ -z "$nombre" ]; then
+    fallo "No se pudo leer appDisplayName de $NOMBRE_FUENTE" "$NOMBRE_FUENTE"
+    return 0
+  fi
+  res=$(grep -nE '^[[:space:]]*CFBundleDisplayName:' project.yml \
+    | grep -vE "^[0-9]+:[[:space:]]*CFBundleDisplayName:[[:space:]]*\"?${nombre}\"?[[:space:]]*$" \
+    | sed -E 's/^([0-9]+):.*/project.yml:\1/' || true)
+  if [ -n "$res" ]; then
+    mapfile -t l <<<"$res"
+    fallo "CFBundleDisplayName distinto de appDisplayName (\"$nombre\")" "${l[@]}"
+  fi
+  if ! grep -qE '^[[:space:]]*CFBundleDisplayName:' project.yml; then
+    fallo "project.yml no declara CFBundleDisplayName" "project.yml"
+  fi
+}
+
 resumen() {
   if [ "$FALLOS" -eq 0 ]; then
     echo "Comprobaciones: OK"
@@ -182,6 +217,7 @@ ejecutar_todo() {
   check_intel
   check_higiene
   check_demomode
+  check_nombre
 }
 
 # --self-test: cada regla debe detectar su caso en un directorio temporal fuera del repo.
@@ -196,7 +232,7 @@ self_test() {
     if grep -qE "$3" <<<"$2"; then hay=1; fi
     if [ "$hay" = "$quiere" ]; then echo "  ok: $1"; ok=$((ok+1)); else echo "  MAL: $1"; bad=$((bad+1)); fi
   }
-  correr() { (cd "$tmp" && MODO_AVISO_CRLF=0 bash "$script" 2>&1) || true; }
+  correr() { (cd "$tmp" && bash "$script" 2>&1) || true; }
 
   cd "$tmp"
   git init -q .
@@ -209,6 +245,11 @@ self_test() {
   printf 'let x = DemoMode.on\n#if DEBUG\nlet y = DemoMode.on\n#else\nlet z = DemoMode.on\n#endif\n#if DEBUG\n#if os(iOS)\nlet w = DemoMode.on\n#endif\nlet v = DemoMode.on\n#endif\n' > App/Views/Demo.swift
   printf 'import Foundation\n#if os(iOS)\n#endif\n' > App/DemoMode.swift
   printf 'a\r\nb\r\n' > crlf.txt
+  mkdir -p Core/Sources/MiBancoCore Redirect
+  printf 'public let appDisplayName = "Onyx"\n' > Core/Sources/MiBancoCore/AppName.swift
+  printf 'Text("Mi Banco")\nlet k = "com.mibanco.banking"\nlet x = "Abre MiBanco ya"\nlet a = ["-MiBancoDemoToday", "group.com.mibanco.shared"]\nlet f = "MiBanco-%s.json"\n// en mibanco://cb\n' '\\(dia)' > App/Views/Nombre.swift
+  printf '<title>Mi Banco</title>\n' > Redirect/index.html
+  printf 'targets:\n  A:\n    info:\n      properties:\n        CFBundleDisplayName: Onyx\n        CFBundleDisplayName: Mi Banco\n' > project.yml
   git -c core.autocrlf=false -c core.safecrlf=false add -A >/dev/null 2>&1
   o=$(correr)
   esperar "registros: print" "$o" 'App/Log\.swift:2:'
@@ -228,6 +269,15 @@ self_test() {
   esperar "DemoMode anidado en DEBUG permitido (9)" "$o" 'App/Views/Demo\.swift:9$' 0
   esperar "DemoMode tras #endif anidado permitido (11)" "$o" 'App/Views/Demo\.swift:11$' 0
   esperar "DemoMode.swift sin #if DEBUG primero" "$o" 'App/DemoMode\.swift:1$'
+  esperar "nombre viejo en una vista" "$o" 'App/Views/Nombre\.swift:1$'
+  esperar "nombre viejo en la pagina de vuelta" "$o" 'Redirect/index\.html:1$'
+  esperar "cadena MiBanco que no es identificador" "$o" 'App/Views/Nombre\.swift:3$'
+  esperar "identificador com.mibanco permitido" "$o" 'App/Views/Nombre\.swift:2$' 0
+  esperar "argumento y grupo permitidos" "$o" 'App/Views/Nombre\.swift:4$' 0
+  esperar "nombre de fichero de copia permitido" "$o" 'App/Views/Nombre\.swift:5$' 0
+  esperar "comentario con el esquema permitido" "$o" 'App/Views/Nombre\.swift:6$' 0
+  esperar "CFBundleDisplayName viejo" "$o" '^  project\.yml:6$'
+  esperar "CFBundleDisplayName igual al de Core permitido" "$o" '^  project\.yml:5$' 0
   esperar "resumen con fallos" "$o" 'Comprobaciones: [0-9]+ fallo'
 
   printf 'UIPasteboard.general\n' > App/MoveMoney/Pasteboard.swift
@@ -236,8 +286,11 @@ self_test() {
   esperar "portapapeles prohibido fuera de Pasteboard.swift" "$o" 'Clip\.swift:2:'
 
   # Caso limpio: sin falsos positivos.
-  rm -r App Core .github crlf.txt
-  mkdir -p App Core/Sources .github/workflows
+  rm -r App Core .github Redirect crlf.txt project.yml
+  mkdir -p App Core/Sources/MiBancoCore .github/workflows
+  printf 'public let appDisplayName = "Onyx"\n' > Core/Sources/MiBancoCore/AppName.swift
+  printf 'let k = "com.mibanco.banking"\nlet s = "mibanco"\nlet t = AppIdentity.displayName\n' > App/Ids.swift
+  printf 'targets:\n  A:\n    info:\n      properties:\n        CFBundleDisplayName: Onyx\n' > project.yml
   printf '#if DEBUG\nenum DemoMode {}\n#endif\n' > App/DemoMode.swift
   printf '#if DEBUG\nlet a = DemoMode.on\n#endif\nlet i = "icon@2x.png"\nlet c = "a@example.com b@users.noreply.github.com"\nlet r = footprint(3)\n' > App/Ok.swift
   printf 'runs-on: namespace-profile-onyx\n# NO usar macos-15-intel\n' > .github/workflows/ok.yml

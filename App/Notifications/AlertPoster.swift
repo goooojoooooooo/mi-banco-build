@@ -13,6 +13,8 @@ enum AlertPoster {
         center.setNotificationCategories([
             UNNotificationCategory(identifier: category, actions: [], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: InsightNotifier.category, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: MorningBriefingNotifier.category, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: BankReminders.category, actions: [], intentIdentifiers: [], options: []),
         ])
     }
 
@@ -49,7 +51,7 @@ enum AlertPoster {
     static func postUnread(bank: BankID) async {
         let content = UNMutableNotificationContent()
         content.title = "Aviso sin leer"
-        content.body = "Mi Banco no ha entendido un aviso de \(bank.displayName). Ábrelo para revisarlo."
+        content.body = "\(AppIdentity.displayName) no ha entendido un aviso de \(bank.displayName). Ábrelo para revisarlo."
         content.interruptionLevel = .active
         await add(content, id: UUID().uuidString)
     }

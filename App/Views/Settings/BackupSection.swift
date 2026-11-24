@@ -5,6 +5,7 @@ import MiBancoCore
 /// Con Reducir movimiento, fundidos. Los identificadores son para las pruebas de toque.
 struct BackupSection: View {
     let model: LedgerModel
+    let portfolio: PortfolioModel
     let present: (RootSheet) -> Void
     let importBackup: () -> Void
 
@@ -40,7 +41,11 @@ struct BackupSection: View {
                 Button {
                     // Se vuelve a leer al tocar: así el recuento de "lo de ahora" es el de ese momento.
                     // Si la copia desapareció desde que se pintó la fila, la fila se actualiza en vez de no hacer nada.
-                    if let fresh = model.previousPreview() { present(.restore(fresh)) } else { self.previous = nil }
+                    if let fresh = model.previousPreview(portfolioSafetyCopy: portfolio.loadSafetyCopy()) {
+                        present(.restore(fresh))
+                    } else {
+                        self.previous = nil
+                    }
                 } label: {
                     OptionLabel(title: "Volver a lo de antes de restaurar", detail: "Datos del \(Self.dayText(previous.file.exportedAt))",
                                 systemImage: "clock.arrow.circlepath")
@@ -62,9 +67,9 @@ struct BackupSection: View {
         } header: {
             SettingsHeader("Copia de seguridad")
         } footer: {
-            SettingsFooter("La copia lleva todos tus movimientos, saldos y notas. Guárdala en un sitio tuyo: quien la tenga puede leerla.")
+            SettingsFooter("La copia lleva todos tus movimientos, saldos, notas e inversiones. Guárdala en un sitio tuyo: quien la tenga puede leerla.")
         }
-        .task(id: model.restoreCount) { previous = model.previousPreview() }
+        .task(id: model.restoreCount) { previous = model.previousPreview(portfolioSafetyCopy: portfolio.loadSafetyCopy()) }
         .animation(reduceMotion ? nil : Theme.Motion.quick, value: failed)
         .sensoryFeedback(.success, trigger: doneTick)
         .sensoryFeedback(.error, trigger: errorTick)
@@ -140,9 +145,14 @@ struct BackupSection: View {
         func stale() -> Bool { gate != nil && gate?.generation != generation }
         set(kind, .working)
         let state = model.state
+        let savedPortfolio = portfolio.portfolioForBackup
         let now = Date()
         let result: Result<URL, Error> = await Task.detached {
-            Result { try kind == .backup ? BackupService.exportBackup(state, now: now) : BackupService.exportCSV(state, now: now) }
+            Result {
+                try kind == .backup
+                    ? BackupService.exportBackup(state, portfolio: savedPortfolio, now: now)
+                    : BackupService.exportCSV(state, now: now)
+            }
         }.value
         switch result {
         case .success(let url):

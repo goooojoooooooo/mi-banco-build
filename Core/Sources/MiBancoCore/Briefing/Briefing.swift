@@ -79,10 +79,10 @@ public enum RenderStyle: Sendable {
 
 private let maskDots = "•••"
 
-/// Un importe escrito en un texto libre («13,99 € dos veces hoy», «20 EUR», «5 euros») o un decimal suelto con coma («13,99»):
-/// cifras con puntos o comas y un € / EUR / euros detrás, o `n,nn`.
+/// Un importe o porcentaje escrito en un texto libre («13,99 € dos veces hoy», «20 EUR», «5 euros», «+24 %», «12.50»,
+/// «13,99») o un símbolo de divisa/porcentaje suelto («Dia %», «Tienda €»): todo queda en «•••» en modo privado (C3/J23).
 private let writtenAmountPattern =
-    "(?i)(?:€|(?<![a-z])(?:euros?|eur)(?![a-z]))[ \u{00A0}]?[-+]?[0-9](?:[0-9.,]*[0-9])?|[-+]?[0-9][0-9.,]*[ \u{00A0}]?(?:€|euros?(?![a-z])|eur(?![a-z]))|[-+]?[0-9][0-9.]*,[0-9]{2}(?![0-9])"
+    "(?i)(?:€|(?<![a-z])(?:euros?|eur)(?![a-z]))[ \u{00A0}\u{202F}]?[+\\-\u{2212}]?[0-9](?:[0-9.,]*[0-9])?|[+\\-\u{2212}]?[0-9][0-9.,]*[ \u{00A0}\u{202F}]?(?:€|%|euros?(?![a-z])|eur(?![a-z]))|[+\\-\u{2212}]?[0-9][0-9.]*[,\\.][0-9]{2}(?![0-9])|[€%]"
 
 /// Un solo signo menos en todo el resumen (U+2212): el que empieza un número negativo.
 private func uniformMinus(_ text: String) -> String {

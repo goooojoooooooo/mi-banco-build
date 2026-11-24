@@ -89,8 +89,71 @@ public func bankStatusLines(
         return BankStatusLines(primary: "Conectado · actualizando…", secondary: expiry, action: nil)
     }
     let days = dayDifference(from: now, to: link.consentValidUntil, calendar: calendar)
+    let balanceSuffix: String
+    switch estimated {
+    case nil: balanceSuffix = "sin saldo"
+    case true?: balanceSuffix = "estimado"
+    case false?: balanceSuffix = "exacto"
+    }
     return BankStatusLines(
-        primary: "Actualizado \(relativeUpdated(ok, now: now, calendar: calendar)) · "
-            + (estimated == true ? "estimado" : "exacto"),
+        primary: "Actualizado \(relativeUpdated(ok, now: now, calendar: calendar)) · \(balanceSuffix)",
         secondary: expiry, action: days <= 10 ? .renew : .refresh)
+}
+
+/// U88: lo que VoiceOver anuncia tras la acción con nombre «Actualizar» del carrusel: «Actualizado» si salió bien; si
+/// falló, el mismo mensaje que enseña la tarjeta con el fallo apuntado.
+public func manualRefreshAnnouncement(
+    bank: BankID, link: BankLinkInfo, problem: SyncProblem?, estimated: Bool?, canConnect: Bool, now: Date, calendar: Calendar
+) -> String {
+    guard let problem else { return "Actualizado" }
+    return bankStatusLines(bank: bank, link: link.recordingFailure(problem, at: now), estimated: estimated,
+                           canConnect: canConnect, now: now, calendar: calendar).primary
+}
+
+/// Estado de la fila de saldo en Ajustes para un banco conectado (U45): nombra el origen real.
+public func connectedBalanceRowStatus(
+    estimated: Bool, origin: BalanceOrigin, setAt: Date, now: Date, calendar: Calendar
+) -> String {
+    let kind = estimated ? "estimado" : "exacto"
+    let rel = relativeUpdated(setAt, now: now, calendar: calendar)
+    let sameYear = calendar.component(.year, from: setAt) == calendar.component(.year, from: now)
+    switch origin {
+    case .bank:
+        return "\(kind) · \(rel)"
+    case .notice:
+        if rel.hasPrefix("el ") {
+            return "\(kind) · aviso del \(rel.dropFirst(3))"
+        }
+        return "\(kind) · aviso de \(rel)"
+    case .statement:
+        return "\(kind) · extracto del \(shortSpanishDate(setAt, calendar: calendar, withYear: !sameYear))"
+    case .manual:
+        return "\(kind) · corregido \(rel)"
+    }
+}
+
+/// Explicación del saldo en el reverso de la tarjeta (U52: preposiciones correctas tras verbo).
+public func balanceExplanationText(
+    origin: BalanceOrigin, estimated: Bool, fromBank: Bool, setAt: Date, bank: BankID, now: Date, calendar: Calendar
+) -> String {
+    let isToday = calendar.isDate(setAt, inSameDayAs: now)
+    let sameYear = calendar.component(.year, from: setAt) == calendar.component(.year, from: now)
+    let dayText = shortSpanishDate(setAt, calendar: calendar, withYear: !sameYear)
+    let whenAfterVerb = isToday ? "a las \(clock(setAt, calendar: calendar))" : "el \(dayText)"
+    let whenAfterNoun = isToday ? "de las \(clock(setAt, calendar: calendar))" : "del \(dayText)"
+    switch origin {
+    case .bank:
+        if !estimated { return "Lo dio \(bank.displayName) \(whenAfterVerb)." }
+        return "Parte del saldo que dio el banco \(whenAfterVerb) y suma lo que ha llegado después."
+    case .statement:
+        if !estimated { return "Viene del extracto de \(bank.displayName) \(whenAfterNoun)." }
+        return "Parte del saldo del extracto \(whenAfterNoun) y suma lo que ha llegado después."
+    case .notice:
+        if !estimated { return "Lo dijo \(bank.displayName) en su aviso \(whenAfterNoun)." }
+        return "Parte del saldo que dio el banco en su aviso \(whenAfterNoun) y suma lo que ha llegado después."
+    case .manual:
+        if !estimated, fromBank { return "Lo dijo \(bank.displayName) en su aviso \(whenAfterNoun)." }
+        if fromBank { return "Parte del saldo que dio el banco en su aviso \(whenAfterNoun) y suma lo que ha llegado después." }
+        return "Lo corregiste \(isToday ? "hoy" : "el \(dayText)") y desde entonces suma los movimientos que llegan."
+    }
 }

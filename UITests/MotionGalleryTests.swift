@@ -189,11 +189,14 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil { amountLabel() == "3.769,95 euros" }, "Al mostrar no salió el importe actual: \(amountLabel())")
     }
 
-    /// Un pago que llega mientras el ojo está cambiando no se pierde.
-    func testChangeDuringEyeToggleIsNotLost() throws {
+    /// Prueba de toques: ojo, ojo, pago, y la etiqueta dice el importe con el pago. No prueba un cambio DURANTE el
+    /// barajado (`tap()` espera a que la app esté quieta y la etiqueta sale de `cents`, no de lo dibujado): eso lo
+    /// prueba `AmountRevealTests` en Core. La primera espera es larga porque es la prueba del arranque más frío.
+    func testEyeTapsThenPaymentUpdateTheLabel() throws {
         launchGallery()
         tap("gallery.eye")
-        XCTAssertTrue(waitUntil { amountLabel() == "importe oculto" })
+        XCTAssertTrue(labelled("importe oculto").waitForExistence(timeout: 30), "El ojo no ocultó el importe")
+        XCTAssertTrue(waitUntil { amountLabel() == "importe oculto" }, "Queda un importe a la vista: \(amountLabel())")
         tap("gallery.eye")
         tap("gallery.pay")
         XCTAssertTrue(waitUntil(8) { amountLabel() == "3.769,95 euros" }, "Se perdió el pago: \(amountLabel())")
@@ -278,7 +281,8 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil(8) { amountLabel() == "3.774,75 euros" }, "No se ve el importe: \(amountLabel())")
     }
 
-    /// K14: las filas `.plain` de la galería existen con su importe (VoiceOver lee el importe, no el signo de la maqueta).
+    /// Las filas `.plain` de la galería existen con su importe (VoiceOver lee el importe, no el signo de la maqueta). Lee
+    /// solo etiquetas: no prueba la tipografía de K14 (eso lo enseña la captura) ni el color (`testPlainIncome…`).
     func testPlainRowsShowTheirAmounts() throws {
         launchGallery()
         for (id, label) in [("gallery.row.expense", "-4,80 euros"), ("gallery.row.income", "1.250,00 euros"),
@@ -287,5 +291,442 @@ final class MotionGalleryTests: XCTestCase {
             XCTAssertTrue(row.waitForExistence(timeout: 5), "No existe \(id)")
             XCTAssertEqual(row.label, label, "\(id)")
         }
+    }
+
+    // MARK: Bloqueos antes de la fase B
+
+    /// Tinta de una franja de la pantalla (en puntos): píxeles del verde de los ingresos (#30D158), píxeles casi blancos
+    /// y dónde empieza y acaba (x, en puntos) lo verde. Se mide sobre la captura de la pantalla, no del elemento: el
+    /// marco de un elemento puede ser mayor que lo que se ve.
+    private struct Ink {
+        var green = 0, white = 0, greenMinX = CGFloat.infinity, greenMaxX = -CGFloat.infinity
+        /// El borde derecho (x, en puntos) de cualquier tinta clara.
+        var inkMaxX = -CGFloat.infinity
+        /// El borde derecho (x, en puntos) de la tinta gris de los títulos (`Theme.label2`), sin contar el verde.
+        var greyMaxX = -CGFloat.infinity
+        /// La caja de la tinta blanca o verde (un importe): x en puntos; alto en puntos (filas de la franja).
+        var figureMinX = CGFloat.infinity, figureMaxX = -CGFloat.infinity
+        var figureMinRow = CGFloat.infinity, figureMaxRow = -CGFloat.infinity
+        var figureWidth: CGFloat { figureMaxX - figureMinX }
+        var figureHeight: CGFloat { figureMaxRow - figureMinRow }
+    }
+
+    private func ink(in band: CGRect) -> Ink {
+        let shot = XCUIScreen.main.screenshot().image
+        let scale = shot.scale
+        guard let full = shot.cgImage else { return Ink() }
+        let px = CGRect(x: band.minX * scale, y: band.minY * scale, width: band.width * scale, height: band.height * scale)
+            .integral.intersection(CGRect(x: 0, y: 0, width: full.width, height: full.height))
+        guard !px.isEmpty, let image = full.cropping(to: px) else { return Ink() }
+        let width = image.width, height = image.height
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let drawn = pixels.withUnsafeMutableBytes { buffer -> Bool in
+            guard let context = CGContext(
+                data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else { return false }
+            context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        guard drawn else { return Ink() }
+        var out = Ink()
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let r = Int(pixels[i]), g = Int(pixels[i + 1]), b = Int(pixels[i + 2])
+            if g > 150, r < 120, b < 160, g - r > 70 {
+                out.green += 1
+                let x = (px.minX + CGFloat((i / 4) % width)) / scale
+                out.greenMinX = min(out.greenMinX, x)
+                out.greenMaxX = max(out.greenMaxX, x)
+            }
+            if r > 225, g > 225, b > 225 { out.white += 1 }
+            // Tinta de un importe (blanca o verde; el gris de los títulos no cuenta): su caja, en puntos.
+            if (r > 200 && g > 200 && b > 200) || (g > 150 && r < 120 && b < 160 && g - r > 70) {
+                let x = (px.minX + CGFloat((i / 4) % width)) / scale
+                let row = CGFloat((i / 4) / width) / scale
+                out.figureMinX = min(out.figureMinX, x)
+                out.figureMaxX = max(out.figureMaxX, x)
+                out.figureMinRow = min(out.figureMinRow, row)
+                out.figureMaxRow = max(out.figureMaxRow, row)
+            }
+            if max(r, g, b) > 150 { out.inkMaxX = max(out.inkMaxX, (px.minX + CGFloat((i / 4) % width)) / scale) }
+            if max(r, g, b) > 90, abs(r - g) < 25, abs(g - b) < 25 {
+                out.greyMaxX = max(out.greyMaxX, (px.minX + CGFloat((i / 4) % width)) / scale)
+            }
+        }
+        return out
+    }
+
+    /// La franja del importe de una fila: a la derecha del título, a su altura (las filas centran título e importe).
+    private func amountBand(rightOf title: XCUIElement, halfHeight: CGFloat = 14) -> CGRect {
+        let window = app.windows.firstMatch.frame
+        let t = title.frame
+        return CGRect(x: t.maxX, y: t.midY - halfHeight, width: window.maxX - t.maxX, height: halfHeight * 2)
+    }
+
+    /// Abre la galería bajada hasta «Filas» (debajo de la barra de estado, sin barridos) y espera a que llegue.
+    private func launchRows(_ extra: [String] = []) {
+        launchGallery(["-MiBancoMotionGalleryPage", "filas"] + extra)
+        let title = app.staticTexts["Nómina"]
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        let window = app.windows.firstMatch.frame
+        _ = waitUntil { title.frame.minY < window.midY }
+        Thread.sleep(forTimeInterval: 0.5)
+    }
+
+    /// B-1: una fila `.plain` se dibuja con el color de quien la coloca: el ingreso sale verde (`Theme.income`), no
+    /// blanco. Con `.foregroundStyle(.foreground)` en cada celda, todos sus píxeles eran blancos (255, 255, 255).
+    func testPlainIncomeKeepsTheCallerColour() throws {
+        launchRows()
+        let income = app.staticTexts["Nómina"]
+        revealWhole(income)
+        let incomeInk = ink(in: amountBand(rightOf: income))
+        XCTAssertGreaterThan(incomeInk.green, 40, "El ingreso no sale en verde: \(incomeInk)")
+        XCTAssertLessThan(incomeInk.white, max(1, incomeInk.green / 10), "El ingreso tiene tinta blanca: \(incomeInk)")
+        // Control: el gasto pide blanco y sale blanco.
+        let expense = app.staticTexts["Café"]
+        revealWhole(expense)
+        let expenseInk = ink(in: amountBand(rightOf: expense))
+        XCTAssertGreaterThan(expenseInk.white, 40, "El gasto no sale en blanco: \(expenseInk)")
+        XCTAssertEqual(expenseInk.green, 0, "El gasto tiene tinta verde: \(expenseInk)")
+    }
+
+    /// B-2 sin efectos a tamaño normal: los importes de una columna acaban en el mismo borde derecho, dentro del margen
+    /// de 20 pt. (Con el marco centrado y medido a mano cada fila acababa en un sitio: 422,7 y 425,3 pt de 440.)
+    func testPlainRowsShareTheirRightEdge() throws {
+        launchRows()
+        let window = app.windows.firstMatch.frame
+        let edges = ["Café", "Nómina", "Saldo"].map { name -> CGFloat in
+            let title = app.staticTexts[name]
+            XCTAssertTrue(title.waitForExistence(timeout: 5))
+            return ink(in: amountBand(rightOf: title)).inkMaxX
+        }
+        XCTAssertLessThanOrEqual((edges.max() ?? 0) - (edges.min() ?? 0), 1.5, "Bordes derechos distintos: \(edges)")
+        for edge in edges {
+            XCTAssertLessThanOrEqual(edge, window.maxX - 19, "Un importe se sale del margen: \(edges)")
+        }
+    }
+
+    /// B-1: oculto, el ingreso conserva el color («+•••,•• €» en verde, como en el prototipo).
+    func testHiddenPlainIncomeKeepsTheCallerColour() throws {
+        launchRows(["-MiBancoDemoPrivate"])
+        XCTAssertEqual(any("gallery.row.income").label, "importe oculto")
+        let income = app.staticTexts["Nómina"]
+        revealWhole(income)
+        let incomeInk = ink(in: amountBand(rightOf: income))
+        XCTAssertGreaterThan(incomeInk.green, 20, "El ingreso oculto no sale en verde: \(incomeInk)")
+        XCTAssertLessThan(incomeInk.white, max(1, incomeInk.green / 10), "El ingreso oculto tiene tinta blanca: \(incomeInk)")
+    }
+
+    /// B-2: con el texto más grande, el importe de una fila se encoge y deja sitio al título: «Nómina» cabe en una línea
+    /// (tan alta como «Café», cuya fila sí cabe) y el importe, entero, va a su derecha sin tocar el borde. Con
+    /// `fixedSize()` el importe pedía ~310 pt y el título se partía en varias líneas.
+    func testPlainRowLeavesRoomForTheTitleAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let title = app.staticTexts["Nómina"]
+        let reference = app.staticTexts["Café"]
+        revealWhole(title)
+        XCTAssertTrue(reference.exists)
+        XCTAssertEqual(title.frame.height, reference.frame.height, accuracy: 2,
+                       "«Nómina» se parte en varias líneas: \(title.frame) frente a «Café» \(reference.frame)")
+        let window = app.windows.firstMatch.frame
+        let row = CGRect(x: window.minX, y: title.frame.minY, width: window.width, height: title.frame.height)
+        let rowInk = ink(in: row)
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        // K18: al menos 8 pt de tinta a tinta entre el título y el importe (el `Spacer` pide 12; en `db9d6c8` quedaban 6,7).
+        XCTAssertGreaterThanOrEqual(rowInk.greenMinX - rowInk.greyMaxX, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 19, "El importe se sale del margen: \(rowInk)")
+    }
+
+    /// K18: con el texto más grande, un título largo («Nómina de noviembre») y un importe largo («+12.345,67 €»): el
+    /// importe encoge lo que haga falta, queda entero dentro del margen derecho y separado del título al menos 8 pt.
+    func testLongPlainRowKeepsItsGapAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let title = app.staticTexts["Nómina de noviembre"]
+        revealWhole(title)
+        let window = app.windows.firstMatch.frame
+        let row = CGRect(x: window.minX, y: title.frame.minY, width: window.width, height: title.frame.height)
+        let rowInk = ink(in: row)
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        XCTAssertGreaterThanOrEqual(rowInk.greenMinX - rowInk.greyMaxX, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 19, "El importe se sale del margen: \(rowInk)")
+        XCTAssertEqual(any("gallery.row.long").label, "12.345,67 euros")
+        // El marco del importe (VoiceOver, toques) es lo que se ve: dentro del margen y a la derecha del título.
+        let amount = any("gallery.row.long").frame
+        XCTAssertLessThanOrEqual(amount.maxX, window.maxX - 19, "El marco del importe se sale: \(amount)")
+        XCTAssertGreaterThanOrEqual(amount.minX, rowInk.greyMaxX + 4, "El marco del importe pisa el título: \(amount), \(rowInk)")
+    }
+
+    /// K21: con el texto más grande, el importe de una fila encoge SOLO lo que el título necesita. Escala de cada importe =
+    /// alto de su tinta / alto de la tinta de «−4,80 €» (que cabe de sobra). Si título + 8 pt + importe a tamaño natural
+    /// caben en la fila, el importe va al menos a 0,9; si caben con 16 pt, va a tamaño completo (la columna no queda
+    /// desigual). Con el `HStack` de antes el importe recibía media fila: «+1.250,00 €» salía a ~0,70 con 82 pt vacíos.
+    func testRowAmountsShrinkOnlyAsMuchAsNeededAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let edge = app.windows.firstMatch.frame.maxX - 19
+        func figure(_ name: String) -> (title: CGRect, ink: Ink) {
+            let title = app.staticTexts[name]
+            revealWhole(title)
+            let t = title.frame
+            return (t, ink(in: CGRect(x: t.maxX + 1, y: t.minY, width: edge + 19 - t.maxX - 1, height: t.height)))
+        }
+        let reference = figure("Café").ink
+        XCTAssertGreaterThan(reference.figureHeight, 20, "No se ve «−4,80 €»: \(reference)")
+        var report: [String] = []
+        for name in ["Nómina", "Saldo", "Hucha", "Ahorro", "Alquiler"] {
+            let (title, ink) = figure(name)
+            XCTAssertGreaterThan(ink.figureHeight, 10, "No se ve el importe de «\(name)»: \(ink)")
+            let scale = ink.figureHeight / reference.figureHeight
+            let natural = ink.figureWidth / max(scale, 0.01)
+            report.append("\(name): escala \(scale), natural \(natural), título hasta \(title.maxX)")
+            XCTAssertLessThanOrEqual(ink.figureMaxX, edge, "«\(name)» se sale del margen: \(ink)")
+            XCTAssertGreaterThanOrEqual(ink.figureMinX - title.maxX, 8, "«\(name)»: título e importe casi se tocan: \(ink)")
+            if title.maxX + 8 + natural <= edge {
+                XCTAssertGreaterThanOrEqual(scale, 0.9, "«\(name)» encoge de más: \(report.last ?? "")")
+            }
+            if title.maxX + 16 + natural <= edge {
+                XCTAssertEqual(ink.figureHeight, reference.figureHeight, accuracy: 1,
+                               "«\(name)» cabe y no va a tamaño completo (columna desigual): \(report.last ?? "")")
+            }
+        }
+        // «Nómina» (~134 pt de título, ~268 pt de importe en una fila de 400): cabe a 0,95 como mucho; nunca a 0,7.
+        let nomina = figure("Nómina").ink
+        XCTAssertGreaterThanOrEqual(nomina.figureHeight / reference.figureHeight, 0.9, "«+1.250,00 €» encoge de más: \(report)")
+    }
+
+    /// K25: con el texto más grande, si el título se parte, el importe recupera el ancho que el título partido deja sin
+    /// usar: en «Nómina de noviembre» el hueco de tinta título–importe es de 20 pt como mucho, o el importe va al menos a
+    /// 0,62 (alto de su tinta / alto de la de «−4,80 €»). Antes se quedaba a ~0,49 con ~66 pt vacíos.
+    func testWrappedTitleGivesBackItsUnusedWidthAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let cafe = app.staticTexts["Café"]
+        revealWhole(cafe)
+        let edge = app.windows.firstMatch.frame.maxX - 19
+        let c = cafe.frame
+        let reference = ink(in: CGRect(x: c.maxX + 1, y: c.minY, width: edge + 19 - c.maxX - 1, height: c.height))
+        XCTAssertGreaterThan(reference.figureHeight, 20, "No se ve «−4,80 €»: \(reference)")
+        let title = app.staticTexts["Nómina de noviembre"]
+        revealWhole(title)
+        let window = app.windows.firstMatch.frame
+        let t = title.frame
+        let rowInk = ink(in: CGRect(x: window.minX, y: t.minY, width: window.width, height: t.height))
+        let amountInk = ink(in: CGRect(x: t.maxX + 1, y: t.minY, width: edge + 19 - t.maxX - 1, height: t.height))
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        let gap = rowInk.greenMinX - rowInk.greyMaxX
+        let scale = amountInk.figureHeight / reference.figureHeight
+        XCTAssertGreaterThanOrEqual(gap, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, edge, "El importe se sale del margen: \(rowInk)")
+        XCTAssertTrue(gap <= 20 || scale >= 0.62,
+                      "Con el título partido el importe encoge de más: hueco \(gap) pt, escala \(scale) (\(amountInk))")
+    }
+
+    /// K21 (y M-5): un importe enorme con un título largo baja hasta la mitad y, de ahí, cede el título (que se parte);
+    /// el importe queda entero dentro de la fila, a 8 pt o más del título.
+    func testHugeAmountStaysInsideItsRowAtLargestText() throws {
+        launchRows(Self.hugeText)
+        let title = app.staticTexts["Traspaso a la cuenta de ahorro"]
+        revealWhole(title)
+        let window = app.windows.firstMatch.frame
+        let row = CGRect(x: window.minX, y: title.frame.minY, width: window.width, height: title.frame.height)
+        let rowInk = ink(in: row)
+        XCTAssertGreaterThan(rowInk.green, 40, "No se ve el importe: \(rowInk)")
+        XCTAssertGreaterThanOrEqual(rowInk.greenMinX - rowInk.greyMaxX, 8, "Título e importe casi se tocan: \(rowInk)")
+        XCTAssertLessThanOrEqual(rowInk.greenMaxX, window.maxX - 19, "El importe se sale del margen: \(rowInk)")
+        XCTAssertGreaterThanOrEqual(rowInk.greyMaxX, window.minX + 60, "El título se quedó sin sitio: \(rowInk)")
+        XCTAssertEqual(any("gallery.row.huge").label, "1.234.567,89 euros")
+    }
+
+    /// K22: cada importe monta UNA cara con cifras reales (una `TimelineView`), no una por escalón de encogido, y UNA
+    /// copia de medida (texto oculto, sin `TimelineView`: el hueco que comparte la máscara, K23); en reposo las caras no
+    /// dibujan fotogramas (la `TimelineView` solo corre mientras rueda).
+    /// Los importes se cuentan uno a uno por su identificador: una fila-botón repite su importe en la etiqueta del botón
+    /// («Hucha, 123,45 euros»), que no es un importe aparte (por eso contar etiquetas con cifras daba 12 para 9).
+    func testEachAmountMountsOneLiveFace() throws {
+        launchGallery()
+        XCTAssertTrue(waitUntil { self.amountLabel() == "3.774,75 euros" })
+        let ids = ["gallery.amount", "gallery.row.expense", "gallery.row.income", "gallery.row.plain", "gallery.row.long",
+                   "gallery.row.huge", "gallery.row.buttonAboveAmount", "gallery.row.buttonAmount", "gallery.row.buttonBelowAmount"]
+        for id in ids {
+            XCTAssertTrue(any(id).label.hasSuffix(" euros"), "\(id) no es un importe a la vista: «\(any(id).label)»")
+        }
+        // Toda etiqueta con cifras es uno de esos importes o un botón que lleva uno dentro.
+        let money = NSPredicate(format: "label MATCHES %@", #".*[0-9]{1,3}(\.[0-9]{3})*,[0-9]{2}.*"#)
+        let buttons = app.buttons.matching(money).count
+        XCTAssertEqual(moneyLabelCount(), ids.count + buttons,
+                       "Etiquetas con cifras: \(moneyLabelCount()), importes \(ids.count), botones con importe \(buttons)")
+        // Que acabe de rodar el protagonista (cuenta desde 0 al abrir).
+        Thread.sleep(forTimeInterval: 2)
+        tap("gallery.census")
+        let faces = app.staticTexts["gallery.census.value"]
+        let slots = app.staticTexts["gallery.census.slots"]
+        let frames = app.staticTexts["gallery.census.frames"]
+        XCTAssertTrue(waitUntil { faces.label != "-1" }, "El recuento no cambió")
+        XCTAssertEqual(Int(faces.label), ids.count, "Caras vivas \(faces.label) para \(ids.count) importes")
+        XCTAssertEqual(Int(slots.label), ids.count, "Copias de medida \(slots.label) para \(ids.count) importes")
+        // En reposo: en 1,5 s, como mucho el redibujado que provoca el propio toque del recuento (≤ 2 por cara); una sola
+        // `TimelineView` en marcha sumaría ~90.
+        let before = Int(frames.label) ?? -1
+        Thread.sleep(forTimeInterval: 1.5)
+        tap("gallery.census")
+        Thread.sleep(forTimeInterval: 0.5)
+        let after = Int(frames.label) ?? -1
+        XCTAssertGreaterThan(before, 0, "Las caras no dibujaron nada: \(before)")
+        XCTAssertLessThanOrEqual(after - before, 2 * ids.count, "Las caras dibujan en reposo: \(before) → \(after)")
+    }
+
+    /// K23: con el texto más grande, cerrar el ojo no deja ninguna cifra a la vista de VoiceOver en ningún momento y la
+    /// máscara ocupa el mismo hueco que el importe al que sustituye (no salta de tamaño). Con la escalera de antes,
+    /// «+•••,•• €», más estrecho, pasaba al escalón 1,0 y crecía.
+    private func assertClosingTheEyeKeepsTheSlot(_ extra: [String]) {
+        launchGallery(Self.hugeText + ["-MiBancoMotionGalleryPage", "cifras"] + extra)
+        let long = any("gallery.row.long")
+        XCTAssertTrue(long.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil { long.label == "12.345,67 euros" }, "No se ve el importe largo: \(long.label)")
+        Thread.sleep(forTimeInterval: 0.6)
+        let before = long.frame
+        tap("gallery.eye")
+        var samples: [Int] = []
+        for _ in 0..<6 {
+            samples.append(moneyLabelCount())
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        XCTAssertEqual(samples, Array(repeating: 0, count: samples.count), "Cifras a la vista al cerrar el ojo: \(samples)")
+        XCTAssertEqual(long.label, "importe oculto")
+        Thread.sleep(forTimeInterval: 0.8)
+        let after = long.frame
+        XCTAssertEqual(after.width, before.width, accuracy: 1, "La máscara cambia de ancho: \(before) → \(after)")
+        XCTAssertEqual(after.height, before.height, accuracy: 1, "La máscara cambia de alto: \(before) → \(after)")
+        XCTAssertEqual(after.maxX, before.maxX, accuracy: 1, "La máscara se mueve: \(before) → \(after)")
+    }
+
+    func testClosingTheEyeKeepsTheSlotAtLargestText() throws {
+        assertClosingTheEyeKeepsTheSlot([])
+    }
+
+    func testClosingTheEyeKeepsTheSlotAtLargestTextReduced() throws {
+        assertClosingTheEyeKeepsTheSlot(["-MiBancoMotionReduce"])
+    }
+
+    /// K19 / K20: el elemento de VoiceOver de un importe mide su línea, no la de las tiras «0…9,0» de cada dígito (que
+    /// se dibujan desplazadas y hacían el marco de 16 líneas: 325 pt a tamaño normal y 693 pt con el texto más grande).
+    private func assertAmountFrameIsOneLine(_ extra: [String]) {
+        launchRows(extra)
+        let title = app.staticTexts["Nómina"]
+        revealWhole(title)
+        let amount = any("gallery.row.income").frame
+        let line = title.frame.height
+        XCTAssertLessThanOrEqual(amount.height, line * 1.6, "Marco del importe: \(amount), una línea: \(line)")
+        XCTAssertLessThan(abs(amount.midY - title.frame.midY), line, "Marco del importe fuera de su fila: \(amount), \(title.frame)")
+    }
+
+    func testRowAmountAccessibilityFrameIsOneLine() throws {
+        assertAmountFrameIsOneLine([])
+    }
+
+    func testRowAmountAccessibilityFrameIsOneLineAtLargestText() throws {
+        assertAmountFrameIsOneLine(Self.hugeText)
+    }
+
+    /// K19: tres filas-botón pegadas («Hucha», «Ahorro», «Alquiler»), cada una con su importe. La del medio recibe el
+    /// toque en toda su forma visible (título e importe) y ninguna roba toques a sus vecinas: un toque sobre la fila de
+    /// arriba o la de abajo, a la altura de cada cifra del importe del medio y a 4 pt del borde común, cuenta en la
+    /// vecina y no en ella. Su importe (marco de VoiceOver) cabe en su fila.
+    ///
+    /// Lo que NO se puede pedir: que un toque en un hueco VACÍO a menos de ~20 pt de un botón no lo active. Eso lo hace
+    /// el sistema con cualquier botón (sonda del 23-11, ejecución 45165248227: una fila de solo `Text`, igual que una con
+    /// `RollingAmount` y que una con el importe sin toques, cuentan hasta 20 pt fuera en un hueco vacío y nada a 24 pt).
+    /// Por eso aquí los toques «de fuera» caen sobre vecinas de verdad, y el hueco vacío se prueba a 32 pt.
+    private func assertRowButtonsKeepTheirTaps(_ extra: [String]) {
+        launchRows(extra)
+        let above = app.buttons["gallery.row.buttonAbove"]
+        let button = app.buttons["gallery.row.button"]
+        let below = app.buttons["gallery.row.buttonBelow"]
+        revealWhole(above)
+        revealWhole(below)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(above.frame), "«Hucha» no se ve entera: \(above.frame)")
+        Thread.sleep(forTimeInterval: 0.5)
+        let up = above.frame, mid = button.frame, down = below.frame
+        let amount = any("gallery.row.buttonAmount").frame
+        let title = app.staticTexts["Ahorro"].frame
+        // Las filas no se pisan y el importe del medio (lo que lee VoiceOver) está dentro de su fila, en una línea.
+        XCTAssertLessThanOrEqual(up.maxY, mid.minY + 0.5, "«Hucha» pisa «Ahorro»: \(up) \(mid)")
+        XCTAssertLessThanOrEqual(mid.maxY, down.minY + 0.5, "«Ahorro» pisa «Alquiler»: \(mid) \(down)")
+        XCTAssertGreaterThanOrEqual(amount.minY, mid.minY - 0.5, "El importe sube fuera de su fila: \(amount) \(mid)")
+        XCTAssertLessThanOrEqual(amount.maxY, mid.maxY + 0.5, "El importe baja fuera de su fila: \(amount) \(mid)")
+        XCTAssertLessThanOrEqual(amount.height, max(title.height, 1) * 1.6, "Importe de más de una línea: \(amount), título \(title)")
+        func count(_ e: XCUIElement) -> Int { Int(e.value as? String ?? "") ?? -1 }
+        XCTAssertEqual([count(above), count(button), count(below)], [0, 0, 0])
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        func tapAt(_ x: CGFloat, _ y: CGFloat) { origin.withOffset(CGVector(dx: x, dy: y)).tap() }
+        // Dentro: título e importe cuentan.
+        tapAt(mid.minX + 20, mid.midY)
+        XCTAssertTrue(waitUntil { count(button) == 1 }, "El título de la fila no recibe el toque")
+        tapAt(amount.midX, amount.midY)
+        XCTAssertTrue(waitUntil { count(button) == 2 }, "El importe de la fila no recibe el toque")
+        // Vecinas: a la altura de la primera cifra, del centro y del final del importe, y del título.
+        let xs = [amount.minX + 4, amount.midX, amount.maxX - 4, mid.minX + 20]
+        var expected = (above: 0, below: 0)
+        for x in xs {
+            for y in [up.midY, up.maxY - 4] {
+                tapAt(x, y)
+                expected.above += 1
+                XCTAssertTrue(waitUntil { count(above) == expected.above },
+                              "Un toque sobre «Hucha» (\(x), \(y)) no cayó en ella: \(count(above)) de \(expected.above)")
+            }
+            for y in [down.minY + 4, down.midY] {
+                tapAt(x, y)
+                expected.below += 1
+                XCTAssertTrue(waitUntil { count(below) == expected.below },
+                              "Un toque sobre «Alquiler» (\(x), \(y)) no cayó en ella: \(count(below)) de \(expected.below)")
+            }
+        }
+        // Un hueco vacío lejos de todo botón (32 pt bajo la última fila) no activa ninguna.
+        XCTAssertLessThan(down.maxY + 40, app.windows.firstMatch.frame.maxY, "El hueco bajo «Alquiler» no se ve: \(down)")
+        tapAt(amount.midX, down.maxY + 32)
+        // K24: «Ahorro» va encima de sus vecinas (`zIndex`), así que una fuga de su área hacia abajo se vería en los
+        // toques sobre «Alquiler» de arriba y, más allá, justo fuera de la holgura del sistema (20 pt): a 24 pt bajo
+        // «Alquiler», en las cuatro x, nada cuenta.
+        for x in xs { tapAt(x, down.maxY + 24) }
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(count(button), 2, "Un toque sobre una vecina o en un hueco cayó en «Ahorro»")
+        XCTAssertEqual(count(above), expected.above)
+        XCTAssertEqual(count(below), expected.below)
+    }
+
+    func testRowButtonTakesTapsOnlyOnItsRow() throws {
+        assertRowButtonsKeepTheirTaps([])
+    }
+
+    func testRowButtonTakesTapsOnlyOnItsRowAtLargestText() throws {
+        assertRowButtonsKeepTheirTaps(Self.hugeText)
+    }
+
+    /// B-4: sin preferencias, el ojo guardado se observa en vivo. Con el ojo abierto se ve el importe; si se cierra lo
+    /// guardado (como haría Ajustes desde otra pantalla), el importe se oculta sin que nada más lo vuelva a dibujar.
+    func testWithoutPreferencesTheStoredEyeIsObservedLive() throws {
+        launchGallery(["-MiBancoMotionGalleryNoPrefs"])
+        XCTAssertTrue(waitUntil(8) { amountLabel() == "3.774,75 euros" }, "No se ve el importe: \(amountLabel())")
+        tap("gallery.storedEye.close")
+        XCTAssertTrue(labelled("importe oculto").waitForExistence(timeout: 10), "El importe no se ocultó al cerrar el ojo guardado")
+        XCTAssertTrue(waitUntil { moneyLabelCount() == 0 }, "Sigue habiendo una cifra real con el ojo cerrado")
+    }
+
+    /// B2 (K9): un hermano `Spacer` en un hueco de 300 pt no estira el botón que se transforma.
+    func testMorphingButtonIsNotStretchedBySpacer() throws {
+        launchGallery()
+        let button = app.buttons["Probar en hueco"]
+        revealWhole(button)
+        XCTAssertLessThan(button.frame.height, 60, "Mide \(button.frame.height) pt")
+        XCTAssertGreaterThanOrEqual(button.frame.height, 44)
+    }
+
+    /// Ajustes › Animaciones arranca en «Expresivo» (lo que aprobó el dueño): sin nada guardado, el nivel de las
+    /// preferencias es `AppPreferences.defaultMotionLevel` y la galería lo enseña elegido.
+    func testMotionLevelStartsExpressive() throws {
+        launchGallery()
+        let expressive = app.buttons["Expresivo"]
+        XCTAssertTrue(expressive.waitForExistence(timeout: 5))
+        XCTAssertTrue(waitUntil { expressive.isSelected }, "«Expresivo» no es el nivel de partida")
+        XCTAssertFalse(app.buttons["Equilibrado"].isSelected)
+        XCTAssertFalse(app.buttons["Sutil"].isSelected)
     }
 }

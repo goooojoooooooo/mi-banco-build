@@ -32,6 +32,7 @@ struct CardMaterial: Sendable, Equatable {
     static let revolut = CardMaterial(top: Color(hex: "#30353C"), middle: Color(hex: "#1F2226"), bottom: Color(hex: "#15171A"))
     static let imagin = CardMaterial(top: Color(hex: "#243532"), middle: Color(hex: "#172422"), bottom: Color(hex: "#0F1817"))
     static let tradeRepublic = CardMaterial(top: Color(hex: "#3A3026"), middle: Color(hex: "#271F19"), bottom: Color(hex: "#1A1511"))
+    static let investments = CardMaterial(top: Color(hex: "#3E342A"), middle: Color(hex: "#2B231C"), bottom: Color(hex: "#1D1813"))
 
     /// 160° en CSS ≈ de arriba-izquierda (algo inclinado) hacia abajo-derecha.
     var gradient: LinearGradient {

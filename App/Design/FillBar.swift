@@ -49,23 +49,28 @@ struct FillBar: View {
         .sensoryFeedback(Haptics.warning, trigger: warnCount)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
-        .accessibilityValue("\(MotionMath.percent(fraction)) %")
+        .accessibilityValue("\(MotionMath.percent(value)) %")
         .onAppear {
             // Reaparecer al desplazarse una lista no repite nada.
             guard !appeared else { return }
             appeared = true
-            latest = fraction
-            let over = isOver(fraction)
+            latest = value
+            let over = isOver(value)
             // Nace pasada del límite: ámbar ya puesto, sin pulso ni háptica.
             warned = over
-            shown = animatesOnAppear && !motion.reduce ? 0 : fraction
-            if animatesOnAppear { fill(to: fraction, animated: true) }
+            shown = animatesOnAppear && !motion.reduce ? 0 : value
+            if animatesOnAppear { fill(to: value, animated: true) }
         }
-        .onChange(of: fraction) { _, new in change(to: new) }
+        // Se observa la fracción limpia: un NaN (distinto de sí mismo) no relanza el cambio en cada pasada.
+        .onChange(of: value) { _, new in change(to: new) }
     }
 
+    /// La fracción limpia (`MotionMath.finite`): la barra, el porcentaje y el aviso leen la misma. Con presupuesto 0
+    /// (gasto / 0 = ∞) es 0: barra vacía, «0 %» y sin ámbar ni vibración.
+    private var value: Double { MotionMath.finite(fraction) }
+
     private func isOver(_ value: Double) -> Bool {
-        warnAt.map { value >= $0 } ?? false
+        MotionMath.isOver(value, warnAt: warnAt)
     }
 
     private func fill(to target: Double, animated: Bool) {

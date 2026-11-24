@@ -3,8 +3,8 @@ import Foundation
 // La guía de los avisos al instante, paso a paso. Todo lo que aparece en pantalla y que NO es nuestro
 // (los nombres de Atajos) está en `GuideNames`, en un solo sitio: si iOS lo llama de otra forma, se corrige aquí.
 
-/// Nombre de la app dentro de la guía. Una sola constante: el cambio de nombre es una línea.
-public let guideAppName = "Mi Banco"
+/// Nombre de la app dentro de la guía: el que ve debajo del icono y busca en Atajos (`appDisplayName`).
+public let guideAppName = appDisplayName
 
 /// Nombres de las pantallas y botones de Atajos que la guía nombra.
 /// SIN VERIFICAR en un iPhone con iOS 27 (salvo lo que el dueño ha visto en su móvil: «Atajos», «Notificación»

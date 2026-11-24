@@ -182,4 +182,67 @@ private func calendarOf(_ state: LedgerState, book: AccountBook = AccountBook(),
         #expect(days.count == 14)
         #expect(days.allSatisfy { $0.isEmpty && $0.balanceAfter.isEmpty })
     }
+
+    // MARK: Ronda U0–U68 (U21, U22)
+
+    @Test func unSoloPasarPorBanco() throws {
+        var state = LedgerState()
+        state.movements = subscription(.rev, "Spotify", 1099, date(9, 21), date(10, 21))
+            + subscription(.rev, "Netflix", 1399, date(9, 22), date(10, 22))
+        state.balances[.rev] = ManualBalance(cents: 6_000, setAt: date(11, 20, 8), origin: .bank)
+        var book = AccountBook()
+        book.floors[.rev] = 5_000
+
+        let now = date(11, 20, 8, 30)
+        let days = upcomingCalendar(state: state, book: book, now: now, calendar: cal)
+        let topUps = calendarTopUps(days: days, floors: book.floors)
+        #expect(topUps.count == 1)
+        let rev = try #require(topUps.first)
+        #expect(rev.bank == .rev)
+        #expect(rev.firstDay == date(11, 21, 0))
+        #expect(rev.suggestedCents == 2_000)
+
+        // Cuadra con `shortfalls` del resumen.
+        let upcoming = subscriptionCharges(in: state, now: now, calendar: cal)
+        let sf = shortfalls(balances: [.rev: 6_000], floors: book.floors, upcoming: upcoming, now: now, calendar: cal)
+        #expect(sf.first?.suggestedCents == 2_000)
+    }
+
+    @Test func finDeMesSuscripcion() throws {
+        // 31 ene + 28 feb 2026 -> 31 mar 2026.
+        let s31 = detectSubscriptions(in: subscription(.rev, "Alquiler", 50_000, date(1, 31), date(2, 28)),
+                                      now: date(3, 10), calendar: cal)
+        #expect(try #require(s31.first).nextDate == date(3, 31))
+
+        // 30 ene + 28 feb 2026 -> 30 mar 2026.
+        let s30 = detectSubscriptions(in: subscription(.rev, "Gym", 3_000, date(1, 30), date(2, 28)),
+                                      now: date(3, 10), calendar: cal)
+        #expect(try #require(s30.first).nextDate == date(3, 30))
+
+        // Control: 15 ene + 15 feb -> 15 mar; 28 ene + 28 feb -> 28 mar.
+        let s15 = detectSubscriptions(in: subscription(.rev, "Spotify", 1_099, date(1, 15), date(2, 15)),
+                                      now: date(3, 10), calendar: cal)
+        #expect(try #require(s15.first).nextDate == date(3, 15))
+        let s28 = detectSubscriptions(in: subscription(.rev, "Netflix", 1_399, date(1, 28), date(2, 28)),
+                                      now: date(3, 10), calendar: cal)
+        #expect(try #require(s28.first).nextDate == date(3, 28))
+    }
+
+    @Test func finDeMesNoEsRetraso() {
+        var state = LedgerState()
+        state.movements = subscription(.rev, "Alquiler", 50_000, date(1, 31), date(2, 28))
+        let days = upcomingCalendar(state: state, book: AccountBook(), now: date(3, 29, 9), calendar: cal)
+        #expect(days.flatMap(\.charges).allSatisfy { !$0.overdue })
+        #expect(days[2].charges.map(\.name) == ["Alquiler"])
+    }
+
+    @Test func finDeMesNomina() throws {
+        var state = LedgerState()
+        state.movements = [
+            mv(.ima, 185_000, "Nómina ACME", at: date(1, 31, 9), shop: false),
+            mv(.ima, 185_000, "Nómina ACME", at: date(2, 28, 9), shop: false),
+        ]
+        let inc = try #require(expectedIncome(in: state, now: date(3, 20, 9), calendar: cal))
+        #expect(inc.date == date(3, 31, 12))
+    }
 }

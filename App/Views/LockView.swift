@@ -16,7 +16,7 @@ struct LockView: View {
         VStack(spacing: 0) {
             Spacer()
             AppMark(size: 76, drawn: drawn)
-            Text("Mi Banco")
+            Text(AppIdentity.displayName)
                 .titan(.sheetTitle)
                 .foregroundStyle(Theme.label)
                 .padding(.top, Theme.Space.gutter)
@@ -54,7 +54,7 @@ struct LockView: View {
             #if DEBUG
             if DemoMode.holdsLock {
                 // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación.
-                try? await Task.sleep(for: .seconds(4))
+                try? await Task.sleep(for: .seconds(DemoMode.lockSeconds))
                 unlockWithFade()
                 return
             }

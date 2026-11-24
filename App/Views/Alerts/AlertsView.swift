@@ -9,6 +9,7 @@ struct AlertsView: View {
     var isVisible = false
     /// Abre la hoja de un movimiento (la presenta `RootView`).
     let onOpen: (UUID) -> Void
+    var onMorningRuleChanged: () -> Void = {}
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Al entrar en la pestaña, los avisos llegan uno tras otro.
@@ -42,7 +43,12 @@ struct AlertsView: View {
                             .padding(.horizontal, 16)
                         }
 
-                        AlertRules(model: model, settings: snapshot.alertSettings, mutedCount: snapshot.mutedList.count)
+                        AlertRules(
+                            model: model,
+                            settings: snapshot.alertSettings,
+                            mutedCount: snapshot.mutedList.count,
+                            onMorningRuleChanged: onMorningRuleChanged
+                        )
                             .id(AlertsAnchor.rules)
                             .staggeredEntrance(min(1 + insights.count, 8))
 

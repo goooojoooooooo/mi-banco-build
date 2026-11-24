@@ -35,6 +35,7 @@ private func briefing(_ s: OpeningSituation) -> Briefing {
         for s in OpeningSituation.allCases {
             let lines = openingCandidates(for: s)
             #expect(lines.count >= 8, "\(s)")
+            #expect(openingCandidateCount(for: s) == lines.count, "\(s)")
             #expect(Set(lines).count == lines.count, "\(s) tiene frases repetidas")
         }
     }

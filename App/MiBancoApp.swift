@@ -4,7 +4,32 @@ import UserNotifications
 
 @main
 struct MiBancoApp: App {
+    init() {
+        // Antes de terminar el arranque: así un toque en un aviso que abre la app en frío también llega al router.
+        UNUserNotificationCenter.current().delegate = ForegroundPresenter.shared
+    }
+
+    var body: some Scene {
+        // U62 (hipótesis, sin pila que la demuestre; ver ejecución 44972452792 y U77): `WindowGroup` envuelve su cierre en un
+        // `LazyView` interno que SwiftUI podría reevaluar en `com.apple.SwiftUI.AsyncRenderer` al cambiar `@State` del `App`
+        // (p. ej. al terminar `LaunchCurtain`) y disparar `_swift_task_checkIsolatedSwift` en Swift 6. Por si acaso,
+        // `MiBancoApp` no tiene `@State`; el otro sospechoso, el `Canvas` asíncrono de `CardSurface`, ya dibuja en el principal.
+        WindowGroup {
+            AppShellView()
+        }
+        // Actualización de bancos en segundo plano (tarea 10): mejor esfuerzo, la decide el sistema.
+        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
+            await BackgroundRefresh.run()
+        }
+    }
+}
+
+private struct AppShellView: View {
     @State private var model = LedgerModel()
+    @State private var portfolio = PortfolioModel()
+    @State private var accountBook = AccountBookModel()
+    @State private var briefing = BriefingModel()
+    @State private var speaker = BriefingSpeaker()
     @State private var logos = MerchantLogos()
     @State private var preferences = AppPreferences()
     @State private var locked = true
@@ -14,11 +39,6 @@ struct MiBancoApp: App {
     @State private var revealToken = 0
     @AppStorage("lockEnabled") private var lockEnabled = true
     @Environment(\.scenePhase) private var scenePhase
-
-    init() {
-        // Antes de terminar el arranque: así un toque en un aviso que abre la app en frío también llega al router.
-        UNUserNotificationCenter.current().delegate = ForegroundPresenter.shared
-    }
 
     private var showsLock: Bool {
         #if DEBUG
@@ -34,29 +54,25 @@ struct MiBancoApp: App {
         return lockEnabled && scenePhase != .active
     }
 
-    var body: some Scene {
-        WindowGroup {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-MiBancoSelfTest") {
-                BankingSelfTestView()
-                    .preferredColorScheme(.dark)
-            } else {
-                content
-            }
-            #else
+    var body: some View {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-MiBancoSelfTest") {
+            BankingSelfTestView()
+                .preferredColorScheme(.dark)
+        } else {
             content
-            #endif
         }
-        // Actualización de bancos en segundo plano (tarea 10): mejor esfuerzo, la decide el sistema.
-        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
-            await BackgroundRefresh.run()
-        }
+        #else
+        content
+        #endif
     }
 
     @ViewBuilder
     private var content: some View {
             ZStack {
-                RootView(model: model, isLocked: showsLock, revealToken: revealToken)
+                RootView(model: model, portfolio: portfolio, accountBook: accountBook,
+                         briefing: briefing, speaker: speaker,
+                         isLocked: showsLock, revealToken: revealToken)
                     .accessibilityHidden(showsLock)
                     .allowsHitTesting(!showsLock)
                 if showsLock {
@@ -91,8 +107,16 @@ struct MiBancoApp: App {
                 }
                 #endif
                 await AlertPoster.setup()
-                // Con el permiso ya pedido: resumen semanal y recordatorios de suscripciones al día.
+                briefing.prefetchOpeningIfNeeded(
+                    state: model.state,
+                    portfolio: portfolio.portfolioForBackup,
+                    book: accountBook.book,
+                    privateMode: preferences.privateMode
+                )
+                // Con el permiso ya pedido: resumen semanal, recordatorios de suscripciones y aviso matinal al día.
                 await AlertScheduler.reschedule(for: model.state)
+                await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday)
+                await portfolio.refreshPrices(force: false)
             }
             .environment(logos)
             // El entorno de movimiento va DENTRO de `.environment(preferences)`: lee las preferencias.
@@ -119,12 +143,26 @@ struct MiBancoApp: App {
                 switch phase {
                 case .active:
                     model.reload()
+                    portfolio.reload()
+                    accountBook.reload()
+                    briefing.reloadPreferences()
+                    briefing.prefetchOpeningIfNeeded(
+                        state: model.state,
+                        portfolio: portfolio.portfolioForBackup,
+                        book: accountBook.book,
+                        privateMode: preferences.privateMode
+                    )
                     BankSync.refreshOnOpen() // tarea 10
+                    Task { await portfolio.refreshPrices(force: false) }
+                    Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
                 case .background:
+                    speaker.stop()
                     BackgroundRefresh.schedule() // tarea 10
+                    Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     if lockEnabled { locked = true }
                 default:
+                    speaker.stop()
                     break
                 }
             }
@@ -136,6 +174,9 @@ struct MiBancoApp: App {
                 }
             }
             .onChange(of: showsLock) { wasLocked, isLocked in
+                if isLocked {
+                    speaker.stop()
+                }
                 // Al desbloquear, Inicio se monta por capas mientras el bloqueo se desvanece encima.
                 if wasLocked && !isLocked {
                     launching = false

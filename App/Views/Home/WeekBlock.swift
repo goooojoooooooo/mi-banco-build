@@ -50,8 +50,19 @@ struct WeekBlock: View {
         if card == .all, let pace {
             PaceSentence(pace: pace)
         } else if card != .all {
-            Text(balance.map { $0.estimated ? "Saldo estimado: corrígelo en Ajustes" : "Saldo exacto del último aviso" }
-                 ?? "Sin saldo: escríbelo en Ajustes")
+            Text(balanceFootnote)
+        }
+    }
+
+    private var balanceFootnote: String {
+        guard let balance else { return "Sin saldo: escríbelo en Ajustes" }
+        switch balance.origin {
+        case .bank:
+            return balance.estimated ? "Saldo estimado desde el banco" : "Saldo exacto del banco"
+        case .statement:
+            return balance.estimated ? "Saldo estimado desde el extracto" : "Saldo exacto del extracto"
+        case .notice, .manual:
+            return balance.estimated ? "Saldo estimado: corrígelo en Ajustes" : "Saldo exacto del último aviso"
         }
     }
 }

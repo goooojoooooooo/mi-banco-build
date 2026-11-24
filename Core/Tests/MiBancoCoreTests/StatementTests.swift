@@ -520,4 +520,78 @@ private func parse(_ csv: String, _ bank: BankID, now: Date = at(11, 20)) throws
         let s = try parse(revolutCSV, .rev)
         #expect(!s.records.contains { $0.amountCents == -300 })
     }
+
+    // MARK: Ronda U0–U68 (U46, U47, U51)
+
+    @Test func extractoTRCuentaAparteLasInversiones() throws {
+        var rows: [[String: String]] = []
+        for i in 1...14 {
+            rows.append([
+                "datetime": "2026-11-10T09:0\(i % 10):00Z",
+                "type": i % 2 == 0 ? "INTEREST" : "CARD_TRANSACTION",
+                "amount": i % 2 == 0 ? "1.50" : "-5.00",
+                "currency": "EUR",
+                "name": i % 2 == 0 ? "Intereses" : "Café \(i)",
+                "transaction_id": "reg-\(i)",
+            ])
+        }
+        for i in 1...6 {
+            rows.append([
+                "datetime": "2026-11-11T10:0\(i):00Z",
+                "type": "BUY",
+                "asset_class": "STOCK",
+                "name": "Apple",
+                "symbol": "US0378331005",
+                "shares": "1",
+                "price": "180.00",
+                "amount": "-180.00",
+                "currency": "EUR",
+                "transaction_id": "inv-\(i)",
+            ])
+        }
+        let csv = ([trHeaders.joined(separator: ",")] + rows.map(trLine)).joined(separator: "\n") + "\n"
+        let parsed = try parse(csv, .tr)
+        var ledger = Ledger()
+        let first = ledger.importStatement(parsed, now: at(11, 20), calendar: madrid)
+        #expect(importSummary(first) == "14 movimientos nuevos, 6 operaciones de inversión nuevas")
+
+        let second = ledger.importStatement(parsed, now: at(11, 20, 12), calendar: madrid)
+        #expect(importSummary(second) == "0 movimientos nuevos, 20 ya estaban")
+    }
+
+    @Test func vistaPreviaDiceLoQueCambia() throws {
+        let parsed = try parse(revolutCSV, .rev)
+        let empty = Ledger()
+        let previewEmpty = empty.previewImport(parsed, now: at(11, 20, 12), calendar: madrid)
+        #expect(previewEmpty.addsPeriod == true)
+        #expect(previewEmpty.adoptsBalance == true)
+
+        var populated = Ledger()
+        populated.importStatement(parsed, now: at(11, 20, 12), calendar: madrid)
+        populated.adoptBalance(.rev, cents: 99_999, at: at(11, 20, 11), origin: .bank)
+        let previewAgain = populated.previewImport(parsed, now: at(11, 20, 12), calendar: madrid)
+        #expect(previewAgain.addsPeriod == false)
+        #expect(previewAgain.adoptsBalance == false)
+        #expect(statementZeroNewNote(previewAgain) == "Nada nuevo que importar: todo esto ya estaba.")
+
+        #expect(statementZeroNewNote(ReconcileReport(addsPeriod: true, adoptsBalance: true))
+            == "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto y el saldo del extracto.")
+        #expect(statementZeroNewNote(ReconcileReport(addsPeriod: true, adoptsBalance: false))
+            == "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto.")
+        #expect(statementZeroNewNote(ReconcileReport(addsPeriod: false, adoptsBalance: true))
+            == "Los movimientos ya estaban, pero al importar se actualiza el saldo con el del extracto.")
+    }
+
+    @Test func periodoConAno() {
+        func ymd(_ y: Int, _ m: Int, _ d: Int) -> Date {
+            madrid.date(from: DateComponents(year: y, month: m, day: d, hour: 12))!
+        }
+        let now2026 = ymd(2026, 11, 20)
+        #expect(statementRangeText(first: ymd(2024, 3, 12), last: ymd(2026, 11, 20), now: now2026, calendar: madrid)
+            == "Del 12 mar 2024 al 20 nov 2026")
+        #expect(statementRangeText(first: ymd(2025, 11, 21), last: ymd(2026, 11, 20), now: now2026, calendar: madrid)
+            == "Del 21 nov 2025 al 20 nov 2026")
+        #expect(statementRangeText(first: ymd(2026, 11, 1), last: ymd(2026, 11, 20), now: now2026, calendar: madrid)
+            == "Del 1 nov al 20 nov")
+    }
 }

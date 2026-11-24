@@ -66,9 +66,13 @@ struct TitanSegmented<Value: Hashable>: View {
             .contentShape(Rectangle())
     }
 
-    /// En fila, una cápsula (el radio se acota a la mitad del lado corto); apilada, esquinas de 26 pt.
-    private func shape(vertical: Bool) -> RoundedRectangle {
-        RoundedRectangle(cornerRadius: vertical ? 26 : 1_000, style: .continuous)
+    /// Lo que el indicador va por dentro de la pista.
+    private static var inset: CGFloat { 3 }
+
+    /// En fila, una cápsula (el radio se acota a la mitad del lado corto); apilada, esquinas de 26 pt en la pista y
+    /// concéntricas (26 − 3 = 23 pt) en el indicador, que va 3 pt por dentro.
+    private func shape(vertical: Bool, inset: Bool = false) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: vertical ? (inset ? 26 - Self.inset : 26) : 1_000, style: .continuous)
     }
 
     @ViewBuilder private func indicator(vertical: Bool) -> some View {
@@ -76,9 +80,9 @@ struct TitanSegmented<Value: Hashable>: View {
             // Sin viaje: un indicador por celda y solo se funde el elegido. El relleno es el MISMO que el del indicador
             // que viaja (3 pt alrededor de toda la pastilla), no uno por celda.
             let stack = options.indices.map { i in
-                shape(vertical: vertical)
+                shape(vertical: vertical, inset: true)
                     .fill(Color(hex: "#2A2A2D"))
-                    .overlay(shape(vertical: vertical).strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
+                    .overlay(shape(vertical: vertical, inset: true).strokeBorder(.white.opacity(0.14), lineWidth: 0.5))
                     .opacity(i == index ? 1 : 0)
             }
             Group {
@@ -88,13 +92,13 @@ struct TitanSegmented<Value: Hashable>: View {
                     HStack(spacing: 0) { ForEach(stack.indices, id: \.self) { stack[$0] } }
                 }
             }
-            .padding(3)
+            .padding(Self.inset)
             .animation(motion.fade, value: index)
         } else {
             Thumb(position: position, target: CGFloat(index), count: max(options.count, 1),
                   squash: continuousPosition != nil ? 0 : motion.level.bounceScale,
-                  vertical: vertical, radius: vertical ? 26 : 1_000)
-                .padding(3)
+                  vertical: vertical, radius: vertical ? 26 - Self.inset : 1_000)
+                .padding(Self.inset)
                 .animation(continuousPosition == nil ? motion.animation(.indicator) : nil, value: index)
         }
     }

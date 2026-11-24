@@ -21,35 +21,93 @@ struct Arrival: Equatable, Sendable {
     let amountCents: Int
 }
 
+/// Vista previa de un extracto CSV antes de aplicarlo al libro (Plan 2, tarea 12).
+struct ImportPreview: Equatable, Hashable, Sendable, Identifiable {
+    let id = UUID()
+    let statement: ParsedStatement
+    let report: ReconcileReport
+    var tradeRepublicRows: [TradeRepublicRow] = []
+    var tradeRepublicInvestmentsFailed: Bool = false
+
+    static func == (a: ImportPreview, b: ImportPreview) -> Bool {
+        a.statement == b.statement
+            && a.report == b.report
+            && a.tradeRepublicRows == b.tradeRepublicRows
+            && a.tradeRepublicInvestmentsFailed == b.tradeRepublicInvestmentsFailed
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
 @MainActor @Observable
 final class LedgerModel {
     private(set) var state = LedgerState()
     private(set) var arrival: Arrival?
     /// Se reconstruye solo cuando `state` cambia (ver `publish`).
     private(set) var snapshot = LedgerSnapshot()
+    /// Traspasos preparados con «Mover dinero» pendientes o recién confirmados (nunca llevan IBAN).
+    private(set) var pendingMoves: [PendingMove] = []
+    private(set) var pendingMoveStates: [UUID: MoveState] = [:]
     private let store: FileStore
     @ObservationIgnored private var observer: Task<Void, Never>?
     @ObservationIgnored private var syncObserver: Task<Void, Never>?
     /// Publicación aplazada de una llegada; cualquier publicación posterior la deja sin efecto.
     @ObservationIgnored private var staged: Task<Void, Never>?
+    @ObservationIgnored private var doneMoveTimers: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var resolvingMoves = false
     @ObservationIgnored private var generation = 0
     /// Presupuestos escritos que no se entienden («abc»): se quedan (solo en memoria) para enseñarlos con su error al
     /// volver a la pantalla, en vez de perderse sin decir nada.
     @ObservationIgnored var budgetDrafts: [BudgetScope: String] = [:]
+    private static let onboardingDoneKey = "onboardingDone"
+    /// Una vez arrancada la bienvenida de primera ejecución, sigue activa durante los 3 pasos aunque el paso 1 guarde saldos.
+    private(set) var onboardingSessionActive = false
+    /// false si la lectura inicial del libro falló (U56): se reevalúa en el primer `reload()` que lea bien.
+    @ObservationIgnored private var startupLoadSucceeded = false
     #if DEBUG
     /// Demo: lo que "escribiría el intent en el almacén"; `reload` lo recoge como si lo leyera de disco.
     @ObservationIgnored private var demoIncoming: LedgerState?
     #endif
 
+    /// Tanto en demo como en Release la bienvenida sigue únicamente `onboardingSessionActive` (U48, U56).
+    var needsOnboarding: Bool {
+        onboardingSessionActive
+    }
+
+    func finishOnboarding() {
+        onboardingSessionActive = false
+        #if DEBUG
+        if DemoMode.isActive {
+            publish(state)
+            return
+        }
+        #endif
+        UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+        publish(state)
+    }
+
     init() {
         store = SharedStore.make()
         #if DEBUG
         if DemoMode.isActive {
-            state = DemoMode.state()
-            snapshot = LedgerSnapshot(state: state, now: clock)
+            let demoState = DemoMode.state()
+            state = demoState
+            snapshot = LedgerSnapshot(state: demoState, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            let decision = onboardingDecision(
+                load: .success(demoState),
+                onboardingDone: DemoMode.onboardingStep == nil
+            )
+            startupLoadSucceeded = true
+            onboardingSessionActive = decision.startSession
+            resolvePendingMoves()
+        } else {
+            loadInitialFromStore()
         }
+        #else
+        loadInitialFromStore()
         #endif
-        reload()
         observer = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .ledgerDidChange) {
                 guard let model = self else { break }
@@ -73,17 +131,52 @@ final class LedgerModel {
         return Date()
     }
 
-    /// Si falla la lectura se conserva lo que ya se mostraba.
-    func reload() {
-        guard let loaded = loadNext() else { return }
-        if loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock) {
-            publish(loaded)
+    private func loadInitialFromStore() {
+        let result = Result { try store.load() }
+        let done = UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+        let decision = onboardingDecision(load: result, onboardingDone: done)
+        if case .success(let loaded) = result {
+            startupLoadSucceeded = true
+            state = loaded
+            snapshot = LedgerSnapshot(state: loaded, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            if decision.markDone {
+                UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+            }
+        } else {
+            startupLoadSucceeded = false
         }
+        onboardingSessionActive = decision.startSession
+        resolvePendingMoves()
     }
 
-    /// Tras una consulta a un banco: el estado nuevo se publica tal cual, sin `arrival`.
+    /// Si falla la lectura se conserva lo que ya se mostraba.
+    func reload() {
+        if let loaded = loadNext() {
+            if !startupLoadSucceeded {
+                startupLoadSucceeded = true
+                let done = UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+                let decision = onboardingDecision(load: .success(loaded), onboardingDone: done)
+                if decision.markDone {
+                    UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+                }
+                onboardingSessionActive = decision.startSession
+            }
+            if loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock) {
+                publish(loaded)
+                return
+            }
+        }
+        resolvePendingMoves()
+    }
+
+    /// Tras una consulta a un banco o cambio de lista ASPSP: rehace el snapshot sin `arrival`.
     private func reloadAfterSync() {
-        reload()
+        if let loaded = loadNext(), (loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock)) {
+            publish(loaded)
+        } else {
+            snapshot = LedgerSnapshot(state: state, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            resolvePendingMoves()
+        }
     }
 
     /// Lo siguiente que hay en el almacén (en la demo, lo que dejó la llegada simulada; si no, nada nuevo).
@@ -102,8 +195,88 @@ final class LedgerModel {
         staged?.cancel()
         staged = nil
         state = next
-        snapshot = LedgerSnapshot(state: next, now: clock)
+        snapshot = LedgerSnapshot(state: next, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
         reschedule(next)
+        resolvePendingMoves()
+    }
+
+    func addPendingMove(_ move: PendingMove) {
+        PendingMoves.add(move)
+        resolvePendingMoves()
+    }
+
+    func removePendingMove(_ id: UUID) {
+        doneMoveTimers[id]?.cancel()
+        doneMoveTimers.removeValue(forKey: id)
+        PendingMoves.remove(id)
+        pendingMoves.removeAll { $0.id == id }
+        pendingMoveStates.removeValue(forKey: id)
+    }
+
+    /// Resuelve los traspasos pendientes contra `state.movements`: caducados fuera en silencio;
+    /// hechos en cuenta propia se marcan como traspaso propio y se retiran tras 6 s.
+    /// `now` nil = el reloj del libro (`clock`: en la demo, `-MiBancoDemoToday`).
+    func resolvePendingMoves(now: Date? = nil) {
+        guard !resolvingMoves else { return }
+        let now = now ?? clock
+        resolvingMoves = true
+        defer { resolvingMoves = false }
+
+        let stored = PendingMoves.all()
+        var kept: [PendingMove] = []
+        var states: [UUID: MoveState] = [:]
+        var claimed = Set<UUID>()
+        var ownTransfersToMark: [UUID] = []
+        var removedExpired = false
+
+        for move in stored {
+            let resolved = moveState(move, movements: state.movements, now: now, claimed: claimed)
+            switch resolved {
+            case .expired:
+                removedExpired = true
+                doneMoveTimers[move.id]?.cancel()
+                doneMoveTimers.removeValue(forKey: move.id)
+            case .waiting:
+                kept.append(move)
+                states[move.id] = .waiting
+            case .done(let movementID):
+                claimed.insert(movementID)
+                kept.append(move)
+                states[move.id] = .done(movementID: movementID)
+                if case .own = move.target,
+                   let match = state.movements.first(where: { $0.id == movementID }),
+                   match.ownTransfer == nil {
+                    ownTransfersToMark.append(movementID)
+                }
+                if doneMoveTimers[move.id] == nil {
+                    let moveID = move.id
+                    let holdSeconds: Int = {
+                        #if DEBUG
+                        if DemoMode.isActive && DemoMode.demoPendingMode == "done" { return 30 }
+                        #endif
+                        return 6
+                    }()
+                    doneMoveTimers[moveID] = Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(holdSeconds))
+                        guard !Task.isCancelled, let self else { return }
+                        let anim: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.quick
+                        withAnimation(anim) {
+                            self.removePendingMove(moveID)
+                        }
+                    }
+                }
+            }
+        }
+
+        if removedExpired {
+            PendingMoves.save(kept)
+        }
+        pendingMoves = kept
+        pendingMoveStates = states
+
+        for movementID in ownTransfersToMark {
+            try? setOwnTransfer(true, for: movementID)
+        }
     }
 
     /// Resumen semanal y recordatorios de suscripciones: se rehacen con cada cambio del libro (nunca en la demo).
@@ -138,10 +311,11 @@ final class LedgerModel {
             let animation: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.roll
             withAnimation(animation) {
                 self.state = next
-                self.snapshot = LedgerSnapshot(state: next, now: self.clock)
+                self.snapshot = LedgerSnapshot(state: next, now: self.clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
             }
             self.staged = nil
             self.reschedule(next)
+            self.resolvePendingMoves()
         }
     }
 
@@ -228,6 +402,52 @@ final class LedgerModel {
         try mutate { $0.setBudget(cents, for: category) }
     }
 
+    func previewImport(_ data: Data, bank: BankID, now: Date? = nil) throws -> ImportPreview {
+        let now = now ?? clock
+        let cal = DateText.madridCalendar
+        let statement = try parseStatement(data, expected: bank, now: now, calendar: cal)
+        let report = Ledger(state: state).previewImport(statement, now: now, calendar: cal)
+        let trRows: [TradeRepublicRow]
+        let trInvestmentsFailed: Bool
+        if bank == .tr {
+            if let table = try? CSVTable.parse(data), let rows = try? parseTradeRepublicExport(table, calendar: cal) {
+                trRows = rows
+                trInvestmentsFailed = false
+            } else {
+                trRows = []
+                trInvestmentsFailed = true
+            }
+        } else {
+            trRows = []
+            trInvestmentsFailed = false
+        }
+        return ImportPreview(
+            statement: statement,
+            report: report,
+            tradeRepublicRows: trRows,
+            tradeRepublicInvestmentsFailed: trInvestmentsFailed
+        )
+    }
+
+    @discardableResult
+    func applyImport(_ preview: ImportPreview, now: Date? = nil) throws -> ReconcileReport {
+        let now = now ?? clock
+        let cal = DateText.madridCalendar
+        #if DEBUG
+        if DemoMode.isActive {
+            var ledger = Ledger(state: state)
+            let report = ledger.importStatement(preview.statement, now: now, calendar: cal)
+            publish(ledger.state)
+            return report
+        }
+        #endif
+        let report = try store.update { ledger -> ReconcileReport in
+            ledger.importStatement(preview.statement, now: now, calendar: cal)
+        }
+        reload()
+        return report
+    }
+
     /// Restaura una copia: antes guarda lo actual como `ledger-antes-de-restaurar.json`, las dos cosas dentro de una sola
     /// actualización coordinada. Si esa copia falla no se restaura nada y lanza `RestoreError.safetyCopyFailed`.
     func restore(_ file: BackupFile) throws {
@@ -257,12 +477,20 @@ final class LedgerModel {
     private(set) var restoreCount = 0
 
     /// La copia guardada antes de la última restauración, lista para "Volver a lo de antes" (nil si no hay).
-    func previousPreview() -> RestorePreview? {
+    func previousPreview(portfolioSafetyCopy: Portfolio? = nil) -> RestorePreview? {
         #if DEBUG
-        if DemoMode.isActive { return DemoMode.scrollsToBackup ? DemoMode.demoPreviousPreview(currentCount: state.movements.count) : nil }
+        if DemoMode.isActive {
+            guard DemoMode.scrollsToBackup else { return nil }
+            let demo = DemoMode.demoPreviousPreview(currentCount: state.movements.count)
+            return RestorePreview(
+                file: BackupFile(exportedAt: demo.file.exportedAt, ledger: demo.file.ledger, portfolio: portfolioSafetyCopy),
+                currentCount: demo.currentCount,
+                isPrevious: true
+            )
+        }
         #endif
         guard let info = store.copyInfo(named: Self.safetyCopyName) else { return nil }
-        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state),
+        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state, portfolio: portfolioSafetyCopy),
                               currentCount: state.movements.count, isPrevious: true)
     }
 

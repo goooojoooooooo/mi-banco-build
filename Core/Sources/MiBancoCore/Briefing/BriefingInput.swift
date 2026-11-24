@@ -139,7 +139,8 @@ let overdueWindowDays = 14
 func subscriptionCharges(in state: LedgerState, now: Date, calendar: Calendar, notSpending: Set<UUID>? = nil) -> [UpcomingCharge] {
     let today = calendar.startOfDay(for: now)
     var chargedToday = Set<String>()
-    for m in state.movements where m.kind == .payment && !m.flaggedNotMine && m.date >= today && m.date <= now {
+    for m in state.movements where m.kind == .payment && !m.flaggedNotMine && !m.excludedFromSpending
+        && m.date >= today && movementCounts(m, upTo: now, calendar: calendar) {
         chargedToday.insert(m.bank.rawValue + "|" + normalizeMerchant(m.merchant ?? ""))
     }
     let earliestOverdue = calendar.date(byAdding: .day, value: -overdueWindowDays, to: today) ?? today
@@ -307,6 +308,6 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     return BriefingInput(now: now, since: since, isFirst: isFirst, banks: banks, totalCents: ledger.total(),
                          totalChangeCents: totalChange, income: income, payments: payments, transfers: transfers,
                          upcoming: upcoming, expected: expected, attention: attention, month: month,
-                         investments: portfolio.flatMap { portfolioSummary($0, now: now) }, shortfalls: short,
+                         investments: portfolio.flatMap { portfolioSummary($0, now: now, calendar: calendar) }, shortfalls: short,
                          budgetTip: budgetTip, freeMoney: free, totalLeftOut: leftOut)
 }

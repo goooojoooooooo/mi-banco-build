@@ -4,7 +4,7 @@ import MiBancoCore
 
 /// Galería de movimiento solo para compilaciones DEBUG: enseña, sobre negro, cada pieza del kit sin enlazarla a ninguna
 /// pantalla. Se abre con `-MiBancoMotionGallery` (junto a `-MiBancoDemo`, para que nada toque datos ni UserDefaults).
-/// `-MiBancoMotionGalleryPage cifras|controles|botones|segmentado|pasos` baja hasta esa parte; `-MiBancoMotionReduce` la abre con
+/// `-MiBancoMotionGalleryPage cifras|filas|controles|botones|segmentado|pasos` baja hasta esa parte; `-MiBancoMotionReduce` la abre con
 /// Reducir movimiento simulado; `-MiBancoMotionGalleryNoPrefs` la monta FUERA del entorno de preferencias (como lo haría
 /// una hoja o una ventana nueva que se olvidase de ellas). Datos inventados.
 enum MotionGalleryLaunch {
@@ -13,7 +13,7 @@ enum MotionGalleryLaunch {
     static var startsReduced: Bool { arguments.contains("-MiBancoMotionReduce") }
     /// Sin `AppPreferences` en el entorno de la galería.
     static var withoutPreferences: Bool { arguments.contains("-MiBancoMotionGalleryNoPrefs") }
-    /// Hasta dónde baja al abrir: «controles», «pasos» (o nada).
+    /// Hasta dónde baja al abrir: una de las seis anclas de arriba (o nada).
     static var page: String? {
         guard let i = arguments.firstIndex(of: "-MiBancoMotionGalleryPage"), i + 1 < arguments.count else { return nil }
         return arguments[i + 1]
@@ -60,6 +60,10 @@ struct MotionGallery: View {
     @State private var stepsDone = false
     @State private var period = 1
     @State private var localLevel = AppPreferences.defaultMotionLevel
+    @State private var rowTaps = 0
+    @State private var rowTapsAbove = 0
+    @State private var rowTapsBelow = 0
+    @State private var census = (faces: -1, slots: -1, frames: -1)
 
     private var motion: MotionContext {
         var m = baseMotion
@@ -86,6 +90,7 @@ struct MotionGallery: View {
                     markSection
                     Color.clear.frame(height: 1).id("cifras")
                     amountSection
+                    Color.clear.frame(height: 1).id("filas")
                     rowsSection
                     Color.clear.frame(height: 1).id("controles")
                     glassSection
@@ -98,6 +103,7 @@ struct MotionGallery: View {
                     fillSection
                     Color.clear.frame(height: 1).id("pasos")
                     stepperSection
+                    censusSection
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.bottom, 48)
@@ -172,6 +178,12 @@ struct MotionGallery: View {
                     chip("Ojo", id: "gallery.eye") {
                         withAnimation(motion.fade) { preferences.privateMode.toggle() }
                     }
+                } else {
+                    // Cierra el ojo guardado sin tocar el estado de la galería (como Ajustes desde otra pantalla): el
+                    // importe sin preferencias lo observa en vivo.
+                    chip("Cerrar ojo guardado", id: "gallery.storedEye.close") {
+                        AppPreferences.privateModeStore.set(true, forKey: AppPreferences.privateModeKey)
+                    }
                 }
             }
         }
@@ -184,16 +196,67 @@ struct MotionGallery: View {
                 rowAmount("Café", cents: -480, sign: false, color: Theme.label, id: "gallery.row.expense")
                 rowAmount("Nómina", cents: 125_000, sign: true, color: Theme.income, id: "gallery.row.income")
                 rowAmount("Saldo", cents: 6_120, sign: false, color: Theme.label, id: "gallery.row.plain")
+                // Título e importe largos: con el texto más grande, el importe tiene que encoger de verdad (K18).
+                rowAmount("Nómina de noviembre", cents: 1_234_567, sign: true, color: Theme.income, id: "gallery.row.long")
+                // Un importe enorme con un título largo: el importe baja hasta la mitad y, de ahí, cede el título (se
+                // parte); el importe nunca se sale de la fila (K21).
+                rowAmount("Traspaso a la cuenta de ahorro", cents: 123_456_789, sign: true, color: Theme.income, id: "gallery.row.huge")
+                // Filas que son botones, pegadas (como en una lista): cada una recibe el toque en toda su forma visible y
+                // ninguna se lo roba a sus vecinas (K19). «Ahorro» empieza por 5: con las tiras «0…9,0» de antes, la de
+                // ese dígito subía 5 líneas por encima de su fila, sobre «Hucha». Va encima de sus vecinas (`zIndex`),
+                // para que una fuga de su área hacia abajo, sobre «Alquiler», se vea en la prueba (K24).
+                rowButton("Hucha", cents: 12_345, taps: $rowTapsAbove, id: "gallery.row.buttonAbove")
+                rowButton("Ahorro", cents: 50_000, taps: $rowTaps, id: "gallery.row.button")
+                    .zIndex(1)
+                rowButton("Alquiler", cents: -95_000, taps: $rowTapsBelow, id: "gallery.row.buttonBelow")
             }
         }
     }
 
+    /// Cuántas caras con cifras reales (cada una con su `TimelineView`) y cuántas copias de medida (texto oculto, sin
+    /// `TimelineView`) hay montadas: una de cada por importe; y cuántos fotogramas han dibujado las caras (en reposo, no
+    /// suben) (K22). Al final de la galería, para no poner un botón en el hueco bajo las filas (las pruebas de toques lo
+    /// quieren vacío). `verbatim`: sin separador de miles.
+    private var censusSection: some View {
+        section("Recuento") {
+            HStack(spacing: 10) {
+                chip("Contar caras", id: "gallery.census") {
+                    census = (RollingAmountCensus.liveFaces, RollingAmountCensus.measuringSlots, RollingAmountCensus.faceFrames)
+                }
+                censusValue(census.faces, id: "gallery.census.value")
+                censusValue(census.slots, id: "gallery.census.slots")
+                censusValue(census.frames, id: "gallery.census.frames")
+            }
+        }
+    }
+
+    private func censusValue(_ value: Int, id: String) -> some View {
+        Text(verbatim: String(value))
+            .titan(.subtitle)
+            .foregroundStyle(Theme.label2)
+            .accessibilityIdentifier(id)
+    }
+
+    /// Una fila-botón con importe; su valor de accesibilidad cuenta los toques. El importe dentro lleva el identificador
+    /// de la fila con «Amount» al final.
+    private func rowButton(_ name: String, cents: Int, taps: Binding<Int>, id: String) -> some View {
+        Button {
+            taps.wrappedValue += 1
+        } label: {
+            rowAmount(name, cents: cents, sign: false, color: Theme.label, id: id + "Amount")
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
+        .accessibilityValue("\(taps.wrappedValue)")
+    }
+
     private func rowAmount(_ name: String, cents: Int, sign: Bool, color: Color, id: String) -> some View {
-        HStack {
+        // El reparto del kit: el título hasta su ancho ideal y el importe a tamaño completo si cabe (K21).
+        AmountRowLayout {
             Text(name)
                 .titan(.subtitle)
                 .foregroundStyle(Theme.label2)
-            Spacer(minLength: 12)
             RollingAmount(cents: cents, countsUp: false, style: .plain(sign: sign))
                 .titan(.row)
                 .foregroundStyle(color)
@@ -262,6 +325,12 @@ struct MotionGallery: View {
                 try? await Task.sleep(for: .milliseconds(500))
                 return false
             }
+            // Un hueco alto con un `Spacer` hermano: el botón conserva su alto (K9).
+            VStack(spacing: 0) {
+                MorphingButton(title: "Probar en hueco", doneTitle: "Enviado") { true }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 200)
         }
     }
 

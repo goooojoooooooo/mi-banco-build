@@ -70,7 +70,7 @@ let openingCatalogue: [OpeningSituation: [String]] = [
         "Un placer arrancar contigo. Te pongo al día de lo que veo.",
         "Aquí estoy para contarte cada día cómo van tus cuentas.",
         "Primer resumen, el de estreno. Vamos allá.",
-        "Hola, soy Onyx. Cada día te contaré cómo van tus cuentas.",
+        "Hola, soy \(appDisplayName). Cada día te contaré cómo van tus cuentas.",
     ],
     .backAfterDays: [
         "Cuánto tiempo. Te cuento lo que ha pasado mientras no estabas.",
@@ -176,6 +176,9 @@ let openingCatalogue: [OpeningSituation: [String]] = [
 /// Las frases candidatas de una situación.
 func openingCandidates(for situation: OpeningSituation) -> [String] { openingCatalogue[situation] ?? [] }
 
+/// Número de frases candidatas de una situación (para validar la respuesta del modelo con `openingChoice(from:count:)`).
+public func openingCandidateCount(for situation: OpeningSituation) -> Int { openingCandidates(for: situation).count }
+
 /// El número de días de Madrid desde una fecha de referencia: estable durante todo el día, +1 al día siguiente.
 private func dayNumber(_ day: Date) -> Int {
     let reference = madridCalendar.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? Date(timeIntervalSince1970: 1_767_222_000)
@@ -205,7 +208,7 @@ public func openingChoice(from answer: String, count: Int) -> Int? {
 }
 
 public let briefingModelInstructions =
-    "Eres el asistente de Mi Banco. Te doy varias frases de saludo numeradas. Elige la que mejor encaje con el día y responde solo con su número. No escribas nada más."
+    "Eres el asistente de \(appDisplayName). Te doy varias frases de saludo numeradas. Elige la que mejor encaje con el día y responde solo con su número. No escribas nada más."
 
 /// El mensaje al modelo: la situación en palabras y las frases candidatas numeradas. Nada más: ni importes, ni comercios, ni
 /// inversiones; el único dígito que lleva es el de cada número de la lista.

@@ -1,5 +1,8 @@
 import SwiftUI
 import MiBancoCore
+#if DEBUG
+import Synchronization
+#endif
 
 /// «•••,•• €» (con «−» o «+» delante según el signo y `sign`). No depende de las cifras del importe, solo de su signo.
 func maskedEUR(_ cents: Int, sign: Bool) -> String {
@@ -23,15 +26,19 @@ struct RollingAmount: View {
     var revealed = true
     var style: AmountStyle = .plain(sign: false)
 
-    /// Opcional: sin preferencias (extensión, vista previa) no se cierra la app, y el ojo se lee de lo guardado: nunca
-    /// se enseña un importe que el dueño tiene oculto.
+    /// Opcional: sin preferencias (una vista previa, una hoja o ventana que no las recibe) no se cierra la app, y el ojo
+    /// se lee de lo guardado y se observa en vivo: si el dueño lo cierra desde otro sitio, este importe se oculta al
+    /// momento. En una extensión `UserDefaults.standard` es el de la extensión (el ojo no está en un App Group), así que
+    /// ahí no se sabe: quien dibuje un importe fuera de la app usa `RollingDigits` y le pasa `hidden` de una fuente real.
     @Environment(AppPreferences.self) private var preferences: AppPreferences?
+    /// El ojo guardado (misma clave y mismo almacén que `AppPreferences`; en la demo, el suyo propio sembrado al arrancar).
+    @AppStorage(AppPreferences.privateModeKey, store: AppPreferences.privateModeStore) private var storedPrivateMode = false
     @Environment(\.motion) private var motion
     @Environment(\.entrance) private var entrance
 
     var body: some View {
         RollingDigits(
-            cents: cents, style: style, hidden: preferences?.privateMode ?? AppPreferences.storedPrivateMode, countsUp: countsUp,
+            cents: cents, style: style, hidden: preferences?.privateMode ?? storedPrivateMode, countsUp: countsUp,
             revealed: revealed, motion: motion,
             restartToken: entrance.token, restartsOnToken: entrance.active && entrance.scope == .assembly)
     }
@@ -90,8 +97,6 @@ struct RollingDigits: View {
     @State private var popped: Int
     @State private var transition: Task<Void, Never>?
     @State private var seed = Int.random(in: 1...1_000_000)
-    @State private var idealWidth: CGFloat = 0
-    @State private var availableWidth: CGFloat = 0
     @ScaledMetric(relativeTo: .largeTitle) private var heroScale = 1.0
 
     // MARK: Cuerpo
@@ -128,11 +133,16 @@ struct RollingDigits: View {
             ZStack {
                 TimelineView(.animation(paused: !rolling)) { context in
                     let t = rolling ? context.date.timeIntervalSince(planStart) : Double.infinity
+                    let _ = censusFrame()
                     row(figures, at: t)
                 }
+                .census(.face)
                 .id(motion.reduce ? shownValue : 0)
                 .transition(.opacity)
             }
+            // Al cerrar el ojo las cifras se quitan al instante, aunque quien llama (o `ReduceFade`) anime el cambio:
+            // nunca se funden encima de la máscara (K23). Al abrirlo sí aparecen fundiéndose.
+            .transition(.asymmetric(insertion: .opacity, removal: .identity))
         case .scramble:
             row(maskGlyphs(scrambleStep: scrambleStep), at: .infinity, blurAll: motion.richEffects ? 0.5 : 0)
         case .dots:
@@ -231,10 +241,11 @@ struct RollingDigits: View {
         return (small ? cents : euros) * min(heroScale, 1.35)
     }
 
-    /// Solo la cifra protagonista cambia el color; en una línea simple se hereda del entorno (verde de un ingreso, etc.).
-    private func glyphStyle(_ small: Bool) -> AnyShapeStyle {
+    /// Solo los céntimos de la cifra protagonista traen su color; lo demás (nil) se dibuja con el del sitio donde se
+    /// coloca (el verde de un ingreso, etc.): `.foregroundStyle(.foreground)` no hereda, pisa el del llamante.
+    private func glyphStyle(_ small: Bool) -> AnyShapeStyle? {
         if small, case .hero(_, _, let c) = style { return AnyShapeStyle(c) }
-        return AnyShapeStyle(.foreground)
+        return nil
     }
 
     private func blurRadius(_ small: Bool) -> CGFloat {
@@ -264,17 +275,17 @@ struct RollingDigits: View {
                     let speed = usesPlan && motion.richEffects ? DigitRoll.speed(plan[d], at: t, overshoot: overshoot) : 0
                     DigitCell(position: pos, blur: max(blurAll, min(1, speed / 16) * 0.85), blurRadius: blurRadius(g.small))
                         .cellFont(font(g.small))
-                        .foregroundStyle(glyphStyle(g.small))
+                        .cellStyle(glyphStyle(g.small))
                 } else if let dot = g.dot {
                     // La máscara es el «•» de la propia tipografía, en la fuente de su celda (grande en euros, pequeña
                     // en céntimos), con el avance del propio glifo.
                     BulletCell(visible: dotVisible(dot))
                         .cellFont(font(g.small))
-                        .foregroundStyle(glyphStyle(g.small))
+                        .cellStyle(glyphStyle(g.small))
                 } else {
                     Text(String(g.char))
                         .cellFont(font(g.small))
-                        .foregroundStyle(glyphStyle(g.small))
+                        .cellStyle(glyphStyle(g.small))
                 }
             }
         }
@@ -287,23 +298,60 @@ struct RollingDigits: View {
         reveal.drawn == .dots ? index < popped : true
     }
 
-    /// Los importes protagonistas se encogen hasta un 60 % si no caben (como `minimumScaleFactor(0.6)`).
-    @ViewBuilder private func fitted<V: View>(_ view: V) -> some View {
+    /// Si no cabe, el importe se encoge entero, nunca celda a celda, y UNA sola vez: escala exacta = min(1, ancho ofrecido /
+    /// ancho natural), calculada por la maquetación (`FitBox`) con una sola cara viva (K22; antes, una escalera de 11
+    /// copias en `ViewThatFits`). Lo que ocupa es lo que se ve: la caja mide natural × escala y la cara se dibuja con esa
+    /// misma escala (la lee de la caja con `visualEffect`, en el mismo fotograma, sin `@State` ni medidas a destiempo).
+    /// - El hueco: la cara va sobre una copia oculta del importe real con cada cifra cambiada por «0» (`slotGlyphs`). El
+    ///   ancho natural es el mayor de los dos, así que la máscara ocupa el mismo hueco, con la misma escala, que las cifras
+    ///   a las que sustituye (K23) y el importe no cambia de tamaño mientras cuenta.
+    /// - El protagonista ocupa todo el ancho y se encoge hacia la izquierda.
+    /// - Una línea (`.plain`) nunca pasa del ancho que se le ofrece. Cuánto se le ofrece en una fila lo decide
+    ///   `AmountRowLayout` (el título hasta su ancho ideal; el importe a tamaño completo si cabe y, si no, hasta la mitad).
+    @ViewBuilder private func fitted<V: View>(_ face: V) -> some View {
+        let box = FitBox {
+            ZStack(alignment: heroEuros != nil ? .leading : .trailing) {
+                // Copia de medida: solo texto, sin `TimelineView` ni temporizadores; no hace nada por fotograma.
+                slotRow(slotGlyphs).census(.slot).hidden()
+                face
+            }
+            .fixedSize()
+            // El área de toque es la caja (abajo, `contentShape`), no el dibujo.
+            .allowsHitTesting(false)
+            .visualEffect { content, proxy in
+                content.scaleEffect(fitScale(in: proxy), anchor: .topLeading)
+            }
+        }
+        .coordinateSpace(.named(fitSpace))
+        .contentShape(Rectangle())
         if heroEuros != nil {
-            view
-                .fixedSize()
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { idealWidth = $0 }
-                .scaleEffect(fitScale, anchor: .leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { availableWidth = $0 }
+            box.frame(maxWidth: .infinity, alignment: .leading)
         } else {
-            view.fixedSize()
+            box
         }
     }
 
-    private var fitScale: CGFloat {
-        guard idealWidth > 0, availableWidth > 0 else { return 1 }
-        return min(1, max(0.5, availableWidth / idealWidth))
+    /// El hueco del importe real (`cents`) con cada cifra cambiada por «0»: mide lo mismo que las celdas de las cifras
+    /// (cada una es un «0» oculto) sin decir cuáles son. Lo mismo para la máscara (que no tiene cifras).
+    private var slotGlyphs: [Glyph] {
+        let parts = texts(of: cents)
+        func zeroed(_ text: String) -> String {
+            String(text.map { $0.isASCII && $0.isNumber ? "0" : $0 })
+        }
+        return build(main: zeroed(parts.main), small: zeroed(parts.small), random: nil)
+    }
+
+    /// Una fila de solo texto con las mismas celdas, tipografías y espaciado que `row`, para medir (siempre oculta).
+    private func slotRow(_ glyphs: [Glyph]) -> some View {
+        HStack(alignment: .lastTextBaseline, spacing: 0) {
+            ForEach(glyphs) { g in
+                Text(String(g.char)).cellFont(font(g.small))
+            }
+        }
+        .monospacedDigit()
+        .lineLimit(1)
+        .modifier(HeroTracking(euros: heroEuros))
+        .accessibilityHidden(true)
     }
 
     // MARK: Estados
@@ -311,7 +359,7 @@ struct RollingDigits: View {
     private func digitCount(_ value: Int) -> Int { max(3, String(abs(value)).count) }
 
     private func start() {
-        // Oculto desde el principio: no hay nada que contar; al mostrar, `toggle` rueda hasta la cifra real.
+        // Oculto desde el principio: no hay nada que contar; al mostrar, el barajado del ojo rueda hasta la cifra real.
         guard !hidden, value == nil, revealed else { return }
         if countsUp, !motion.reduce {
             value = 0
@@ -416,6 +464,49 @@ struct RollingDigits: View {
     }
 }
 
+/// La caja de un importe: mide lo natural de su hijo × escala, con escala = min(1, ancho ofrecido / ancho natural)
+/// (nunca más ancha que lo ofrecido: no se sale de la fila). Coloca al hijo a su tamaño natural en su esquina; el hijo
+/// se dibuja escalado con `fitScale(in:)`, que lee esta misma caja (`fitSpace`). Las líneas de base se escalan igual,
+/// para que una fila alineada por la base siga alineada.
+private struct FitBox: Layout {
+    static func scale(natural: CGFloat, offered: CGFloat?) -> CGFloat {
+        guard let offered, offered.isFinite, natural > 0 else { return 1 }
+        return max(0, min(1, offered / natural))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let natural = child.sizeThatFits(.unspecified)
+        let s = Self.scale(natural: natural.width, offered: proposal.width)
+        return CGSize(width: natural.width * s, height: natural.height * s)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let child = subviews.first else { return }
+        child.place(at: bounds.origin, anchor: .topLeading, proposal: ProposedViewSize(child.sizeThatFits(.unspecified)))
+    }
+
+    func explicitAlignment(
+        of guide: VerticalAlignment, in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()
+    ) -> CGFloat? {
+        guard let child = subviews.first else { return nil }
+        let natural = child.sizeThatFits(.unspecified)
+        let s = natural.width > 0 ? bounds.width / natural.width : 1
+        return bounds.minY + child.dimensions(in: .unspecified)[guide] * s
+    }
+}
+
+/// El espacio de coordenadas de cada `FitBox` (el más cercano gana: cada importe lee el suyo).
+private let fitSpace = "RollingAmount.fit"
+
+/// La escala con que se dibuja el hijo de una `FitBox`: ancho de la caja / ancho natural del hijo. En `visualEffect`
+/// (fuera del actor principal), así que es una función libre.
+private func fitScale(in proxy: GeometryProxy) -> CGFloat {
+    let natural = proxy.size.width
+    guard natural > 0, let box = proxy.bounds(of: .named(fitSpace)) else { return 1 }
+    return max(0, min(1, box.width / natural))
+}
+
 /// `tracking` solo de la cifra protagonista (−3 % del cuerpo de los euros).
 private struct HeroTracking: ViewModifier {
     let euros: CGFloat?
@@ -427,6 +518,8 @@ private struct HeroTracking: ViewModifier {
 
 /// Un dígito: tira «0…9,0» recortada a una línea y desplazada a `position`; una copia ya desenfocada cuya opacidad
 /// (`blur`, 0…1) sigue a la velocidad. El desenfoque es fijo; lo único que cambia es el desplazamiento y la opacidad.
+/// La tira se pinta en un `Canvas` del tamaño de la celda (solo las cifras que asoman), no como 11 vistas desplazadas:
+/// la geometría de esas vistas, aunque recortada, hacía el marco del importe (VoiceOver, toques) de hasta 16 líneas.
 private struct DigitCell: View {
     let position: Double
     let blur: Double
@@ -435,17 +528,34 @@ private struct DigitCell: View {
     var body: some View {
         let f = position.truncatingRemainder(dividingBy: 10)
         let place = f < 0 ? f + 10 : f
+        let blur = blur
+        let blurRadius = blurRadius
         Text("0")
             .hidden()
-            .overlay(alignment: .top) {
-                ZStack(alignment: .top) {
-                    strip.opacity(1 - blur * 0.7)
-                    if blur > 0.001 {
-                        strip.blur(radius: blurRadius).opacity(blur)
+            .overlay {
+                Canvas { context, size in
+                    // La línea k de la tira dice k mod 10 y está a (k − place) líneas de la celda.
+                    func strip(_ layer: GraphicsContext) {
+                        let line = size.height
+                        for k in 0...10 {
+                            let y = (CGFloat(k) - CGFloat(place)) * line
+                            guard y > -line, y < line else { continue }
+                            var digit = layer.resolve(Text(String(k % 10)))
+                            // El color de quien coloca el importe (B-1), como en las demás celdas.
+                            digit.shading = .foreground
+                            layer.draw(digit, at: CGPoint(x: size.width / 2, y: y + line / 2), anchor: .center)
+                        }
                     }
-                }
-                .visualEffect { content, proxy in
-                    content.offset(y: -CGFloat(place) * proxy.size.height / 11)
+                    var sharp = context
+                    sharp.opacity = 1 - blur * 0.7
+                    strip(sharp)
+                    if blur > 0.001 {
+                        context.drawLayer { layer in
+                            layer.addFilter(.blur(radius: blurRadius))
+                            layer.opacity = blur
+                            strip(layer)
+                        }
+                    }
                 }
             }
             .clipped()
@@ -454,13 +564,6 @@ private struct DigitCell: View {
                     stops: [.init(color: .clear, location: 0), .init(color: .black, location: 0.13),
                             .init(color: .black, location: 0.87), .init(color: .clear, location: 1)],
                     startPoint: .top, endPoint: .bottom))
-    }
-
-    private var strip: some View {
-        VStack(spacing: 0) {
-            ForEach(0..<11, id: \.self) { Text(String($0 % 10)) }
-        }
-        .fixedSize()
     }
 }
 
@@ -476,20 +579,80 @@ private struct BulletCell: View {
     }
 }
 
-/// `.font(nil)` no significa «hereda»: la tipografía solo se aplica si el estilo trae una propia.
+/// `.font(nil)` y `.foregroundStyle(.foreground)` no significan «hereda»: la tipografía y el color solo se aplican si
+/// el estilo trae uno propio.
 private extension View {
     @ViewBuilder func cellFont(_ font: Font?) -> some View {
         if let font { self.font(font) } else { self }
     }
+
+    @ViewBuilder func cellStyle(_ style: AnyShapeStyle?) -> some View {
+        if let style { self.foregroundStyle(style) } else { self }
+    }
 }
 
-/// Con Reducir movimiento, el cambio de lo que se dibuja (cifra ↔ puntos) se funde por sí solo.
+#if DEBUG
+/// Solo DEBUG: lo que hay montado de cada importe, para que la galería compruebe que cada uno monta UNA cara con cifras
+/// reales (con su `TimelineView`), UNA copia de medida (solo texto, oculta) y que en reposo ninguna dibuja fotogramas
+/// (K22). Se cuenta con `onAppear`/`onDisappear` de cada identidad montada. Antes cada cara guardaba una ficha en su
+/// `@State`, pero el valor inicial de `@State` se crea en CADA `init` y SwiftUI se queda con la última vista, así que una
+/// cara redibujada al menos una vez contaba dos fichas (18 para 9 importes).
+enum RollingAmountCensus {
+    fileprivate static let faces = Atomic<Int>(0)
+    fileprivate static let slots = Atomic<Int>(0)
+    fileprivate static let frames = Atomic<Int>(0)
+    /// Caras con cifras reales montadas ahora (cada una con su `TimelineView`).
+    static var liveFaces: Int { faces.load(ordering: .relaxed) }
+    /// Copias de medida montadas ahora (texto oculto, sin `TimelineView`).
+    static var measuringSlots: Int { slots.load(ordering: .relaxed) }
+    /// Fotogramas dibujados por todas las caras desde el arranque.
+    static var faceFrames: Int { frames.load(ordering: .relaxed) }
+}
+#endif
+
+private enum CensusEntry { case face, slot }
+
+private extension View {
+    /// Solo DEBUG: apunta esta vista en `RollingAmountCensus` mientras está montada; en Release no hace nada.
+    @ViewBuilder func census(_ entry: CensusEntry) -> some View {
+        #if DEBUG
+        // `Atomic` no se copia: cada rama usa el suyo directamente.
+        onAppear {
+            switch entry {
+            case .face: _ = RollingAmountCensus.faces.add(1, ordering: .relaxed)
+            case .slot: _ = RollingAmountCensus.slots.add(1, ordering: .relaxed)
+            }
+        }
+        .onDisappear {
+            switch entry {
+            case .face: _ = RollingAmountCensus.faces.subtract(1, ordering: .relaxed)
+            case .slot: _ = RollingAmountCensus.slots.subtract(1, ordering: .relaxed)
+            }
+        }
+        #else
+        self
+        #endif
+    }
+}
+
+/// Solo DEBUG: cuenta un fotograma de la `TimelineView` de una cara; en Release no hace nada.
+private func censusFrame() {
+    #if DEBUG
+    _ = RollingAmountCensus.frames.add(1, ordering: .relaxed)
+    #endif
+}
+
+/// Con Reducir movimiento, el cambio de lo que se dibuja (cifra ↔ puntos) se funde por sí solo. Sin `if/else` (cambiar
+/// Reducir movimiento no rehace el importe entero) y sin `.animation(nil)` (sin Reducir, la animación de quien llama
+/// sigue intacta).
 private struct ReduceFade: ViewModifier {
     let reduce: Bool
     let fade: Animation
     let value: AmountReveal.Drawn
 
-    @ViewBuilder func body(content: Content) -> some View {
-        if reduce { content.animation(fade, value: value) } else { content }
+    func body(content: Content) -> some View {
+        content.transaction(value: value) { transaction in
+            if reduce { transaction.animation = fade }
+        }
     }
 }

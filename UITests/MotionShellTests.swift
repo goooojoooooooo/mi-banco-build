@@ -362,12 +362,12 @@ final class MotionShellTests: XCTestCase {
 
     /// Toque tardío: mientras el bloqueo, ya desbloqueado, se funde, un toque no llega a Inicio. El botón «Desbloquear»
     /// ocupa todo el ancho justo encima de la barra de pestañas: un segundo toque sobre él, ya tarde, cambiaba de
-    /// pestaña. A ×80 el fundido dura 27 s: se toca donde estaba el botón, sobre la pestaña Gasto y sobre el ojo de
+    /// pestaña. A ×50 (el tope de la cámara lenta) el fundido dura 17 s: se toca donde estaba el botón, sobre la pestaña Gasto y sobre el ojo de
     /// Inicio; ni cambia la pestaña ni se cierra el ojo. Cuando el fundido termina, Inicio responde.
     /// (En el simulador de CI la barra de pestañas no siempre toma un toque sintético, así que «la pestaña no cambió»
     /// podría pasar por eso; el ojo sí los toma siempre, y es el que hace de testigo.)
     func testLateTapDuringTheUnlockFadeDoesNotReachHome() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "14", "-MiBancoMotionScale", "80"])
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "14", "-MiBancoMotionScale", "50"])
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 12), "Falta la pantalla de bloqueo")
         let button = unlock.frame
@@ -395,7 +395,7 @@ final class MotionShellTests: XCTestCase {
         XCTAssertFalse(spending.isSelected, "Un toque durante el fundido del bloqueo abrió Gasto")
         XCTAssertTrue(eye.exists, "Un toque durante el fundido del bloqueo llegó al ojo de Inicio")
         XCTAssertFalse(app.buttons["Mostrar importes"].exists, "Un toque durante el fundido del bloqueo llegó al ojo de Inicio")
-        // Cuando el fundido termina (y la marca acaba de volar: 34 s a ×80), Inicio vuelve a responder.
+        // Cuando el fundido termina (y la marca acaba de volar: 21 s a ×50), Inicio vuelve a responder.
         XCTAssertTrue(waitUntil(40) { self.probe()["fundido"] == "0" }, "El fundido del bloqueo no terminó: \(probe())")
         XCTAssertTrue(waitUntil(45) { !self.element("launch-exit").exists }, "La marca no terminó de volar")
         XCTAssertTrue(home.isSelected, "La pestaña cambió sola")

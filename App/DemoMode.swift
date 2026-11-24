@@ -16,9 +16,9 @@ import MiBancoCore
 enum DemoMode {
     enum Screen { case home, spending, alerts, settings }
 
-    private static var arguments: [String] { ProcessInfo.processInfo.arguments }
+    static var arguments: [String] { ProcessInfo.processInfo.arguments }
 
-    private static func value(after flag: String) -> String? {
+    static func value(after flag: String) -> String? {
         let args = arguments
         guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
         return args[i + 1]

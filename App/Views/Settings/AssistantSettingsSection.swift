@@ -18,7 +18,7 @@ struct AssistantSettingsSection: View {
         } header: {
             SettingsHeader("Asistente")
         } footer: {
-            SettingsFooter("Elige qué temas puede enseñarte Onyx en «Te puede interesar». Todo se calcula en tu iPhone; tus preguntas no se guardan.")
+            SettingsFooter("Elige qué temas puede enseñarte \(AppIdentity.displayName) en «Te puede interesar». Todo se calcula en tu iPhone; tus preguntas no se guardan.")
         }
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }

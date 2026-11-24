@@ -402,10 +402,3 @@ struct HomeView: View {
     }
     #endif
 }
-
-/// La hoja de detalle abierta para un movimiento.
-struct DetailRoute: Identifiable, Hashable {
-    let id: UUID
-    /// Viene de una fila de Inicio: la hoja sale con zoom desde su logo.
-    var zooms = false
-}

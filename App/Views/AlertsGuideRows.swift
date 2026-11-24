@@ -71,7 +71,7 @@ struct AlertsGuideRows: View {
                 .transition(.opacity)
                 .listRowBackground(Theme.grouped)
             case .denied:
-                Text("Activa las notificaciones de Mi Banco en Ajustes del iPhone.")
+                Text("Activa las notificaciones de \(AppIdentity.displayName) en Ajustes del iPhone.")
                     .font(Theme.font(.footnote))
                     .foregroundStyle(Theme.warning)
                     .transition(.opacity)

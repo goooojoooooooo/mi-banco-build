@@ -51,8 +51,8 @@ private func actionRows(_ action: String) -> [Row] {
         row(3, "Empieza en blanco", "Toca «Nueva automatización en blanco».", "Nueva automatización en blanco",
             "Si ves sugerencias, búscala entre ellas: puede estar arriba o abajo del todo."),
         row(3, "Añade una acción", "Toca «Añadir acción».", "Añadir acción", "Es el botón con un más, en el centro."),
-        row(3, "Busca Mi Banco", "Toca el buscador de arriba.", "Buscar", "La lupa está arriba, debajo del título."),
-        row(3, "Escribe Mi Banco", "Escribe «Mi Banco» en el buscador.", "Mi Banco", helpType),
+        row(3, "Busca Onyx", "Toca el buscador de arriba.", "Buscar", "La lupa está arriba, debajo del título."),
+        row(3, "Escribe Onyx", "Escribe «Onyx» en el buscador.", "Onyx", helpType),
         row(3, "Elige la acción", "Toca «\(action)».", action, helpAction),
         row(4, "Elige el banco", "Toca «Banco».", "Banco", list),
     ]
@@ -240,7 +240,7 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
         #expect(actionCount("Si ya está gris, no lo toques.") == 0)
         // Casos negativos: dos acciones que la lista de frases prohibidas no veía.
         #expect(actionCount("Toca «Aplicación» y baja hasta el final.") == 2)
-        #expect(actionCount("Pulsa el buscador y escribe «Mi Banco».") == 2)
+        #expect(actionCount("Pulsa el buscador y escribe «Onyx».") == 2)
         #expect(actionCount("Márcala y escríbelo.") == 2)
         // Un toque más otro verbo de pantalla cuenta 2 (también con pronombre); el nombre «buscador» no es un verbo.
         for second in ["busca «Revolut»", "búscala abajo", "selecciona «Revolut»", "añade otra acción", "añádela abajo",

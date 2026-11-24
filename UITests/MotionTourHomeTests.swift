@@ -3,7 +3,7 @@ import XCTest
 /// Ráfagas de movimiento del flujo «Inicio» (nadie más edita este fichero). Cada momento se dispara con un toque real y
 /// la ráfaga empieza en el acto, a cámara lenta ×4 (`MotionTourCase.launch`). Cada ráfaga con importes se repite con el
 /// ojo cerrado (`-MiBancoDemoPrivate`, sufijo `-eye`): en ningún fotograma puede verse una cifra.
-/// - El montaje por capas se dispara quitando el bloqueo de demo con un toque en «Desbloquear».
+/// - El montaje por capas se dispara al quitarse solo el bloqueo de demo.
 /// - Levantar, inclinar y la pista del volteo no se pueden provocar y fotografiar a la vez (una pulsación larga bloquea
 ///   la prueba; el simulador no tiene giroscopio): `-MiBancoDemoCardMoment` los dispara al tocar el segmento ya elegido.
 final class MotionTourHomeTests: MotionTourCase {
@@ -27,13 +27,14 @@ final class MotionTourHomeTests: MotionTourCase {
         carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
     }
 
-    /// Abre con el bloqueo de demo y lo quita con un toque: Inicio se monta por capas debajo.
+    /// Abre con el bloqueo de demo, que se quita solo a los 6 s (en el simulador, tocar «Desbloquear» abre la hoja del
+    /// código del sistema), y empieza la ráfaga en cuanto el botón del bloqueo deja de existir: Inicio se monta debajo.
     private func unlockAndBurst(_ name: String, extra: [String] = [], frames: Int = 24, every: TimeInterval = 0.28) {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "90"] + extra)
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "6"] + extra)
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 20), "Falta la pantalla de bloqueo")
-        Thread.sleep(forTimeInterval: 1.5)
-        unlock.tap()
+        let limit = Date().addingTimeInterval(20)
+        while unlock.exists && Date() < limit {}
         burst(name, frames: frames, every: every)
     }
 

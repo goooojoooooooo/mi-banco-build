@@ -45,13 +45,16 @@ final class MotionHomeTests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label ENDSWITH %@", " de 4")).firstMatch
     }
 
+    /// Etiquetas con forma de dinero DENTRO del carrusel de tarjetas (todas sus cifras son importes que ruedan). Las
+    /// filas de la lista y la frase del ritmo del mes no entran: siguen siendo textos difuminados (su cifra queda en el
+    /// árbol de elementos aunque VoiceOver no la lea); eso no lo cambia este lote.
     private func moneyLabelCount() -> Int {
-        app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", Self.money)).count
+        carousel().descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", Self.money)).count
     }
 
     /// Para el mensaje de un fallo: qué elementos llevan una etiqueta con forma de dinero (los primeros).
     private func moneyLabels() -> String {
-        let found = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", Self.money))
+        let found = carousel().descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", Self.money))
         return found.allElementsBoundByIndex.prefix(6)
             .map { "[\($0.elementType.rawValue) id=\($0.identifier) label=\($0.label)]" }
             .joined(separator: " ")
@@ -92,6 +95,12 @@ final class MotionHomeTests: XCTestCase {
         for bank in ["rev", "ima", "tr"] {
             XCTAssertEqual(any("card-bank-\(bank)").label, "importe oculto", "El saldo de \(bank) no está oculto")
         }
+        // El resumen de 7 días (también rueda) dice «importe oculto».
+        let week = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label BEGINSWITH %@", "Gastado en 7 días:")).firstMatch
+        XCTAssertTrue(week.exists, "Falta el resumen de 7 días")
+        XCTAssertTrue(week.label.contains("importe oculto"), "El resumen de 7 días no está oculto: \(week.label)")
+        XCTAssertNil(week.label.range(of: #"[0-9],[0-9]{2}"#, options: .regularExpression), "El resumen de 7 días enseña una cifra: \(week.label)")
 
         // Abrir el ojo enseña la cifra; cerrarlo otra vez la quita al momento.
         app.buttons["Mostrar importes"].tap()
@@ -177,16 +186,17 @@ final class MotionHomeTests: XCTestCase {
 
     // MARK: A2 — Inicio se monta por capas
 
-    /// Abre con el bloqueo de demo (largo, para que no se quite solo) y lo quita con un toque en «Desbloquear»: es lo
-    /// que dispara el montaje por capas de Inicio.
+    /// Abre con el bloqueo de demo y espera a que se quite solo (a los 5 s; en el simulador, tocar «Desbloquear» abre la
+    /// hoja del código del sistema): al quitarse, Inicio se monta por capas.
     private func launchLockedAndUnlock(_ extra: [String] = []) {
         app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "60",
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "5",
                                "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"] + extra
         app.launch()
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta la pantalla de bloqueo")
-        unlock.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: unlock)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 20), .completed, "El bloqueo de demo no se quitó")
     }
 
     /// Tras desbloquear, Inicio se monta por capas y nada se queda sin aparecer ni sin poder tocarse: la marca, el ojo,
@@ -307,18 +317,36 @@ final class MotionHomeTests: XCTestCase {
     /// Sin cámara lenta: un deslizamiento del dedo pasa a la tarjeta siguiente y otro hacia atrás vuelve (el gesto de
     /// levantar la tarjeta no le quita el deslizamiento al carrusel).
     func testFingerSwipesMoveOneCardEachWay() throws {
-        launchHome()
+        launchHome(["-MiBancoDemoCardElements"])
         XCTAssertTrue(carousel().waitForExistence(timeout: 5), "Falta el carrusel")
         XCTAssertEqual(frontCardNumber(), 1)
+        /// Dónde está cada tarjeta y los contadores de DEBUG, para el mensaje de un fallo.
+        func where_() -> String {
+            let frames = ["all", "rev", "ima"].map { "\($0)=\(Int(self.any("card-front-\($0)").frame.minX))" }.joined(separator: " ")
+            return "\(carousel().label) | x: \(frames) | levantadas=\(any("card-lift-count").label) arreglos=\(any("card-rest-fixes").label)"
+        }
         carousel().swipeLeft()
-        XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 2 }, "Deslizar no pasó a Revolut: \(carousel().label)")
+        XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 2 }, "Deslizar no pasó a Revolut: \(where_())")
         assertEverythingAgrees(on: 2, "Tras deslizar a la izquierda")
-        // Hacia atrás, con el dedo empezando en mitad de la tarjeta (lejos del borde de la pantalla).
-        let from = carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
-        let to = carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
-        from.press(forDuration: 0.05, thenDragTo: to)
-        XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 1 }, "Deslizar no volvió a «Todo»: \(carousel().label)")
+        carousel().swipeLeft()
+        XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 3 }, "Deslizar no pasó a imagin: \(where_())")
+        Thread.sleep(forTimeInterval: 1.5)
+        // Hacia atrás, de imagin a Revolut…
+        carousel().swipeRight()
+        let backToTwo = waitUntil(6) { self.frontCardNumber() == 2 }
+        let afterFirstBack = where_()
+        Thread.sleep(forTimeInterval: 1.5)
+        // … y de Revolut a «Todo» (la primera tarjeta).
+        carousel().swipeRight()
+        let backToOne = waitUntil(6) { self.frontCardNumber() == 1 }
+        let afterSecondBack = where_()
+        XCTAssertTrue(backToTwo, "Deslizar no volvió a Revolut: \(afterFirstBack)")
+        XCTAssertTrue(backToOne, "Deslizar no volvió a «Todo»: \(afterSecondBack) (antes: \(afterFirstBack))")
+        Thread.sleep(forTimeInterval: 1.5)
         assertEverythingAgrees(on: 1, "Tras deslizar a la derecha")
+        // La tarjeta «Todo» está de verdad en su sitio (centrada), no solo en la etiqueta.
+        let front = any("card-front-all").frame
+        XCTAssertEqual(front.midX, app.windows.firstMatch.frame.midX, accuracy: 4, "«Todo» no quedó centrada: \(where_())")
     }
 
     /// Mantener pulsada la tarjeta de delante la levanta (lo cuenta `card-lift-count`, solo en DEBUG) y soltarla NO la

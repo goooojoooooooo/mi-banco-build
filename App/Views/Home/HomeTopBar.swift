@@ -45,6 +45,8 @@ struct HomeTopBar: View {
                         Image(systemName: hidden ? "eye.slash" : "eye")
                             .font(.system(size: 18, weight: .medium))
                             .contentTransition(.symbolEffect(.replace))
+                            // El símbolo cambia con su propia animación, también cuando ocultar va sin ella.
+                            .animation(.easeOut(duration: 0.2), value: hidden)
                             .foregroundStyle(Theme.label)
                             .frame(width: 44, height: 44)
                             .glassSurface(Circle())
@@ -148,8 +150,15 @@ struct HomeTopBar: View {
     }
 
     private func togglePrivacy() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.privacy) {
-            preferences.privateMode.toggle()
+        if preferences.privateMode {
+            // Al mostrar, los importes que se difuminan (filas, frases) vuelven con un fundido.
+            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.privacy) {
+                preferences.privateMode = false
+            }
+        } else {
+            // Al ocultar, se tapan en el acto: ni un fotograma con la cifra legible después del toque. (Los importes
+            // que ruedan hacen su propio barajado con dígitos al azar, sin depender de esta animación.)
+            withAnimation(nil) { preferences.privateMode = true }
         }
         AccessibilityNotification.Announcement(preferences.privateMode ? "Importes ocultos" : "Importes visibles").post()
     }

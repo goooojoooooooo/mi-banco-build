@@ -52,6 +52,8 @@ struct CardCarousel: View {
     @State private var demoLifted: AccountCard?
     /// Solo para las pruebas de toques: cuántas veces ha levantado una tarjeta la pulsación larga.
     @State private var liftCount = 0
+    /// Solo para las pruebas de toques: cuántas veces ha hecho falta la red de seguridad de `landed()`.
+    @State private var restFixes = 0
     @Environment(\.cardTilt) private var tilt
     #endif
     @Environment(\.motion) private var kit
@@ -211,6 +213,12 @@ struct CardCarousel: View {
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(liftCount)")
                         .accessibilityIdentifier("card-lift-count")
+                    Color.clear
+                        .frame(width: 2, height: 2)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(restFixes)")
+                        .accessibilityIdentifier("card-rest-fixes")
+                        .offset(x: 4)
                 }
             }
         #else
@@ -367,8 +375,17 @@ struct CardCarousel: View {
     private func landed() {
         guard !cards.isEmpty else { return }
         let position = motion.carouselPosition
-        guard abs(position - motion.carouselRest) > 0.5 else { return }
         let index = min(max(Int(position.rounded()), 0), cards.count - 1)
+        // Red de seguridad: quieto y sin deslizamiento programado en curso, la tarjeta elegida es la que se ve. Si el
+        // scroll no llegó a informar de ella (su identificador puede llegar vacío en el borde), se pone aquí de acuerdo:
+        // carrusel, segmentado y lista nunca se quedan diciendo cosas distintas.
+        if measured, scrollTarget == nil, abs(position - CGFloat(index)) < 0.2, cards[index] != current {
+            #if DEBUG
+            restFixes += 1
+            #endif
+            selection = cards[index]
+        }
+        guard abs(position - motion.carouselRest) > 0.5 else { return }
         motion.carouselRest = CGFloat(index)
         guard !kit.reduce else { return }
         settleDirection = motion.carouselDirection

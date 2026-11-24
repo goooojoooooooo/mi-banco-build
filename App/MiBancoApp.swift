@@ -129,7 +129,9 @@ private struct AppShellView: View {
                          briefing: briefing, speaker: speaker,
                          isLocked: shell.showsLock, revealToken: homeRevealToken)
                     .accessibilityHidden(shell.hidesHome)
-                    .allowsHitTesting(!shell.hidesHome)
+                    // Ni con el bloqueo delante ni mientras el bloqueo, ya desbloqueado, se funde: un toque tardío sobre
+                    // «Desbloquear» caería en la barra de pestañas que hay justo debajo.
+                    .allowsHitTesting(shell.homeTakesTouches)
                 // ORDEN (no cambiar sin revisar el bloqueo; es el de `ShellState.layers`): Inicio; el bloqueo o el arranque;
                 // la marca que vuela; y, encima de todo, la tapa del selector de apps. Qué capa hay la decide `ShellState`:
                 // el arranque y la marca que vuela nunca existen con el bloqueo puesto, y la tapa nunca va encima de él.
@@ -139,9 +141,11 @@ private struct AppShellView: View {
                 // bloqueo, en vez de fundirse sobre Inicio, desaparecía de golpe detrás de él (visto en las hojas).
                 if shell.showsLock {
                     // Entra sin animación (la captura del selector de apps nunca pilla la app a medias);
-                    // al desbloquear se desvanece, porque solo ese cambio va en `withAnimation`.
+                    // al desbloquear en primer plano se desvanece, porque solo ese cambio va en `withAnimation`; si la
+                    // escena no está activa se quita de golpe y lo releva la tapa (`ShellState.lockExitOnUnlock`).
                     // En el arranque en frío monta las piezas sobre su propia marca; en un re-bloqueo, la marca está quieta.
-                    LockView(locked: unlockBinding, playsLaunch: shell.lockPlaysLaunch, flightTakesTheMark: flightTakesTheMark)
+                    LockView(locked: unlockBinding, playsLaunch: shell.lockPlaysLaunch,
+                             leaveOnUnlock: lockLeave, fadeStarted: lockFadeStarted)
                         .transition(.opacity)
                         .zIndex(1)
                 } else if shell.showsLaunch {
@@ -301,14 +305,38 @@ private struct AppShellView: View {
         return from
     }
 
-    /// Lo pregunta el bloqueo en el instante de desbloquear: ¿la marca echa a volar ahora mismo? Si sí, el bloqueo suelta
-    /// su marca (deja de dibujarla) para que no se vean dos.
-    private func flightTakesTheMark() -> Bool {
+    /// Lo pregunta el bloqueo en el instante de desbloquear: cómo se va. Lo decide `ShellState.lockExitOnUnlock`: en
+    /// primer plano se funde y, si la marca echa a volar en ese instante, suelta la suya (para que no se vean dos);
+    /// fuera de primer plano se quita de golpe, porque la tapa lo releva.
+    private func lockLeave() -> LockLeave {
         #if DEBUG
-        // La prueba que simula «inactiva tras desbloquear» retrasa el vuelo: la marca se queda en el bloqueo.
-        if DemoMode.isActive, DemoMode.unlockInactiveSeconds != nil, shell.coldStart { return false }
+        // La prueba que simula «inactiva tras desbloquear»: para la carcasa la escena ya está inactiva en el desbloqueo
+        // (`simulateInactiveUnlockIfAsked` se lo cuenta a `ShellState` justo antes de desbloquear).
+        if DemoMode.isActive, DemoMode.unlockInactiveSeconds != nil, !simulatedInactive, shell.coldStart { return .covered }
         #endif
-        return shell.fliesOnUnlock && flightOrigin(cold: shell.coldStart) != nil
+        switch shell.lockExitOnUnlock {
+        case .covered:
+            return .covered
+        case .fades, nil:
+            return .fades(handsMark: flightOrigin(cold: shell.coldStart) != nil)
+        }
+    }
+
+    /// Lo avisa el bloqueo justo después de desbloquear: su fundido dura `seconds` (0 si se quitó de golpe). Cuando
+    /// acaba, `ShellState` devuelve los toques a Inicio. El aviso de fin va SIEMPRE, se funda o no, para que Inicio no
+    /// pueda quedarse sin toques.
+    private func lockFadeStarted(_ seconds: Double) {
+        #if DEBUG
+        LaunchProbe.shared.lockFading = shell.lockFading
+        #endif
+        Task { @MainActor in
+            if seconds > 0 { try? await Task.sleep(for: .seconds(seconds), tolerance: .milliseconds(20)) }
+            shell.apply(.lockFadeFinished)
+            #if DEBUG
+            LaunchProbe.shared.lockFading = false
+            LaunchProbe.shared.lockFadesWithItsMark = false
+            #endif
+        }
     }
 
     #if DEBUG

@@ -188,7 +188,13 @@ struct LaunchExit: View {
         }
         .onAppear {
             #if DEBUG
-            if timeline.exitDuration != nil { LaunchProbe.shared.exits += 1 }
+            if timeline.exitDuration != nil {
+                LaunchProbe.shared.exits += 1
+                // Para las pruebas: ¿la marca echa a volar con un bloqueo aún fundiéndose y dibujando la suya?
+                if LaunchProbe.shared.lockFading, LaunchProbe.shared.lockFadesWithItsMark {
+                    LaunchProbe.shared.doubleMarks += 1
+                }
+            }
             #endif
         }
     }

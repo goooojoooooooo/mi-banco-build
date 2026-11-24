@@ -50,6 +50,12 @@ extension DemoMode {
     var reveals = 0
     /// Cómo estaba la marca del bloqueo al empezar a fundirse en el último desbloqueo: «completa» o «piezas».
     var lockMarkAtUnlock = "-"
+    /// El bloqueo, ya desbloqueado, se está fundiendo (`ShellState.lockFading`): Inicio aún no recibe toques.
+    var lockFading = false
+    /// Hay un bloqueo fundiéndose que sigue dibujando su marca (no la entregó a la que vuela).
+    var lockFadesWithItsMark = false
+    /// Veces que la marca ha echado a volar con un bloqueo aún fundiéndose y dibujando la suya: dos marcas a la vista.
+    var doubleMarks = 0
     /// Cuándo empieza (o empezó) el último arranque o montaje del bloqueo: segundos desde 1970, para que una prueba que
     /// lo graba sepa cuándo hacer la primera captura.
     var startsAt: Double?
@@ -61,6 +67,7 @@ extension DemoMode {
             "libre=\(freeAfterMs.map { String($0) } ?? "-")", "fin=\(finishedAfterMs.map { String($0) } ?? "-")",
             "bloqueoPiezas=\(lockPlays)", "bloqueoQuieto=\(lockStatic)", "salidas=\(exits)", "montajes=\(reveals)",
             "marcaAlDesbloquear=\(lockMarkAtUnlock)",
+            "fundido=\(lockFading ? 1 : 0)", "marcasDobles=\(doubleMarks)",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")
     }

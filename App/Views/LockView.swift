@@ -13,9 +13,12 @@ struct LockView: View {
     @Binding var locked: Bool
     /// Arranque en frío: las piezas se montan sobre la marca. Si no, la marca está quieta desde el principio.
     var playsLaunch = false
-    /// Se pregunta en el instante de desbloquear: ¿la marca echa a volar ahora mismo hacia Inicio? Si sí, este bloqueo
-    /// deja de dibujar la suya en ese instante (la que vuela sale del mismo sitio): nunca se ven dos.
-    var flightTakesTheMark: () -> Bool = { false }
+    /// Se pregunta en el instante de desbloquear: cómo se va este bloqueo (fundiéndose, soltando o no su marca; o de
+    /// golpe, porque la tapa lo releva). Lo decide la carcasa con `ShellState`.
+    var leaveOnUnlock: () -> LockLeave = { .fades(handsMark: false) }
+    /// Aviso a la carcasa, justo después de desbloquear: cuánto dura el fundido con el que se va este bloqueo (0 si se
+    /// quita de golpe). Hasta entonces Inicio no recibe toques.
+    var fadeStarted: (_ seconds: Double) -> Void = { _ in }
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motion) private var motion
     @State private var authenticating = false
@@ -32,7 +35,8 @@ struct LockView: View {
     /// Se desbloqueó antes de que la marca terminara de montarse: el nombre y el lema, que aún no habían salido, ya no
     /// salen (no aparecen de golpe para fundirse enseguida).
     @State private var textsDropped = false
-    /// Ya desbloqueado y fundiéndose: deja pasar los toques a Inicio (no se queda delante estorbando mientras se va).
+    /// Ya desbloqueado y fundiéndose: su botón ya no hace nada (no vuelve a pedir Face ID). Los toques tampoco llegan a
+    /// Inicio: la carcasa no se los da hasta que este fundido termina (`ShellState.homeTakesTouches`).
     @State private var leaving = false
 
     private static let markSize: CGFloat = 76
@@ -173,22 +177,53 @@ struct LockView: View {
     /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto. El fundido lee `\.motion`:
     /// obedece la intensidad, Reducir movimiento (también el forzado al grabar) y la cámara lenta.
     private func unlockWithFade() {
-        // Antes de fundirse, el DIBUJO queda como lo va a recoger la salida: la marca terminada (ni mitades en el aire ni
+        // Antes de irse, el DIBUJO queda como lo va a recoger la salida: la marca terminada (ni mitades en el aire ni
         // líneas de velocidad, aunque Face ID haya sido más rápido que las piezas) y, si la marca echa a volar ahora,
         // este bloqueo deja de dibujar la suya. Esos cambios van sin animación (`.transaction` en `body`); el único que
         // se anima es el fundido del bloqueo entero. Nada de esto toca `locked`.
-        let takesTheMark = LaunchTimeline(motion).exitDuration != nil && flightTakesTheMark()
+        let leave = leaveOnUnlock()
+        var takesTheMark = false
+        if case .fades(let handsMark) = leave { takesTheMark = handsMark && LaunchTimeline(motion).exitDuration != nil }
         // Si la marca aún se estaba montando y ahora sale volando, el nombre y el lema ya no llegan a salir.
         if playsLaunch, !launchFinished, takesTheMark { textsDropped = true }
         launchFinished = true
         if takesTheMark { markHandedOff = true }
         leaving = true
         #if DEBUG
-        // Para las pruebas: cómo estaba la marca del bloqueo en el instante de empezar a fundirse.
+        // Para las pruebas: cómo estaba la marca del bloqueo en el instante de empezar a irse, y si este bloqueo se
+        // queda fundiéndose con su marca dibujada (si entonces echara a volar otra, se verían dos).
         LaunchProbe.shared.lockMarkAtUnlock = launchFinished ? "completa" : "piezas"
+        if case .fades = leave {
+            LaunchProbe.shared.lockFadesWithItsMark = !takesTheMark
+        } else {
+            LaunchProbe.shared.lockFadesWithItsMark = false
+        }
         #endif
-        withAnimation(motion.reduce ? motion.fade : .smooth(duration: motion.seconds(0.3))) { locked = false }
+        switch leave {
+        case .fades:
+            // La misma duración que el fundido: `motion.fade` dura 0,22 s (× cámara lenta).
+            let seconds = motion.reduce ? 0.22 * motion.timeMultiplier : motion.seconds(0.3)
+            withAnimation(motion.reduce ? motion.fade : .smooth(duration: seconds)) { locked = false }
+            fadeStarted(seconds)
+        case .covered:
+            // La escena no está activa (Face ID aún la tiene): la tapa se pone encima en esta misma actualización y este
+            // bloqueo se quita de golpe, sin fundido. Si se fundiera debajo, al volver la escena a activa antes de
+            // acabar asomaría a medio apagar —marca, lema y botón— junto a la marca que echa a volar.
+            var atOnce = Transaction()
+            atOnce.disablesAnimations = true
+            withTransaction(atOnce) { locked = false }
+            fadeStarted(0)
+        }
     }
+}
+
+/// Cómo deja la pantalla el bloqueo al desbloquear. Lo decide la carcasa (`ShellState.lockExitOnUnlock`).
+enum LockLeave {
+    /// La escena está activa: el bloqueo se funde sobre Inicio. `handsMark`: la marca echa a volar en ese mismo instante
+    /// desde donde está la del bloqueo, que deja de dibujar la suya (nunca se ven dos).
+    case fades(handsMark: Bool)
+    /// La escena no está activa: la tapa del selector de apps releva al bloqueo y este se quita de golpe.
+    case covered
 }
 
 /// La cara del bloqueo: la marca, el nombre y el lema, con el botón (o su hueco) abajo. La comparten el bloqueo y la

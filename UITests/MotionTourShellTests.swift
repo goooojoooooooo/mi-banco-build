@@ -136,6 +136,15 @@ final class MotionTourShellTests: MotionTourCase {
         burst("unlock-inactive", frames: 30, every: 0.2)
     }
 
+    /// N-1: lo mismo, pero la escena vuelve a activa a los 0,2 s reales del desbloqueo, mucho antes de lo que duraría el
+    /// fundido del bloqueo (2,7 s a ×8; la bandera no va a cámara lenta). El bloqueo no se funde debajo de la tapa: al
+    /// quitarse la tapa no queda nada suyo y solo hay una marca, la que vuela.
+    func testUnlockInactiveForAnInstant() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "14", "-MiBancoDemoUnlockInactive", "0.2"], scale: 8)
+        try sleepUntilLaunchStarts(lead: -13.7)
+        burst("unlock-inactive-corto", frames: 30, every: 0.2)
+    }
+
     /// Re-bloqueo (volver de segundo plano): la marca sale quieta y entera, sin piezas.
     func testRelockIsStatic() throws {
         launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "10"])

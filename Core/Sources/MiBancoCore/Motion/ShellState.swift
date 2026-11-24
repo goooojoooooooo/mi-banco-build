@@ -12,7 +12,10 @@ import Foundation
 /// - Inicio se monta por capas una sola vez por desbloqueo, en el instante del desbloqueo (debajo de la tapa si la
 ///   escena aún no está activa), nunca después de haberse visto ya montado; solo el vuelo de la marca espera a
 ///   primer plano;
-/// - el bloqueo solo lo quita `unlockSucceeded`.
+/// - el bloqueo solo lo quita `unlockSucceeded`;
+/// - al desbloquear, el bloqueo solo se funde si la escena está activa; si no, lo releva la tapa de golpe, de modo que
+///   la marca que espera a primer plano para volar nunca arranca sobre un bloqueo a medio fundir;
+/// - mientras el bloqueo se funde, Inicio no recibe toques.
 public struct ShellState: Equatable, Hashable, Sendable {
     /// La fase de la escena, como la da el sistema.
     public enum Scene: Hashable, Sendable, CaseIterable {
@@ -119,18 +122,22 @@ public struct ShellState: Equatable, Hashable, Sendable {
     /// Inicio no se toca ni se lee con el bloqueo delante.
     public var hidesHome: Bool { showsLock }
 
-    /// Si se desbloqueara ahora mismo, la marca echaría a volar en ese instante (la escena está activa). El bloqueo
-    /// lo pregunta para soltar su marca justo cuando la que vuela la releva.
+    /// Si se desbloqueara ahora mismo, la marca echaría a volar en ese instante (la escena está activa). Es lo mismo
+    /// que `lockExitOnUnlock == .fades`, que es lo que pregunta el bloqueo.
     public var fliesOnUnlock: Bool { showsLock && scene == .active }
 
-    /// Si se desbloqueara ahora mismo, cómo se iría el bloqueo (nil: no hay bloqueo delante).
+    /// Si se desbloqueara ahora mismo, cómo se iría el bloqueo (nil: no hay bloqueo delante). En primer plano se funde
+    /// sobre Inicio. Fuera de primer plano (Face ID aún tiene la escena inactiva) se quita de golpe: la tapa se pone
+    /// encima en esa misma actualización, y así no queda debajo un bloqueo a medio fundir que asome —con su marca, su
+    /// lema y su botón— si la escena vuelve a activa antes de que el fundido hubiera acabado.
     public var lockExitOnUnlock: LockExit? {
         guard showsLock else { return nil }
-        return .fades
+        return scene == .active ? .fades : .covered
     }
 
-    /// Inicio recibe los toques.
-    public var homeTakesTouches: Bool { !showsLock }
+    /// Inicio recibe los toques: ni con el bloqueo delante ni mientras el bloqueo, ya desbloqueado, se está fundiendo
+    /// (un toque tardío sobre «Desbloquear» caería en la barra de pestañas que hay justo debajo).
+    public var homeTakesTouches: Bool { !showsLock && !lockFading }
 
     /// Las capas que hay ahora, de abajo arriba. La última es la que se ve encima.
     public var layers: [Layer] {
@@ -144,7 +151,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
     /// La capa de arriba del todo es opaca (bloqueo o tapa): debajo no se ve nada.
     public var isCoveredOpaquely: Bool { showsLock || showsCover }
 
-    /// Cómo entra y sale cada capa. Solo se anima UNA cosa: el bloqueo al quitarse (un fundido). Todo lo demás aparece y
+    /// Cómo entra y sale cada capa. Solo se anima UNA cosa: el bloqueo al quitarse (un fundido, y solo si se desbloquea
+    /// en primer plano: ver `lockExitOnUnlock`). Todo lo demás aparece y
     /// desaparece de golpe: el bloqueo y la tapa al ponerse (la captura del selector de apps nunca pilla nada a medias),
     /// la tapa al quitarse (sin destello) y las capas del arranque (ya son transparentes cuando se quitan).
     public static func animatesInsertion(of layer: Layer) -> Bool { false }
@@ -168,10 +176,12 @@ public struct ShellState: Equatable, Hashable, Sendable {
             coldStart = false
             // Inicio se monta YA, esté o no la escena en primer plano (si no lo está, debajo de la tapa).
             revealToken += 1
-            lockFading = true
             if scene == .active {
+                // El bloqueo se funde sobre Inicio y la marca echa a volar en este instante.
+                lockFading = true
                 startExit(cold: cold)
             } else {
+                // La tapa releva al bloqueo de golpe (no hay fundido); la marca volará al volver a primer plano.
                 pendingFlight = cold
             }
 

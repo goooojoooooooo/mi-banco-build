@@ -150,7 +150,7 @@ struct ImportStatementView: View {
                 VStack(spacing: 12) {
                     if canApply {
                         // Se transforma: cápsula «Importar» → rueda → ✓ (el botón del kit).
-                        MorphingButton(title: "Importar", doneTitle: "Importado", action: apply)
+                        MorphingButton(title: "Importar", doneTitle: "Importado", action: { await apply() })
                             .disabled(applied)
                             .accessibilityIdentifier("import-confirm")
                     } else {

@@ -95,6 +95,9 @@ private struct RisesIn: ViewModifier {
             .opacity(shown ? 1 : 0)
             .scaleEffect(shown || motion.reduce ? 1 : scale)
             .offset(y: shown ? 0 : motion.distance(rise))
+            // Mientras no ha llegado no existe para VoiceOver ni se puede tocar.
+            .accessibilityHidden(!shown)
+            .allowsHitTesting(shown)
             .onAppear { if active { arrive() } }
             .onChange(of: active) { _, now in
                 if now {

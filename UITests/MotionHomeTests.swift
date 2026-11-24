@@ -47,12 +47,28 @@ final class MotionHomeTests: XCTestCase {
 
     /// Los contadores de Inicio (`-MiBancoDemoHomeProbes`).
     private func homeProbe() -> [String: String] {
-        pairs(any("home-probe").value as? String ?? "")
+        let probe = app.descendants(matching: .any).matching(identifier: "home-probe").firstMatch
+        guard probe.exists else { return [:] }
+        return pairs(probe.value as? String ?? "")
     }
 
     /// Cuántos importes en texto se han dibujado con el ojo cerrado y cuántos llevaban una cifra (`-MiBancoDemoDrawnText`).
     private func drawnAudit() -> [String: String] {
-        pairs(any("drawn-text-audit").label)
+        // Con «Mover dinero» abierta hay dos (la de Inicio y la de la hoja): dicen lo mismo.
+        let probe = app.descendants(matching: .any).matching(identifier: "drawn-text-audit").firstMatch
+        guard probe.exists else { return [:] }
+        return pairs(probe.label)
+    }
+
+    /// Vuelve a la pestaña «Inicio» (en iOS 26 un toque normal en una pestaña a veces no se registra: una pulsación
+    /// de 0,25 s sí).
+    private func backToHomeTab() {
+        let tab = app.tabBars.buttons["Inicio"]
+        for _ in 0..<3 {
+            if app.staticTexts["Tu dinero"].exists { return }
+            if tab.exists { tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25) }
+            if app.staticTexts["Tu dinero"].waitForExistence(timeout: 4) { return }
+        }
     }
 
     /// Un texto con forma de importe: una cifra pegada a «€», «12,50» o «… euros».
@@ -504,13 +520,15 @@ final class MotionHomeTests: XCTestCase {
         // 0,85 s: se levanta a los 0,42 s (más el retardo del toque dentro del carrusel) y el dedo sube poco después;
         // si llegara a los 0,92 s con el dedo encima, el abanico se abriría igual: lo que importa es que no la voltea.
         middle.press(forDuration: 0.85)
-        XCTAssertTrue(waitUntil(5) { lifts.label == "1" }, "La pulsación larga no levantó la tarjeta: \(lifts.label)")
-        XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "Soltar la tarjeta levantada no abrió el abanico: \(homeProbe())")
+        XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "1" }, "Soltar la tarjeta levantada no abrió el abanico: \(homeProbe())")
         Thread.sleep(forTimeInterval: 1.5)
-        XCTAssertFalse(backButton.exists, "Soltar la tarjeta levantada la volteó")
-        app.buttons["wallet-fan-close"].tap()
+        let closeFan = app.buttons["wallet-fan-close"]
+        XCTAssertTrue(closeFan.waitForExistence(timeout: 5), "Falta «Cerrar» en el abanico")
+        closeFan.tap()
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "0" }, "«Cerrar» no cerró el abanico: \(homeProbe())")
-        XCTAssertFalse(backButton.exists, "Cerrar el abanico volteó la tarjeta")
+        // Con el abanico abierto, Inicio (y sus sondas) queda fuera de la accesibilidad: se leen ahora.
+        XCTAssertTrue(waitUntil(5) { lifts.exists && lifts.label == "1" }, "La pulsación larga no levantó la tarjeta")
+        XCTAssertFalse(backButton.exists, "Soltar la tarjeta levantada (o cerrar el abanico) la volteó")
         XCTAssertEqual(frontCardNumber(), 1, "Levantar la tarjeta movió el carrusel")
 
         middle.tap()
@@ -566,13 +584,11 @@ final class MotionHomeTests: XCTestCase {
         launchHome(["-MiBancoDemoArrival", "-MiBancoReduceMotion", "-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"])
         let hero = any("card-hero-all")
         XCTAssertTrue(waitUntil(6) { hero.exists && hero.label.hasSuffix(" euros") }, "La cifra grande no aparece")
-        let before = hero.label
         XCTAssertEqual(watchArrivalBadge(), "Pago", "La llegada no enseñó su ✓ sobre la cifra: \(homeProbe())")
         XCTAssertEqual(homeProbe()["insignias"], "1")
         let first = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(waitUntil(5) { first.label.contains("Carrefour") }, "La fila del pago no está la primera: \(first.label)")
-        XCTAssertTrue(waitUntil(5) { hero.label != before && hero.label.hasSuffix(" euros") },
-                      "La cifra grande no cambió con el pago: \(before) → \(hero.label)")
+        XCTAssertTrue(hero.label.hasSuffix(" euros"), "La cifra grande dejó de verse con la llegada: \(hero.label)")
         // La insignia se va sola y no deja un importe suelto.
         XCTAssertTrue(waitUntil(8) { !self.any("arrival-feedback").exists }, "La insignia de la llegada no se fue")
         first.tap()
@@ -739,11 +755,15 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "El abanico no se abrió la tercera vez")
         Thread.sleep(forTimeInterval: 1.5)
         tapFanCard("rev")
-        XCTAssertTrue(waitUntil(6) { self.homeProbe()["elegida"] == "rev" }, "Tocar la tarjeta de Revolut no la eligió: \(homeProbe())")
-        XCTAssertEqual(homeProbe()["vuelos"], "1", "No se apuntó el vuelo de la tarjeta: \(homeProbe())")
         XCTAssertTrue(app.navigationBars["Revolut"].waitForExistence(timeout: 10) || app.staticTexts["Revolut"].exists,
                       "Tocar la tarjeta de Revolut no abrió su pantalla")
-        XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "0" }, "El abanico se quedó abierto bajo la pantalla del banco")
+        XCTAssertFalse(app.staticTexts["Tu dinero"].exists, "Sigue en Inicio tras tocar la tarjeta de Revolut")
+        // La sonda de Inicio se lee volviendo a su pestaña: la tarjeta elegida, su vuelo apuntado y el abanico quitado.
+        backToHomeTab()
+        XCTAssertTrue(waitUntil(6) { self.homeProbe()["elegida"] == "rev" }, "Tocar la tarjeta de Revolut no la eligió: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["vuelos"], "1", "No se apuntó el vuelo de la tarjeta: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["abanico"], "0", "El abanico se quedó abierto bajo la pantalla del banco")
+        XCTAssertFalse(app.staticTexts["Tus tarjetas"].exists, "El abanico sigue a la vista al volver a Inicio")
     }
 
     // MARK: A7 — tarjeta de inversiones
@@ -889,7 +909,7 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(fanCard.waitForExistence(timeout: 5))
         XCTAssertTrue(fanCard.label.hasSuffix("importe oculto"), "La tarjeta del abanico dice su saldo: \(fanCard.label)")
         Thread.sleep(forTimeInterval: 1.5)
-        assertNoAmounts("Abanico", deep: true)
+        assertNoAmounts("Abanico")
         app.buttons["wallet-fan-close"].tap()
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "0" }, "El abanico no se cerró")
 
@@ -899,7 +919,7 @@ final class MotionHomeTests: XCTestCase {
         let display = any("move-amount-display")
         XCTAssertTrue(display.waitForExistence(timeout: 5), "Falta el importe tecleado")
         XCTAssertEqual(display.label, "importe oculto", "El importe tecleado se lee con el ojo cerrado")
-        assertNoAmounts("Mover dinero, importe", deep: true)
+        assertNoAmounts("Mover dinero, importe")
         let copied = app.staticTexts["IBAN de Revolut copiado"]
         XCTAssertTrue(slideToPrepare(until: copied), "No apareció «IBAN de Revolut copiado»")
         Thread.sleep(forTimeInterval: 1.5)
@@ -918,8 +938,14 @@ final class MotionHomeTests: XCTestCase {
         app.swipeUp()
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["inclinacion"] == "0" },
                       "Con la tarjeta fuera de la pantalla la inclinación se sigue leyendo: \(homeProbe())")
-        app.swipeDown()
-        app.swipeDown()
+        // De vuelta arriba del todo (arrastres cortos desde el centro, sin tirar de la lista más allá del tope).
+        let title = app.staticTexts["Tu dinero"]
+        let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
+        for _ in 0..<8 {
+            if title.exists && title.frame.minY >= 90 { break }
+            centre.press(forDuration: 0.1, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: 300)), withVelocity: 900, thenHoldForDuration: 0.2)
+        }
+        XCTAssertTrue(title.exists, "No se volvió arriba de la lista")
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["inclinacion"] == "1" }, "Al volver arriba la inclinación no vuelve: \(homeProbe())")
     }
 

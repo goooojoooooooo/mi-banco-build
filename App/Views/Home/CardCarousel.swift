@@ -68,6 +68,8 @@ struct CardCarousel: View {
     @State private var fingerLandings = 0
     @State private var fingerLandedOn = 0
     @State private var fingerSettling = false
+    /// Solo para probar la prueba (`-MiBancoDemoGlideWins`): cuándo empezó el último deslizamiento programado.
+    @State private var glideStartedAt = Date.distantPast
     #endif
     @Environment(\.cardTilt) private var tilt
     @Environment(\.motion) private var kit
@@ -207,6 +209,16 @@ struct CardCarousel: View {
                 if scrollTarget != nil { return }
                 // El dedo dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
                 guard new != selection else { return }
+                #if DEBUG
+                // Solo para probar la prueba (`-MiBancoDemoGlideWins`): la regresión exacta. El dedo deslizó DURANTE un
+                // deslizamiento programado (dentro de su ventana) y dejó el carrusel en otra tarjeta, pero gana el
+                // programa: el carrusel vuelve a la suya. Fuera de esa ventana el dedo manda como siempre.
+                if DemoMode.glideWinsOverFinger, let chosen = selection,
+                   Date().timeIntervalSince(glideStartedAt) < kit.seconds(0.9) {
+                    glide(to: chosen)
+                    return
+                }
+                #endif
                 selection = new
             }
             .onChange(of: selection) { _, new in
@@ -214,6 +226,9 @@ struct CardCarousel: View {
                 if let new { seen.insert(new) }
                 // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
                 guard measured, let new, new != scrolledID else { return }
+                #if DEBUG
+                glideStartedAt = Date()
+                #endif
                 glide(to: new)
             }
             // Montaje de Inicio (arranque o desbloqueo): la primera vez en la vida de la app, la tarjeta asoma.

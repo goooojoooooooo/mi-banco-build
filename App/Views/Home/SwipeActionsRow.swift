@@ -59,7 +59,10 @@ struct SwipeActionsRow<Content: View>: View {
                 }
             }
             .offset(x: offset)
-            .background(alignment: .trailing) { buttons }
+            .background(alignment: .trailing) {
+                // Las acciones solo existen mientras la fila está (algo) abierta: cerrada, no hay nada debajo.
+                if offset < -0.5 { buttons }
+            }
             .clipped()
             .simultaneousGesture(drag)
             .onChange(of: dragging) { _, on in

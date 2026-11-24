@@ -109,6 +109,7 @@ jobs:
           shot avisos 10 -MiBancoDemoScreen avisos
           shot avisos-ajustes 10 -MiBancoDemoScreen avisos -MiBancoDemoRules
           shot ajustes 10 -MiBancoDemoScreen ajustes
+          shot ajustes-inversiones 10 -MiBancoDemoScreen ajustes -MiBancoDemoInvestmentsSettings
           shot ajustes-copia 10 -MiBancoDemoScreen ajustes -MiBancoDemoBackup
           shot restaurar 10 -MiBancoDemoScreen ajustes -MiBancoDemoRestorePreview
           # La guia de avisos: la lista y pasos de Revolut (apagar «Notificar al ejecutar», rellenar «Titulo») y de Apple Pay.
@@ -124,6 +125,23 @@ jobs:
           xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
           shot guia-letra-grande 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
           xcrun simctl ui "$UDID" content_size large
+          shot inicio-inversiones 10 -MiBancoDemoCard inv
+          shot posicion 10 -MiBancoDemoCard inv -MiBancoDemoPosition
+          shot mover-destino 10 -MiBancoDemoMove 1
+          shot mover-importe 10 -MiBancoDemoMove 2
+          shot mover-listo 10 -MiBancoDemoMove 3
+          shot cuentas 10 -MiBancoDemoScreen ajustes -MiBancoDemoAccounts
+          shot proximos-cobros 10 -MiBancoDemoScreen gasto -MiBancoDemoUpcoming
+          shot resumen 12 -MiBancoDemoBriefing busy
+          shot resumen-tranquilo 12 -MiBancoDemoBriefing quiet
+          shot resumen-privado 12 -MiBancoDemoBriefing busy -MiBancoDemoPrivate
+          shot bancos 10 -MiBancoDemoScreen ajustes -MiBancoDemoBanks
+          shot guia 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuide
+          shot importar 10 -MiBancoDemoScreen ajustes -MiBancoDemoImport
+          shot reverso-revolut 10 -MiBancoDemoCard rev -MiBancoDemoFlip -MiBancoDemoBanks
+          shot bienvenida-1 10 -MiBancoDemoOnboarding 1
+          shot bienvenida-2 10 -MiBancoDemoOnboarding 2
+          shot bienvenida-3 10 -MiBancoDemoOnboarding 3
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.

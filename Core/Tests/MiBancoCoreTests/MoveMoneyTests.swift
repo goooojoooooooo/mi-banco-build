@@ -127,14 +127,14 @@ private func move(_ cents: Int = 20000) -> PendingMove {
     @Test func dondeLoPago() {
         let upcoming = [spotify, netflix]
         #expect(whereToPay(amountCents: 4500, balances: balances, floors: floors, upcoming: upcoming) == [
-            PayOption(bank: .ima, leftAfterCents: 123955, fits: true),
-            PayOption(bank: .rev, leftAfterCents: 22022, fits: true),
-            PayOption(bank: .tr, leftAfterCents: 210500, fits: true),
+            PayOption(bank: .ima, leftAfterCents: 123955, fits: true, balanceAfterCents: 123955, floorCents: 0),
+            PayOption(bank: .rev, leftAfterCents: 22022, fits: true, balanceAfterCents: 29520, floorCents: 5000),
+            PayOption(bank: .tr, leftAfterCents: 210500, fits: true, balanceAfterCents: 210500, floorCents: 0),
         ])
         #expect(whereToPay(amountCents: 30000, balances: balances, floors: floors, upcoming: upcoming) == [
-            PayOption(bank: .ima, leftAfterCents: 98455, fits: true),
-            PayOption(bank: .tr, leftAfterCents: 185000, fits: true),
-            PayOption(bank: .rev, leftAfterCents: -3478, fits: false),
+            PayOption(bank: .ima, leftAfterCents: 98455, fits: true, balanceAfterCents: 98455, floorCents: 0),
+            PayOption(bank: .tr, leftAfterCents: 185000, fits: true, balanceAfterCents: 185000, floorCents: 0),
+            PayOption(bank: .rev, leftAfterCents: -3478, fits: false, balanceAfterCents: 4020, floorCents: 5000),
         ])
     }
 
@@ -238,8 +238,8 @@ private func move(_ cents: Int = 20000) -> PendingMove {
         let options = whereToPay(amountCents: 4500, balances: balances, floors: floors, upcoming: [spotify, netflix],
                                  included: [.rev, .ima], estimated: [.ima])
         #expect(options == [
-            PayOption(bank: .ima, leftAfterCents: 123955, fits: true, isEstimated: true),
-            PayOption(bank: .rev, leftAfterCents: 22022, fits: true),
+            PayOption(bank: .ima, leftAfterCents: 123955, fits: true, isEstimated: true, balanceAfterCents: 123955, floorCents: 0),
+            PayOption(bank: .rev, leftAfterCents: 22022, fits: true, balanceAfterCents: 29520, floorCents: 5000),
         ])
     }
 
@@ -309,5 +309,85 @@ private func move(_ cents: Int = 20000) -> PendingMove {
     @Test func telefonoConGuiones() {
         #expect(normalizeSpanishMobile("612-345-678") == "+34 612 345 678")
         #expect(normalizeSpanishMobile("+34-612-34-56-78") == "+34 612 345 678")
+    }
+
+    // MARK: Ronda U0–U68 (U20, U26, U31, U63)
+
+    @Test func detalleDeLaFichaDesde() throws {
+        let nbsp = "\u{00A0}"
+        let netflix3d = UpcomingCharge(name: "Netflix", bank: .ima, cents: 1_399, date: nov(23))
+        // 1. imagin 1.000,00 €, colchón 100,00 €, Netflix 13,99 € en 3 días, importe 200,00 € -> "te quedarían 800,00 €"
+        let opts1 = whereToPay(amountCents: 20_000, balances: [.ima: 100_000], floors: [.ima: 10_000], upcoming: [netflix3d])
+        let ima1 = try #require(opts1.first)
+        #expect(payOptionDetail(ima1, hasKnownBalance: true) == "te quedarían 800,00\(nbsp)€")
+
+        // 2. Revolut 250,00 €, colchón 100,00 €, importe 200,00 € -> "te quedarían 50,00 €, bajo el colchón"
+        let opts2 = whereToPay(amountCents: 20_000, balances: [.rev: 25_000], floors: [.rev: 10_000], upcoming: [])
+        let rev2 = try #require(opts2.first)
+        #expect(payOptionDetail(rev2, hasKnownBalance: true) == "te quedarían 50,00\(nbsp)€, bajo el colchón")
+        #expect(payOptionSpokenDetail(rev2, hasKnownBalance: true, hidden: true) == "te quedarían importe oculto, bajo el colchón")
+
+        // 3. 210,00 €, sin colchón, Netflix 13,99 € -> "te quedarían 10,00 €, sin cubrir los próximos cobros"
+        let opts3 = whereToPay(amountCents: 20_000, balances: [.ima: 21_000], floors: [:], upcoming: [netflix3d])
+        let ima3 = try #require(opts3.first)
+        #expect(payOptionDetail(ima3, hasKnownBalance: true) == "te quedarían 10,00\(nbsp)€, sin cubrir los próximos cobros")
+
+        // 4. 150,00 € -> "no llega"
+        let opts4 = whereToPay(amountCents: 20_000, balances: [.rev: 15_000], floors: [:], upcoming: [])
+        let rev4 = try #require(opts4.first)
+        #expect(payOptionDetail(rev4, hasKnownBalance: true) == "no llega")
+        #expect(payOptionSpokenDetail(rev4, hasKnownBalance: true, hidden: true) == "no llega")
+
+        // 5. Estimado, caso 1 -> "te quedarían ≈ 800,00 €" y hablado "te quedarían aproximadamente 800,00 euros"
+        let opts5 = whereToPay(amountCents: 20_000, balances: [.ima: 100_000], floors: [.ima: 10_000], upcoming: [netflix3d], estimated: [.ima])
+        let ima5 = try #require(opts5.first)
+        #expect(payOptionDetail(ima5, hasKnownBalance: true) == "te quedarían ≈ 800,00\(nbsp)€")
+        #expect(payOptionSpokenDetail(ima5, hasKnownBalance: true, hidden: false) == "te quedarían aproximadamente 800,00 euros")
+
+        // Saldo desconocido -> "sin datos de saldo"
+        #expect(payOptionDetail(ima1, hasKnownBalance: false) == "sin datos de saldo")
+        #expect(payOptionSpokenDetail(ima1, hasKnownBalance: false, hidden: true) == "sin datos de saldo")
+    }
+
+    @Test func cifraTecleada() {
+        let nbsp = "\u{00A0}"
+        var a = KeypadAmount()
+        #expect(a.typedText == "0\(nbsp)€")
+        a.tapDigit(1); a.tapDigit(2); a.tapComma()
+        #expect(a.typedText == "12,\(nbsp)€")
+        a.tapDigit(5)
+        #expect(a.typedText == "12,5\(nbsp)€")
+        #expect(a.cents == 1250)
+        a.tapDigit(0)
+        #expect(a.typedText == "12,50\(nbsp)€")
+        a.backspace()
+        #expect(a.typedText == "12,5\(nbsp)€")
+        // Tercer decimal y segunda coma no cambian nada y devuelven false.
+        a.tapDigit(0)
+        #expect(a.tapDigit(9) == false)
+        #expect(a.tapComma() == false)
+
+        var b = KeypadAmount()
+        for d in [1, 2, 3, 4] { b.tapDigit(d) }
+        #expect(b.typedText == "1.234\(nbsp)€")
+        #expect(b.cents == 123_400)
+    }
+
+    @Test func pendientesTolerantes() throws {
+        let good = PendingMove(id: UUID(), from: .ima, target: .own(.rev), amountCents: 20_000, createdAt: nov(20, 10))
+        let goodData = try JSONEncoder().encode(good)
+        let goodStr = String(decoding: goodData, as: UTF8.self)
+        let badStr = #"{"id":"6F9619FF-8B86-D011-B42D-00C04FC964FF","from":"ima","target":{"own":{"_0":"rev"}},"amountCents":"mal","createdAt":0}"#
+        let mixed = Data("[\(goodStr),\(badStr)]".utf8)
+        let decoded = decodePendingMoves(mixed)
+        #expect(decoded == [good])
+    }
+
+    @Test func inicialesDeContacto() {
+        #expect(contactInitials(for: "Ana (demo)") == "AD")
+        #expect(contactInitials(for: "  ana  ") == "A")
+        #expect(contactInitials(for: "Ñandú Pérez") == "ÑP")
+        #expect(contactInitials(for: "123") == nil)
+        #expect(contactInitials(for: "   ") == nil)
     }
 }

@@ -37,9 +37,22 @@ final class GuideUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [reached], timeout: 6), .completed, "\(message) (se esperaba «\(expected)»)")
     }
 
-    private func openRevolutGuide() {
+    /// Ajustes creció con la unión #5 (Bancos, «Preparar conexión» y «Cuentas y contactos» van antes de Avisos): en un
+    /// iPhone pequeño la fila puede quedar fuera de la pantalla y una lista no crea las filas que no se ven.
+    private func alertsGuideLink() -> XCUIElement {
+        XCTAssertTrue(app.buttons["settings-bank-rev"].waitForExistence(timeout: 15), "Ajustes no apareció")
         let link = app.buttons["settings-alerts-guide"]
-        XCTAssertTrue(link.waitForExistence(timeout: 15), "Ajustes no muestra «Avisos al instante»")
+        var swipes = 0
+        while !(link.exists && link.isHittable) && swipes < 6 {
+            app.swipeUp()
+            swipes += 1
+        }
+        XCTAssertTrue(link.waitForExistence(timeout: 5), "Ajustes no muestra «Avisos al instante»")
+        return link
+    }
+
+    private func openRevolutGuide() {
+        let link = alertsGuideLink()
         link.tap()
         let revolut = app.buttons["guide-track-revolut"]
         XCTAssertTrue(revolut.waitForExistence(timeout: 5), "La lista de guías no aparece")
@@ -72,8 +85,7 @@ final class GuideUITests: XCTestCase {
     }
 
     func testListHasOneApplePayGuidePerBank() throws {
-        let link = app.buttons["settings-alerts-guide"]
-        XCTAssertTrue(link.waitForExistence(timeout: 15), "Ajustes no muestra «Avisos al instante»")
+        let link = alertsGuideLink()
         link.tap()
         for id in ["guide-track-walletImagin", "guide-track-walletRevolut", "guide-track-walletTradeRepublic"] {
             XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 5), "Falta la guía de Apple Pay: \(id)")
@@ -83,8 +95,7 @@ final class GuideUITests: XCTestCase {
     private let base = ["-MiBancoDemo", "-MiBancoDemoScreen", "ajustes", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
 
     private func openList() {
-        let link = app.buttons["settings-alerts-guide"]
-        XCTAssertTrue(link.waitForExistence(timeout: 15), "Ajustes no muestra «Avisos al instante»")
+        let link = alertsGuideLink()
         link.tap()
     }
 

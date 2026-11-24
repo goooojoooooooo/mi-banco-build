@@ -44,16 +44,13 @@ public func expectedIncome(in state: LedgerState, now: Date, calendar: Calendar)
         let lastMonth = monthIndex(last.date, calendar: calendar)
         guard lastMonth == current || lastMonth == current - 1 else { continue }
         let day = calendar.component(.day, from: last.date)
-        let regular = group.contains {
+        let matches = group.filter {
             monthIndex($0.date, calendar: calendar) == lastMonth - 1
                 && abs(calendar.component(.day, from: $0.date) - day) <= 3
         }
-        guard regular else { continue }
-        let nextMonth = lastMonth + 1
-        var parts = DateComponents(year: nextMonth / 12, month: nextMonth % 12 + 1, day: 1, hour: 12)
-        guard let first = calendar.date(from: parts), let length = calendar.range(of: .day, in: .month, for: first)?.count else { continue }
-        parts.day = min(day, length)
-        guard let next = calendar.date(from: parts), next > now else { continue }
+        guard !matches.isEmpty else { continue }
+        let next = nextAnchoredMonthlyDate(last: last.date, priorDates: matches.map(\.date), calendar: calendar, fixedHour: 12)
+        guard next > now else { continue }
         let candidate = ExpectedIncome(name: last.merchant ?? last.bank.displayName, bank: last.bank,
                                        cents: last.amountCents, date: next)
         if let incumbent = best {

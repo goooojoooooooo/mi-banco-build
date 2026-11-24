@@ -11,6 +11,10 @@ on:
         description: "En un iPhone de 393 pt (iPhone 15/16), como en screenshots.yml"
         type: boolean
         default: false
+      parallel_workers:
+        description: "Pruebas en paralelo: numero de simuladores (>=2). Vacio = 2 con la bateria completa; una clase sola va en serie"
+        required: false
+        default: ""
       runner:
         description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
@@ -20,7 +24,9 @@ permissions:
 jobs:
   ui:
     runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
-    timeout-minutes: 75
+    # U80: la batería completa (U8–U80) ya no cabe en 75 min. La prueba sola tiene su propio tope para que, si se pasa, el
+    # paso falle (no se cancele) y se suban el registro y el `.xcresult`.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
@@ -64,8 +70,10 @@ jobs:
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
           echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
       - name: Pruebas de toques
+        timeout-minutes: 125
         env:
           TEST_CLASS: ${{ github.event.inputs.test_class }}
+          PARALLEL_WORKERS: ${{ github.event.inputs.parallel_workers }}
         run: |
           mkdir -p build
           set +e
@@ -76,10 +84,20 @@ jobs:
             SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
           else
             SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests"
+            # La bateria completa va en 2 simuladores salvo que se pida otro numero (experimento medido: mismas pruebas y
+            # mismos resultados que en serie). Una clase sola sigue en serie, salvo que se pida `parallel_workers`.
+            PARALLEL_WORKERS="${PARALLEL_WORKERS:-2}"
+          fi
+          if [ -n "$PARALLEL_WORKERS" ]; then
+            case "$PARALLEL_WORKERS" in
+              *[!0-9]*|0|1) echo "parallel_workers debe ser un numero >= 2"; echo "2" > build/status.txt; exit 1 ;;
+            esac
+            SELECT="$SELECT -parallel-testing-enabled YES -parallel-testing-worker-count $PARALLEL_WORKERS -maximum-parallel-testing-workers $PARALLEL_WORKERS"
           fi
           echo "SELECT=$SELECT" >> "$GITHUB_ENV"
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600 \
             $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
@@ -89,7 +107,7 @@ jobs:
       # y se repite una sola vez la misma orden de «Pruebas de toques».
       - name: Reintento si las pruebas no llegaron a empezar
         run: |
-          if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test Case " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
+          if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test [Cc]ase " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
             exit 0
           fi
           echo "== Las pruebas no llegaron a empezar =="
@@ -101,14 +119,18 @@ jobs:
           set +e
           xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
+            -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600 \
             $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
           echo "$?" > build/status.txt
           tail -n 60 build/ui.log
           exit 0
       - name: Resumen por prueba
+        if: always()
         run: |
+          test -f build/status.txt || echo "124" > build/status.txt
           echo "== Resultado por prueba =="
-          grep -E "^Test Case .* (passed|failed)" build/ui.log | tee build/summary.txt || true
+          # Una prueba que se pasa de su tope no deja «passed/failed»: se ve por «exceeded …» y por el reinicio.
+          grep -E "^Test [Cc]ase .* (passed|failed)|exceeded execution time allowance|Restarting after unexpected exit" build/ui.log | tee build/summary.txt || true
           { echo "### Pruebas"; echo '```'; cat build/summary.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # R31: lo que dejó la prueba de un solo toque por pestaña (rojo o verde): del log y, si no, del xcresult.
           echo "== R24: Cambio de pestaña con un solo toque =="
@@ -126,7 +148,7 @@ jobs:
           fi
           test "$(cat build/status.txt)" = "0"
       - uses: actions/upload-artifact@v4
-        if: failure()
+        if: failure() || cancelled()
         with:
           name: ui-xcresult
           path: |

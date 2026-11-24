@@ -54,7 +54,7 @@ struct LockView: View {
             #if DEBUG
             if DemoMode.holdsLock {
                 // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación.
-                try? await Task.sleep(for: .seconds(4))
+                try? await Task.sleep(for: .seconds(DemoMode.lockSeconds))
                 unlockWithFade()
                 return
             }

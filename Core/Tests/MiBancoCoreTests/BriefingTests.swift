@@ -734,4 +734,14 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         #expect(render(b.headline, .plain) == nb("Desde ayer a las 22:10 gastaste 12,50 € en 1 pago."))
         #expect(lines(b, .happened).last == nb("200,00 € de imagin a Revolut (entre tus cuentas)"))
     }
+
+    // MARK: Ronda U0–U68 (U36)
+
+    @Test func vozPrivadaSinCifras() {
+        #expect(privateSpokenText("Café Sol: 61,20 €") == "Café Sol: importe oculto")
+        #expect(privateSpokenText("Café Sol: 61,20\u{00A0}€") == "Café Sol: importe oculto")
+        #expect(privateSpokenText("+1,4 %") == "importe oculto")
+        #expect(privateSpokenText("−2,5\u{00A0}%") == "importe oculto")
+        #expect(privateSpokenText("Gastaste •••") == "Gastaste importe oculto")
+    }
 }

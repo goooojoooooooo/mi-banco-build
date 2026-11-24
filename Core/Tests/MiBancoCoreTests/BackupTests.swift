@@ -375,5 +375,36 @@ private func tempDirectory() -> URL {
         ledger.restore(backup)
         #expect(ledger.state == once)
     }
+
+    // MARK: Ronda U0–U68 (U57)
+
+    @Test func copiaPreviaDeCarteraSoloTrasRestaurarElLibro() throws {
+        struct Boom: Error {}
+        var events: [String] = []
+        // 1. Si `restoreLedger` falla, se borra el temporal y NUNCA se promociona (P0 queda intacta).
+        var threw = false
+        do {
+            try restorePortfolioSafetyCopyPlan(
+                saveTemp: { events.append("saveTemp") },
+                restoreLedger: { events.append("restoreLedger"); throw Boom() },
+                promoteTemp: { events.append("promoteTemp") },
+                removeTemp: { events.append("removeTemp") }
+            )
+        } catch {
+            threw = true
+        }
+        #expect(threw)
+        #expect(events == ["saveTemp", "restoreLedger", "removeTemp"])
+
+        // 2. Si `restoreLedger` va bien, `promoteTemp` ocurre DESPUÉS de `restoreLedger`.
+        var okEvents: [String] = []
+        try restorePortfolioSafetyCopyPlan(
+            saveTemp: { okEvents.append("saveTemp") },
+            restoreLedger: { okEvents.append("restoreLedger") },
+            promoteTemp: { okEvents.append("promoteTemp") },
+            removeTemp: { okEvents.append("removeTemp") }
+        )
+        #expect(okEvents == ["saveTemp", "restoreLedger", "promoteTemp"])
+    }
 }
 

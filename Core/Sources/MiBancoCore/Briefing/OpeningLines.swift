@@ -176,6 +176,9 @@ let openingCatalogue: [OpeningSituation: [String]] = [
 /// Las frases candidatas de una situación.
 func openingCandidates(for situation: OpeningSituation) -> [String] { openingCatalogue[situation] ?? [] }
 
+/// Número de frases candidatas de una situación (para validar la respuesta del modelo con `openingChoice(from:count:)`).
+public func openingCandidateCount(for situation: OpeningSituation) -> Int { openingCandidates(for: situation).count }
+
 /// El número de días de Madrid desde una fecha de referencia: estable durante todo el día, +1 al día siguiente.
 private func dayNumber(_ day: Date) -> Int {
     let reference = madridCalendar.date(from: DateComponents(year: 2026, month: 1, day: 1)) ?? Date(timeIntervalSince1970: 1_767_222_000)

@@ -59,8 +59,255 @@ enum DemoMode {
         case "rev": .rev
         case "ima": .ima
         case "tr": .tr
+        case "inv": .investments
         default: nil
         }
+    }
+
+    enum BriefingMode: String { case busy, quiet }
+
+    static var scrollsToInvestments: Bool { arguments.contains("-MiBancoDemoInvestmentsSettings") }
+    static var scrollsToAssistant: Bool { arguments.contains("-MiBancoDemoAssistantSettings") }
+    static var asksPrices: Bool { arguments.contains("-MiBancoDemoAskPrices") }
+    static var opensPosition: Bool { arguments.contains("-MiBancoDemoPosition") }
+    static var demoMoveStep: Int? { value(after: "-MiBancoDemoMove").flatMap(Int.init) }
+    static var opensAccounts: Bool { arguments.contains("-MiBancoDemoAccounts") }
+    static var opensUpcoming: Bool { arguments.contains("-MiBancoDemoUpcoming") }
+    static var briefingMode: BriefingMode? { value(after: "-MiBancoDemoBriefing").flatMap(BriefingMode.init(rawValue:)) }
+    static var briefingShortfall: Bool { arguments.contains("-MiBancoDemoShortfall") }
+    static var banksConnected: Bool { arguments.contains("-MiBancoDemoBanks") }
+    static var opensConnectionGuide: Bool { arguments.contains("-MiBancoDemoGuide") }
+    static var opensStatementImport: Bool { arguments.contains("-MiBancoDemoImport") }
+    static var startsFlipped: Bool { arguments.contains("-MiBancoDemoFlip") }
+    static var onboardingStep: Int? { value(after: "-MiBancoDemoOnboarding").flatMap(Int.init) }
+    /// Argumentos DEBUG de la ronda U0–U67 (solo en memoria).
+    static var showsImportFeedback: Bool { arguments.contains("-MiBancoDemoImportFeedback") }
+    static var forcesPortfolio: Bool { arguments.contains("-MiBancoDemoPortfolio") }
+    static var setsDemoFloor: Bool { arguments.contains("-MiBancoDemoFloor") }
+    static var demoPendingMode: String? {
+        guard arguments.contains("-MiBancoDemoPending") else { return nil }
+        return value(after: "-MiBancoDemoPending") == "done" ? "done" : "waiting"
+    }
+    static var omittedIBANBank: BankID? { value(after: "-MiBancoDemoNoIban").flatMap(BankID.init(rawValue:)) }
+    static var keychainFailCount: Int { arguments.contains("-MiBancoDemoKeychainFails") ? 2 : 0 }
+    static var demoRoute: String? { value(after: "-MiBancoDemoRoute") }
+    static var prefsFail: Bool { arguments.contains("-MiBancoDemoPrefsFail") }
+    static var bankSyncAgoMinutes: Int? { value(after: "-MiBancoDemoBankSyncAgo").flatMap(Int.init) }
+    /// U74: tras soltar «Ver» en Cuentas y contactos, el IBAN sigue a la vista estos segundos (la pulsación de XCUITest no
+    /// deja mirar la pantalla mientras dura). Solo cambia CUÁNTO dura lo que ya ha revelado el toque, nunca lo revela.
+    static var revealLingerSeconds: Double? {
+        guard isActive else { return nil }
+        return value(after: "-MiBancoDemoRevealLinger").flatMap(Double.init)
+    }
+    /// U76: entrar por el aviso de la mañana (`-MiBancoDemoRoute briefing`) a los N segundos del arranque, para probar que la
+    /// ruta del aviso no abre el resumen encima de una confirmación ni de una conexión.
+    static var demoRouteDelaySeconds: Double? { value(after: "-MiBancoDemoRouteAfter").flatMap(Double.init) }
+    /// U82: con `-MiBancoDemoRoute briefing`, entrar por el aviso SIN dar por visto el resumen de hoy.
+    static var demoRouteUnseen: Bool { arguments.contains("-MiBancoDemoRouteUnseen") }
+    /// U80: el carrusel de tarjetas deja ver sus botones a XCUITest (para VoiceOver sigue siendo un solo elemento).
+    static var exposesCardElements: Bool { isActive && arguments.contains("-MiBancoDemoCardElements") }
+    /// U80 (U35.1): segundos que dura el bloqueo de demo (`-MiBancoDemoLock`); 4 si no se dice.
+    static var lockSeconds: Double { value(after: "-MiBancoDemoLockSeconds").flatMap(Double.init) ?? 4 }
+    static var demoGuideKey: Bool { arguments.contains("-MiBancoDemoGuideKey") }
+    static var demoConnectPhase: (phase: String, bank: BankID)? {
+        let args = arguments
+        guard let i = args.firstIndex(of: "-MiBancoDemoConnectPhase"),
+              i + 2 < args.count,
+              let bank = BankID(rawValue: args[i + 2]) else { return nil }
+        return (args[i + 1], bank)
+    }
+
+    static func initialPendingMoves(now: Date = DemoMode.now) -> [PendingMove] {
+        guard demoPendingMode != nil else { return [] }
+        return [PendingMove(from: .ima, target: .own(.rev), amountCents: 20_000, createdAt: now.addingTimeInterval(-600))]
+    }
+
+    /// Extracto sintético de Revolut (muestra de la Tarea 6 con fechas desplazadas ~40 días atrás para que nada enlace
+    /// y el resumen sea exactamente «3 movimientos nuevos, 3 filas ignoradas», con saldo 327,70 €).
+    static func sampleRevolutStatementData(now: Date = DemoMode.now) -> Data {
+        let cal = DateText.madridCalendar
+        let today = cal.startOfDay(for: now)
+        func fmt(_ daysAgo: Int, _ time: String) -> String {
+            let d = cal.date(byAdding: .day, value: -daysAgo, to: today) ?? today
+            let c = cal.dateComponents([.year, .month, .day], from: d)
+            let y = String(format: "%04d", c.year ?? 2026)
+            let m = String(format: "%02d", c.month ?? 10)
+            let day = String(format: "%02d", c.day ?? 10)
+            return "\(y)-\(m)-\(day) \(time)"
+        }
+        let header = "Type,Product,Started Date,Completed Date,Description,Amount,Fee,Currency,State,Balance"
+        let rows = [
+            "Transfer,Current,\(fmt(42, "10:00:00")),\(fmt(42, "10:00:01")),To USD,-20.00,0.50,EUR,COMPLETED,240.20",
+            "Topup,Current,\(fmt(41, "08:00:00")),\(fmt(41, "08:00:01")),Apple Pay Top-Up,100.00,0.00,EUR,COMPLETED,340.20",
+            "Card Payment,Current,\(fmt(40, "13:05:11")),\(fmt(39, "09:00:00")),Mercadona,-12.50,0.00,EUR,COMPLETED,327.70",
+            "Card Payment,Current,\(fmt(40, "20:00:00")),,Bolt,-7.30,0.00,EUR,PENDING,",
+            "Card Payment,Savings,\(fmt(48, "10:00:00")),\(fmt(48, "10:00:00")),Vault,-5.00,0.00,EUR,COMPLETED,10.00",
+            "Card Payment,Current,\(fmt(43, "10:00:00")),\(fmt(43, "10:00:00")),Shop US,-3.00,0.00,USD,COMPLETED,1.00",
+        ]
+        return Data((([header] + rows).joined(separator: "\n") + "\n").utf8)
+    }
+
+    /// Cuaderno de cuentas de demo: solo IBANs de ejemplo publicados (ES91, DE89, GB82) y un contacto inventado.
+    static func accountBook() -> AccountBook {
+        var book = AccountBook()
+        book.ibans = [
+            .rev: "GB82WEST12345698765432",
+            .ima: "ES9121000418450200051332",
+            .tr: "DE89370400440532013000",
+        ]
+        if let omitted = omittedIBANBank {
+            book.ibans.removeValue(forKey: omitted)
+        }
+        if setsDemoFloor {
+            // Saldo de demo de Revolut (340,20 €) + 1,00 € para provocar un día bajo el mínimo (U24).
+            book.floors[.rev] = 34_120
+        }
+        book.payees = [
+            Payee(name: "Ana (demo)", phone: "+34 612 345 678"),
+        ]
+        return book
+    }
+
+    /// Solo carga cartera en demo cuando se pide alguna pantalla de inversiones o el resumen movido: las capturas previas no cambian.
+    static var includesPortfolio: Bool {
+        forcesPortfolio || showsImportFeedback || scrollsToInvestments || asksPrices || opensPosition
+            || initialCard == .investments || briefingMode == .busy
+    }
+
+    /// Entradas del resumen de demo (`-MiBancoDemoBriefing busy|quiet`, con `-MiBancoDemoShortfall` opcional):
+    /// valores idénticos a `busy` / `quiet` / `consejoPorFalta` de la Tarea 5 (`BriefingTests.swift`).
+    static func briefingInput(mode: BriefingMode, shortfall: Bool, state: LedgerState? = nil, now: Date = DemoMode.now) -> BriefingInput {
+        let cal = DateText.madridCalendar
+        func nov(_ day: Int, _ hour: Int = 12, _ minute: Int = 0) -> Date {
+            cal.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute)) ?? now
+        }
+        let spotify = UpcomingCharge(name: "Spotify", bank: .rev, cents: 1_099, date: nov(22, 12))
+        let netflix = UpcomingCharge(name: "Netflix", bank: .rev, cents: 1_399, date: nov(25, 12))
+        let month = MonthDigest(spentCents: 41_230, projectedCents: 69_000, paceDifferenceCents: -3_510, previousMonthName: "octubre")
+
+        let demoShortfalls: [Shortfall] = shortfall ? [
+            Shortfall(
+                bank: .rev,
+                charge: UpcomingCharge(name: "Netflix", bank: .rev, cents: 1_399, date: nov(21, 12)),
+                balanceCents: 920,
+                missingCents: 479,
+                suggestedFrom: .ima,
+                suggestedCents: 1_000
+            ),
+        ] : []
+
+        if mode == .quiet {
+            let quietNow = nov(21, 9, 10)
+            let quietSummary = portfolioSummary(portfolio(now: nov(20, 17, 35)), now: quietNow, calendar: cal)
+            return BriefingInput(
+                now: quietNow,
+                since: nov(20, 8, 30),
+                isFirst: false,
+                banks: [
+                    BankLine(bank: .rev, cents: 34_020, estimated: false, changeCents: 0),
+                    BankLine(bank: .ima, cents: 128_455, estimated: true, changeCents: 0),
+                    BankLine(bank: .tr, cents: 215_000, estimated: true, changeCents: 0),
+                ],
+                totalCents: 377_475,
+                totalChangeCents: 0,
+                upcoming: [spotify, netflix],
+                month: month,
+                investments: quietSummary,
+                shortfalls: demoShortfalls,
+                freeMoney: FreeMoney(cents: 154_977, daysLeft: 10)
+            )
+        }
+
+        let busyNow = nov(20, 8, 30)
+        let busySummary = portfolioSummary(portfolio(now: nov(19, 17, 35)), now: busyNow, calendar: cal)
+
+        func movementID(merchant: String, cents: Int) -> UUID {
+            state?.movements.first {
+                $0.merchant == merchant && abs($0.amountCents) == cents
+            }?.id ?? UUID()
+        }
+
+        return BriefingInput(
+            now: busyNow,
+            since: nov(19, 22, 10),
+            isFirst: false,
+            banks: [
+                BankLine(bank: .rev, cents: 34_020, estimated: false, changeCents: 13_755),
+                BankLine(bank: .ima, cents: 128_455, estimated: true, changeCents: 165_000),
+                BankLine(bank: .tr, cents: 215_000, estimated: true, changeCents: 0),
+            ],
+            totalCents: 377_475,
+            totalChangeCents: 178_755,
+            income: [
+                MovementDigest(id: movementID(merchant: "Nómina", cents: 145_000), bank: .ima, name: "Nómina ACME", cents: 185_000, date: nov(20, 6, 5)),
+            ],
+            payments: [
+                MovementDigest(id: movementID(merchant: "Zara", cents: 4_995), bank: .rev, name: "Zara", cents: 4_995, date: nov(20, 7)),
+                MovementDigest(id: movementID(merchant: "Mercadona", cents: 1_250), bank: .rev, name: "Mercadona", cents: 1_250, date: nov(20, 7)),
+            ],
+            transfers: [
+                TransferDigest(from: .ima, to: .rev, cents: 20_000),
+            ],
+            upcoming: [spotify, netflix],
+            attention: [
+                .bankProblem(.ima, .bankUnavailable),
+                .consentExpiring(.rev, nov(30, 10)),
+            ],
+            month: month,
+            investments: busySummary,
+            shortfalls: demoShortfalls,
+            budgetTip: BudgetTip(name: "Comer fuera", remainingCents: 2_380),
+            freeMoney: FreeMoney(cents: 154_977, daysLeft: 11)
+        )
+    }
+
+    static func demoPositionInstrument(in summary: PortfolioSummary?) -> String? {
+        summary?.positions.first(where: { $0.position.name == "Apple" })?.position.instrument
+            ?? summary?.positions.first?.position.instrument
+    }
+
+    /// Cartera inventada del Plan 4b (tareas 6–7): MSCI World (8 acc.), Apple (3 acc.) y Ethereum (0,01).
+    static func portfolio(now: Date = DemoMode.now) -> Portfolio {
+        let cal = DateText.madridCalendar
+        let today = cal.startOfDay(for: now)
+        let marketTime = cal.date(bySettingHour: 17, minute: 35, second: 0, of: today) ?? now
+        let importDate = cal.date(bySettingHour: 9, minute: 0, second: 0, of: today) ?? now
+        let txDate1 = cal.date(byAdding: .day, value: -180, to: today)?.addingTimeInterval(11 * 3600 + 15 * 60) ?? now
+        let txDate2 = cal.date(byAdding: .day, value: -90, to: today)?.addingTimeInterval(14 * 3600 + 30 * 60) ?? now
+        let txDate3 = cal.date(byAdding: .day, value: -45, to: today)?.addingTimeInterval(9 * 3600 + 45 * 60) ?? now
+
+        var p = Portfolio()
+        p.transactions = [
+            InvestmentTransaction(
+                id: "demo-msci-1", date: txDate1, instrument: "IE00B4L5Y983", name: "MSCI World",
+                assetClass: "ETF", shares: 8, cashCents: -77_067, priceEUR: Decimal(string: "96.33")
+            ),
+            InvestmentTransaction(
+                id: "demo-aapl-1", date: txDate1, instrument: "US0378331005", name: "Apple",
+                assetClass: "STOCK", shares: 2, cashCents: -36_100, priceEUR: Decimal(string: "180.50")
+            ),
+            InvestmentTransaction(
+                id: "demo-aapl-2", date: txDate2, instrument: "US0378331005", name: "Apple",
+                assetClass: "STOCK", shares: 1, cashCents: -18_000, priceEUR: Decimal(string: "180.00")
+            ),
+            InvestmentTransaction(
+                id: "demo-eth-1", date: txDate3, instrument: "ETH", name: "Ethereum",
+                assetClass: "CRYPTO", shares: Decimal(string: "0.01")!, cashCents: -2_500, priceEUR: 2_500
+            ),
+        ]
+        p.quotes = [
+            "IE00B4L5Y983": Quote(priceEUR: 110, previousCloseEUR: Decimal(string: "108.50"), fetchedAt: marketTime, marketTime: marketTime),
+            "US0378331005": Quote(priceEUR: 200, previousCloseEUR: 202, fetchedAt: marketTime, marketTime: marketTime),
+        ]
+        p.manualPrices = [
+            "ETH": ManualPrice(priceEUR: 3_000, setAt: importDate),
+        ]
+        p.symbols = [
+            "IE00B4L5Y983": "EUNL.DE",
+            "US0378331005": "APC.DE",
+        ]
+        p.lastImport = importDate
+        return p
     }
 
     /// `-MiBancoDemoSwitch`: a los 2 s pasa a la tarjeta siguiente como lo haría un toque en el segmentado.
@@ -151,6 +398,9 @@ enum DemoMode {
     /// Hay historia para que salgan los avisos: Spotify sube de 9,99 a 10,99, Netflix se cobra en 3 días, una nómina,
     /// gasto repartido por el mes pasado (frase del ritmo) y compras previas en Mercadona (historial del comercio).
     static func state(now: Date = DemoMode.now) -> LedgerState {
+        if onboardingStep != nil {
+            return LedgerState()
+        }
         let calendar = Calendar.current
         let startOfToday = calendar.startOfDay(for: now)
 
@@ -170,12 +420,20 @@ enum DemoMode {
             calendar.date(byAdding: .month, value: -months, to: date) ?? date
         }
 
-        let balances: [BankID: ManualBalance] = [
-            // Revolut dio el saldo en el propio aviso de Mercadona (mismo instante): su "Te quedaban" se conoce.
-            .rev: ManualBalance(cents: 34_020, setAt: day(0), fromBank: true),
-            .ima: ManualBalance(cents: 128_455, setAt: now, fromBank: false),
-            .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
-        ]
+        let balances: [BankID: ManualBalance] = if banksConnected {
+            [
+                .rev: ManualBalance(cents: 34_020, setAt: now, origin: .bank, fetchedAt: now),
+                .ima: ManualBalance(cents: 128_455, setAt: now, origin: .bank, fetchedAt: now),
+                .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
+            ]
+        } else {
+            [
+                // Revolut dio el saldo en el propio aviso de Mercadona (mismo instante): su "Te quedaban" se conoce.
+                .rev: ManualBalance(cents: 34_020, setAt: day(0), fromBank: true),
+                .ima: ManualBalance(cents: 128_455, setAt: now, fromBank: false),
+                .tr: ManualBalance(cents: 215_000, setAt: now, fromBank: false),
+            ]
+        }
 
         // Gasto: lo de este mes se fecha siempre dentro del mes en curso y nunca en el futuro, sea el día que sea.
         // Hora fija (R19): el día sale de la fracción del mes transcurrido y la hora es siempre las 9:00 (hoy, las 0:30),
@@ -270,8 +528,62 @@ enum DemoMode {
             // Marca fuera del directorio (tesla.es / tesla.com): obliga a la descarga online de verdad.
             movements.append(movement(.ima, -3_900, "Tesla", day(0).addingTimeInterval(-120)))
         }
+        if demoPendingMode == "done" {
+            // Salida reciente de 200,00 € desde imagin para que `moveState` marque el traspaso pendiente como `.done` (U24/U25).
+            movements.append(Movement(
+                bank: .ima, amountCents: -20_000, merchant: "Transferencia a Revolut", kind: .payment,
+                source: .notification, date: now.addingTimeInterval(-120), isShop: false
+            ))
+        }
+
+        var links: [BankID: BankLinkInfo] = [:]
+        if banksConnected {
+            let madrid = DateText.madridCalendar
+            let revValid = madrid.date(from: DateComponents(year: 2027, month: 5, day: 19, hour: 10))
+                ?? now.addingTimeInterval(180 * 86_400)
+            let imaValid = madrid.date(byAdding: .day, value: 9, to: madrid.startOfDay(for: now))?.addingTimeInterval(12 * 3600)
+                ?? now.addingTimeInterval(9 * 86_400)
+            let revSyncAgo = Double(bankSyncAgoMinutes ?? 5) * 60
+            var revLink = BankLinkInfo(
+                connectedAt: now.addingTimeInterval(-30 * 86_400),
+                consentValidUntil: revValid
+            )
+            revLink.lastAttemptAt = now.addingTimeInterval(-revSyncAgo)
+            revLink.lastSuccessAt = now.addingTimeInterval(-revSyncAgo)
+            revLink.historyLoaded = true
+            links[.rev] = revLink
+
+            var imaLink = BankLinkInfo(
+                connectedAt: now.addingTimeInterval(-81 * 86_400),
+                consentValidUntil: imaValid
+            )
+            imaLink.lastAttemptAt = now.addingTimeInterval(-15 * 60)
+            imaLink.lastSuccessAt = now.addingTimeInterval(-15 * 60)
+            imaLink.historyLoaded = true
+            links[.ima] = imaLink
+            // En modo conectado, el pago más reciente de Revolut aparece como «Pendiente» y todos los antiguos de Revolut e
+            // imagin salvo uno (-14,35 € en Mercadona hace 12 días) están confirmados por el banco.
+            for i in movements.indices {
+                let m = movements[i]
+                guard m.bank == .rev || m.bank == .ima else { continue }
+                if i == 0 {
+                    movements[i].bankRef = "demo-rev-pending-0"
+                    movements[i].bankStatus = .pending
+                    movements[i].linkedAt = m.date
+                } else if m.bank == .rev && m.amountCents == -1_435 && m.merchant == "Mercadona" {
+                    // Se deja sin bankRef para que unconfirmedCaptures lo marque «Sin confirmar por el banco».
+                    continue
+                } else {
+                    movements[i].bankRef = "demo-\(m.bank.rawValue)-\(i)"
+                    movements[i].bankStatus = .booked
+                    movements[i].linkedAt = m.date
+                }
+            }
+        }
+
         return LedgerState(balances: balances, movements: movements, unread: [],
-                           budgets: Budgets(monthlyCents: 70_000, byCategory: [.comerFuera: 9_000]))
+                           budgets: Budgets(monthlyCents: 70_000, byCategory: [.comerFuera: 9_000]),
+                           links: links)
     }
 }
 #endif

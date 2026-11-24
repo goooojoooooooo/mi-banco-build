@@ -7,10 +7,16 @@ import MiBancoCore
 /// nunca del `body`. Para VoiceOver es un solo elemento ajustable: "Cuenta, Revolut, 340,20 euros, 2 de 4".
 struct CardCarousel: View {
     let snapshot: LedgerSnapshot
+    var links: [BankID: BankLinkInfo] = [:]
+    let cards: [AccountCard]
+    var portfolioSummary: PortfolioSummary? = nil
+    var portfolioLastImport: Date? = nil
     @Binding var selection: AccountCard?
     @Binding var flipped: AccountCard?
     let motion: HomeMotion
     let onEdit: (BankID?) -> Void
+    var onOpenBank: (BankID) -> Void = { _ in }
+    var onImportInvestments: () -> Void = {}
 
     /// Tarjetas que ya se han visto: su cifra contó desde 0 la primera vez.
     @State private var seen: Set<AccountCard> = []
@@ -26,18 +32,28 @@ struct CardCarousel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppPreferences.self) private var preferences
 
-    private var current: AccountCard { selection ?? .all }
+    private var current: AccountCard {
+        if let selection, cards.contains(selection) { return selection }
+        return cards.first ?? .all
+    }
 
     var body: some View {
         let reduce = reduceMotion
         ScrollView(.horizontal) {
             HStack(spacing: CarouselMetrics.spacing) {
-                ForEach(AccountCard.allCases, id: \.self) { card in
+                ForEach(cards, id: \.self) { card in
                     AccountCardView(
-                        card: card, balances: snapshot.balances, total: snapshot.total,
-                        monthSpent: snapshot.monthSpent[card] ?? 0, flipped: flipped == card,
+                        card: card, balances: snapshot.balances,
+                        links: links,
+                        total: snapshot.total,
+                        monthSpent: snapshot.monthSpent[card] ?? 0,
+                        portfolioSummary: portfolioSummary,
+                        portfolioLastImport: portfolioLastImport,
+                        flipped: flipped == card,
                         revealed: seen.contains(card),
-                        onFlip: { tap(card) }, onEdit: { onEdit(card.bank) })
+                        onFlip: { tap(card) }, onEdit: { onEdit(card.bank) },
+                        onOpenBank: onOpenBank,
+                        onImportInvestments: onImportInvestments)
                         .containerRelativeFrame(.horizontal)
                         .frame(maxHeight: .infinity)
                         .scrollTransition(.interactive, axis: .horizontal) { content, phase in
@@ -63,13 +79,13 @@ struct CardCarousel: View {
         .onScrollGeometryChange(for: CGFloat.self) { geometry in
             // Paso entre tarjetas medido en el contenido (n tarjetas + n−1 huecos), no en el contenedor: el ancho del
             // contenedor ya viene sin el margen lateral y restarlo otra vez desplazaba el indicador (1,2 en vez de 1).
-            let count = CGFloat(AccountCard.allCases.count)
+            let count = CGFloat(max(cards.count, 1))
             let step = (geometry.contentSize.width + CarouselMetrics.spacing) / count
             return step > 0 ? (geometry.contentOffset.x + geometry.contentInsets.leading) / step : 0
         } action: { _, position in
             guard position.isFinite else { return }
             motion.carouselPosition = position
-            let last = CGFloat(AccountCard.allCases.count - 1)
+            let last = CGFloat(max(cards.count - 1, 0))
             let over = position < -0.04 || position > last + 0.04
             if over != motion.carouselOverscrolled { motion.carouselOverscrolled = over }
         }
@@ -112,7 +128,7 @@ struct CardCarousel: View {
                 releaseTarget(token)
             }
         }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: Self.cardChildrenBehavior)
         .accessibilityLabel(spokenLabel)
         .accessibilityHint("Desliza hacia arriba o hacia abajo para cambiar de cuenta")
         .accessibilityAdjustableAction { direction in
@@ -122,8 +138,74 @@ struct CardCarousel: View {
             @unknown default: break
             }
         }
-        .accessibilityAction(named: flipped == current ? "Ver el saldo" : "Ver detalles de la cuenta") { tap(current) }
-        .accessibilityAction(named: current == .all ? "Editar saldos" : "Editar saldo") { onEdit(current.bank) }
+        .accessibilityAction(named: flipAccessibilityActionTitle) { tap(current) }
+        .accessibilityAction(named: primaryAccessibilityActionTitle) {
+            if current == .investments {
+                onImportInvestments()
+            } else if let bank = current.bank, let link = links[bank] {
+                let status = bankStatusLines(
+                    bank: bank,
+                    link: link,
+                    estimated: snapshot.balances[bank]?.estimated,
+                    canConnect: BankConnector.shared.canConnect(bank),
+                    now: AppClock.now,
+                    calendar: DateText.madridCalendar
+                )
+                switch status.action {
+                case .refresh:
+                    let estimated = snapshot.balances[bank]?.estimated
+                    let canConnect = BankConnector.shared.canConnect(bank)
+                    Task {
+                        let outcome = await BankSync.shared.refresh(trigger: .manual, only: bank)[bank]
+                        // U88: la acción con nombre dice cómo acabó, como el botón del reverso.
+                        let problem: SyncProblem? = if case .failed(let p)? = outcome { p } else { nil }
+                        let text = manualRefreshAnnouncement(bank: bank, link: link, problem: problem, estimated: estimated,
+                                                             canConnect: canConnect, now: AppClock.now,
+                                                             calendar: DateText.madridCalendar)
+                        AccessibilityNotification.Announcement(text).post()
+                    }
+                case .renew:
+                    onOpenBank(bank)
+                case .connect, .importStatement, .editBalance, nil:
+                    onEdit(bank)
+                }
+            } else {
+                onEdit(current.bank)
+            }
+        }
+    }
+
+    private var flipAccessibilityActionTitle: String {
+        if current == .investments {
+            return flipped == current ? "Ver el valor" : "Ver detalles"
+        }
+        return flipped == current ? "Ver el saldo" : "Ver detalles de la cuenta"
+    }
+
+    private var primaryAccessibilityActionTitle: String {
+        switch current {
+        case .all:
+            return "Editar saldos"
+        case .investments:
+            return "Importar de nuevo"
+        case .rev, .ima, .tr:
+            if let bank = current.bank, let link = links[bank] {
+                let status = bankStatusLines(
+                    bank: bank,
+                    link: link,
+                    estimated: snapshot.balances[bank]?.estimated,
+                    canConnect: BankConnector.shared.canConnect(bank),
+                    now: AppClock.now,
+                    calendar: DateText.madridCalendar
+                )
+                switch status.action {
+                case .refresh: return "Actualizar"
+                case .renew: return "Renovar"
+                case .connect, .importStatement, .editBalance, nil: return "Editar saldo"
+                }
+            }
+            return "Editar saldo"
+        }
     }
 
     /// Fin de un desplazamiento programado. Si el dedo lo interrumpió y dejó el carrusel en otra tarjeta, esa pasa a ser
@@ -152,14 +234,45 @@ struct CardCarousel: View {
     }
 
     private func move(by step: Int) {
-        let all = AccountCard.allCases
-        let next = min(max(current.index + step, 0), all.count - 1)
-        withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { selection = all[next] }
+        guard !cards.isEmpty else { return }
+        let next = min(max(current.index(in: cards) + step, 0), cards.count - 1)
+        withAnimation(reduceMotion ? nil : Theme.Motion.cardSettle) { selection = cards[next] }
+    }
+
+    /// Para VoiceOver el carrusel es UN elemento ajustable con acciones con nombre. Solo en la demo de pruebas
+    /// (`-MiBancoDemoCardElements`, DEBUG) deja ver los botones del reverso para que XCUITest los toque de verdad (U80).
+    private static var cardChildrenBehavior: AccessibilityChildBehavior {
+        #if DEBUG
+        if DemoMode.exposesCardElements { return .contain }
+        #endif
+        return .ignore
     }
 
     private var spokenLabel: String {
         let hidden = preferences.privateMode
-        let position = "\(current.index + 1) de \(AccountCard.allCases.count)"
+        let position = "\(current.index(in: cards) + 1) de \(cards.count)"
+        if current == .investments {
+            let missing = portfolioSummary?.missingPrices ?? 0
+            let value: String
+            if hidden {
+                value = "importe oculto"
+            } else if let cents = portfolioSummary?.valueCents {
+                value = (missing > 0 ? "al menos " : "") + spokenAmount(cents, hidden: false)
+            } else {
+                value = "sin precio"
+            }
+            let count = portfolioSummary?.positions.count ?? 0
+            let positionsText = count == 1 ? "1 posición" : "\(count) posiciones"
+            let missingPart = missing > 0 ? ", falta el precio de \(missing)" : ""
+            // U80 (U14): lo mismo que dice la tarjeta, «… desde la compra», también para VoiceOver (con el ojo cerrado, oculto).
+            let gainPart: String = {
+                guard let gain = portfolioSummary?.gainCents else { return "" }
+                if hidden { return ", importe oculto desde la compra" }
+                let kind = gain >= 0 ? "ganancia de" : "pérdida de"
+                return ", \(kind) \(spokenAmount(abs(gain), hidden: false)) desde la compra"
+            }()
+            return "Inversiones, \(value), \(positionsText)\(gainPart)\(missingPart), \(position)"
+        }
         guard let bank = current.bank else {
             let total = snapshot.total.map { spokenAmount($0, hidden: hidden) } ?? "sin saldo"
             return "Todo, \(total) en tres cuentas, \(position)"

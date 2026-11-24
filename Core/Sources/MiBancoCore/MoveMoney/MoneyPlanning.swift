@@ -32,13 +32,47 @@ public struct PayOption: Equatable, Sendable {
     public let fits: Bool
     /// true = el saldo de ese banco es una estimación (no lo dijo el banco).
     public let isEstimated: Bool
+    /// Saldo menos importe (sin descontar colchón ni cobros próximos) — U20.
+    public let balanceAfterCents: Int
+    /// Colchón configurado para ese banco (0 si no tiene) — U20.
+    public let floorCents: Int
 
-    public init(bank: BankID, leftAfterCents: Int, fits: Bool, isEstimated: Bool = false) {
+    public init(bank: BankID, leftAfterCents: Int, fits: Bool, isEstimated: Bool = false,
+                balanceAfterCents: Int? = nil, floorCents: Int = 0) {
         self.bank = bank
         self.leftAfterCents = leftAfterCents
         self.fits = fits
         self.isEstimated = isEstimated
+        self.balanceAfterCents = balanceAfterCents ?? leftAfterCents
+        self.floorCents = floorCents
     }
+}
+
+/// Texto visible de una ficha «Desde» en Mover dinero (U20).
+public func payOptionDetail(_ option: PayOption, hasKnownBalance: Bool) -> String {
+    guard hasKnownBalance else { return "sin datos de saldo" }
+    guard option.balanceAfterCents >= 0 else { return "no llega" }
+    let prefix = option.isEstimated ? "≈ " : ""
+    let amount = prefix + formatEUR(option.balanceAfterCents)
+    if option.fits { return "te quedarían \(amount)" }
+    if option.balanceAfterCents - option.floorCents < 0 { return "te quedarían \(amount), bajo el colchón" }
+    return "te quedarían \(amount), sin cubrir los próximos cobros"
+}
+
+/// Texto hablado de VoiceOver de una ficha «Desde» en Mover dinero (U20).
+public func payOptionSpokenDetail(_ option: PayOption, hasKnownBalance: Bool, hidden: Bool) -> String {
+    guard hasKnownBalance else { return "sin datos de saldo" }
+    guard option.balanceAfterCents >= 0 else { return "no llega" }
+    let amount: String
+    if hidden {
+        amount = "importe oculto"
+    } else {
+        let spoken = formatEUR(option.balanceAfterCents).replacingOccurrences(of: "\u{00A0}€", with: " euros")
+        amount = option.isEstimated ? "aproximadamente \(spoken)" : spoken
+    }
+    if option.fits { return "te quedarían \(amount)" }
+    if option.balanceAfterCents - option.floorCents < 0 { return "te quedarían \(amount), bajo el colchón" }
+    return "te quedarían \(amount), sin cubrir los próximos cobros"
 }
 
 private func order(_ bank: BankID) -> Int { BankID.allCases.firstIndex(of: bank) ?? 0 }
@@ -50,9 +84,12 @@ public func whereToPay(amountCents: Int, balances: [BankID: Int], floors: [BankI
                        upcoming: [UpcomingCharge], included: Set<BankID> = Set(BankID.allCases),
                        estimated: Set<BankID> = []) -> [PayOption] {
     let options = balances.filter { included.contains($0.key) }.map { bank, balance -> PayOption in
+        let floor = floors[bank] ?? 0
         let charges = upcoming.filter { $0.bank == bank }.reduce(0) { $0 + $1.cents }
-        let left = balance - amountCents - (floors[bank] ?? 0) - charges
-        return PayOption(bank: bank, leftAfterCents: left, fits: left >= 0, isEstimated: estimated.contains(bank))
+        let balanceAfter = balance - amountCents
+        let left = balanceAfter - floor - charges
+        return PayOption(bank: bank, leftAfterCents: left, fits: left >= 0, isEstimated: estimated.contains(bank),
+                         balanceAfterCents: balanceAfter, floorCents: floor)
     }
     func sorted(_ list: [PayOption]) -> [PayOption] {
         let normal = list.filter { $0.bank != .tr }.sorted {

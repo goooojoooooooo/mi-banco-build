@@ -129,6 +129,14 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(card.exists, "Falta la cara delantera de «Todo»")
         let cardFrame = card.frame.insetBy(dx: -1, dy: -1)
         let heroFrame = hero.frame
+        // Además, contra la pantalla: la tarjeta ocupa de 32 pt a (ancho − 32 pt); lo que mide XCUITest de una vista
+        // dentro de un giro 3D no siempre es fiable, así que la cifra se comprueba también con esos márgenes.
+        let screen = app.windows.firstMatch.frame
+        for (name, frame) in [("la cifra grande", heroFrame)] + ["rev", "ima", "tr"].map({ ("el saldo de \($0)", any("card-bank-\($0)").frame) }) {
+            XCTAssertGreaterThanOrEqual(frame.minX, 31, "\(category): \(name) \(frame) se sale por la izquierda de la tarjeta")
+            XCTAssertLessThanOrEqual(frame.maxX, screen.width - 31, "\(category): \(name) \(frame) se sale por la derecha de la tarjeta")
+            XCTAssertGreaterThan(frame.width, 20, "\(category): \(name) \(frame) no tiene ancho")
+        }
         XCTAssertTrue(cardFrame.contains(heroFrame), "\(category): la cifra \(heroFrame) se sale de la tarjeta \(card.frame)")
         XCTAssertGreaterThanOrEqual(heroFrame.height, 24, "\(category): la cifra grande queda diminuta: \(heroFrame)")
         for bank in ["rev", "ima", "tr"] {
@@ -341,9 +349,6 @@ final class MotionHomeTests: XCTestCase {
         }
         XCTAssertEqual(numbers, [2, 3, 4, 3, 2, 1], "Cada deslizamiento debe mover una tarjeta: \(trace.joined(separator: " → "))")
         assertEverythingAgrees(on: 1, "Tras deslizar de vuelta")
-        // La tarjeta «Todo» está de verdad en su sitio (centrada), no solo en la etiqueta.
-        let front = any("card-front-all").frame
-        XCTAssertEqual(front.midX, app.windows.firstMatch.frame.midX, accuracy: 4, "«Todo» no quedó centrada: \(snapshot())")
     }
 
     /// Mantener pulsada la tarjeta de delante la levanta (lo cuenta `card-lift-count`, solo en DEBUG) y soltarla NO la

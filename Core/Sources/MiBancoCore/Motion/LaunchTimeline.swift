@@ -123,6 +123,11 @@ public struct LaunchTimeline: Equatable, Sendable {
     /// Desde cuándo la capa deja pasar los toques a Inicio (antes, un toque la salta).
     public var interactiveAt: Double { flightAt ?? assembleAt }
 
+    /// Cuándo encajan las dos mitades de la ola (el golpe háptico); nil si solo hay fundido.
+    public var piecesLockAt: Double? {
+        style == .pieces ? Self.piecesEnd * scale : nil
+    }
+
     // MARK: El reloj y el salto
 
     /// Segundos del guion a partir del tiempo real transcurrido. Con un toque en `skippedAt`, el guion salta al vuelo
@@ -167,7 +172,9 @@ public struct LaunchTimeline: Equatable, Sendable {
     }
 
     /// `n`: segundos del guion a nivel Equilibrado.
-    private func piecesFrame(at n: Double, skipped: Bool) -> LaunchFrame {
+    private func piecesFrame(at time: Double, skipped: Bool) -> LaunchFrame {
+        // Pasado el final, el último fotograma (y nunca un tiempo infinito en las cuentas del muelle).
+        let n = min(max(0, time), Self.end)
         var frame = LaunchFrame.assembled
         let rich = richEffects && !skipped
 

@@ -20,5 +20,8 @@ enum Haptics {
     /// Deslizar para borrar llega al final.
     static var confirm: SensoryFeedback { SensoryFeedback.impact(weight: .medium) }
 
+    /// Las piezas de la marca encajan (arranque): un golpe seco.
+    static var lock: SensoryFeedback { SensoryFeedback.impact(flexibility: .rigid) }
+
     static func arrival(isIncome: Bool) -> SensoryFeedback { isIncome ? success : payment }
 }

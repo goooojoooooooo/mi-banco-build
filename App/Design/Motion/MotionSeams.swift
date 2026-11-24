@@ -8,6 +8,9 @@ import MiBancoCore
 /// Dónde está la ranura de la marca en la barra de Inicio: el arranque hace volar la marca hasta ahí.
 @MainActor @Observable final class LaunchAnchor {
     var brandFrame: CGRect?
+    /// Dónde está la marca del bloqueo (y de la tapa del selector de apps, que usa el mismo diseño): de ahí sale
+    /// volando al desbloquear. No se borra al quitarse el bloqueo: se lee justo después.
+    var lockMarkFrame: CGRect?
 }
 
 /// El vuelo de una tarjeta desde el abanico de Inicio hasta la cabecera de la pantalla del banco.

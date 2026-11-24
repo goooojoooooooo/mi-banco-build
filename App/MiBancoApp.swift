@@ -12,7 +12,7 @@ struct MiBancoApp: App {
     var body: some Scene {
         // U62 (hipótesis, sin pila que la demuestre; ver ejecución 44972452792 y U77): `WindowGroup` envuelve su cierre en un
         // `LazyView` interno que SwiftUI podría reevaluar en `com.apple.SwiftUI.AsyncRenderer` al cambiar `@State` del `App`
-        // (p. ej. al terminar `LaunchCurtain`) y disparar `_swift_task_checkIsolatedSwift` en Swift 6. Por si acaso,
+        // (p. ej. al terminar el arranque) y disparar `_swift_task_checkIsolatedSwift` en Swift 6. Por si acaso,
         // `MiBancoApp` no tiene `@State`; el otro sospechoso, el `Canvas` asíncrono de `CardSurface`, ya dibuja en el principal.
         WindowGroup {
             AppShellView()
@@ -33,10 +33,20 @@ private struct AppShellView: View {
     @State private var logos = MerchantLogos()
     @State private var preferences = AppPreferences()
     @State private var locked = true
-    /// Arranque en frío: la marca se traza sobre negro y luego Inicio se monta por capas.
+    /// Arranque en frío sin bloqueo delante: la capa del arranque («logo en piezas») está puesta hasta que termina.
+    /// Solo vale `true` una vez por vida de la app: al volver de segundo plano no hay arranque.
     @State private var launching = true
-    /// Sube cuando Inicio debe montarse por capas (tras la marca del arranque y al desbloquear).
+    /// Inicio aún no se ha enseñado ni una vez desde que se abrió la app. Decide si el bloqueo monta las piezas
+    /// (arranque en frío) o sale con la marca quieta (re-bloqueo).
+    @State private var coldStart = true
+    /// Sube cuando Inicio debe montarse por capas (a los 0,78 s del arranque y al desbloquear).
     @State private var revealToken = 0
+    /// Se acaba de desbloquear y falta enseñarlo: Inicio se monta y la marca vuela en cuanto la app está en primer plano
+    /// (Face ID deja la escena inactiva un instante; mientras, lo que se ve es la tapa del selector de apps).
+    @State private var unlockReveal: UnlockReveal?
+    /// La marca volando del bloqueo a su ranura. Solo dibujo; nunca existe con el bloqueo puesto.
+    @State private var launchExit: LaunchExitRun?
+    @State private var exitCount = 0
     /// Costura de movimiento (F1): dónde está la ranura de la marca en Inicio. Vive aquí, por encima del bloqueo, el telón
     /// y `RootView`, para que todos vean el mismo objeto.
     @State private var launchAnchor = LaunchAnchor()
@@ -49,12 +59,20 @@ private struct AppShellView: View {
         #endif
         return locked && lockEnabled
     }
-    /// Tapa opaca para la captura del selector de apps; no toca `locked`.
+    /// Tapa opaca para la captura del selector de apps; no toca `locked`. Con el bloqueo ya delante no hace falta (el
+    /// bloqueo es opaco y no enseña nada) y taparía la marca montándose mientras Face ID tiene la escena inactiva.
     private var showsPrivacyCover: Bool {
         #if DEBUG
         if DemoMode.isActive { return false }
         #endif
-        return lockEnabled && scenePhase != .active
+        return lockEnabled && scenePhase != .active && !showsLock
+    }
+    /// En primer plano. En la demo siempre (la fase de escena parpadea en el simulador de CI), igual que la tapa.
+    private var sceneActive: Bool {
+        #if DEBUG
+        if DemoMode.isActive { return true }
+        #endif
+        return scenePhase == .active
     }
 
     var body: some View {
@@ -73,29 +91,46 @@ private struct AppShellView: View {
     @ViewBuilder
     private var content: some View {
             ZStack {
+                #if DEBUG
+                if DemoMode.isActive { LaunchProbeView() }
+                #endif
                 RootView(model: model, portfolio: portfolio, accountBook: accountBook,
                          briefing: briefing, speaker: speaker,
                          isLocked: showsLock, revealToken: revealToken)
                     .accessibilityHidden(showsLock)
                     .allowsHitTesting(!showsLock)
+                // ORDEN (no cambiar sin revisar el bloqueo): Inicio; el bloqueo o el arranque; la marca que vuela; y,
+                // encima de todo, la tapa del selector de apps. El arranque y la marca que vuela solo se montan con
+                // `showsLock` falso: nunca hay nada por encima del bloqueo.
                 if showsLock {
                     // Entra sin animación (la captura del selector de apps nunca pilla la app a medias);
                     // al desbloquear se desvanece, porque solo ese cambio va en `withAnimation`.
-                    LockView(locked: unlockBinding)
+                    // En el arranque en frío monta las piezas sobre su propia marca; en un re-bloqueo, la marca está quieta.
+                    LockView(locked: unlockBinding, playsLaunch: coldStart)
                         .transition(.opacity)
                 } else if launching {
-                    LaunchCurtain(onReveal: reveal)
-                        .transition(.opacity)
+                    // Sin bloqueo: el arranque. Se quita cuando ya es transparente (sin transición).
+                    LaunchSequence(onAssemble: assembleHome, onFinish: finishLaunch)
+                        .transition(.identity)
+                }
+                if let launchExit, !showsLock {
+                    // Aparece y se quita de golpe aunque el desbloqueo vaya animado: su primer fotograma es la marca
+                    // donde estaba y el último no pinta nada.
+                    LaunchExit(from: launchExit.from, cold: launchExit.cold, coversLockMark: launchExit.coversLockMark) {
+                        if self.launchExit?.id == launchExit.id { self.launchExit = nil }
+                    }
+                    .id(launchExit.id)
+                    .transition(.identity)
                 }
                 if showsPrivacyCover {
                     privacyCover
                 }
             }
             .environment(\.launchAnchor, launchAnchor)
-            // Respaldo del telón: pase lo que pase con su animación, a los 1,5 s Inicio está a la vista.
+            // Respaldo del arranque: pase lo que pase con su animación, a los 1,5 s Inicio está a la vista y se puede tocar.
             .task {
-                try? await Task.sleep(for: .milliseconds(1_500))
-                if launching && !showsLock { reveal() }
+                try? await Task.sleep(for: .seconds(launchSafetySeconds))
+                if launching && !showsLock { finishLaunch() }
             }
             .task {
                 // Arranque en frío (tarea 10): puede que no haya cambio de escena que lo dispare.
@@ -160,14 +195,20 @@ private struct AppShellView: View {
                     Task { await portfolio.refreshPrices(force: false) }
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
+                    // Si se desbloqueó con la escena aún inactiva (Face ID), ahora sí: Inicio se monta y la marca vuela.
+                    revealAfterUnlock()
                 case .background:
                     speaker.stop()
+                    // Nada del arranque sobrevive a irse a segundo plano.
+                    launchExit = nil
+                    if launching && !showsLock { finishLaunch() }
                     BackgroundRefresh.schedule() // tarea 10
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     if lockEnabled { locked = true }
                 default:
                     speaker.stop()
-                    break
+                    // Fuera de primer plano la marca no sigue volando (en la demo la fase de escena no cuenta).
+                    if !sceneActive { launchExit = nil }
                 }
             }
             .onChange(of: lockEnabled) { _, _ in
@@ -180,17 +221,22 @@ private struct AppShellView: View {
             .onChange(of: showsLock) { wasLocked, isLocked in
                 if isLocked {
                     speaker.stop()
+                    // Con el bloqueo puesto no queda nada del arranque: ni la marca volando ni un montaje pendiente.
+                    launchExit = nil
+                    unlockReveal = nil
                 }
-                // Al desbloquear, Inicio se monta por capas mientras el bloqueo se desvanece encima.
+                // Al desbloquear, Inicio se monta por capas mientras el bloqueo se desvanece encima, y la marca vuela.
                 if wasLocked && !isLocked {
                     launching = false
-                    revealToken += 1
+                    unlockReveal = UnlockReveal(cold: coldStart)
+                    coldStart = false
+                    revealAfterUnlock(lockIsFading: true)
                 }
             }
         }
 
     /// El bloqueo escribe `locked = false` dentro de su animación de salida: en esa misma transacción se da por
-    /// terminado el arranque, así el telón nunca asoma un instante entre el bloqueo y Inicio.
+    /// terminado el arranque, así la capa del arranque nunca asoma un instante entre el bloqueo y Inicio.
     private var unlockBinding: Binding<Bool> {
         Binding(get: { locked }, set: { value in
             locked = value
@@ -198,54 +244,65 @@ private struct AppShellView: View {
         })
     }
 
-    /// La marca ya está trazada: Inicio empieza a montarse debajo y el telón se aparta.
-    private func reveal() {
+    /// A los 0,78 s del arranque (o al saltarlo): Inicio empieza a montarse debajo. Solo la primera vez.
+    private func assembleHome() {
+        guard coldStart else { return }
+        coldStart = false
         revealToken += 1
-        withAnimation(.easeOut(duration: 0.32)) { launching = false }
     }
 
+    /// El arranque ha terminado (o lo corta el respaldo): la capa se quita. Si Inicio aún no se montó, se monta ya.
+    private func finishLaunch() {
+        assembleHome()
+        launching = false
+    }
+
+    /// Lo que se ve al desbloquear: Inicio se monta por capas y la marca del bloqueo vuela a su ranura. Solo dibujo, y
+    /// solo con la app desbloqueada y en primer plano; si aún no lo está, espera a que lo esté (`scenePhase`).
+    /// `lockIsFading`: se llama en el mismo instante del desbloqueo, con el bloqueo fundiéndose debajo.
+    private func revealAfterUnlock(lockIsFading: Bool = false) {
+        guard let pending = unlockReveal, !showsLock, sceneActive else { return }
+        unlockReveal = nil
+        revealToken += 1
+        // La marca vuela si se sabe de dónde sale y a dónde va: en frío, a donde estará la ranura; después, solo si
+        // Inicio la tiene a la vista. (Los marcos se leen aquí, en la acción, nunca en `body`.)
+        guard let from = launchAnchor.lockMarkFrame, from.width > 0,
+              pending.cold || launchAnchor.brandFrame != nil else { return }
+        exitCount += 1
+        launchExit = LaunchExitRun(id: exitCount, from: from, cold: pending.cold, coversLockMark: lockIsFading)
+    }
+
+    /// El respaldo del arranque: 1,5 s. Solo al grabar (DEBUG) se estira igual que el arranque (cámara lenta y espera).
+    private var launchSafetySeconds: Double {
+        #if DEBUG
+        return 1.5 * DemoMode.motionScale + DemoMode.launchHoldSeconds
+        #else
+        return 1.5
+        #endif
+    }
+
+    /// La misma cara que el bloqueo (la marca en el mismo sitio y el nombre debajo), sin lema ni botón: al quitarse, la
+    /// marca que vuela sale exactamente de donde estaba.
     private var privacyCover: some View {
-        ZStack {
-            Theme.canvas.ignoresSafeArea()
-            VStack(spacing: Theme.Space.row) {
-                AppMark(size: 64)
-                Text(AppIdentity.displayName)
-                    .titan(.sheetTitle)
-                    .foregroundStyle(Theme.label)
-            }
+        LockFace(showsTagline: false) {
+            AppMark(size: 76)
+        } action: {
+            Color.clear.frame(height: 52)
         }
+        .background(Theme.canvas.ignoresSafeArea())
         .accessibilityHidden(true)
     }
 }
 
-/// Arranque: negro, la marca aparece y su ola se traza (≈ 0,5 s); después se aparta mientras Inicio se monta.
-/// No bloquea nada (no recibe toques) y con Reducir movimiento se aparta al instante.
-private struct LaunchCurtain: View {
-    let onReveal: () -> Void
-    @State private var drawn: CGFloat = 0
-    @State private var shown = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+/// Un desbloqueo que falta enseñar (`cold`: es el del arranque en frío).
+private struct UnlockReveal {
+    let cold: Bool
+}
 
-    var body: some View {
-        ZStack {
-            Theme.canvas.ignoresSafeArea()
-            AppMark(size: 72, drawn: drawn)
-                .opacity(shown ? 1 : 0)
-                .scaleEffect(shown ? 1 : 0.92)
-        }
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .task {
-            guard !reduceMotion else {
-                onReveal()
-                return
-            }
-            withAnimation(.easeOut(duration: 0.25)) { shown = true }
-            withAnimation(Theme.Motion.markDraw.delay(0.05)) { drawn = 1 }
-            try? await Task.sleep(for: .milliseconds(560))
-            // Si el telón ya se fue (p. ej. desbloqueo), la tarea se cancela: no se vuelve a montar Inicio.
-            guard !Task.isCancelled else { return }
-            onReveal()
-        }
-    }
+/// Una salida del bloqueo en curso: de dónde sale la marca y cómo.
+private struct LaunchExitRun {
+    let id: Int
+    let from: CGRect
+    let cold: Bool
+    let coversLockMark: Bool
 }

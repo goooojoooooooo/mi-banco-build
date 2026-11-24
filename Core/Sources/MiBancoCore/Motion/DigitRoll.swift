@@ -90,6 +90,23 @@ public enum DigitRoll {
         return abs(position(column, at: hi, overshoot: overshoot) - position(column, at: lo, overshoot: overshoot)) / (hi - lo)
     }
 
+    /// Cuánto se ve cada columna (0…1) mientras rueda, para que un grupo de millares nunca aparezca como un cero a la
+    /// izquierda («0.145,19 €» al abrir el ojo, «0.000,00 €» al empezar a contar): una columna a la izquierda de las
+    /// `alwaysShown` últimas (unidades y céntimos: 3; euros enteros: 1) no se dibuja mientras ella y todas las de su
+    /// izquierda están en el cero, y aparece según sale de él (entera a medio dígito). El punto de millar que la sigue
+    /// lleva su misma opacidad. Asentado en una cifra de verdad (que no empieza por cero) todo vale 1.
+    public static func leadingVisibility(positions: [Double], alwaysShown: Int) -> [Double] {
+        let free = max(0, positions.count - max(0, alwaysShown))
+        var shown = 0.0
+        return positions.enumerated().map { index, position in
+            guard index < free else { return 1 }
+            let place = mod10(position)
+            let away = min(place, 10 - place)
+            shown = max(shown, min(1, away / 0.5))
+            return shown
+        }
+    }
+
     private static func power10(_ n: Int) -> Int {
         var v = 1
         for _ in 0..<n { v *= 10 }
@@ -108,6 +125,11 @@ public enum AmountMask {
     /// «•••,•• €» (con «−» o «+» delante si se pide).
     public static func text(negative: Bool, showsPlus: Bool) -> String {
         (negative ? "−" : (showsPlus ? "+" : "")) + "•••,••\u{00A0}€"
+    }
+
+    /// La máscara de un importe en euros enteros: «••• €» (sin decimales, como la cifra a la que sustituye).
+    public static func wholeText(negative: Bool, showsPlus: Bool) -> String {
+        (negative ? "−" : (showsPlus ? "+" : "")) + "•••\u{00A0}€"
     }
 
     /// Dígitos al azar (deterministas por semilla y paso) para barajar mientras el ojo cambia. Nunca salen del importe.

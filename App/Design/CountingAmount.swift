@@ -97,6 +97,8 @@ private struct AmountFigure: View, Animatable {
         switch style {
         case .plain(let sign):
             Text(scrambled(sign ? signedEUR(cents) : formatEUR(cents).replacingOccurrences(of: "-", with: "−")))
+        case .whole(let sign):
+            Text(scrambled(sign ? signedEURWhole(cents) : formatEURWhole(cents).replacingOccurrences(of: "-", with: "−")))
         case let .hero(euros, small, color):
             let split = splitEUR(cents)
             let parts = (main: scrambled(split.main), small: scrambled(split.small))

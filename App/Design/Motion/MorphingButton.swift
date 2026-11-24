@@ -99,18 +99,18 @@ struct MorphingButton: View {
         let began = Date()
         let ok = await action()
         // La rueda se ve al menos un instante, aunque la acción sea inmediata.
-        let rest = 0.45 - Date().timeIntervalSince(began)
+        let rest = motion.pause(0.45) - Date().timeIntervalSince(began)
         if rest > 0 { try? await Task.sleep(for: .seconds(rest)) }
         if ok {
             withAnimation(motion.animation(.snap)) { phase = .done }
             doneCount += 1
-            try? await Task.sleep(for: .milliseconds(1_100))
+            try? await Task.sleep(for: .seconds(motion.pause(1.1)))
             withAnimation(motion.animation(.snap)) { phase = .idle }
         } else {
             withAnimation(motion.animation(.snap)) { phase = .idle }
             failCount += 1
             withAnimation(motion.fade) { errorShown = true }
-            try? await Task.sleep(for: .seconds(2.5))
+            try? await Task.sleep(for: .seconds(motion.pause(2.5)))
             withAnimation(motion.fade) { errorShown = false }
         }
     }

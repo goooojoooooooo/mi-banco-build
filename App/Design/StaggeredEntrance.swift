@@ -14,21 +14,23 @@ extension EnvironmentValues {
     @Entry var entrance = Entrance()
 }
 
-/// Sube `rise` pt y aparece con el muelle de montaje, `índice × 60 ms` después de empezar la entrada.
-/// Fuera de una entrada (o con índice alto, o con Reducir movimiento) la pieza ya está en su sitio:
-/// nunca se espera para poder tocar nada, y solo se animan opacidad y desplazamiento.
+/// Sube `rise` pt y aparece con el muelle `enter` del kit, escalonada: 55 ms tras la primera pieza y cada hueco un
+/// 20 % más corto (55 ms × 0,8ⁿ). Lee `\.motion`: obedece la intensidad (tiempos, recorrido y rebote), Reducir
+/// movimiento —también el forzado al grabar: las piezas solo se funden, sin subir ni crecer— y la cámara lenta.
+/// Fuera de una entrada (o con índice alto) la pieza ya está en su sitio: nunca se espera para poder tocar nada, y
+/// solo se animan opacidad, escala y desplazamiento.
 private struct StaggeredEntrance: ViewModifier {
     let index: Int
     let listIndex: Int?
     let rise: CGFloat
     let scale: CGFloat
     @Environment(\.entrance) private var entrance
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var landed = -1
 
     private var effectiveIndex: Int? { entrance.scope == .assembly ? index : listIndex }
     private var animates: Bool {
-        guard entrance.active, !reduceMotion, let i = effectiveIndex else { return false }
+        guard entrance.active, let i = effectiveIndex else { return false }
         return i < Theme.Motion.staggerLimit
     }
     private var visible: Bool { !animates || landed == entrance.token }
@@ -36,8 +38,8 @@ private struct StaggeredEntrance: ViewModifier {
     func body(content: Content) -> some View {
         content
             .opacity(visible ? 1 : 0)
-            .scaleEffect(visible ? 1 : scale)
-            .offset(y: visible ? 0 : rise)
+            .scaleEffect(visible || motion.reduce ? 1 : scale)
+            .offset(y: visible ? 0 : motion.distance(rise))
             .onAppear(perform: land)
             .onChange(of: entrance.token) { _, _ in land() }
     }
@@ -45,7 +47,16 @@ private struct StaggeredEntrance: ViewModifier {
     private func land() {
         guard animates, let i = effectiveIndex else { return }
         let token = entrance.token
-        withAnimation(Theme.Motion.assemble.delay(Double(i) * Theme.Motion.staggerStep)) { landed = token }
+        // `motion.animation` ya es un fundido con Reducir movimiento, y `motion.stagger` no espera.
+        withAnimation(motion.animation(.enter).delay(StaggerPlan.delay(i, motion: motion))) { landed = token }
+    }
+}
+
+/// El retardo de la pieza `index` de una entrada escalonada del kit (55 ms × 0,8ⁿ, según intensidad y cámara lenta;
+/// 0 con Reducir movimiento).
+enum StaggerPlan {
+    static func delay(_ index: Int, motion: MotionContext) -> Double {
+        motion.stagger(index, firstGap: 0.055, decay: 0.8)
     }
 }
 

@@ -89,7 +89,66 @@ import Testing
     }
 }
 
+@Suite struct LeadingZeroTests {
+    /// Al abrir el ojo, «3.145,19 €» rueda desde cinco dígitos al azar: la columna nueva de la izquierda empieza en 0.
+    /// Mientras sigue en el cero no se dibuja (ni su punto de millar): nunca «0.145,19 €».
+    @Test func aNewThousandsColumnIsNotDrawnWhileItIsZero() {
+        #expect(DigitRoll.leadingVisibility(positions: [0, 4.2, 1, 7, 3, 9], alwaysShown: 3) == [0, 1, 1, 1, 1, 1])
+        // Aparece según sale del cero: a medio dígito ya está entera, y sin saltos por el camino.
+        #expect(DigitRoll.leadingVisibility(positions: [0.25, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 0.5)
+        #expect(DigitRoll.leadingVisibility(positions: [0.5, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 1)
+        var previous = 0.0
+        for step in 0...300 {
+            let now = DigitRoll.leadingVisibility(positions: [Double(step) / 100, 0, 0, 0], alwaysShown: 3)[0]
+            #expect(now >= previous && now - previous < 0.03)
+            previous = now
+        }
+        // También si llega al cero dando la vuelta a la tira (9,9 está a una décima del 0).
+        #expect(abs(DigitRoll.leadingVisibility(positions: [9.9, 1, 2, 3], alwaysShown: 3)[0] - 0.2) < 1e-9)
+    }
+
+    /// Al empezar a contar desde cero no se ve «0.000,00 €»: solo «0,00 €»; los millares aparecen al rodar.
+    @Test func countingUpNeverShowsZeroThousands() {
+        #expect(DigitRoll.leadingVisibility(positions: [0, 0, 0, 0, 0, 0, 0], alwaysShown: 3) == [0, 0, 0, 0, 1, 1, 1])
+        // Recorrido entero de una cuenta de 0 a 3.774,75 €: en ningún instante hay una columna a la vista en el cero
+        // con todas las de su izquierda en el cero (un cero a la izquierda).
+        let plan = DigitRoll.columns(from: 0, to: 377_475, digitCount: 6)
+        for step in 0...400 {
+            let time = Double(step) / 400 * 1.2
+            let positions = plan.map { DigitRoll.position($0, at: time, overshoot: 0.17) }
+            let visibility = DigitRoll.leadingVisibility(positions: positions, alwaysShown: 3)
+            for index in 0..<3 where visibility[index] > 0.99 {
+                let anyAway = positions[0...index].contains { p in
+                    let place = p.truncatingRemainder(dividingBy: 10)
+                    return min(place, 10 - place) >= 0.49
+                }
+                #expect(anyAway, "cero a la izquierda a la vista en t = \(time): \(positions)")
+            }
+            // Las unidades y los céntimos se ven siempre.
+            #expect(visibility.suffix(3).allSatisfy { $0 == 1 })
+        }
+    }
+
+    /// Asentada en una cifra de verdad, todo se ve entero (también un cero interior: 1.005,00 €).
+    @Test func aSettledAmountIsFullyVisible() {
+        #expect(DigitRoll.leadingVisibility(positions: [3, 1, 4, 5, 1, 9], alwaysShown: 3).allSatisfy { $0 == 1 })
+        #expect(DigitRoll.leadingVisibility(positions: [1, 0, 0, 5, 0, 0], alwaysShown: 3).allSatisfy { $0 == 1 })
+        #expect(DigitRoll.leadingVisibility(positions: [0, 0, 5], alwaysShown: 3) == [1, 1, 1])
+        // Euros enteros: solo las unidades se ven siempre («0 €»).
+        #expect(DigitRoll.leadingVisibility(positions: [0, 0, 0, 0], alwaysShown: 1) == [0, 0, 0, 1])
+        #expect(DigitRoll.leadingVisibility(positions: [1, 2, 9, 0], alwaysShown: 1).allSatisfy { $0 == 1 })
+        #expect(DigitRoll.leadingVisibility(positions: [], alwaysShown: 3).isEmpty)
+    }
+}
+
 @Suite struct AmountMaskTests {
+    @Test func wholeMaskHasNoDecimalsNorDigits() {
+        #expect(AmountMask.wholeText(negative: false, showsPlus: false) == "•••\u{00A0}€")
+        #expect(AmountMask.wholeText(negative: true, showsPlus: false) == "−•••\u{00A0}€")
+        #expect(AmountMask.wholeText(negative: false, showsPlus: true) == "+•••\u{00A0}€")
+        #expect(AmountMask.wholeText(negative: true, showsPlus: true).allSatisfy { !$0.isNumber && $0 != "," })
+    }
+
     @Test func maskNeverContainsDigitsNorDependsOnTheAmount() {
         for negative in [true, false] {
             let text = AmountMask.text(negative: negative, showsPlus: false)

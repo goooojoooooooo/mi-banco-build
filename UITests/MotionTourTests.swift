@@ -36,6 +36,24 @@ final class MotionTourTests: MotionTourCase {
         burst("gallery-burst", frames: 16, every: 0.4)
     }
 
+    /// El ojo sobre una cifra con millares (lote 2): al abrirlo, las cifras ruedan desde el barajado y la columna de
+    /// millares aparece según rueda — nunca «0.145,19 €»—; al cerrarlo, barajado y puntos. Debajo, la frase con el
+    /// importe en línea (sin blanco delante cuando está oculto) y el importe en euros enteros («••• €» ↔ «1.290 €»).
+    func testGalleryEyeOnThousands() throws {
+        launch(["-MiBancoMotionGallery", "-MiBancoMotionGalleryPage", "frases", "-MiBancoDemoPrivate"])
+        let eye = app.buttons["gallery.sentence.eye"]
+        XCTAssertTrue(eye.waitForExistence(timeout: 20), "No aparece el ojo de la sección de frases")
+        let deadline = Date().addingTimeInterval(10)
+        while !eye.isHittable, Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
+        XCTAssertTrue(eye.isHittable, "El ojo de la sección de frases no se puede tocar")
+        burst("gallery-frases-ojo", frames: 2, every: 0.3)
+        eye.tap()
+        burst("gallery-eye-thousands", frames: 16, every: 0.18)
+        Thread.sleep(forTimeInterval: 2)
+        eye.tap()
+        burst("gallery-eye-thousands-cerrar", frames: 12, every: 0.15)
+    }
+
     func testTour() throws {
         launch(scale: 1)
         // Lo que se ve de la llegada: el vídeo lo graba entero; aquí solo se espera.

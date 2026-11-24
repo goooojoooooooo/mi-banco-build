@@ -63,6 +63,13 @@ struct MotionContext: Equatable, Sendable {
     /// Fundido tranquilo (Reducir movimiento).
     var fade: Animation { .easeOut(duration: 0.22 * timeMultiplier) }
 
+    /// La vuelta de un botón al soltarlo (0,3 s), a la cámara lenta de las grabaciones.
+    var pressOut: Animation { .easeOut(duration: 0.3 * timeMultiplier) }
+
+    /// Una pausa fija de la interfaz (lo que dura a la vista un ✓ o un aviso), en segundos: no cambia con la
+    /// intensidad, pero sí con la cámara lenta de las grabaciones.
+    func pause(_ s: Double) -> Double { s * max(timeMultiplier, 0.01) }
+
     /// Recorrido en puntos según la intensidad; 0 con Reducir movimiento.
     func distance(_ pt: CGFloat) -> CGFloat {
         reduce ? 0 : pt * level.distanceScale

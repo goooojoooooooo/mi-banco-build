@@ -263,25 +263,27 @@ final class MotionShellTests: XCTestCase {
         }
     }
 
-    /// I-2: Face ID suele ser más rápido que las piezas. Si el desbloqueo llega con la marca del bloqueo a medio montar,
-    /// el bloqueo que se funde enseña ya la marca TERMINADA (ni mitades ni líneas) y la marca echa a volar: en el momento
-    /// en que existe la marca que vuela, la del bloqueo dice «completa». A ×50 las piezas tardarían 55 s en montarse y el
-    /// bloqueo tarda 17 s en fundirse (su fundido obedece la cámara lenta), así que da tiempo a leerlo.
+    /// I-2: Face ID suele ser más rápido que las piezas. Si el desbloqueo llega con la marca del bloqueo a medio montar
+    /// (aquí a los 0,4 s; a ×50 las piezas tardarían 55 s), el bloqueo empieza a fundirse con la marca ya TERMINADA y la
+    /// marca echa a volar una sola vez. Lo que dice la marca del bloqueo en ese instante lo apunta la propia app
+    /// (`marcaAlDesbloquear`): XCUITest deja de ver el bloqueo en cuanto empieza a quitarse (comprobado: el elemento
+    /// `lock-mark` ya no existe aunque el fundido dure 17 s), así que no puede leerlo él. Si alguna vez lo viera, tiene
+    /// que decir lo mismo. Que no se ven piezas ni dos marcas lo enseñan las hojas `unlock-early` y `unlock-early-mitad`.
     func testUnlockBeforeThePiecesFinishHandsOverAFinishedMark() throws {
         launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "0.4", "-MiBancoMotionScale", "50"])
         let exit = element("launch-exit")
         XCTAssertTrue(exit.waitForExistence(timeout: 20), "Tras desbloquear a mitad de las piezas la marca no vuela")
-        let mark = element("lock-mark")
-        XCTAssertTrue(mark.exists, "El bloqueo ya no está: su fundido no obedece la cámara lenta, o la prueba llegó tarde")
-        XCTAssertEqual(mark.value as? String, "completa",
-                       "El bloqueo se funde con la marca a medio montar mientras la marca entera ya vuela")
-        XCTAssertFalse(element("launch-layer").exists, "Se montó la capa del arranque sin bloqueo")
         let result = probe()
+        XCTAssertEqual(result["marcaAlDesbloquear"], "completa", "El bloqueo empezó a fundirse con la marca a medias: \(result)")
+        let mark = element("lock-mark")
+        if mark.exists {
+            XCTAssertEqual(mark.value as? String, "completa",
+                           "El bloqueo se funde con la marca a medio montar mientras la marca entera ya vuela")
+        }
+        XCTAssertFalse(element("launch-layer").exists, "Se montó la capa del arranque sin bloqueo")
         XCTAssertEqual(result["bloqueoPiezas"], "1", "El bloqueo no llegó a montar las piezas: \(result)")
         XCTAssertEqual(result["salidas"], "1", "La marca no voló exactamente una vez: \(result)")
         XCTAssertEqual(result["montajes"], "1", "Inicio no se montó exactamente una vez: \(result)")
-        XCTAssertEqual(result["marcaAlDesbloquear"], "completa", "El bloqueo empezó a fundirse con la marca a medias: \(result)")
-        XCTAssertTrue(waitUntil(30) { !mark.exists }, "El bloqueo no terminó de quitarse")
         assertHomeResponds("Tras desbloquear a mitad de las piezas, Inicio no responde")
     }
 

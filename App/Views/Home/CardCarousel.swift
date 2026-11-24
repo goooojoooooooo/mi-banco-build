@@ -7,7 +7,9 @@ import MiBancoCore
 /// nunca del `body`. Para VoiceOver es un solo elemento ajustable: "Cuenta, Revolut, 340,20 euros, 2 de 4".
 /// Movimiento (desde `\.motion`: intensidad, Reducir movimiento y cámara lenta; la única excepción es la DURACIÓN del
 /// deslizamiento de una tarjeta a otra, que es la del scroll del sistema, tanto con el dedo como por programa):
-/// - Al pararse en otra tarjeta, esa tarjeta da un rebote de encaje (4 pt en el sentido en que venía, escala 1,012).
+/// - Un deslizamiento programado (segmentado, llegada) llega con el rebote de su muelle `snap`: se pasa y vuelve.
+/// - Cuando es el dedo quien lo deja en otra tarjeta, esa tarjeta da un rebote de encaje pequeño (4 pt en el sentido en
+///   que venía, escala 1,012).
 /// - Mantener pulsada la tarjeta de delante 0,42 s la levanta (`.lift`); al soltar vuelve, y soltar no la voltea.
 /// - La primera vez que se ve Inicio, la tarjeta asoma unos grados (la pista de que se puede voltear).
 /// - Con Reducir movimiento: tarjetas planas, sin rebote ni levantar, y el cambio programado es un fundido.
@@ -168,11 +170,13 @@ struct CardCarousel: View {
                 let over = position < -0.04 || position > last + 0.04
                 if over != motion.carouselOverscrolled { motion.carouselOverscrolled = over }
             }
-            // El carrusel se para (tras el dedo o tras un deslizamiento programado): si ha cambiado de tarjeta, rebote.
+            // Quién mueve el carrusel (el dedo o un deslizamiento programado) y cuándo se para.
             .onScrollPhaseChange { old, new in
                 #if DEBUG
                 probeFinger(old, new)
                 #endif
+                if new == .interacting { motion.carouselByFinger = true }
+                if new == .animating { motion.carouselByFinger = false }
                 if new == .idle, old != .idle { landed() }
             }
             .sensoryFeedback(Haptics.edge, trigger: motion.carouselOverscrolled) { _, new in new }
@@ -396,8 +400,11 @@ struct CardCarousel: View {
 
     // MARK: - Encaje, levantar y pista
 
-    /// El carrusel se ha parado. Si está en otra tarjeta que la última vez, esa tarjeta da su rebote de encaje en el
-    /// sentido en que venía. Un toque (el dedo baja y sube sin mover nada) no cuenta.
+    /// El carrusel se ha parado. Si el DEDO lo ha dejado en otra tarjeta que la última vez, esa tarjeta da su rebote de
+    /// encaje en el sentido en que venía (el frenado del sistema llega a su sitio sin pasarse). Tras un deslizamiento
+    /// programado no: ese ya llega con el rebote de su muelle `snap` (se pasa y vuelve, más o menos según la
+    /// intensidad), y un segundo rebote después solo sería un tic a destiempo. Un toque (el dedo baja y sube sin mover
+    /// nada) no cuenta.
     private func landed() {
         guard !cards.isEmpty else { return }
         let position = motion.carouselPosition
@@ -413,7 +420,7 @@ struct CardCarousel: View {
         }
         guard abs(position - motion.carouselRest) > 0.5 else { return }
         motion.carouselRest = CGFloat(index)
-        guard !kit.reduce else { return }
+        guard !kit.reduce, motion.carouselByFinger else { return }
         settleDirection = motion.carouselDirection
         settles[cards[index], default: 0] += 1
     }
@@ -478,6 +485,16 @@ struct CardCarousel: View {
             tilt?.demoSweep()
         case .peek:
             peek(current, after: 0.05)
+        case .glide, .glideFar:
+            // Un deslizamiento programado un instante después del toque (la ráfaga ya está en marcha), por el mismo
+            // camino que un toque en el segmentado: a la tarjeta siguiente o a la última.
+            let far = DemoMode.cardMoment == .glideFar
+            let from = current.index(in: cards)
+            let target = cards[far ? cards.count - 1 : min(from + 1, cards.count - 1)]
+            Task {
+                try? await Task.sleep(for: .milliseconds(800))
+                withAnimation(kit.reduce ? nil : kit.animation(.snap)) { selection = target }
+            }
         case .settle:
             // El rebote de encaje solo, hacia la derecha, un instante después del toque (la ráfaga ya está en marcha).
             let card = current

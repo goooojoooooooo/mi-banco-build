@@ -17,6 +17,9 @@ final class HomeMotion {
     @ObservationIgnored var carouselDirection: CGFloat = 0
     /// La posición (en tarjetas) en la que el carrusel se paró la última vez. Tampoco se observa.
     @ObservationIgnored var carouselRest: CGFloat = 0
+    /// El último movimiento del carrusel lo hizo el dedo (true) o un deslizamiento programado (false). Tampoco se
+    /// observa: decide si al pararse toca el rebote de encaje.
+    @ObservationIgnored var carouselByFinger = false
     #if DEBUG
     /// Solo demo (`-MiBancoDemoCardMoment`): sube al tocar el segmento que ya está elegido.
     var demoMomentTick = 0

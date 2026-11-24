@@ -202,22 +202,52 @@ final class MotionTourHomeTests: MotionTourCase {
         return (crop, screen.width)
     }
 
-    /// El deslizamiento programado (toque en el segmentado) a velocidad real y con ráfaga densa, en Expresivo: de «Todo»
-    /// a Revolut (una tarjeta) y, después, de Revolut a Trade Republic (dos). Su duración es la del scroll del sistema.
-    func testCarouselGlideRealTimeExpressive() throws {
-        launchRealTime(["-MiBancoMotionLevel", "expressive"])
-        segment("Revolut").tap()
-        fastBurst("carousel-drag-expressive", frames: 14, every: 0.04)
-        Thread.sleep(forTimeInterval: 2)
-        segment("Trade Rep.").tap()
-        fastBurst("carousel-glide-far", frames: 14, every: 0.04)
+    /// El deslizamiento programado, fotografiado ENTERO: `-MiBancoDemoCardMoment glide` lo dispara 0,8 s después de
+    /// tocar el segmento ya elegido (por el mismo camino que un toque en otro segmento), así que la ráfaga densa ya
+    /// está en marcha cuando empieza. `tap()` vuelve cuando el toque ya ha pasado: con un toque directo en «Revolut»
+    /// la ráfaga llegaba con la tarjeta casi en su sitio.
+    private func glideBurst(_ name: String, level: String, scale: Double, moment: String = "glide",
+                            frames: Int, every: TimeInterval, zoomed: Bool = false) {
+        launch(["-MiBancoMotionLevel", level, "-MiBancoDemoCardMoment", moment], scale: scale)
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "Inicio no aparece")
+        Thread.sleep(forTimeInterval: scale > 1 ? 7 : 3)
+        let zone = zoomed ? leftEdgeCrop() : (crop: CGRect.null, screenWidth: CGFloat(0))
+        segment("Todo").tap()
+        if zoomed {
+            fastBurst(name, frames: frames, every: every, crop: zone.crop, screenWidth: zone.screenWidth)
+        } else {
+            fastBurst(name, frames: frames, every: every)
+        }
     }
 
-    /// Lo mismo en Sutil: las vecinas giran menos y se apagan menos.
+    /// A velocidad real, Expresivo: de «Todo» a Revolut.
+    func testCarouselGlideRealTimeExpressive() throws {
+        glideBurst("carousel-drag-expressive", level: "expressive", scale: 1, frames: 18, every: 0.04)
+    }
+
+    /// A velocidad real, Sutil: las vecinas giran y se apagan menos, y la tarjeta se pasa menos al llegar.
     func testCarouselGlideRealTimeSubtle() throws {
-        launchRealTime(["-MiBancoMotionLevel", "subtle"])
-        segment("Revolut").tap()
-        fastBurst("carousel-drag-subtle", frames: 14, every: 0.04)
+        glideBurst("carousel-drag-subtle", level: "subtle", scale: 1, frames: 18, every: 0.04)
+    }
+
+    /// A cámara lenta ×4, Expresivo: el mismo deslizamiento con el muelle cuatro veces más lento.
+    func testCarouselGlideSlowMotion() throws {
+        glideBurst("carousel-drag-slow", level: "expressive", scale: 4, frames: 30, every: 0.12)
+    }
+
+    /// A velocidad real, de «Todo» a la última tarjeta (tres de recorrido).
+    func testCarouselGlideFar() throws {
+        glideBurst("carousel-glide-far", level: "expressive", scale: 1, moment: "glideFar", frames: 18, every: 0.04)
+    }
+
+    /// La llegada a velocidad real, ampliada sobre el borde izquierdo de la tarjeta que llega: cuánto se pasa de su
+    /// sitio y cómo vuelve, en Expresivo y en Sutil.
+    func testCarouselLandingExpressive() throws {
+        glideBurst("carousel-landing-expressive", level: "expressive", scale: 1, frames: 20, every: 0.04, zoomed: true)
+    }
+
+    func testCarouselLandingSubtle() throws {
+        glideBurst("carousel-landing-subtle", level: "subtle", scale: 1, frames: 20, every: 0.04, zoomed: true)
     }
 
     /// El rebote de encaje solo (`-MiBancoDemoCardMoment settle`: 0,35 s después de tocar el segmento ya elegido, la
@@ -237,14 +267,5 @@ final class MotionTourHomeTests: MotionTourCase {
         let zone = leftEdgeCrop()
         segment("Todo").tap()
         fastBurst("card-settle-real", frames: 16, every: 0.05, crop: zone.crop, screenWidth: zone.screenWidth)
-    }
-
-    /// El final de un deslizamiento de verdad a velocidad real, ampliado sobre el borde izquierdo: la tarjeta que llega
-    /// se pasa de su sitio (hacia la izquierda, el sentido en que venía) y vuelve.
-    func testCarouselLandingRealTime() throws {
-        launchRealTime(["-MiBancoMotionLevel", "expressive"])
-        let zone = leftEdgeCrop()
-        segment("Revolut").tap()
-        fastBurst("carousel-landing-real", frames: 18, every: 0.04, crop: zone.crop, screenWidth: zone.screenWidth)
     }
 }

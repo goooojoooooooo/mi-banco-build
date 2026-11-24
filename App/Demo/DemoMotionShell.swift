@@ -48,6 +48,8 @@ extension DemoMode {
     var exits = 0
     /// Veces que Inicio ha recibido la orden de montarse por capas (`ShellState.revealToken`).
     var reveals = 0
+    /// Cómo estaba la marca del bloqueo al empezar a fundirse en el último desbloqueo: «completa» o «piezas».
+    var lockMarkAtUnlock = "-"
     /// Cuándo empieza (o empezó) el último arranque o montaje del bloqueo: segundos desde 1970, para que una prueba que
     /// lo graba sepa cuándo hacer la primera captura.
     var startsAt: Double?
@@ -58,6 +60,7 @@ extension DemoMode {
             "arranques=\(launches)", "estilo=\(style)", "saltos=\(skips)",
             "libre=\(freeAfterMs.map { String($0) } ?? "-")", "fin=\(finishedAfterMs.map { String($0) } ?? "-")",
             "bloqueoPiezas=\(lockPlays)", "bloqueoQuieto=\(lockStatic)", "salidas=\(exits)", "montajes=\(reveals)",
+            "marcaAlDesbloquear=\(lockMarkAtUnlock)",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")
     }

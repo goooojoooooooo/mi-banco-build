@@ -280,6 +280,7 @@ final class MotionShellTests: XCTestCase {
         XCTAssertEqual(result["bloqueoPiezas"], "1", "El bloqueo no llegó a montar las piezas: \(result)")
         XCTAssertEqual(result["salidas"], "1", "La marca no voló exactamente una vez: \(result)")
         XCTAssertEqual(result["montajes"], "1", "Inicio no se montó exactamente una vez: \(result)")
+        XCTAssertEqual(result["marcaAlDesbloquear"], "completa", "El bloqueo empezó a fundirse con la marca a medias: \(result)")
         XCTAssertTrue(waitUntil(30) { !mark.exists }, "El bloqueo no terminó de quitarse")
         assertHomeResponds("Tras desbloquear a mitad de las piezas, Inicio no responde")
     }
@@ -301,13 +302,19 @@ final class MotionShellTests: XCTestCase {
         XCTAssertEqual(under["montajes"], "1", "Con la tapa puesta Inicio aún no ha recibido la orden de montarse: \(under)")
         XCTAssertEqual(under["salidas"], "0", "La marca voló con la escena inactiva: \(under)")
         XCTAssertFalse(element("launch-exit").exists, "La marca vuela con la tapa puesta")
+        // Un toque de verdad justo donde está el ojo de Inicio, con la tapa puesta: no puede llegarle (se comprueba
+        // cuando la tapa se quita).
         let eye = app.buttons["Ocultar importes"]
-        XCTAssertFalse(eye.exists && eye.isHittable, "Inicio se puede tocar con la tapa puesta")
+        XCTAssertTrue(eye.exists, "No se encuentra el ojo de Inicio bajo la tapa para tocar encima")
+        eye.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        XCTAssertTrue(cover.exists, "La tapa se quitó con un toque")
         XCTAssertTrue(waitUntil(20) { !cover.exists }, "La tapa no se quitó al volver a primer plano")
         XCTAssertTrue(waitUntil(5) { self.probe()["salidas"] == "1" }, "Al volver a primer plano la marca no voló: \(probe())")
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertEqual(probe()["montajes"], "1", "Inicio se volvió a montar al volver a primer plano: \(probe())")
         XCTAssertFalse(cover.exists, "La tapa volvió a aparecer")
+        XCTAssertTrue(eye.exists, "El toque sobre la tapa llegó al ojo de Inicio")
+        XCTAssertFalse(app.buttons["Mostrar importes"].exists, "El toque sobre la tapa llegó al ojo de Inicio")
         assertHomeResponds("Tras volver a primer plano, Inicio no responde")
     }
 

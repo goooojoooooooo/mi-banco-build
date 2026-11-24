@@ -178,6 +178,10 @@ struct LockView: View {
             launchFinished = true
             if takesTheMark { markHandedOff = true }
         }
+        #if DEBUG
+        // Para las pruebas: cómo estaba la marca del bloqueo en el instante de empezar a fundirse.
+        LaunchProbe.shared.lockMarkAtUnlock = launchFinished ? "completa" : "piezas"
+        #endif
         withAnimation(motion.reduce ? motion.fade : .smooth(duration: motion.seconds(0.3))) { locked = false }
     }
 }

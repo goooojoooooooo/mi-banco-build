@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import MiBancoCore
 
 /// Una acción que aparece al deslizar una fila.
@@ -16,8 +17,9 @@ struct RowSwipeAction: Identifiable {
 /// - Al soltar se abre si ha pasado de 70 pt o si el dedo iba rápido hacia la izquierda; si no, se cierra. Abrir lleva
 ///   el muelle `snap`; cerrar, el mismo sin rebote. Con Reducir movimiento no hay viaje al soltar: se coloca.
 /// - Solo hay una fila abierta: abrir otra (o empezar a deslizar otra) cierra esta. Tocar una fila abierta la cierra.
-/// - El gesto va en paralelo con el de la lista y solo actúa si el arrastre es más horizontal que vertical: bajar la
-///   lista, tocar la fila y mantenerla pulsada (menú) siguen igual.
+/// - El gesto es un reconocedor de arrastre que SOLO empieza si el dedo va más en horizontal que en vertical
+///   (`HorizontalPan`): un arrastre vertical ni lo toca, así que bajar la lista, tocar la fila y mantenerla pulsada
+///   (menú) siguen igual. (Un `DragGesture` simultáneo no servía: la lista cancelaba el arrastre de la fila.)
 /// VoiceOver no desliza: quien use la fila declara las mismas acciones con `accessibilityAction(named:)`.
 struct SwipeActionsRow<Content: View>: View {
     let rowID: UUID
@@ -32,15 +34,11 @@ struct SwipeActionsRow<Content: View>: View {
         self.content = content()
     }
 
-    private enum Intent { case undecided, horizontal, other }
-
     @Environment(\.motion) private var motion
     @State private var offset: CGFloat = 0
     @State private var dragBase: CGFloat = 0
-    @State private var intent = Intent.undecided
-    @State private var released = false
+    @State private var dragging = false
     @State private var openTick = 0
-    @GestureState private var dragging = false
 
     private static var actionWidth: CGFloat { 76 }
     private var span: CGFloat { CGFloat(actions.count) * Self.actionWidth }
@@ -64,15 +62,7 @@ struct SwipeActionsRow<Content: View>: View {
                 if offset < -0.5 { buttons }
             }
             .clipped()
-            .simultaneousGesture(drag)
-            .onChange(of: dragging) { _, on in
-                // El sistema canceló el arrastre (la lista se lo quedó) sin avisar del final: la fila no se queda a medias.
-                if !on {
-                    if intent == .horizontal, !released { settle(open: offset < -span / 2) }
-                    intent = .undecided
-                    released = false
-                }
-            }
+            .gesture(HorizontalPan(began: panBegan, moved: panMoved, ended: panEnded))
             .onChange(of: openRow) { _, new in
                 if new == rowID {
                     // Abierta desde fuera (demo de las ráfagas).
@@ -116,28 +106,26 @@ struct SwipeActionsRow<Content: View>: View {
         .accessibilityHidden(!open)
     }
 
-    private var drag: some Gesture {
-        DragGesture(minimumDistance: 12)
-            .updating($dragging) { _, state, _ in state = true }
-            .onChanged { value in
-                if intent == .undecided {
-                    let horizontal = abs(value.translation.width) > abs(value.translation.height)
-                    intent = horizontal ? .horizontal : .other
-                    if horizontal {
-                        dragBase = offset
-                        // Empezar a deslizar una fila cierra la que estuviera abierta.
-                        if openRow != nil, openRow != rowID { openRow = nil }
-                    }
-                }
-                guard intent == .horizontal else { return }
-                offset = resisted(dragBase + value.translation.width)
-            }
-            .onEnded { value in
-                guard intent == .horizontal else { return }
-                released = true
-                let speed = value.velocity.width
-                settle(open: (offset < -70 && speed < 400) || speed < -500)
-            }
+    private func panBegan() {
+        dragging = true
+        dragBase = offset
+        // Empezar a deslizar una fila cierra la que estuviera abierta.
+        if openRow != nil, openRow != rowID { openRow = nil }
+    }
+
+    private func panMoved(_ translation: CGFloat) {
+        offset = resisted(dragBase + translation)
+    }
+
+    /// El dedo sube (`speed` en pt/s, negativa hacia la izquierda) o el sistema cancela el arrastre.
+    private func panEnded(_ speed: CGFloat, _ cancelled: Bool) {
+        dragging = false
+        if cancelled {
+            // La fila no se queda a medias.
+            settle(open: offset < -span / 2)
+        } else {
+            settle(open: (offset < -70 && speed < 400) || speed < -500)
+        }
     }
 
     /// Goma en los dos extremos: hacia la derecha casi no cede; más allá de las acciones, algo más.
@@ -170,5 +158,51 @@ struct SwipeActionsRow<Content: View>: View {
 
     private func close() {
         settle(open: false)
+    }
+}
+
+/// Un arrastre de un dedo que solo empieza si va más en horizontal que en vertical. Es un reconocedor de UIKit porque
+/// ahí se puede decidir ANTES de empezar (`gestureRecognizerShouldBegin`): si el dedo va en vertical, este reconocedor
+/// falla y la lista se desplaza como siempre; si va en horizontal, empieza él (está más adentro que la lista) y la
+/// lista no se mueve.
+private struct HorizontalPan: UIGestureRecognizerRepresentable {
+    let began: () -> Void
+    /// Desplazamiento horizontal desde donde empezó.
+    let moved: (CGFloat) -> Void
+    /// Velocidad horizontal al soltar y si el sistema lo canceló.
+    let ended: (CGFloat, Bool) -> Void
+
+    func makeCoordinator(converter: CoordinateSpaceConverter) -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIGestureRecognizer(context: Context) -> UIPanGestureRecognizer {
+        let recognizer = UIPanGestureRecognizer()
+        recognizer.maximumNumberOfTouches = 1
+        recognizer.delegate = context.coordinator
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UIPanGestureRecognizer, context: Context) {
+        switch recognizer.state {
+        case .began:
+            began()
+        case .changed:
+            moved(recognizer.translation(in: recognizer.view).x)
+        case .ended:
+            ended(recognizer.velocity(in: recognizer.view).x, false)
+        case .cancelled, .failed:
+            ended(0, true)
+        default:
+            break
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return false }
+            let velocity = pan.velocity(in: pan.view)
+            return abs(velocity.x) > abs(velocity.y)
+        }
     }
 }

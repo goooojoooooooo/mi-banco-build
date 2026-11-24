@@ -68,8 +68,6 @@ struct CardCarousel: View {
     @State private var fingerLandings = 0
     @State private var fingerLandedOn = 0
     @State private var fingerSettling = false
-    /// Solo para probar la prueba (`-MiBancoDemoGlideWins`): cuándo empezó el último deslizamiento programado.
-    @State private var glideStartedAt = Date.distantPast
     #endif
     @Environment(\.cardTilt) private var tilt
     @Environment(\.motion) private var kit
@@ -209,16 +207,6 @@ struct CardCarousel: View {
                 if scrollTarget != nil { return }
                 // El dedo dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
                 guard new != selection else { return }
-                #if DEBUG
-                // Solo para probar la prueba (`-MiBancoDemoGlideWins`): la regresión exacta. El dedo deslizó DURANTE un
-                // deslizamiento programado (dentro de su ventana) y dejó el carrusel en otra tarjeta, pero gana el
-                // programa: el carrusel vuelve a la suya. Fuera de esa ventana el dedo manda como siempre.
-                if DemoMode.glideWinsOverFinger, let chosen = selection,
-                   Date().timeIntervalSince(glideStartedAt) < kit.seconds(0.9) {
-                    glide(to: chosen)
-                    return
-                }
-                #endif
                 selection = new
             }
             .onChange(of: selection) { _, new in
@@ -226,9 +214,6 @@ struct CardCarousel: View {
                 if let new { seen.insert(new) }
                 // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
                 guard measured, let new, new != scrolledID else { return }
-                #if DEBUG
-                glideStartedAt = Date()
-                #endif
                 glide(to: new)
             }
             // Montaje de Inicio (arranque o desbloqueo): la primera vez en la vida de la app, la tarjeta asoma.
@@ -346,10 +331,14 @@ struct CardCarousel: View {
 
     /// Lleva el carrusel a `card`. Con movimiento, con el muelle de encaje; con Reducir movimiento, sin viaje: el
     /// carrusel se funde, cambia y vuelve. Mientras dura, lo que informe el scroll no cambia la tarjeta elegida.
-    private func glide(to card: AccountCard) {
+    private func glide(to card: AccountCard, forcedBack: Bool = false) {
         scrollTarget = card
         scrollTargetToken += 1
         let token = scrollTargetToken
+        // Solo para probar la prueba (`-MiBancoDemoGlideWins`, DEBUG): el deslizamiento programado se da por «en
+        // curso» 4 s más (ni siquiera lo suelta el final de su animación), para que el dedo de la prueba —que no
+        // empieza hasta que la app está quieta— deslice de verdad con él en curso. En Release siempre es falso.
+        let holdsOpen = glideWins && !forcedBack
         if kit.reduce {
             withAnimation(kit.fade) {
                 crossFaded = true
@@ -362,12 +351,12 @@ struct CardCarousel: View {
             withAnimation(kit.animation(.snap)) {
                 scrolledID = card
             } completion: {
-                releaseTarget(token)
+                if !holdsOpen { releaseTarget(token) }
             }
         }
         // Por si la animación no informa de su final (el usuario la interrumpe con el dedo): se suelta igual. La espera
         // sigue a la intensidad y a la cámara lenta, para no soltar a mitad de un deslizamiento grabado despacio.
-        let patience = kit.seconds(0.9)
+        let patience = kit.seconds(0.9) + (holdsOpen ? 4 : 0)
         Task {
             try? await Task.sleep(for: .seconds(patience))
             guard scrollTargetToken == token else { return }
@@ -394,7 +383,7 @@ struct CardCarousel: View {
         // Solo para probar la prueba (`-MiBancoDemoGlideWins`): la regresión exacta. El dedo interrumpió el
         // deslizamiento programado y dejó el carrusel en otra tarjeta, pero gana el programa: vuelve a la suya.
         if DemoMode.glideWinsOverFinger, let chosen = selection {
-            glide(to: chosen)
+            glide(to: chosen, forcedBack: true)
             return
         }
         #endif
@@ -553,6 +542,16 @@ struct CardCarousel: View {
             .offset(x: CGFloat(slot) * 4)
     }
     #endif
+
+    /// Solo en DEBUG puede ser verdad (`-MiBancoDemoGlideWins`): la regresión exacta con la que se comprueba que la
+    /// prueba de deslizar a medias se pone roja.
+    private var glideWins: Bool {
+        #if DEBUG
+        return DemoMode.glideWinsOverFinger
+        #else
+        return false
+        #endif
+    }
 
     private func tap(_ card: AccountCard) {
         // Soltar una tarjeta levantada (o el dedo que abrió el abanico) no es un toque: no la voltea.

@@ -20,9 +20,9 @@ struct WeekBlock: View {
                     Text(card.bank.map { "Gastado en 7 días · \($0.shortName)" } ?? "Gastado en 7 días")
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
-                    CountingAmount(cents: week.totalCents)
+                    // Rueda al cambiar de tarjeta o al llegar un movimiento; con el ojo cerrado dibuja «•••,•• €».
+                    RollingAmount(cents: week.totalCents)
                         .titan(.week)
-                        .privateAmount()
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Gastado en 7 días: \(spokenAmount(week.totalCents, hidden: hidden)). \(hidden ? "" : week.summary)")

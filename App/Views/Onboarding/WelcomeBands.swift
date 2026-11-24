@@ -3,9 +3,12 @@ import SwiftUI
 /// El barrido de titanio de la primera vez (momento 11 aprobado): tres líneas finas cruzan la pantalla en diagonal, una
 /// tras otra (520 ms, 70 ms entre ellas), y después se ensanchan hasta ser bandas tenues de titanio (620 ms, 60 ms entre
 /// ellas) que se quedan de fondo. Solo se animan escala y opacidad (cada banda es un rectángulo girado 45°). Se juega una
-/// vez, al aparecer. Con Reducir movimiento no hay barrido: las bandas tenues aparecen con un fundido. Con Bajo consumo,
+/// vez, cuando la bienvenida queda a la vista (`active`). Con Reducir movimiento no hay barrido: las bandas tenues aparecen con un fundido. Con Bajo consumo,
 /// igual que siempre (no hay brillos ni desenfoques). Es un fondo: no recibe toques ni existe para VoiceOver.
 struct WelcomeBands: View {
+    /// El barrido empieza cuando esto pasa a ser cierto (la bienvenida ya está a la vista: sin bloqueo ni arranque encima).
+    var active = true
+
     @Environment(\.motion) private var motion
     @State private var traced = false
     @State private var widened = false
@@ -40,10 +43,13 @@ struct WelcomeBands: View {
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-        .onAppear {
-            traced = true
-            widened = true
-        }
+        .onAppear { if active { play() } }
+        .onChange(of: active) { _, now in if now { play() } }
+    }
+
+    private func play() {
+        traced = true
+        widened = true
     }
 
     private func traceAnimation(_ index: Int) -> Animation? {

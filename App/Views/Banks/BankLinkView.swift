@@ -284,7 +284,8 @@ struct BankLinkView: View {
             if DemoMode.requestsFlightOnOpen, flight?.request == nil {
                 flight?.request = CardFlight.Request(bank: bank, card: AccountCard(bank: bank), source: .zero)
             }
-            if DemoMode.isActive && DemoMode.opensStatementImport && !didShowDemoImport && importPreview == nil {
+            let demoImport = DemoMode.opensStatementImport || (DemoMode.importsOnBankOpen && bank == .rev)
+            if DemoMode.isActive && demoImport && !didShowDemoImport && importPreview == nil {
                 didShowDemoImport = true
                 importPreview = try? model.previewImport(DemoMode.sampleRevolutStatementData(), bank: .rev)
             }

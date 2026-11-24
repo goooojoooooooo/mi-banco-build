@@ -3,13 +3,18 @@ import SwiftUI
 
 /// Bienvenida de primera ejecución en tres pasos (Plan 4b, tarea 12).
 /// Se muestra en lugar de la barra de pestañas mientras `model.needsOnboarding` es verdadero; el bloqueo queda por encima.
-/// Al aparecer, tres líneas de titanio cruzan la pantalla y se ensanchan en bandas (`WelcomeBands`); la marca va quieta
-/// (el arranque ya la ha dibujado) y las piezas del primer paso llegan una tras otra.
+/// Cuando queda a la vista (tras el arranque o al abrirse el bloqueo), tres líneas de titanio cruzan la pantalla y se
+/// ensanchan en bandas (`WelcomeBands`); la marca va quieta (el arranque ya la ha dibujado) y las piezas del primer paso
+/// llegan una tras otra.
 struct OnboardingView: View {
     let model: LedgerModel
     let onFinish: (_ openBanksSettings: Bool) -> Void
 
     @Environment(\.motion) private var motion
+    @Environment(\.presentationGate) private var gate
+    /// La bienvenida ya está a la vista (el bloqueo se ha abierto o el arranque ha dejado ver lo de debajo): entonces
+    /// cruzan las bandas y llegan las piezas. Si se jugara al montarse, pasaría entera detrás del bloqueo o del arranque.
+    @State private var welcomed = false
 
     @State private var step: Int = {
         #if DEBUG
@@ -35,7 +40,7 @@ struct OnboardingView: View {
 
                 ZStack {
                     if step == 1 {
-                        OnboardingBalancesStep(model: model) {
+                        OnboardingBalancesStep(model: model, arrived: welcomed) {
                             advance(to: 2)
                         }
                         .transition(stepTransition)
@@ -58,7 +63,7 @@ struct OnboardingView: View {
             .background {
                 ZStack {
                     Theme.canvas
-                    WelcomeBands()
+                    WelcomeBands(active: welcomed)
                 }
                 .ignoresSafeArea()
             }
@@ -66,6 +71,18 @@ struct OnboardingView: View {
             .navigationDestination(isPresented: $showAlertsGuide) {
                 AlertsGuideView(model: model)
             }
+        }
+        .task {
+            guard !welcomed else { return }
+            // Sin bloqueo delante, lo que tapa la bienvenida al abrir la app es el arranque: se espera a que empiece a
+            // dejar ver lo de debajo (el mismo instante en que Inicio empezaría a montarse). Con el bloqueo delante, la
+            // bienvenida empieza al abrirse (ver `onChange`).
+            let wait = LaunchTimeline(motion).assembleAt * max(motion.timeMultiplier, 0.01)
+            try? await Task.sleep(for: .seconds(max(0.05, wait)))
+            if gate?.isLocked != true { welcomed = true }
+        }
+        .onChange(of: gate?.isLocked) { old, locked in
+            if old == true, locked != true { welcomed = true }
         }
     }
 

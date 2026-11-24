@@ -6,6 +6,8 @@ import SwiftUI
 /// Con el ojo cerrado, un saldo ya escrito (y sin editar) es la máscara del kit: ninguna cifra en pantalla.
 struct OnboardingBalancesStep: View {
     let model: LedgerModel
+    /// La bienvenida ya está a la vista: las piezas empiezan a llegar.
+    var arrived = true
     let onNext: () -> Void
 
     @Environment(AppPreferences.self) private var preferences
@@ -26,13 +28,13 @@ struct OnboardingBalancesStep: View {
                             .titan(.homeTitle)
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
-                            .risesIn(after: 0.50, rise: 22)
+                            .risesIn(when: arrived, after: 0.50, rise: 22)
 
                         Text("Escribe lo que tienes ahora en cada banco. \(AppIdentity.displayName) lo irá actualizando.")
                             .titan(.callout)
                             .foregroundStyle(Theme.label2)
                             .fixedSize(horizontal: false, vertical: true)
-                            .risesIn(after: 0.62, rise: 22)
+                            .risesIn(when: arrived, after: 0.62, rise: 22)
                     }
 
                     VStack(spacing: 0) {
@@ -46,7 +48,7 @@ struct OnboardingBalancesStep: View {
                         }
                     }
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
-                    .risesIn(after: 0.74, rise: 22)
+                    .risesIn(when: arrived, after: 0.74, rise: 22)
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.top, 8)
@@ -68,7 +70,7 @@ struct OnboardingBalancesStep: View {
             .accessibilityIdentifier("onboarding-next-1")
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, Theme.Space.gutter)
-            .risesIn(after: 0.86, rise: 34, bounce: 0.28)
+            .risesIn(when: arrived, after: 0.86, rise: 34, bounce: 0.28)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }

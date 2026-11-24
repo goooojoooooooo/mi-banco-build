@@ -12,6 +12,20 @@ final class MotionTourScreensTests: MotionTourCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
+    /// Abre la app y espera a que la capa del arranque se haya quitado: mientras está, un toque la salta en vez de llegar a
+    /// la pantalla, y lo que se anime debajo no se ve. A cámara lenta el arranque dura varios segundos.
+    override func launch(_ extra: [String] = [], scale: Double = 4) {
+        super.launch(extra, scale: scale)
+        waitForLaunchToEnd()
+    }
+
+    private func waitForLaunchToEnd() {
+        let layer = element("launch-layer")
+        _ = layer.waitForExistence(timeout: 3)
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: layer)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 120), .completed, "El arranque no terminó")
+    }
+
     /// Arrastra la pantalla hacia arriba un tercio, despacio y sin inercia, hasta que el elemento se pueda tocar.
     private func scrollDown(to el: XCUIElement, drags: Int = 16) {
         var left = drags
@@ -454,9 +468,14 @@ final class MotionTourScreensTests: MotionTourCase {
 
     /// Leer › Revisar con su porcentaje y, después, la vista previa: sus piezas entran una tras otra y el recuento cuenta.
     private func importPreview(_ name: String, extra: [String]) {
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport"] + extra)
-        XCTAssertTrue(element("import-steps-percent").waitForExistence(timeout: 20), "La importación no enseña sus pasos")
-        burst(name, frames: 20, every: 0.3)
+        // La importación se abre tocando la fila del banco (con el arranque ya terminado): si se abriera sola al arrancar,
+        // sus pasos pasarían debajo de la capa del arranque.
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImportOnOpen"] + extra)
+        let row = app.buttons["settings-bank-rev"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "Falta la fila de Revolut en Ajustes")
+        Thread.sleep(forTimeInterval: 2)
+        row.tap()
+        burst(name, frames: 26, every: 0.3)
         XCTAssertTrue(app.staticTexts["import-summary"].waitForExistence(timeout: 10), "La ráfaga no llegó a la vista previa")
     }
 
@@ -473,15 +492,17 @@ final class MotionTourScreensTests: MotionTourCase {
     /// La primera vez: tres líneas de titanio cruzan la pantalla en diagonal, se ensanchan en bandas tenues y las piezas
     /// del primer paso llegan una tras otra; la marca va quieta.
     func testWelcome() throws {
-        launch(["-MiBancoDemoOnboarding", "1"])
-        burst("welcome", frames: 24, every: 0.3)
+        // Sin esperar al arranque: la bienvenida empieza cuando el arranque deja ver lo de debajo, y la ráfaga los coge
+        // seguidos (primero las piezas del arranque, luego las bandas y las piezas de la bienvenida).
+        super.launch(["-MiBancoDemoOnboarding", "1"])
+        burst("welcome", frames: 32, every: 0.4)
         XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
     }
 
     /// Con Reducir movimiento: sin barrido; las bandas y las piezas aparecen con un fundido.
     func testWelcomeReduce() throws {
-        launch(["-MiBancoDemoOnboarding", "1", "-MiBancoReduceMotion"])
-        burst("welcome-reduce", frames: 10, every: 0.3)
+        super.launch(["-MiBancoDemoOnboarding", "1", "-MiBancoReduceMotion"])
+        burst("welcome-reduce", frames: 14, every: 0.3)
         XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
     }
 
@@ -501,9 +522,12 @@ final class MotionTourScreensTests: MotionTourCase {
 
     /// Tocar «Importar»: el tercer paso corre de 67 a 100, el botón se transforma (rueda y ✓) y se vuelve al banco.
     func testImportConfirm() throws {
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport"])
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImportOnOpen"])
+        let row = app.buttons["settings-bank-rev"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "Falta la fila de Revolut en Ajustes")
+        row.tap()
         let confirm = app.buttons["import-confirm"]
-        XCTAssertTrue(confirm.waitForExistence(timeout: 20), "Falta «Importar»")
+        XCTAssertTrue(confirm.waitForExistence(timeout: 30), "Falta «Importar»")
         Thread.sleep(forTimeInterval: 5)
         XCTAssertTrue(confirm.isHittable, "«Importar» no se puede tocar")
         confirm.tap()

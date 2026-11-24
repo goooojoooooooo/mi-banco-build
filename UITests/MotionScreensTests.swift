@@ -28,6 +28,12 @@ final class MotionScreensTests: XCTestCase {
             let b = springboard.alerts.buttons[name]
             if b.waitForExistence(timeout: 2) { b.tap(); break }
         }
+        // La capa del arranque se salta con un toque (y no deja pasar el toque): se espera a que se haya quitado. A
+        // cámara lenta (las pruebas que piden `-MiBancoMotionScale`) tarda bastante más que a velocidad real.
+        let layer = app.descendants(matching: .any).matching(identifier: "launch-layer").firstMatch
+        if layer.exists {
+            XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), layer, timeout: 120), "El arranque no terminó")
+        }
     }
 
     /// Cualquier elemento con ese identificador (filas combinadas, grupos, etc.).
@@ -591,8 +597,9 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 5), "La hoja no enseña movimientos")
         let labels = rows.allElementsBoundByIndex.map { $0.label }
         XCTAssertLessThanOrEqual(labels.count, 8, "La hoja enseña más de ocho movimientos")
-        XCTAssertEqual(labels.filter { $0.contains("imagin") || $0.contains("Trade Republic") }, [],
-                       "La hoja de Revolut enseña movimientos de otro banco")
+        // Cada fila dice de qué banco es («… euros. Revolut, hoy a las …»): todas son de Revolut (un traspaso «a imagin»
+        // sale de Revolut y también lo es).
+        XCTAssertEqual(labels.filter { !$0.contains(". Revolut, ") }, [], "La hoja de Revolut enseña movimientos de otro banco")
 
         // Sube la hoja: el título pequeño se acopla y el saldo grande ya no se ve.
         drag(from: 0.72, to: 0.18)

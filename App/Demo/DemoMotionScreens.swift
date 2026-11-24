@@ -46,6 +46,11 @@ extension DemoMode {
     /// Inicio y no llegara nunca (hoy nadie la hace aterrizar). La cabecera tiene que acabar viéndose igual.
     static var requestsFlightOnOpen: Bool { isActive && arguments.contains("-MiBancoDemoFlightRequest") }
 
+    /// `-MiBancoDemoImportOnOpen`: al abrir la pantalla de Revolut (tocando su fila) se empuja la vista previa del
+    /// extracto de ejemplo, como hace `-MiBancoDemoImport`, pero sin abrir nada al arrancar: así la importación empieza
+    /// cuando la prueba quiere (con el arranque ya terminado), no debajo de él.
+    static var importsOnBankOpen: Bool { isActive && arguments.contains("-MiBancoDemoImportOnOpen") }
+
     /// `-MiBancoDemoImportSlow`: los pasos de «Importar extracto» duran 8 s cada uno (en vez de 0,35 s), para poder
     /// verlos desde una prueba de toque (que tarda unos segundos en empezar a mirar).
     static var slowsImportSteps: Bool { isActive && arguments.contains("-MiBancoDemoImportSlow") }

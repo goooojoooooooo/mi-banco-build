@@ -10,6 +10,9 @@ import MiBancoCore
 /// `delay` (segundos al nivel Equilibrado) retrasa el llenado de entrada: así una lista de barras se llena en escalera.
 /// Dentro de una entrada por capas (`\.entrance`, al entrar en la pestaña) la barra se vacía y se vuelve a llenar.
 /// `onWarn` avisa a quien la usa de cada cruce (el mismo instante que la háptica).
+/// Solo avisa una barra que se está viendo: su pantalla está delante (`onAppear`/`onDisappear`) y la app, activa. Una
+/// barra tapada por otra pantalla, en otra pestaña o con la app en segundo plano se queda con el ámbar nuevo, sin pulso,
+/// sin vibración y sin `onWarn`; al volver a verse ya está pasada y sale en ámbar sin avisar (como la que nace pasada).
 struct FillBar: View {
     let fraction: Double
     var warnAt: Double? = 0.9
@@ -20,6 +23,9 @@ struct FillBar: View {
 
     @Environment(\.motion) private var motion
     @Environment(\.entrance) private var entrance
+    @Environment(\.scenePhase) private var scenePhase
+    /// Su pantalla está delante (entre `onAppear` y `onDisappear`).
+    @State private var visible = false
     @State private var shown: Double = 0
     @State private var warned = false
     @State private var warnCount = 0
@@ -59,6 +65,7 @@ struct FillBar: View {
         .accessibilityLabel(label)
         .accessibilityValue("\(MotionMath.percent(value)) %")
         .onAppear {
+            visible = true
             // Reaparecer al desplazarse una lista no repite nada.
             guard !appeared else { return }
             appeared = true
@@ -69,6 +76,7 @@ struct FillBar: View {
             shown = animatesOnAppear && !motion.reduce ? 0 : value
             if animatesOnAppear { fill(to: value, animated: true, entering: true) } else { landed = entrance.token }
         }
+        .onDisappear { visible = false }
         // Se observa la fracción limpia: un NaN (distinto de sí mismo) no relanza el cambio en cada pasada.
         .onChange(of: value) { _, new in change(to: new) }
         // Una entrada por capas nueva (se entra en la pestaña): la barra, que ya está vacía (`drawn`), se llena otra vez.
@@ -114,16 +122,29 @@ struct FillBar: View {
         }
     }
 
+    /// La barra se está viendo: su pantalla está delante y la app, activa. Solo entonces avisa.
+    private var isOnScreen: Bool { visible && scenePhase == .active }
+
     private func change(to target: Double) {
         pending?.cancel()
         latest = target
         fill(to: target, animated: true)
         if isOver(target), !warned {
+            // Sin verse no hay aviso: se queda con el ámbar, sin pulso, sin vibración y sin `onWarn`.
+            guard isOnScreen else {
+                warned = true
+                return
+            }
             // El ámbar entra cuando la barra llega al límite (a media carrera de su muelle), con pulso y aviso. Si el valor
             // cambia antes, la tarea se cancela y, además, se vuelve a comprobar el valor en vivo.
             pending = Task {
                 try? await Task.sleep(for: .seconds(motion.seconds(0.3)))
                 guard !Task.isCancelled, isOver(latest) else { return }
+                // Si mientras esperaba ha dejado de verse (otra pantalla, la app a segundo plano), tampoco avisa.
+                guard isOnScreen else {
+                    warned = true
+                    return
+                }
                 withAnimation(motion.calmAnimation(.row)) { warned = true }
                 pulse += 1
                 warnCount += 1

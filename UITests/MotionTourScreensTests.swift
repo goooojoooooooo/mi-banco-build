@@ -208,13 +208,22 @@ final class MotionTourScreensTests: MotionTourCase {
     // MARK: - Próximos cobros: la entrada de siempre
 
     /// Los días entran uno tras otro: cada bloque sube y aparece (la entrada estándar, con los tiempos del kit).
-    func testUpcomingCalendar() throws {
-        launchGasto()
+    private func upcomingCalendar(_ name: String, extra: [String]) {
+        launchGasto(extra)
         let link = element("gasto.proximos")
         scrollDown(to: link)
         XCTAssertTrue(link.isHittable, "No se puede abrir Próximos cobros")
         link.tap()
-        burst("upcoming-calendar", frames: 12, every: 0.25)
+        burst(name, frames: 12, every: 0.25)
         XCTAssertTrue(element("upcoming-calendar-scroll").waitForExistence(timeout: 10), "La ráfaga no es de Próximos cobros")
+    }
+
+    func testUpcomingCalendar() throws {
+        upcomingCalendar("upcoming-calendar", extra: [])
+    }
+
+    /// Con el ojo cerrado: el cobro y los saldos previstos son «•••,•• €» en todos los fotogramas de la entrada.
+    func testUpcomingCalendarEye() throws {
+        upcomingCalendar("upcoming-calendar-eye", extra: ["-MiBancoDemoPrivate"])
     }
 }

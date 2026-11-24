@@ -248,31 +248,70 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 1, ámbar"), bar, timeout: 10),
                       "Cruzar el 90 % no avisó una vez: \(value(bar)) · \(bar.label)")
 
-        // Sigue por encima (al 97 %): no se repite.
-        setLimit(field, cents: spent * 100 / 97)
-        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", ", 97 por ciento"), bar, timeout: 10),
-                      "El límite nuevo no llegó a la barra: \(bar.label)")
-        Thread.sleep(forTimeInterval: 2)
-        XCTAssertEqual(value(bar), "avisos 1, ámbar", "Seguir por encima del 90 % volvió a avisar")
-
-        // Baja (al 50 %): blanca, sin aviso nuevo. Y vuelve a cruzar (al 93 %): segundo aviso.
-        setLimit(field, cents: spent * 2)
-        XCTAssertTrue(waitFor(white, bar, timeout: 10), "Al bajar del 90 % la barra sigue en ámbar: \(value(bar))")
-        XCTAssertEqual(value(bar), "avisos 1, blanca")
-        setLimit(field, cents: spent * 100 / 93)
-        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 2, ámbar"), bar, timeout: 10),
-                      "Volver a cruzar el 90 % no avisó: \(value(bar)) · \(bar.label)")
-
-        // Se sale y se vuelve: la barra nace ya pasada del 90 %. Ámbar desde el principio y ningún aviso.
-        goBack()
+        // Se sale a Gasto: su barra del presupuesto del mes estaba debajo, sin verse, mientras se cruzaba el 90 %. Lleva el
+        // dato nuevo y va en ámbar, pero NO ha avisado (ni pulso ni vibración desde una barra que no se ve).
+        let root = element("gasto.presupuestoMes")
         let link = element("gasto.presupuestos")
-        scrollDown(to: link)
+        goBack()
         XCTAssertTrue(link.waitForExistence(timeout: 8), "No volvió a Gasto")
+        XCTAssertTrue(root.waitForExistence(timeout: 8), "Gasto no tiene la barra del presupuesto del mes")
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", ", 95 por ciento"), root, timeout: 10),
+                      "La barra de Gasto no lleva el límite nuevo: \(root.label)")
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(value(root), "avisos 0, ámbar", "La barra de Gasto avisó sin estar a la vista")
+
+        // Se vuelve a Presupuestos: la barra nace ya pasada del 90 %. Ámbar desde el principio y ningún aviso.
+        scrollDown(to: link)
         link.tap()
         XCTAssertTrue(bar.waitForExistence(timeout: 8), "No se ve la barra al volver")
         XCTAssertTrue(waitFor(amber, bar, timeout: 5), "La barra que nace pasada no va en ámbar: \(value(bar))")
         Thread.sleep(forTimeInterval: 2.5)
         XCTAssertEqual(value(bar), "avisos 0, ámbar", "Una barra que nace pasada del 90 % avisó")
+
+        // Sigue por encima (al 97 %): no avisa.
+        setLimit(field, cents: spent * 100 / 97)
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", ", 97 por ciento"), bar, timeout: 10),
+                      "El límite nuevo no llegó a la barra: \(bar.label)")
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(value(bar), "avisos 0, ámbar", "Seguir por encima del 90 % avisó")
+
+        // Baja (al 50 %): blanca, sin aviso. Y vuelve a cruzar (al 93 %): un aviso, el de esta barra.
+        setLimit(field, cents: spent * 2)
+        XCTAssertTrue(waitFor(white, bar, timeout: 10), "Al bajar del 90 % la barra sigue en ámbar: \(value(bar))")
+        XCTAssertEqual(value(bar), "avisos 0, blanca")
+        setLimit(field, cents: spent * 100 / 93)
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 1, ámbar"), bar, timeout: 10),
+                      "Volver a cruzar el 90 % no avisó: \(value(bar)) · \(bar.label)")
+
+        // Y la de Gasto, que tampoco se veía en estos dos cruces, sigue sin haber avisado.
+        goBack()
+        XCTAssertTrue(root.waitForExistence(timeout: 8), "No volvió a Gasto")
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", ", 93 por ciento"), root, timeout: 10),
+                      "La barra de Gasto no lleva el último límite: \(root.label)")
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(value(root), "avisos 0, ámbar", "La barra de Gasto avisó sin estar a la vista")
+    }
+
+    // MARK: - Próximos cobros con el ojo cerrado (S5)
+
+    /// Con el ojo cerrado, Próximos cobros no enseña ningún importe con cifras y VoiceOver dice «importe oculto».
+    func testPrivateModeHidesAmountsInUpcomingCalendar() throws {
+        openGasto(["-MiBancoDemoPrivate"])
+        let link = element("gasto.proximos")
+        scrollDown(to: link)
+        XCTAssertTrue(link.isHittable, "No se puede abrir Próximos cobros")
+        link.tap()
+        XCTAssertTrue(app.navigationBars["Próximos cobros"].waitForExistence(timeout: 8), "No se abrió Próximos cobros")
+        let calendar = app.scrollViews["upcoming-calendar-scroll"]
+        XCTAssertTrue(calendar.waitForExistence(timeout: 5), "Falta el contenedor de Próximos cobros")
+        // La demo trae un cobro (Netflix) y los saldos previstos de los tres bancos.
+        let hiddenAmounts = calendar.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "importe oculto"))
+        XCTAssertTrue(hiddenAmounts.firstMatch.waitForExistence(timeout: 8), "VoiceOver no dice «importe oculto» en Próximos cobros")
+        XCTAssertEqual(visibleAmounts(), [], "Próximos cobros enseña importes con el ojo cerrado")
+        // Ni un dígito pegado a una coma decimal en ninguna etiqueta (un importe sin su «€»).
+        let decimals = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", ".*[0-9],[0-9]{2}.*"))
+        XCTAssertEqual(decimals.allElementsBoundByIndex.map { $0.label }, [], "Próximos cobros enseña cifras con el ojo cerrado")
     }
 
     // MARK: - Suscripciones (B1, B2)

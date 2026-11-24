@@ -436,10 +436,9 @@ private struct PositionDetailContent: View {
                         // El teclado decimal no tiene tecla de volver: «Hecho» solo quita el foco, no guarda (U75).
                         .toolbar {
                             ToolbarItemGroup(placement: .keyboard) {
-                                // A la derecha con un marco flexible, no con un `Spacer()`: la barra del teclado se
-                                // maqueta primero con ancho cero y un `Spacer` ahí es el sospechoso del aviso de
-                                // ejecución «Invalid frame dimension» de las pruebas de inversiones (hipótesis: no
-                                // se ha podido confirmar la causa sin depurador).
+                                // A la derecha con un marco flexible, no con un `Spacer()`. (Se probó por si el `Spacer`
+                                // de la barra del teclado causaba el aviso de ejecución «Invalid frame dimension» de
+                                // las pruebas de inversiones: NO era eso, el aviso sigue saliendo con este cambio.)
                                 Button("Hecho") { priceFocused = false }
                                     .accessibilityIdentifier("manualPriceKeyboardDone")
                                     .frame(maxWidth: .infinity, alignment: .trailing)

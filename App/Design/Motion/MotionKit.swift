@@ -111,10 +111,6 @@ struct MotionEnvironment: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.motion, context)
-            #if DEBUG
-            // Los componentes anteriores al kit leen el valor del sistema: también ven la bandera.
-            .transformEnvironment(\.accessibilityReduceMotion) { if DemoMode.forcesReduceMotion { $0 = true } }
-            #endif
             .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
                 lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }

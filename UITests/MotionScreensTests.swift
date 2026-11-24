@@ -114,8 +114,13 @@ final class MotionScreensTests: XCTestCase {
                           "El kit no pasó a «\(title)»: \(value(picker))")
         }
         // Sigue elegido al salir de Ajustes y volver.
+        // Al desplazar Ajustes la barra de pestañas se recoge: se vuelve arriba para tenerla entera.
+        app.swipeDown()
+        app.swipeDown()
         XCTAssertTrue(selectTab("Inicio", until: app.staticTexts["Tu dinero"]), "No se ve Inicio")
-        XCTAssertTrue(selectTab("Ajustes", until: picker), "No volvió a Ajustes")
+        XCTAssertTrue(selectTab("Ajustes", until: app.navigationBars["Ajustes"]), "No volvió a Ajustes")
+        scrollDown(to: app.buttons["Sutil"])
+        XCTAssertTrue(picker.waitForExistence(timeout: 5), "La fila «Animaciones» no está al volver")
         XCTAssertTrue(app.buttons["Sutil"].isSelected, "El nivel elegido se perdió al cambiar de pestaña")
         XCTAssertEqual(value(picker), "Sutil")
     }
@@ -168,6 +173,8 @@ final class MotionScreensTests: XCTestCase {
 
     /// Con el ojo cerrado, Gasto, Presupuestos y Suscripciones no enseñan ni dicen ningún importe.
     func testPrivateModeHidesAmountsInSpendingScreens() throws {
+        // Las tres pantallas se miran aunque una falle: así un fallo dice todo lo que se ve, no solo lo primero.
+        continueAfterFailure = true
         openGasto(["-MiBancoDemoPrivate"])
         XCTAssertTrue(element("gasto.total").label.hasSuffix("importe oculto"), "El total se lee con el ojo cerrado")
         let chart = element("gasto.grafico")

@@ -16,6 +16,7 @@ struct CategoryRow: View {
     @ScaledMetric(relativeTo: .caption) private var changeWidth: CGFloat = 66
 
     var body: some View {
+        let hidden = preferences.privateMode
         HStack(spacing: 14) {
             Image(systemName: row.category.symbolName)
                 .font(.system(size: 17, weight: .regular))
@@ -30,20 +31,23 @@ struct CategoryRow: View {
                         .foregroundStyle(Theme.label)
                         .lineLimit(1)
                     Spacer(minLength: 8)
-                    Text(formatEUR(row.cents))
+                    // Con el ojo cerrado no se monta ninguna cifra: la máscara del kit («•••,•• €»), no un desenfoque.
+                    Text(hidden ? maskedEUR(row.cents, sign: false) : formatEUR(row.cents))
                         .titan(.row)
                         .foregroundStyle(Theme.label)
-                        .privateAmount()
+                        .contentTransition(.identity)
+                        .privacySensitive()
                 }
                 HStack(spacing: 10) {
                     SpendBar(name: row.category.displayName, fraction: row.fraction, previous: row.previousFraction, index: index)
                     // Columna fija (aunque no haya cambio): todas las barras comparten escala y se pueden comparar.
-                    Text(row.change ?? "")
+                    Text(hidden && row.change != nil ? "•••" : (row.change ?? ""))
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
                         .lineLimit(1)
                         .frame(width: changeWidth, alignment: .trailing)
-                        .privateAmount(radius: 6)
+                        .contentTransition(.identity)
+                        .privacySensitive()
                 }
             }
             // Empuja la pantalla de la categoría.

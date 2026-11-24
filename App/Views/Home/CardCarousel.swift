@@ -73,40 +73,51 @@ struct CardCarousel: View {
         return pressLifted
     }
 
-    var body: some View {
+    // El cuerpo va en piezas (tarjeta, paginado, seguimiento, sincronía, sonda de pruebas): entero, el compilador no
+    // llega a comprobar los tipos de una sola expresión tan larga.
+
+    /// Una tarjeta con su rebote de encaje, su «levantar» y el gesto que la levanta.
+    private func cardView(_ card: AccountCard) -> some View {
+        AccountCardView(
+            card: card, balances: snapshot.balances,
+            links: links,
+            total: snapshot.total,
+            monthSpent: snapshot.monthSpent[card] ?? 0,
+            portfolioSummary: portfolioSummary,
+            portfolioLastImport: portfolioLastImport,
+            flipped: flipped == card,
+            revealed: seen.contains(card),
+            peek: peeks[card, default: 0],
+            peekDelay: peekDelay,
+            isFront: card == current,
+            onFlip: { tap(card) }, onEdit: { onEdit(card.bank) },
+            onOpenBank: onOpenBank,
+            onImportInvestments: onImportInvestments)
+            .modifier(SettleBounce(tick: settles[card, default: 0], direction: settleDirection))
+            .lift(lifted == card)
+            // Simultáneo con el toque de la tarjeta y con el deslizamiento del carrusel: no les quita nada.
+            .simultaneousGesture(liftGesture(card))
+    }
+
+    /// El paginado: las tarjetas en fila, cada una girada, encogida y apagada según lo lejos que esté del centro.
+    private var pager: some View {
         let reduce = kit.reduce
         // ±22° × el recorrido del nivel, con el tope de 34° de la maqueta.
-        let turn = 22 * kit.level.distanceScale
-        ScrollView(.horizontal) {
+        let turn: Double = 22 * kit.level.distanceScale
+        return ScrollView(.horizontal) {
             HStack(spacing: CarouselMetrics.spacing) {
                 ForEach(cards, id: \.self) { card in
-                    AccountCardView(
-                        card: card, balances: snapshot.balances,
-                        links: links,
-                        total: snapshot.total,
-                        monthSpent: snapshot.monthSpent[card] ?? 0,
-                        portfolioSummary: portfolioSummary,
-                        portfolioLastImport: portfolioLastImport,
-                        flipped: flipped == card,
-                        revealed: seen.contains(card),
-                        peek: peeks[card, default: 0],
-                        peekDelay: peekDelay,
-                        isFront: card == current,
-                        onFlip: { tap(card) }, onEdit: { onEdit(card.bank) },
-                        onOpenBank: onOpenBank,
-                        onImportInvestments: onImportInvestments)
-                        .modifier(SettleBounce(tick: settles[card, default: 0], direction: settleDirection))
-                        .lift(lifted == card)
-                        // Simultáneo con el toque de la tarjeta y con el deslizamiento del carrusel: no les quita nada.
-                        .simultaneousGesture(liftGesture(card))
+                    cardView(card)
                         .containerRelativeFrame(.horizontal)
                         .frame(maxHeight: .infinity)
                         .scrollTransition(.interactive, axis: .horizontal) { content, phase in
-                            content
-                                .rotation3DEffect(.degrees(reduce ? 0 : max(-34, min(34, phase.value * -turn))),
-                                                  axis: (x: 0, y: 1, z: 0), perspective: 0.6)
-                                .scaleEffect(reduce ? 1 : 1 - 0.08 * abs(phase.value))
-                                .brightness(-0.25 * abs(phase.value))
+                            let away: Double = abs(phase.value)
+                            let angle: Double = reduce ? 0 : min(34, max(-34, -turn * phase.value))
+                            let shrink: Double = reduce ? 1 : 1 - 0.08 * away
+                            return content
+                                .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
+                                .scaleEffect(shrink)
+                                .brightness(-0.25 * away)
                         }
                         .onScrollVisibilityChange(threshold: 0.5) { visible in
                             if visible { seen.insert(card) }
@@ -124,70 +135,91 @@ struct CardCarousel: View {
         .scrollIndicators(.hidden)
         .scrollClipDisabled()
         .opacity(crossFaded ? 0 : 1)
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            // Paso entre tarjetas medido en el contenido (n tarjetas + n−1 huecos), no en el contenedor: el ancho del
-            // contenedor ya viene sin el margen lateral y restarlo otra vez desplazaba el indicador (1,2 en vez de 1).
-            let count = CGFloat(max(cards.count, 1))
-            let step = (geometry.contentSize.width + CarouselMetrics.spacing) / count
-            return step > 0 ? (geometry.contentOffset.x + geometry.contentInsets.leading) / step : 0
-        } action: { old, position in
-            guard position.isFinite else { return }
-            // Sentido en que se mueven las tarjetas (la posición sube = van hacia la izquierda), para el rebote de encaje.
-            if abs(position - old) > 0.0005 { motion.carouselDirection = position > old ? -1 : 1 }
-            motion.carouselPosition = position
-            let last = CGFloat(max(cards.count - 1, 0))
-            let over = position < -0.04 || position > last + 0.04
-            if over != motion.carouselOverscrolled { motion.carouselOverscrolled = over }
-        }
-        // El carrusel se para (tras el dedo o tras un deslizamiento programado): si ha cambiado de tarjeta, rebote.
-        .onScrollPhaseChange { old, new in
-            if new == .idle, old != .idle { landed() }
-        }
-        .sensoryFeedback(Haptics.edge, trigger: motion.carouselOverscrolled) { _, new in new }
-        .sensoryFeedback(Haptics.flip, trigger: flipped)
-        .onScrollGeometryChange(for: Bool.self) { geometry in
-            geometry.containerSize.width > 0
-        } action: { _, hasWidth in
-            if hasWidth { settleInitialPosition() }
-        }
-        // Respaldo: si el cambio de geometría no llega (el primer valor ya era el bueno), tras el primer pase igual.
-        .task {
-            try? await Task.sleep(for: .milliseconds(60))
-            settleInitialPosition()
-        }
-        .onChange(of: scrolledID) { _, new in
-            guard measured, let new else { return }
-            // Desplazamiento programado en curso (incluida nuestra propia asignación): nada de lo que informe el scroll
-            // cambia la elegida; al terminar `releaseTarget` pone todo de acuerdo.
-            if scrollTarget != nil { return }
-            // El dedo dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
-            if new != selection { selection = new }
-        }
-        .onChange(of: selection) { _, new in
-            if flipped != nil { flipped = nil }
-            if let new { seen.insert(new) }
-            // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
-            guard measured, let new, new != scrolledID else { return }
-            glide(to: new)
-        }
-        // Montaje de Inicio (arranque o desbloqueo): la primera vez en la vida de la app, la tarjeta asoma.
-        .onChange(of: entrance.token) { _, _ in peekIfFirstTime() }
-        #if DEBUG
-        .onChange(of: pressLifted) { old, new in
-            if old == nil, new != nil { liftCount += 1 }
-        }
-        .onChange(of: motion.demoMomentTick) { _, _ in runDemoMoment() }
-        .overlay(alignment: .topLeading) {
-            // Solo para XCUITest (`-MiBancoDemoCardElements`): cuántas veces se ha levantado una tarjeta.
-            if DemoMode.exposesCardElements {
-                Color.clear
-                    .frame(width: 2, height: 2)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(liftCount)")
-                    .accessibilityIdentifier("card-lift-count")
+    }
+
+    /// El paginado y lo que se mide de él: posición continua, sentido, paradas y primera colocación.
+    private var tracked: some View {
+        pager
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                // Paso entre tarjetas medido en el contenido (n tarjetas + n−1 huecos), no en el contenedor: el ancho del
+                // contenedor ya viene sin el margen lateral y restarlo otra vez desplazaba el indicador (1,2 en vez de 1).
+                let count = CGFloat(max(cards.count, 1))
+                let step = (geometry.contentSize.width + CarouselMetrics.spacing) / count
+                return step > 0 ? (geometry.contentOffset.x + geometry.contentInsets.leading) / step : 0
+            } action: { old, position in
+                guard position.isFinite else { return }
+                // Sentido en que se mueven las tarjetas (la posición sube = van hacia la izquierda), para el rebote de encaje.
+                if abs(position - old) > 0.0005 { motion.carouselDirection = position > old ? -1 : 1 }
+                motion.carouselPosition = position
+                let last = CGFloat(max(cards.count - 1, 0))
+                let over = position < -0.04 || position > last + 0.04
+                if over != motion.carouselOverscrolled { motion.carouselOverscrolled = over }
             }
-        }
+            // El carrusel se para (tras el dedo o tras un deslizamiento programado): si ha cambiado de tarjeta, rebote.
+            .onScrollPhaseChange { old, new in
+                if new == .idle, old != .idle { landed() }
+            }
+            .sensoryFeedback(Haptics.edge, trigger: motion.carouselOverscrolled) { _, new in new }
+            .sensoryFeedback(Haptics.flip, trigger: flipped)
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.containerSize.width > 0
+            } action: { _, hasWidth in
+                if hasWidth { settleInitialPosition() }
+            }
+            // Respaldo: si el cambio de geometría no llega (el primer valor ya era el bueno), tras el primer pase igual.
+            .task {
+                try? await Task.sleep(for: .milliseconds(60))
+                settleInitialPosition()
+            }
+    }
+
+    /// Lo anterior, de acuerdo con la tarjeta elegida en los dos sentidos.
+    private var synced: some View {
+        tracked
+            .onChange(of: scrolledID) { _, new in
+                guard measured, let new else { return }
+                // Desplazamiento programado en curso (incluida nuestra propia asignación): nada de lo que informe el
+                // scroll cambia la elegida; al terminar `releaseTarget` pone todo de acuerdo.
+                if scrollTarget != nil { return }
+                // El dedo dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
+                if new != selection { selection = new }
+            }
+            .onChange(of: selection) { _, new in
+                if flipped != nil { flipped = nil }
+                if let new { seen.insert(new) }
+                // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
+                guard measured, let new, new != scrolledID else { return }
+                glide(to: new)
+            }
+            // Montaje de Inicio (arranque o desbloqueo): la primera vez en la vida de la app, la tarjeta asoma.
+            .onChange(of: entrance.token) { _, _ in peekIfFirstTime() }
+    }
+
+    /// En DEBUG, además: el contador de levantadas para XCUITest y los momentos de demo para las ráfagas.
+    @ViewBuilder private var probed: some View {
+        #if DEBUG
+        synced
+            .onChange(of: pressLifted) { old, new in
+                if old == nil, new != nil { liftCount += 1 }
+            }
+            .onChange(of: motion.demoMomentTick) { _, _ in runDemoMoment() }
+            .overlay(alignment: .topLeading) {
+                // Solo para XCUITest (`-MiBancoDemoCardElements`): cuántas veces se ha levantado una tarjeta.
+                if DemoMode.exposesCardElements {
+                    Color.clear
+                        .frame(width: 2, height: 2)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("\(liftCount)")
+                        .accessibilityIdentifier("card-lift-count")
+                }
+            }
+        #else
+        synced
         #endif
+    }
+
+    var body: some View {
+        probed
         .accessibilityElement(children: Self.cardChildrenBehavior)
         .accessibilityLabel(spokenLabel)
         .accessibilityHint("Desliza hacia arriba o hacia abajo para cambiar de cuenta")

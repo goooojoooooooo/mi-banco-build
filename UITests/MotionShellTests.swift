@@ -361,10 +361,13 @@ final class MotionShellTests: XCTestCase {
                        "El desbloqueo no llegó con la marca a medio montar: la prueba no dice nada (\(result))")
         XCTAssertEqual(result["marcaAlIrse"], "completa", "El bloqueo empezó a fundirse con la marca a medias: \(result)")
         // A ×50 el bloqueo tarda 17 s en fundirse: sigue ahí, y su marca tiene que estar terminada.
+        // (XCUITest no ve una vista que se está quitando —lo comprobó el run 45473585871—, así que esta mirada solo
+        // cuenta si llega a verla; el testigo firme es `marcaAlIrse`.)
         let mark = element("lock-mark")
-        XCTAssertTrue(mark.exists, "El bloqueo que se funde ya no está: no se puede comprobar su marca")
-        XCTAssertEqual(mark.value as? String, "completa",
-                       "El bloqueo se funde con la marca a medio montar mientras la marca entera ya vuela")
+        if mark.exists {
+            XCTAssertEqual(mark.value as? String, "completa",
+                           "El bloqueo se funde con la marca a medio montar mientras la marca entera ya vuela")
+        }
         XCTAssertEqual(result["fundido"], "1", "El bloqueo no se está fundiendo: \(result)")
         XCTAssertEqual(result["ranura"], "marca", "La barra de Inicio dibuja su marca mientras la otra vuela: \(result)")
         // Mientras se funde, VoiceOver ya no puede activar «Desbloquear»: el botón no acepta toques.

@@ -102,7 +102,8 @@ struct TitaniumRefreshIndicator: View {
         let pull: CGFloat = max(-motion.listOffset, 0)
         let gap: CGFloat = pull + state.hold
         let drawn: CGFloat = state.busy ? 1 : min(pull / TitaniumRefreshState.armDistance, 1)
-        let visible: CGFloat = state.busy && !kit.reduce ? 1 : min(gap / 34, 1)
+        // Su opacidad sigue al hueco: al recogerse la lista se apaga con él (no se queda encima de la barra).
+        let visible: CGFloat = min(gap / 34, 1)
         let armed = pull >= TitaniumRefreshState.armDistance && !state.busy
         let line = StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
         Color.clear

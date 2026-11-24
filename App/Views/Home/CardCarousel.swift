@@ -140,7 +140,9 @@ struct CardCarousel: View {
                                 .brightness(-dim * away)
                         }
                         .onScrollVisibilityChange(threshold: 0.5) { visible in
-                            if visible { seen.insert(card) }
+                            // Las tarjetas por las que solo PASA un deslizamiento programado no empiezan a contar su
+                            // cifra desde 0 (se veía «0.000,00 €» al pasar): la contarán cuando de verdad se vean.
+                            if visible, scrollTarget == nil || scrollTarget == card { seen.insert(card) }
                         }
                         // La tarjeta levantada pasa por encima de sus vecinas.
                         .zIndex(lifted == card ? 1 : 0)

@@ -44,8 +44,9 @@ struct WalletFan: View {
             // Donde está la tarjeta levantada, en las coordenadas de esta capa.
             let startY: CGFloat = (request.origin?.minY ?? frame.minY + 150) - frame.minY
             ZStack(alignment: .top) {
+                // Negro del todo: Inicio no se transparenta bajo el título ni entre las tarjetas.
                 Color.black
-                    .opacity(fanned ? 0.9 : 0)
+                    .opacity(fanned ? 1 : 0)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture(perform: close)

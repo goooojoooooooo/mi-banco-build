@@ -39,7 +39,7 @@ struct ImportStatementView: View {
     /// Lo mínimo que se ve cada paso: 0,35 s del kit (sigue la intensidad y la cámara lenta).
     private var stepSeconds: Double {
         #if DEBUG
-        if DemoMode.slowsImportSteps { return 2 }
+        if DemoMode.slowsImportSteps { return 8 }
         #endif
         return motion.seconds(0.35)
     }

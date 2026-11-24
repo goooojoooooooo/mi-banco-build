@@ -46,8 +46,8 @@ extension DemoMode {
     /// Inicio y no llegara nunca (hoy nadie la hace aterrizar). La cabecera tiene que acabar viéndose igual.
     static var requestsFlightOnOpen: Bool { isActive && arguments.contains("-MiBancoDemoFlightRequest") }
 
-    /// `-MiBancoDemoImportSlow`: los pasos de «Importar extracto» duran 2 s cada uno (en vez de 0,35 s), para poder
-    /// verlos desde una prueba de toque.
+    /// `-MiBancoDemoImportSlow`: los pasos de «Importar extracto» duran 8 s cada uno (en vez de 0,35 s), para poder
+    /// verlos desde una prueba de toque (que tarda unos segundos en empezar a mirar).
     static var slowsImportSteps: Bool { isActive && arguments.contains("-MiBancoDemoImportSlow") }
 }
 #endif

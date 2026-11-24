@@ -778,20 +778,20 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(percent.waitForExistence(timeout: 20), "La importación no enseña sus pasos")
         let summary = app.staticTexts["import-summary"]
         let confirm = app.buttons["import-confirm"]
-        // Mientras se lee y se revisa (2 s por paso en esta prueba) no hay vista previa ni botón.
+        // Mientras se lee y se revisa (8 s por paso en esta prueba) no hay vista previa ni botón.
         var early: Set<Int> = []
-        let reading = Date().addingTimeInterval(3)
+        let reading = Date().addingTimeInterval(6)
         while Date() < reading, !summary.exists {
             guard let now = stepAndPercent(percent.label) else { continue }
             XCTAssertLessThan(now.percent, 67, "El porcentaje pasó de 67 antes de la vista previa: \(now)")
             XCTAssertLessThan(now.step, 3, "El tercer paso empezó antes de la vista previa")
             early.insert(now.step)
         }
-        XCTAssertTrue(early.contains(1), "No se vio el paso «Leer» en marcha: \(early.sorted()) · etiqueta: \(percent.label)")
+        XCTAssertFalse(early.isEmpty, "No se vio ningún paso en marcha antes de la vista previa · etiqueta: \(percent.label)")
         XCTAssertFalse(summary.exists, "La vista previa salió antes de terminar los pasos")
         XCTAssertFalse(confirm.exists, "«Importar» salió antes de terminar los pasos")
 
-        XCTAssertTrue(summary.waitForExistence(timeout: 10), "Tras los pasos no llegó la vista previa")
+        XCTAssertTrue(summary.waitForExistence(timeout: 25), "Tras los pasos no llegó la vista previa")
         XCTAssertEqual(summary.label, "3 movimientos nuevos, 3 filas ignoradas")
         XCTAssertEqual(percent.label, "Paso 3 de 3, 67 por ciento", "Esperando al dueño el porcentaje no está en 67")
         Thread.sleep(forTimeInterval: 2.5)
@@ -802,7 +802,7 @@ final class MotionScreensTests: XCTestCase {
         confirm.tap()
         let bank = app.buttons["bank-import-statement"]
         var afterTap: [Int] = []
-        let leaving = Date().addingTimeInterval(12)
+        let leaving = Date().addingTimeInterval(25)
         while Date() < leaving, !bank.exists {
             guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
             XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")

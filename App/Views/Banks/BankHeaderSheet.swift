@@ -234,13 +234,14 @@ private struct BankMiniTitle: View {
         }
         // La barra es una guía de orientación: con letra enorme se queda en un tamaño que cabe en ella.
         .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .opacity(m)
-        .offset(y: reduce ? 0 : (1 - m) * 8)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(balanceCents.map { "\(title), \(spokenAmount($0, hidden: hidden))" } ?? title)
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier("bank-mini-title")
         .accessibilityHidden(m < 0.5)
+        // La opacidad va por FUERA del elemento de accesibilidad: a 0 (hoja abajo) el título no existe para nadie.
+        .opacity(m)
+        .offset(y: reduce ? 0 : (1 - m) * 8)
     }
 }
 

@@ -10,9 +10,10 @@ import MiBancoCore
 /// `delay` (segundos al nivel Equilibrado) retrasa el llenado de entrada: así una lista de barras se llena en escalera.
 /// Dentro de una entrada por capas (`\.entrance`, al entrar en la pestaña) la barra se vacía y se vuelve a llenar.
 /// `onWarn` avisa a quien la usa de cada cruce (el mismo instante que la háptica).
-/// Solo avisa una barra que se está viendo: su pantalla está delante (`onAppear`/`onDisappear`) y la app, activa. Una
-/// barra tapada por otra pantalla, en otra pestaña o con la app en segundo plano se queda con el ámbar nuevo, sin pulso,
-/// sin vibración y sin `onWarn`; al volver a verse ya está pasada y sale en ámbar sin avisar (como la que nace pasada).
+/// Solo avisa una barra que se está viendo: su pantalla está delante (`onAppear`/`onDisappear` y lo que diga quien la
+/// aloja en `\.fillBarsOnScreen`) y la app, activa. Una barra tapada por otra pantalla, en otra pestaña o con la app en
+/// segundo plano se queda con el ámbar nuevo, sin pulso, sin vibración y sin `onWarn`; al volver a verse ya está pasada
+/// y sale en ámbar sin avisar (como la que nace pasada).
 struct FillBar: View {
     let fraction: Double
     var warnAt: Double? = 0.9
@@ -24,6 +25,7 @@ struct FillBar: View {
     @Environment(\.motion) private var motion
     @Environment(\.entrance) private var entrance
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.fillBarsOnScreen) private var hostOnScreen
     /// Su pantalla está delante (entre `onAppear` y `onDisappear`).
     @State private var visible = false
     @State private var shown: Double = 0
@@ -123,7 +125,7 @@ struct FillBar: View {
     }
 
     /// La barra se está viendo: su pantalla está delante y la app, activa. Solo entonces avisa.
-    private var isOnScreen: Bool { visible && scenePhase == .active }
+    private var isOnScreen: Bool { visible && hostOnScreen && scenePhase == .active }
 
     private func change(to target: Double) {
         pending?.cancel()
@@ -154,4 +156,11 @@ struct FillBar: View {
             withAnimation(motion.calmAnimation(.row)) { warned = false }
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Si las barras de esta parte de la pantalla se están viendo. Lo pone quien las aloja cuando `onDisappear` no basta:
+    /// la raíz de una pila de navegación sigue «aparecida» debajo de la pantalla que se le empuja encima, y una pestaña que
+    /// no es la elegida sigue viva. Por defecto, sí.
+    @Entry var fillBarsOnScreen = true
 }

@@ -113,19 +113,26 @@ struct SpendingView: View {
                     }
                 }
                 .padding(.bottom, Theme.Space.section)
+                // Las barras de la raíz solo avisan (ámbar con pulso y vibración) si Gasto es la pestaña que se ve y no
+                // tiene ninguna pantalla empujada encima: la raíz sigue viva debajo y cruzaría el límite a la vez.
+                .environment(\.fillBarsOnScreen, isVisible && path.isEmpty)
             }
             .scrollIndicators(.hidden)
             .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Gasto")
             .navigationDestination(for: SpendingRoute.self) { route in
-                switch route {
-                case let .category(category, month): CategoryDetailView(model: model, category: category, month: month, openDetail: openDetail)
-                case .budgets: BudgetsView(model: model)
-                case .transfers: TransfersView(model: model, openDetail: openDetail)
-                case .subscriptions: SubscriptionsView(model: model)
-                case .hiddenSubscriptions: HiddenSubscriptionsView(model: model)
-                case .upcoming: UpcomingCalendarView(model: model, accountBook: accountBook, onMoveMoney: openMoveMoney)
+                Group {
+                    switch route {
+                    case let .category(category, month): CategoryDetailView(model: model, category: category, month: month, openDetail: openDetail)
+                    case .budgets: BudgetsView(model: model)
+                    case .transfers: TransfersView(model: model, openDetail: openDetail)
+                    case .subscriptions: SubscriptionsView(model: model)
+                    case .hiddenSubscriptions: HiddenSubscriptionsView(model: model)
+                    case .upcoming: UpcomingCalendarView(model: model, accountBook: accountBook, onMoveMoney: openMoveMoney)
+                    }
                 }
+                // Lo mismo para cada pantalla empujada: solo avisa la que está arriba del todo, con Gasto a la vista.
+                .environment(\.fillBarsOnScreen, isVisible && path.last == route)
             }
             // Deslizar en horizontal cambia de mes (umbral 60 pt, y más horizontal que vertical).
             .simultaneousGesture(

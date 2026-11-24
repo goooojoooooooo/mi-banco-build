@@ -120,6 +120,7 @@ struct BudgetsView: View {
                 BudgetBar(status: status, name: barName, index: index, textTrailingInset: stacked ? 0 : 10)
                     .padding(.leading, stacked ? 0 : 54)
                     .transition(.opacity)
+                    .accessibilityIdentifier("\(identifier(scope)).barra")
             }
         }
         .padding(.horizontal, 16)

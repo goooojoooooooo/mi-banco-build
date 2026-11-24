@@ -30,7 +30,7 @@ struct SubscriptionsView: View {
                         .padding(.bottom, 10)
                         .staggeredEntrance(0, rise: 8)
                     ForEach(Array(snapshot.subscriptions.enumerated()), id: \.element.id) { i, row in
-                        SubscriptionRowView(row: row, isLast: i == snapshot.subscriptions.count - 1, hideAction: { hide(row) })
+                        SubscriptionRowView(row: row, isLast: i == snapshot.subscriptions.count - 1, index: i, hideAction: { hide(row) })
                             .staggeredEntrance(1 + i)
                             .transition(rowTransition)
                     }
@@ -145,28 +145,70 @@ struct HiddenSubscriptionsView: View {
     }
 }
 
-/// «24,98 € al mes · 299,76 € al año»: las dos cifras cuentan desde 0 al montar y ruedan si cambian.
+/// «24,98 € al mes · 299,76 € al año»: las dos cifras ruedan desde 0 al montar y de la anterior a la nueva si cambian
+/// (`RollingAmount`; con el ojo cerrado, «•••,•• €» y nunca una cifra). Con texto muy grande, una debajo de la otra.
 private struct SubscriptionsHeader: View {
     let monthlyCents: Int
     let yearlyCents: Int
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 0) {
-            CountingAmount(cents: monthlyCents).privateAmount()
-            Text(" al mes · ")
-            CountingAmount(cents: yearlyCents).privateAmount()
-            Text(" al año")
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 0))
+        layout {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                RollingAmount(cents: monthlyCents)
+                Text(stacked ? " al mes" : " al mes · ")
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                RollingAmount(cents: yearlyCents)
+                Text(" al año")
+                    .lineLimit(1)
+                    .fixedSize()
+            }
         }
         .titan(.cardTitle)
         .foregroundStyle(Theme.label)
-        .lineLimit(2)
-        .minimumScaleFactor(0.8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(spokenAmount(monthlyCents, hidden: preferences.privateMode)) al mes, \(spokenAmount(yearlyCents, hidden: preferences.privateMode)) al año")
         .accessibilityIdentifier("suscripciones.total")
+    }
+}
+
+/// «HOY»: la etiqueta de la suscripción que se cobra hoy. Sale con un salto (muelle `snap`, de 0,3 a 1) poco después de
+/// su fila; con Reducir movimiento, se funde. La fila ya dice «Próximo cobro: hoy»: para VoiceOver la etiqueta no existe.
+private struct TodayTag: View {
+    /// Orden de su fila: sale después de que la fila haya entrado.
+    let index: Int
+
+    @Environment(\.motion) private var motion
+    @State private var popped = false
+
+    var body: some View {
+        Text("HOY")
+            .titan(.captionStrong)
+            .fontWeight(.semibold)
+            .foregroundStyle(.black)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Theme.label, in: Capsule())
+            .scaleEffect(popped || motion.reduce ? 1 : 0.3)
+            .opacity(popped ? 1 : 0)
+            .accessibilityHidden(true)
+            .onAppear {
+                guard !popped else { return }
+                let delay = motion.seconds(0.32) + motion.stagger(index, firstGap: 0.055, decay: 0.8)
+                withAnimation(motion.animation(.snap).delay(motion.reduce ? 0 : delay)) { popped = true }
+            }
     }
 }
 
@@ -175,14 +217,17 @@ private struct SubscriptionsHeader: View {
 struct SubscriptionRowView: View {
     let row: LedgerSnapshot.SubscriptionRow
     var isLast = false
+    /// Orden en la lista: retrasa el salto de «HOY» hasta que la fila ha entrado.
+    var index = 0
     /// Nil en las ocultas.
     var hideAction: (() -> Void)?
     /// Solo en las ocultas.
     var restoreAction: (() -> Void)?
 
-    init(row: LedgerSnapshot.SubscriptionRow, isLast: Bool, hideAction: @escaping () -> Void) {
+    init(row: LedgerSnapshot.SubscriptionRow, isLast: Bool, index: Int = 0, hideAction: @escaping () -> Void) {
         self.row = row
         self.isLast = isLast
+        self.index = index
         self.hideAction = hideAction
     }
 
@@ -208,10 +253,16 @@ struct SubscriptionRowView: View {
                     MerchantTile(image: logos.image(merchant: row.merchant, domain: row.logoDomain, isShop: true),
                                  symbol: "repeat", size: tileSize)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.merchant)
-                            .titan(.row)
-                            .foregroundStyle(Theme.label)
-                            .lineLimit(stacked ? nil : 1)
+                        HStack(alignment: .center, spacing: 8) {
+                            Text(row.merchant)
+                                .titan(.row)
+                                .foregroundStyle(Theme.label)
+                                .lineLimit(stacked ? nil : 1)
+                            // Solo en las activas: una oculta no avisa de su cobro.
+                            if row.chargesToday, restoreAction == nil {
+                                TodayTag(index: index)
+                            }
+                        }
                         Text(row.nextCharge)
                             .titan(.subtitle)
                             .foregroundStyle(Theme.label2)

@@ -48,6 +48,14 @@ struct SpendingView: View {
                                 .padding(.top, 8)
                                 .staggeredEntrance(2, listIndex: 0)
 
+                            // El gráfico del mes: se dibuja solo al entrar y al cambiar de mes (nada que dibujar sin gasto).
+                            if !content.series.isEmpty {
+                                MonthChart(series: content.series, title: content.title, previousTitle: content.previousTitle)
+                                    .padding(.horizontal, Theme.Space.gutter)
+                                    .padding(.top, 14)
+                                    .staggeredEntrance(2, listIndex: 0)
+                            }
+
                             // El presupuesto del mes («412 de 700 €  59 %»), solo en el mes en curso.
                             if index == months.count - 1, let budget = snapshot.budgets.first(where: { $0.scope == .month }) {
                                 BudgetBar(status: budget, name: "Presupuesto del mes")

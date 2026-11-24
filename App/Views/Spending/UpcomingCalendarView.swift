@@ -41,6 +41,7 @@ struct UpcomingCalendarView: View {
                     .foregroundStyle(Theme.label2)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
+                    .staggeredEntrance(0, rise: 8)
 
                 if !hasAnyActivity {
                     VStack(alignment: .leading, spacing: 8) {
@@ -55,14 +56,19 @@ struct UpcomingCalendarView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(18)
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+                    .staggeredEntrance(1)
                 } else {
-                    ForEach(blocks) { block in
-                        switch block {
-                        case .day(let day):
-                            daySection(day, allDays: days, topUps: topUpsByDay[day.day] ?? [], now: now, calendar: cal)
-                        case .quietSpan(let first, let nextActive):
-                            quietSpanRow(first: first, nextActive: nextActive, now: now, calendar: cal)
+                    // La entrada de siempre: cada día sube y aparece tras el anterior (los que pasan del tope, ya colocados).
+                    ForEach(Array(blocks.enumerated()), id: \.element.id) { index, block in
+                        Group {
+                            switch block {
+                            case .day(let day):
+                                daySection(day, allDays: days, topUps: topUpsByDay[day.day] ?? [], now: now, calendar: cal)
+                            case .quietSpan(let first, let nextActive):
+                                quietSpanRow(first: first, nextActive: nextActive, now: now, calendar: cal)
+                            }
                         }
+                        .staggeredEntrance(1 + index)
                     }
                 }
             }
@@ -74,6 +80,7 @@ struct UpcomingCalendarView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Próximos cobros")
         .navigationBarTitleDisplayMode(.inline)
+        .assemblesOnFirstAppear()
     }
 
     private func buildBlocks(days: [UpcomingDay]) -> [CalendarBlock] {

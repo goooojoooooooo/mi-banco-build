@@ -292,44 +292,104 @@ final class MotionHomeTests: XCTestCase {
         return Int(String(label[range].prefix(1))) ?? 0
     }
 
-    /// Carrusel, segmentado y etiqueta dicen la misma tarjeta.
-    private func assertEverythingAgrees(on number: Int, _ message: String) {
+    /// Lo que no cuadra entre carrusel, segmentado y etiqueta para esa tarjeta (vacío = todos dicen lo mismo).
+    private func agreementProblems(on number: Int, _ message: String) -> [String] {
         let titles = ["Todo", "Revolut", "imagin", "Trade Rep."]
         let names = ["Todo", "Revolut", "imagin", "Trade Republic"]
-        XCTAssertTrue((1...4).contains(number), "\(message): tarjeta \(number)")
-        guard (1...4).contains(number) else { return }
-        XCTAssertTrue(carousel().label.contains(names[number - 1]), "\(message): la etiqueta no nombra la tarjeta \(number): \(carousel().label)")
+        guard (1...4).contains(number) else { return ["\(message): tarjeta \(number)"] }
+        var problems: [String] = []
+        let label = carousel().label
+        if !label.contains(names[number - 1]) {
+            problems.append("\(message): la etiqueta no nombra la tarjeta \(number): \(label)")
+        }
         for (index, title) in titles.enumerated() {
             let button = segment(title)
             guard button.exists else { continue }
-            XCTAssertEqual(button.isSelected, index == number - 1, "\(message): el segmento «\(title)» no está de acuerdo con la tarjeta \(number)")
+            if button.isSelected != (index == number - 1) {
+                problems.append("\(message): el segmento «\(title)» no está de acuerdo con la tarjeta \(number)")
+            }
         }
+        return problems
     }
 
-    /// Deslizar con el dedo mientras el carrusel se desliza solo (`-MiBancoDemoSwitch`: a los 2 s pasa de «Todo» a
-    /// Revolut; a cámara lenta ×3 ese deslizamiento dura unos 2 s): el carrusel acaba en la tarjeta que dejó el dedo
-    /// (nunca vuelve a «Todo»), carrusel y segmentado dicen lo mismo, y se queda ahí. Si XCUITest llega cuando el
-    /// deslizamiento ya ha terminado, el dedo avanza una tarjeta desde Revolut: imagin (3 de 4). Después, otro
-    /// deslizamiento del dedo avanza exactamente una tarjeta: el carrusel sigue respondiendo.
-    func testSwipeDuringGlideEndsOnTouchedCard() throws {
-        launchHome(["-MiBancoDemoSwitch", "-MiBancoMotionScale", "3"])
-        let card = carousel()
-        XCTAssertTrue(card.waitForExistence(timeout: 5), "Falta el carrusel")
-        XCTAssertTrue(waitUntil(8) { self.frontCardNumber() == 2 }, "El deslizamiento programado no empezó: \(card.label)")
-        card.swipeLeft()
-        XCTAssertTrue(waitUntil(8) { self.frontCardNumber() >= 2 }, "El carrusel volvió atrás: \(carousel().label)")
-        // Que termine lo que esté en marcha y se asiente.
-        Thread.sleep(forTimeInterval: 4)
+    /// Carrusel, segmentado y etiqueta dicen la misma tarjeta.
+    private func assertEverythingAgrees(on number: Int, _ message: String) {
+        let problems = agreementProblems(on: number, message)
+        XCTAssertTrue(problems.isEmpty, problems.joined(separator: "; "))
+    }
+
+    /// El dedo desliza justo después de que el carrusel empiece a deslizarse solo (`-MiBancoDemoSwitch`: a los 2 s pasa
+    /// de «Todo» a Revolut). Devuelve lo que NO cumple (vacío = todo bien):
+    /// 1. el dedo movió de verdad el carrusel (sube `card-finger-landings`; un deslizamiento tragado no lo sube);
+    /// 2. el carrusel acaba en imagin (3 de 4); Revolut (2 de 4) solo vale si el deslizamiento programado seguía en
+    ///    curso cuando el dedo empezó (`card-glide-active`), porque entonces el dedo pudo pillarlo a medio camino;
+    /// 3. el carrusel acaba en la tarjeta en la que lo dejó el dedo (`card-finger-landed-on`), no en otra;
+    /// 4. carrusel y segmentado dicen lo mismo, y no se mueve después;
+    /// 5. el siguiente deslizamiento del dedo avanza exactamente una tarjeta.
+    /// El viaje programado dura lo que el scroll del sistema (unos 0,5 s) con cualquier cámara lenta; lo que la escala
+    /// ×3 alarga es el rato en que el carrusel da el deslizamiento programado por «en curso» y no hace caso de lo que
+    /// informa el scroll, que es justo cuando el programa podría ganarle al dedo.
+    private func swipeDuringGlideProblems(_ extra: [String] = []) -> [String] {
+        launchHome(["-MiBancoDemoSwitch", "-MiBancoMotionScale", "3", "-MiBancoDemoCardElements"] + extra)
+        let landings = any("card-finger-landings")
+        let landedOn = any("card-finger-landed-on")
+        let glideActive = any("card-glide-active")
+        guard carousel().waitForExistence(timeout: 5), landings.waitForExistence(timeout: 5) else {
+            return ["Falta el carrusel o sus sondas"]
+        }
+        guard waitUntil(8, { self.frontCardNumber() == 2 }) else {
+            return ["El deslizamiento programado no empezó: \(carousel().label)"]
+        }
+        let landingsBefore = Int(landings.label) ?? -1
+        let wasGliding = glideActive.label == "1"
+        carousel().swipeLeft()
+        // Que termine lo que esté en marcha (a ×3 el deslizamiento programado se da por terminado a los ~3 s).
+        Thread.sleep(forTimeInterval: 5)
+
+        var problems: [String] = []
         let landed = frontCardNumber()
-        XCTAssertTrue(landed == 2 || landed == 3, "El carrusel no acabó en la tarjeta del dedo: \(carousel().label)")
-        assertEverythingAgrees(on: landed, "Tras deslizar a medias")
+        let landingsAfter = Int(landings.label) ?? -1
+        let fingerCard = Int(landedOn.label) ?? 0
+        let context = "(en curso al tocar: \(wasGliding), aterrizajes \(landingsBefore) → \(landingsAfter), dedo en \(fingerCard), carrusel en \(landed): \(carousel().label))"
+        if landingsAfter <= landingsBefore {
+            problems.append("El dedo no movió el carrusel \(context)")
+        }
+        if landed != 3 && !(wasGliding && landed == 2) {
+            problems.append("El carrusel no acabó donde debía \(context)")
+        }
+        if fingerCard != landed {
+            problems.append("El carrusel no acabó en la tarjeta en la que lo dejó el dedo \(context)")
+        }
+        problems += agreementProblems(on: landed, "Tras deslizar a medias")
         Thread.sleep(forTimeInterval: 2)
-        XCTAssertEqual(frontCardNumber(), landed, "El carrusel se movió solo después de asentarse: \(carousel().label)")
+        if frontCardNumber() != landed {
+            problems.append("El carrusel se movió solo después de asentarse: \(carousel().label)")
+        }
         // Con todo quieto, un deslizamiento avanza exactamente una tarjeta.
         carousel().swipeLeft()
-        XCTAssertTrue(waitUntil(8) { self.frontCardNumber() == landed + 1 }, "El dedo no avanzó una tarjeta: \(carousel().label)")
-        Thread.sleep(forTimeInterval: 3)
-        assertEverythingAgrees(on: landed + 1, "Tras el segundo deslizamiento")
+        if !waitUntil(8, { self.frontCardNumber() == landed + 1 }) {
+            problems.append("El siguiente deslizamiento no avanzó una tarjeta: \(carousel().label)")
+        } else {
+            Thread.sleep(forTimeInterval: 3)
+            problems += agreementProblems(on: landed + 1, "Tras el segundo deslizamiento")
+        }
+        return problems
+    }
+
+    /// El carrusel acaba en la tarjeta que dejó el dedo y nunca le lleva la contraria (ver `swipeDuringGlideProblems`).
+    func testSwipeDuringGlideEndsOnTouchedCard() throws {
+        let problems = swipeDuringGlideProblems()
+        XCTAssertTrue(problems.isEmpty, problems.joined(separator: " | "))
+    }
+
+    /// La prueba de la prueba: con `-MiBancoDemoFingerLoses` (solo DEBUG) el carrusel deja de seguir al dedo y vuelve a
+    /// la tarjeta del programa, que es el fallo que vigila la prueba anterior. La MISMA comprobación tiene que dar
+    /// problemas; si aquí saliera limpia, la prueba anterior no protegería nada.
+    func testSwipeGuardGoesRedWhenTheProgramBeatsTheFinger() throws {
+        let problems = swipeDuringGlideProblems(["-MiBancoDemoFingerLoses"])
+        XCTAssertFalse(problems.isEmpty, "Con el programa ganándole al dedo, la comprobación debería fallar y no falla")
+        XCTAssertTrue(problems.contains { $0.contains("no acabó") || $0.contains("no avanzó") },
+                      "Falla, pero no por la tarjeta en la que acaba el carrusel: \(problems.joined(separator: " | "))")
     }
 
     /// Sin cámara lenta: un deslizamiento del dedo pasa a la tarjeta siguiente y otro hacia atrás vuelve (el gesto de

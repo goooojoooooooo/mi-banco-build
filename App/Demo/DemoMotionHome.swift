@@ -12,13 +12,20 @@ extension DemoMode {
         case tilt
         /// La pista del primer día: la tarjeta asoma unos grados, como si fuera a voltearse.
         case peek
+        /// El rebote de encaje solo (4 pt hacia la derecha y vuelta), sin que el carrusel se deslice.
+        case settle
     }
 
-    /// `-MiBancoDemoCardMoment lift|tilt|peek` (solo con `-MiBancoDemo`): tocar el segmento que YA está elegido dispara
+    /// `-MiBancoDemoCardMoment lift|tilt|peek|settle` (solo con `-MiBancoDemo`): tocar el segmento que YA está elegido dispara
     /// ese momento en la tarjeta de delante, para sacarlo en una ráfaga de fotogramas.
     static var cardMoment: CardMoment? {
         guard isActive else { return nil }
         return value(after: "-MiBancoDemoCardMoment").flatMap(CardMoment.init(rawValue:))
     }
+
+    /// `-MiBancoDemoFingerLoses` (solo con `-MiBancoDemo`): el carrusel deja de seguir al dedo y vuelve siempre a la
+    /// tarjeta elegida por programa. Es el fallo contra el que protege la prueba de deslizar a medias: con esta bandera
+    /// esa misma comprobación tiene que ponerse roja (así se sabe que la prueba puede fallar).
+    static var fingerLosesToGlide: Bool { isActive && arguments.contains("-MiBancoDemoFingerLoses") }
 }
 #endif

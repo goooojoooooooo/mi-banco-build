@@ -3,9 +3,10 @@ import MiBancoCore
 
 /// El carrusel de cuentas: paginado horizontal con la física del sistema y encaje en cada tarjeta
 /// (`viewAligned`), los vecinos asomando 32 pt, girados en 3D (±22° × el recorrido del nivel, perspectiva 0,6), al 92 %
-/// y apagados. La posición continua (para el indicador del segmentado y el brillo) sale de la geometría del scroll,
+/// y apagados (0,25 × el recorrido del nivel). La posición continua (para el indicador del segmentado y el brillo) sale de la geometría del scroll,
 /// nunca del `body`. Para VoiceOver es un solo elemento ajustable: "Cuenta, Revolut, 340,20 euros, 2 de 4".
-/// Movimiento (todo desde `\.motion`: intensidad, Reducir movimiento y cámara lenta):
+/// Movimiento (desde `\.motion`: intensidad, Reducir movimiento y cámara lenta; la única excepción es la DURACIÓN del
+/// deslizamiento de una tarjeta a otra, que es la del scroll del sistema, tanto con el dedo como por programa):
 /// - Al pararse en otra tarjeta, esa tarjeta da un rebote de encaje (4 pt en el sentido en que venía, escala 1,012).
 /// - Mantener pulsada la tarjeta de delante 0,42 s la levanta (`.lift`); al soltar vuelve, y soltar no la voltea.
 /// - La primera vez que se ve Inicio, la tarjeta asoma unos grados (la pista de que se puede voltear).
@@ -56,6 +57,11 @@ struct CardCarousel: View {
     @State private var liftCount = 0
     /// Solo para las pruebas de toques: cuántas veces ha hecho falta la red de seguridad de `landed()`.
     @State private var restFixes = 0
+    /// Solo para las pruebas de toques: cuántas veces ha movido el DEDO el carrusel, en qué tarjeta (1…n) lo dejó la
+    /// última vez, y si ese último movimiento del dedo aún está frenando.
+    @State private var fingerLandings = 0
+    @State private var fingerLandedOn = 0
+    @State private var fingerSettling = false
     @Environment(\.cardTilt) private var tilt
     #endif
     @Environment(\.motion) private var kit
@@ -105,8 +111,12 @@ struct CardCarousel: View {
     /// El paginado: las tarjetas en fila, cada una girada, encogida y apagada según lo lejos que esté del centro.
     private var pager: some View {
         let reduce = kit.reduce
-        // ±22° × el recorrido del nivel, con el tope de 34° de la maqueta.
+        // Cuánto giran y cuánto se apagan las vecinas sigue a la intensidad: ±22° × el recorrido del nivel (13° en
+        // Sutil, 22° en Equilibrado, 32° en Expresivo; tope de 34° de la maqueta) y un apagado de 0,25 × el recorrido
+        // (0,15 / 0,25 / 0,33, con tope ×1,3). El viaje en sí lo hace el scroll del sistema (su física, interrumpible
+        // con el dedo), así que su duración no cambia con el nivel ni con la cámara lenta.
         let turn: Double = 22 * kit.level.distanceScale
+        let dim: Double = 0.25 * min(1.3, kit.level.distanceScale)
         return ScrollView(.horizontal) {
             HStack(spacing: CarouselMetrics.spacing) {
                 ForEach(cards, id: \.self) { card in
@@ -120,7 +130,7 @@ struct CardCarousel: View {
                             return content
                                 .rotation3DEffect(.degrees(angle), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
                                 .scaleEffect(shrink)
-                                .brightness(-0.25 * away)
+                                .brightness(-dim * away)
                         }
                         .onScrollVisibilityChange(threshold: 0.5) { visible in
                             if visible { seen.insert(card) }
@@ -160,6 +170,9 @@ struct CardCarousel: View {
             }
             // El carrusel se para (tras el dedo o tras un deslizamiento programado): si ha cambiado de tarjeta, rebote.
             .onScrollPhaseChange { old, new in
+                #if DEBUG
+                probeFinger(old, new)
+                #endif
                 if new == .idle, old != .idle { landed() }
             }
             .sensoryFeedback(Haptics.edge, trigger: motion.carouselOverscrolled) { _, new in new }
@@ -185,7 +198,15 @@ struct CardCarousel: View {
                 // scroll cambia la elegida; al terminar `releaseTarget` pone todo de acuerdo.
                 if scrollTarget != nil { return }
                 // El dedo dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
-                if new != selection { selection = new }
+                guard new != selection else { return }
+                #if DEBUG
+                // Solo para probar la prueba (`-MiBancoDemoFingerLoses`): aquí el programa le gana al dedo.
+                if DemoMode.fingerLosesToGlide, let chosen = selection {
+                    glide(to: chosen)
+                    return
+                }
+                #endif
+                selection = new
             }
             .onChange(of: selection) { _, new in
                 if flipped != nil { flipped = nil }
@@ -207,19 +228,15 @@ struct CardCarousel: View {
             }
             .onChange(of: motion.demoMomentTick) { _, _ in runDemoMoment() }
             .overlay(alignment: .topLeading) {
-                // Solo para XCUITest (`-MiBancoDemoCardElements`): cuántas veces se ha levantado una tarjeta.
+                // Solo para XCUITest (`-MiBancoDemoCardElements`): sondas invisibles con lo que la prueba necesita saber.
                 if DemoMode.exposesCardElements {
-                    Color.clear
-                        .frame(width: 2, height: 2)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(liftCount)")
-                        .accessibilityIdentifier("card-lift-count")
-                    Color.clear
-                        .frame(width: 2, height: 2)
-                        .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("\(restFixes)")
-                        .accessibilityIdentifier("card-rest-fixes")
-                        .offset(x: 4)
+                    probe("card-lift-count", "\(liftCount)", at: 0)
+                    probe("card-rest-fixes", "\(restFixes)", at: 1)
+                    // Cuántas veces ha movido el dedo el carrusel y en qué tarjeta (1…n) lo dejó la última vez.
+                    probe("card-finger-landings", "\(fingerLandings)", at: 2)
+                    probe("card-finger-landed-on", "\(fingerLandedOn)", at: 3)
+                    // «1» mientras hay un deslizamiento programado en curso.
+                    probe("card-glide-active", scrollTarget != nil ? "1" : "0", at: 4)
                 }
             }
         #else
@@ -356,7 +373,15 @@ struct CardCarousel: View {
     private func releaseTarget(_ token: Int) {
         guard scrollTargetToken == token, scrollTarget != nil else { return }
         scrollTarget = nil
-        if let shown = scrolledID, shown != selection { selection = shown }
+        guard let shown = scrolledID, shown != selection else { return }
+        #if DEBUG
+        // Solo para probar la prueba (`-MiBancoDemoFingerLoses`): el carrusel vuelve a la tarjeta del programa.
+        if DemoMode.fingerLosesToGlide, let chosen = selection {
+            glide(to: chosen)
+            return
+        }
+        #endif
+        selection = shown
     }
 
     /// Una sola vez, con el carrusel ya maquetado: se coloca en la tarjeta elegida sin animación (p. ej. la demo con Revolut).
@@ -380,7 +405,7 @@ struct CardCarousel: View {
         // Red de seguridad: quieto y sin deslizamiento programado en curso, la tarjeta elegida es la que se ve. Si el
         // scroll no llegó a informar de ella (su identificador puede llegar vacío en el borde), se pone aquí de acuerdo:
         // carrusel, segmentado y lista nunca se quedan diciendo cosas distintas.
-        if measured, scrollTarget == nil, abs(position - CGFloat(index)) < 0.2, cards[index] != current {
+        if measured, scrollTarget == nil, abs(position - CGFloat(index)) < 0.2, cards[index] != current, !fingerLoses {
             #if DEBUG
             restFixes += 1
             #endif
@@ -453,11 +478,53 @@ struct CardCarousel: View {
             tilt?.demoSweep()
         case .peek:
             peek(current, after: 0.05)
+        case .settle:
+            // El rebote de encaje solo, hacia la derecha, un instante después del toque (la ráfaga ya está en marcha).
+            let card = current
+            Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                settleDirection = 1
+                settles[card, default: 0] += 1
+            }
         case nil:
             break
         }
     }
+
+    /// Solo para las pruebas de toques: apunta cuándo el DEDO suelta el carrusel y en qué tarjeta queda al frenar.
+    private func probeFinger(_ old: ScrollPhase, _ new: ScrollPhase) {
+        guard DemoMode.exposesCardElements, !cards.isEmpty else { return }
+        let front = min(max(Int(motion.carouselPosition.rounded()), 0), cards.count - 1) + 1
+        if old == .interacting, new != .interacting {
+            fingerLandings += 1
+            fingerSettling = new == .decelerating
+            if !fingerSettling { fingerLandedOn = front }
+        } else if fingerSettling, old == .decelerating {
+            fingerSettling = false
+            fingerLandedOn = front
+        }
+    }
+
+    /// Una sonda invisible de 2 pt para XCUITest: su etiqueta es el valor.
+    private func probe(_ id: String, _ value: String, at slot: Int) -> some View {
+        Color.clear
+            .frame(width: 2, height: 2)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(value)
+            .accessibilityIdentifier(id)
+            .offset(x: CGFloat(slot) * 4)
+    }
     #endif
+
+    /// Solo en DEBUG puede ser verdad (`-MiBancoDemoFingerLoses`): la variante «el programa le gana al dedo» con la
+    /// que se comprueba que la prueba de deslizar a medias se pone roja.
+    private var fingerLoses: Bool {
+        #if DEBUG
+        return DemoMode.fingerLosesToGlide
+        #else
+        return false
+        #endif
+    }
 
     private func tap(_ card: AccountCard) {
         // Soltar una tarjeta levantada no es un toque: no la voltea.

@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 
 /// Ráfagas de movimiento del flujo «Inicio» (nadie más edita este fichero). Cada momento se dispara con un toque real y
@@ -142,5 +143,108 @@ final class MotionTourHomeTests: MotionTourCase {
         waitForHome()
         segment("Todo").tap()
         burst("card-peek", frames: 20, every: 0.3)
+    }
+
+    // MARK: Ronda de arreglos 1 — el deslizamiento a velocidad real y el rebote de encaje
+
+    /// Ráfaga densa: como `burst`, pero captura la pantalla directamente (sin consultar antes el árbol de la app, que es
+    /// lo que más tarda), primero todas las capturas y después los adjuntos, para sacar un fotograma cada pocas
+    /// centésimas a velocidad real. `crop` (en puntos de pantalla, con `screenWidth` = ancho de la pantalla en puntos)
+    /// recorta una zona para verla ampliada en la hoja. Mismos nombres de adjunto que `burst` («<name>-NN_tTTT», TTT =
+    /// décimas reales desde la primera captura): con ráfagas densas, dos fotogramas pueden compartir décima.
+    private func fastBurst(_ name: String, frames: Int, every: TimeInterval, crop: CGRect? = nil, screenWidth: CGFloat = 0) {
+        XCTAssertNotNil(name.range(of: "^[a-z0-9]+(-[a-z0-9]+)*$", options: .regularExpression),
+                        "El nombre de la ráfaga solo admite minúsculas, números y guiones: \(name)")
+        XCTAssertTrue((1...99).contains(frames), "Una ráfaga lleva de 1 a 99 fotogramas")
+        var shots: [XCUIScreenshot] = []
+        var times: [TimeInterval] = []
+        let start = Date()
+        for index in 0..<min(max(frames, 1), 99) {
+            let wait = start.addingTimeInterval(Double(index) * every).timeIntervalSinceNow
+            if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+            times.append(Date().timeIntervalSince(start))
+            shots.append(XCUIScreen.main.screenshot())
+        }
+        for (index, shot) in shots.enumerated() {
+            let tenths = Int((times[index] * 10).rounded())
+            let attachment: XCTAttachment
+            if let crop, screenWidth > 0, let whole = shot.image.cgImage {
+                let k = CGFloat(whole.width) / screenWidth
+                let pixels = CGRect(x: crop.minX * k, y: crop.minY * k, width: crop.width * k, height: crop.height * k).integral
+                guard let cut = whole.cropping(to: pixels) else {
+                    XCTFail("No se pudo recortar el fotograma \(index + 1) de \(name)")
+                    return
+                }
+                attachment = XCTAttachment(image: UIImage(cgImage: cut), quality: .original)
+            } else {
+                attachment = XCTAttachment(screenshot: shot, quality: .original)
+            }
+            attachment.name = "\(name)-" + String(format: "%02d", index + 1) + "_t" + String(format: "%03d", tenths)
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+    }
+
+    /// Inicio a velocidad real (escala 1), ya montado.
+    private func launchRealTime(_ extra: [String]) {
+        launch(extra, scale: 1)
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "Inicio no aparece")
+        Thread.sleep(forTimeInterval: 3)
+    }
+
+    /// La zona del borde izquierdo de la tarjeta de delante (170 pt de ancho), con el título encima y el segmentado
+    /// debajo, que no se mueven y sirven de referencia.
+    private func leftEdgeCrop() -> (crop: CGRect, screenWidth: CGFloat) {
+        let screen = app.windows.firstMatch.frame
+        let card = carousel().frame
+        let top = max(0, card.minY - 50)
+        let crop = CGRect(x: 0, y: top, width: 170, height: min(card.height + 110, screen.height - top))
+        return (crop, screen.width)
+    }
+
+    /// El deslizamiento programado (toque en el segmentado) a velocidad real y con ráfaga densa, en Expresivo: de «Todo»
+    /// a Revolut (una tarjeta) y, después, de Revolut a Trade Republic (dos). Su duración es la del scroll del sistema.
+    func testCarouselGlideRealTimeExpressive() throws {
+        launchRealTime(["-MiBancoMotionLevel", "expressive"])
+        segment("Revolut").tap()
+        fastBurst("carousel-drag-expressive", frames: 14, every: 0.04)
+        Thread.sleep(forTimeInterval: 2)
+        segment("Trade Rep.").tap()
+        fastBurst("carousel-glide-far", frames: 14, every: 0.04)
+    }
+
+    /// Lo mismo en Sutil: las vecinas giran menos y se apagan menos.
+    func testCarouselGlideRealTimeSubtle() throws {
+        launchRealTime(["-MiBancoMotionLevel", "subtle"])
+        segment("Revolut").tap()
+        fastBurst("carousel-drag-subtle", frames: 14, every: 0.04)
+    }
+
+    /// El rebote de encaje solo (`-MiBancoDemoCardMoment settle`: 0,35 s después de tocar el segmento ya elegido, la
+    /// tarjeta se pasa 4 pt × nivel hacia la derecha, crece a 1,012 y vuelve), a cámara lenta ×4 y ampliado sobre el
+    /// borde izquierdo de la tarjeta.
+    func testCardSettle() throws {
+        launch(["-MiBancoDemoCardMoment", "settle"])
+        waitForHome()
+        let zone = leftEdgeCrop()
+        segment("Todo").tap()
+        fastBurst("card-settle", frames: 24, every: 0.15, crop: zone.crop, screenWidth: zone.screenWidth)
+    }
+
+    /// El mismo rebote a velocidad real: lo que se llega a ver de verdad.
+    func testCardSettleRealTime() throws {
+        launchRealTime(["-MiBancoDemoCardMoment", "settle"])
+        let zone = leftEdgeCrop()
+        segment("Todo").tap()
+        fastBurst("card-settle-real", frames: 16, every: 0.05, crop: zone.crop, screenWidth: zone.screenWidth)
+    }
+
+    /// El final de un deslizamiento de verdad a velocidad real, ampliado sobre el borde izquierdo: la tarjeta que llega
+    /// se pasa de su sitio (hacia la izquierda, el sentido en que venía) y vuelve.
+    func testCarouselLandingRealTime() throws {
+        launchRealTime(["-MiBancoMotionLevel", "expressive"])
+        let zone = leftEdgeCrop()
+        segment("Revolut").tap()
+        fastBurst("carousel-landing-real", frames: 18, every: 0.04, crop: zone.crop, screenWidth: zone.screenWidth)
     }
 }

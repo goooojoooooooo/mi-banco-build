@@ -42,7 +42,6 @@ struct BankLinkView: View {
     @State private var awaitsFlight = false
     /// El plazo de la tarjeta ha pasado: la cabecera se ve aunque no haya aterrizado.
     @State private var flightTimedOut = false
-    @Namespace private var zoom
     #if DEBUG
     @State private var didShowDemoImport = false
     /// Guion de demo (`-MiBancoDemoConnectScript`): hace de banco; `nil` = manda el conector.
@@ -222,6 +221,7 @@ struct BankLinkView: View {
     }
 
     /// Los últimos movimientos de este banco, con las cabeceras de sus días (sin avisos sin leer: aquí no se borran).
+    /// Se dibujan con `BankMovementEntry` (mismas filas que Inicio, pero con máscara con el ojo cerrado).
     private var latestEntries: [ListEntry] {
         let all = model.snapshot.entries[AccountCard(bank: bank)] ?? []
         var out: [ListEntry] = []
@@ -417,7 +417,6 @@ struct BankLinkView: View {
                     .accessibilityIdentifier("bank-cancel-wait")
                 }
             }
-            .accessibilityIdentifier("bank-steps-block")
         } else if needsResumeForThisBank {
             VStack(alignment: .leading, spacing: 12) {
                 Text("¿Ya lo has aprobado en la app de \(bank.displayName)?")
@@ -605,12 +604,10 @@ struct BankLinkView: View {
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
-                            ListEntryView(entry: entry, logoDomain: logoDomain(entry), isFresh: false, zoom: zoom,
-                                          onOpen: openMovement, onDeleteUnread: { _ in })
+                            BankMovementEntry(entry: entry, logoDomain: logoDomain(entry), onOpen: openMovement)
                                 .motionEntrance(index)
                         }
                     }
-                    .accessibilityIdentifier("bank-movements")
                     // Cada vez que llegan las filas (también tras el esqueleto) entran una tras otra.
                     .assemblesOnFirstAppear()
                     .transition(.opacity)

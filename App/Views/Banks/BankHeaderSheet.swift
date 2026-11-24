@@ -79,10 +79,16 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
         }
         .accessibilityIdentifier("bank-screen-scroll")
         .background { BankHeaderBackdrop() }
-        .overlay(alignment: .top) { BankHeaderBar(scroll: scroll) }
+        .overlay(alignment: .top) {
+            BankHeaderBar(scroll: scroll, title: title, balanceCents: balanceCents, hidden: hidden, reduce: motion.reduce)
+        }
+        // El título del sistema no se dibuja (el banco ya está en la cabecera y, acoplada la hoja, en el título pequeño):
+        // en su sitio va una pieza vacía. El nombre de la pantalla sigue siendo el del banco para VoiceOver y la pila.
         .toolbar {
             ToolbarItem(placement: .principal) {
-                BankMiniTitle(scroll: scroll, title: title, balanceCents: balanceCents, hidden: hidden, reduce: motion.reduce)
+                Color.clear
+                    .frame(width: 1, height: 1)
+                    .accessibilityHidden(true)
             }
         }
         .toolbarBackground(.hidden, for: .navigationBar)
@@ -171,18 +177,33 @@ private struct BankHeaderBackdrop: View {
     }
 }
 
-/// La barra negra que llega con el título pequeño.
+/// Lo que llega a la barra de navegación cuando la hoja sube: una barra negra (el saldo grande ya no se ve debajo) y,
+/// centrado en ella, el título pequeño. Va dibujado en la zona de la barra del sistema (que aquí es transparente), justo
+/// encima del contenido; no recibe toques (los botones de la barra siguen siendo los del sistema).
 private struct BankHeaderBar: View {
     let scroll: BankHeaderScroll
+    let title: String
+    let balanceCents: Int?
+    let hidden: Bool
+    let reduce: Bool
 
     var body: some View {
-        Color.black
-            .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5) }
-            .frame(height: 0.5)
-            .ignoresSafeArea(edges: .top)
-            .opacity(BankHeaderMath.barOpacity(scroll.progress))
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        GeometryReader { geo in
+            let inset = geo.safeAreaInsets.top
+            ZStack(alignment: .bottom) {
+                Color.black
+                    .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5) }
+                    .opacity(BankHeaderMath.barOpacity(scroll.progress))
+                    .accessibilityHidden(true)
+                BankMiniTitle(scroll: scroll, title: title, balanceCents: balanceCents, hidden: hidden, reduce: reduce)
+                    .frame(height: 44)
+                    // Sitio para el botón de volver a la izquierda (y lo mismo a la derecha, para quedar centrado).
+                    .padding(.horizontal, 76)
+            }
+            .frame(width: geo.size.width, height: inset)
+            .offset(y: -inset)
+        }
+        .allowsHitTesting(false)
     }
 }
 

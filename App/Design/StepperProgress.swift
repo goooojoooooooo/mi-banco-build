@@ -94,8 +94,7 @@ struct StepperProgress: View {
             .animation(motion.calmAnimation(.enter), value: caption)
             if let percent {
                 StepPercentText(percent: percent, since: since, stepNumber: min(current, steps.count - 1) + 1,
-                                stepCount: steps.count)
-                    .accessibilityIdentifier(identifier.map { "\($0)-percent" } ?? "")
+                                stepCount: steps.count, identifier: identifier.map { "\($0)-percent" } ?? "")
             }
         }
     }
@@ -239,6 +238,8 @@ struct StepPercentText: View {
     let since: Date
     let stepNumber: Int
     let stepCount: Int
+    /// Para las pruebas: va en el propio texto (un identificador puesto por fuera se lo quedaría el contenedor).
+    var identifier = ""
 
     @Environment(\.motion) private var motion
 
@@ -272,6 +273,7 @@ struct StepPercentText: View {
                 .animation(motion.reduce ? motion.fade : nil, value: value)
                 .accessibilityLabel("Paso \(stepNumber) de \(stepCount), \(value) por ciento")
                 .accessibilityAddTraits(.updatesFrequently)
+                .accessibilityIdentifier(identifier)
         }
     }
 }

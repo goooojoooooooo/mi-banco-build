@@ -432,14 +432,13 @@ final class MotionScreensTests: XCTestCase {
     /// Con la letra en XXXL (el tamaño más grande que no es de accesibilidad) e importes de cuatro y cinco cifras, la
     /// cabecera de Suscripciones salta de línea: no se sale del ancho de la pantalla ni se recorta. Deja una captura.
     func testSubscriptionsHeaderWrapsAtXXXL() throws {
-        openGasto(["-MiBancoDemoBigSubscriptions",
-                   "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryExtraExtraExtraLarge"])
+        openGasto(["-MiBancoDemoBigSubscriptions", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryXXXL"])
         let link = element("gasto.suscripciones")
         scrollDown(to: link)
         link.tap()
         let totals = element("suscripciones.total")
         XCTAssertTrue(totals.waitForExistence(timeout: 8), "No se ve Suscripciones")
-        XCTAssertNotNil(totals.label.range(of: #"^[0-9]\.[0-9]{3},[0-9]{2} euros al mes, [0-9]{2}\.[0-9]{3},[0-9]{2} euros al año$"#,
+        XCTAssertNotNil(totals.label.range(of: #"^[0-9]{2}\.[0-9]{3},[0-9]{2} euros al mes, [0-9]{3}\.[0-9]{3},[0-9]{2} euros al año$"#,
                                            options: .regularExpression), "La demo no trae los importes largos: \(totals.label)")
         Thread.sleep(forTimeInterval: 2)
         let screen = app.frame
@@ -581,7 +580,7 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(balance.label.hasSuffix(" euros"), "El saldo no dice su importe: \(balance.label)")
         let spoken = balance.label.replacingOccurrences(of: "Saldo de Revolut: ", with: "")
         let mini = element("bank-mini-title")
-        XCTAssertFalse(mini.exists, "El título pequeño ya está en la barra con la hoja abajo")
+        XCTAssertFalse(mini.exists, "El título pequeño ya está en la barra con la hoja abajo: \(mini.exists ? mini.debugDescription : "")")
         XCTAssertTrue(app.staticTexts["Actualizado hace 5 min · exacto"].exists, "Falta el estado del banco en la cabecera")
         XCTAssertTrue(app.buttons["Actualizar ahora"].isHittable, "Falta «Actualizar ahora»")
         XCTAssertTrue(app.buttons["bank-import-statement"].isHittable, "Falta «Importar extracto»")
@@ -598,7 +597,9 @@ final class MotionScreensTests: XCTestCase {
         // Sube la hoja: el título pequeño se acopla y el saldo grande ya no se ve.
         drag(from: 0.72, to: 0.18)
         XCTAssertTrue(mini.waitForExistence(timeout: 5), "Al subir la hoja no aparece el título pequeño")
-        XCTAssertTrue(waitFor(hittable, mini, timeout: 5), "El título pequeño no está a la vista")
+        // Va en la barra de arriba: por encima de donde estaba el saldo grande y dentro de la pantalla.
+        XCTAssertLessThan(mini.frame.maxY, 130, "El título pequeño no está en la barra: \(mini.frame)")
+        XCTAssertGreaterThan(mini.frame.minY, 30, "El título pequeño queda bajo la barra de estado: \(mini.frame)")
         XCTAssertEqual(mini.label, "Revolut, \(spoken)", "El título pequeño no dice banco y saldo")
         XCTAssertFalse(balance.exists && balance.isHittable, "El saldo grande sigue a la vista bajo el título pequeño")
 
@@ -786,7 +787,7 @@ final class MotionScreensTests: XCTestCase {
             XCTAssertLessThan(now.step, 3, "El tercer paso empezó antes de la vista previa")
             early.insert(now.step)
         }
-        XCTAssertTrue(early.contains(1), "No se vio el paso «Leer» en marcha: \(early.sorted())")
+        XCTAssertTrue(early.contains(1), "No se vio el paso «Leer» en marcha: \(early.sorted()) · etiqueta: \(percent.label)")
         XCTAssertFalse(summary.exists, "La vista previa salió antes de terminar los pasos")
         XCTAssertFalse(confirm.exists, "«Importar» salió antes de terminar los pasos")
 

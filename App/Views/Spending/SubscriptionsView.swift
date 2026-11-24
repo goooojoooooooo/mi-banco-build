@@ -10,11 +10,11 @@ struct SubscriptionsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var errorTick = 0
 
-    /// Solo en la demo con `-MiBancoDemoBigSubscriptions`: la cabecera enseña importes cien veces mayores (cuatro y cinco
+    /// Solo en la demo con `-MiBancoDemoBigSubscriptions`: la cabecera enseña importes mil veces mayores (cinco y seis
     /// cifras), para comprobar que salta de línea en vez de salirse. En la app de verdad, 1.
     private static var headerScale: Int {
         #if DEBUG
-        if DemoMode.isActive, DemoMode.bigSubscriptionTotals { return 100 }
+        if DemoMode.isActive, DemoMode.bigSubscriptionTotals { return 1_000 }
         #endif
         return 1
     }

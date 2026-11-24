@@ -13,7 +13,7 @@ extension DemoMode {
     /// y la etiqueta «HOY» necesita una para verse). Solo cambia la fila de Suscripciones, no el libro.
     static var chargesToday: Bool { arguments.contains("-MiBancoDemoChargeToday") }
 
-    /// `-MiBancoDemoBigSubscriptions`: la cabecera de Suscripciones enseña sus dos importes multiplicados por cien
+    /// `-MiBancoDemoBigSubscriptions`: la cabecera de Suscripciones enseña sus dos importes multiplicados por mil
     /// (solo lo que se dibuja, no el libro), para probar que con importes largos y letra grande salta de línea.
     static var bigSubscriptionTotals: Bool { arguments.contains("-MiBancoDemoBigSubscriptions") }
 

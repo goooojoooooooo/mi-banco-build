@@ -16,7 +16,7 @@ struct LockView: View {
         VStack(spacing: 0) {
             Spacer()
             AppMark(size: 76, drawn: drawn)
-            Text("Mi Banco")
+            Text(AppIdentity.displayName)
                 .titan(.sheetTitle)
                 .foregroundStyle(Theme.label)
                 .padding(.top, Theme.Space.gutter)

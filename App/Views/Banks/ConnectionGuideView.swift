@@ -141,7 +141,7 @@ struct ConnectionGuideView: View {
     private var stepTwoCard: some View {
         guideCard(
             title: "Registra la app",
-            bodyText: "En «API applications», elige Production, ponle de nombre Mi Banco y pega esta dirección en «Redirect URLs». Luego, Register: se descargará un archivo .pem."
+            bodyText: "En «API applications», elige Production, ponle de nombre \(AppIdentity.displayName) y pega esta dirección en «Redirect URLs». Luego, Register: se descargará un archivo .pem."
         ) {
             Text(BankingConstants.redirectURL.absoluteString)
                 .titan(.meta)

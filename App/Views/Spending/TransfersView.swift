@@ -1,7 +1,7 @@
 import SwiftUI
 import MiBancoCore
 
-/// «Traspasos entre tus cuentas»: los pagos y los ingresos que Mi Banco ha emparejado como dinero que solo cambia de
+/// «Traspasos entre tus cuentas»: los pagos y los ingresos que la app ha emparejado como dinero que solo cambia de
 /// banco. No cuentan como gasto ni como ingreso. Tocar uno abre su detalle.
 struct TransfersView: View {
     let model: LedgerModel

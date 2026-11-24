@@ -16,9 +16,9 @@ import MiBancoCore
 enum DemoMode {
     enum Screen { case home, spending, alerts, settings }
 
-    private static var arguments: [String] { ProcessInfo.processInfo.arguments }
+    static var arguments: [String] { ProcessInfo.processInfo.arguments }
 
-    private static func value(after flag: String) -> String? {
+    static func value(after flag: String) -> String? {
         let args = arguments
         guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
         return args[i + 1]
@@ -382,6 +382,30 @@ enum DemoMode {
     /// `-MiBancoDemoRules`: en Avisos, se desplaza hasta "Qué quieres que te avise".
     static var showsAlertRules: Bool { arguments.contains("-MiBancoDemoRules") }
     static var startsPrivate: Bool { arguments.contains("-MiBancoDemoPrivate") }
+
+    // MARK: Grabación del movimiento (leído una sola vez al arrancar; nada de esto existe en Release)
+
+    /// `-MiBancoMotionScale <n>`: multiplica la duración de toda animación del kit por n (4 = a un cuarto de velocidad, para
+    /// las ráfagas de fotogramas). Un valor que no sea un número finito mayor que 0 se ignora; se acota a 0,05…50.
+    static let motionScale: Double = parseMotionScale(ProcessInfo.processInfo.arguments)
+
+    /// `-MiBancoMotionLevel <subtle|balanced|expressive>`: la intensidad de este arranque, por encima de la guardada.
+    static let motionLevelOverride: MotionLevel? = parseMotionLevel(ProcessInfo.processInfo.arguments)
+
+    /// `-MiBancoReduceMotion`: fuerza el camino de Reducir movimiento aunque el sistema lo tenga apagado.
+    static let forcesReduceMotion: Bool = ProcessInfo.processInfo.arguments.contains("-MiBancoReduceMotion")
+
+    static func parseMotionScale(_ arguments: [String]) -> Double {
+        guard let i = arguments.firstIndex(of: "-MiBancoMotionScale"), i + 1 < arguments.count,
+              let n = Double(arguments[i + 1]), n.isFinite, n > 0 else { return 1 }
+        return min(max(n, 0.05), 50)
+    }
+
+    static func parseMotionLevel(_ arguments: [String]) -> MotionLevel? {
+        guard let i = arguments.firstIndex(of: "-MiBancoMotionLevel"), i + 1 < arguments.count else { return nil }
+        return MotionLevel(rawValue: arguments[i + 1])
+    }
+
     static var searchQuery: String? { value(after: "-MiBancoDemoSearch") }
 
     /// `-MiBancoDemoArrival`: ~4 s tras arrancar entra un pago nuevo por el mismo camino que un intent real.

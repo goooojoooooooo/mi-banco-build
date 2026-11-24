@@ -102,6 +102,9 @@ struct MovementRowView: View {
                         .lineLimit(1)
                         .fixedSize()
                         .privateAmount()
+                        // Apunta dónde está el importe en pantalla: el del detalle sale volando desde aquí. Solo
+                        // apunta el marco (no cambia el diseño ni los toques) y se lee al tocar la fila, nunca al dibujar.
+                        .detailAmountSource(id: movement.id)
                     if isFresh && movement.amountCents > 0 {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 17, weight: .semibold))
@@ -187,7 +190,7 @@ private struct LogoTaskID: Equatable {
     let downloads: Bool
 }
 
-/// Aviso con importe que Mi Banco no supo leer: tus cifras pueden no estar al día, así que se ve como una fila.
+/// Aviso con importe que la app no supo leer: tus cifras pueden no estar al día, así que se ve como una fila.
 /// Muestra su texto (2 líneas, se amplía al tocar) y se borra con la ✕.
 struct UnreadRowView: View {
     let notice: UnreadNotice

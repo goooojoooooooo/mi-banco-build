@@ -18,7 +18,7 @@ struct PositionRows: View {
             .padding(.top, 18)
             .padding(.bottom, 6)
             .accessibilityAddTraits(.isHeader)
-            .staggeredEntrance(3, listIndex: 0)
+            .homeEntrance(.row(0))
 
         ForEach(Array(summary.positions.enumerated()), id: \.element.id) { index, value in
             PositionRowView(
@@ -26,7 +26,7 @@ struct PositionRows: View {
                 isLast: index == summary.positions.count - 1,
                 onOpen: { onOpen(value.position.instrument) }
             )
-            .staggeredEntrance(4 + index, listIndex: 1 + index)
+            .homeEntrance(.row(1 + index))
         }
     }
 }

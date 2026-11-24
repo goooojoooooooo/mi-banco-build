@@ -25,7 +25,7 @@ struct OnboardingBalancesStep: View {
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
 
-                        Text("Escribe lo que tienes ahora en cada banco. Mi Banco lo irá actualizando.")
+                        Text("Escribe lo que tienes ahora en cada banco. \(AppIdentity.displayName) lo irá actualizando.")
                             .titan(.callout)
                             .foregroundStyle(Theme.label2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -174,7 +174,7 @@ struct OnboardingAlertsStep: View {
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
 
-                        Text("Para enterarte de cada pago, enseña a tu iPhone a pasarle los avisos a Mi Banco. Te guiamos paso a paso para cada banco.")
+                        Text("Para enterarte de cada pago, enseña a tu iPhone a pasarle los avisos a \(AppIdentity.displayName). Te guiamos paso a paso para cada banco.")
                             .titan(.callout)
                             .foregroundStyle(Theme.label2)
                             .fixedSize(horizontal: false, vertical: true)

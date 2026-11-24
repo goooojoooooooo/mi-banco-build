@@ -37,6 +37,9 @@ private struct AppShellView: View {
     @State private var launching = true
     /// Sube cuando Inicio debe montarse por capas (tras la marca del arranque y al desbloquear).
     @State private var revealToken = 0
+    /// Costura de movimiento (F1): dónde está la ranura de la marca en Inicio. Vive aquí, por encima del bloqueo, el telón
+    /// y `RootView`, para que todos vean el mismo objeto.
+    @State private var launchAnchor = LaunchAnchor()
     @AppStorage("lockEnabled") private var lockEnabled = true
     @Environment(\.scenePhase) private var scenePhase
 
@@ -88,6 +91,7 @@ private struct AppShellView: View {
                     privacyCover
                 }
             }
+            .environment(\.launchAnchor, launchAnchor)
             // Respaldo del telón: pase lo que pase con su animación, a los 1,5 s Inicio está a la vista.
             .task {
                 try? await Task.sleep(for: .milliseconds(1_500))

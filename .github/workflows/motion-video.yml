@@ -3,6 +3,10 @@ run-name: motion-video ${{ github.ref_name }}
 on:
   workflow_dispatch:
     inputs:
+      tour_class:
+        description: "Clases de recorrido a grabar, separadas por espacios o comas (por defecto las cuatro; un flujo graba solo la suya)"
+        type: string
+        default: "MotionTourTests MotionTourHomeTests MotionTourScreensTests MotionTourShellTests"
       runner:
         description: "Runner macOS (por defecto Namespace Apple silicon)"
         type: string
@@ -43,6 +47,8 @@ jobs:
             echo "El simulador no arranco en 10 minutos"
             exit 1
           fi
+      - name: Autoprueba de la agrupacion de fotogramas (cada comprobacion tiene que poder fallar)
+        run: python3 -I .github/scripts/motion_sheets.py selftest
       - name: Compilar para pruebas
         run: |
           mkdir -p build
@@ -50,6 +56,24 @@ jobs:
             -destination "id=$UDID" -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO > build/compile.log 2>&1 \
             || { grep -E "error:" build/compile.log | sort -u | head -n 40; tail -n 40 build/compile.log; exit 1; }
           tail -n 5 build/compile.log
+      - name: Elegir las clases de recorrido
+        env:
+          TOUR_CLASS: ${{ inputs.tour_class }}
+        run: |
+          CLASSES="$(echo "${TOUR_CLASS:-MotionTourTests MotionTourHomeTests MotionTourScreensTests MotionTourShellTests}" | tr ',' ' ')"
+          ONLY=""
+          LIST=""
+          for c in $CLASSES; do
+            case "$c" in
+              *[!A-Za-z0-9_]*) echo "tour_class solo admite letras, numeros y _ : $c"; exit 1 ;;
+            esac
+            ONLY="$ONLY -only-testing:MiBancoUITests/$c"
+            LIST="$LIST $c"
+          done
+          if [ -z "$LIST" ]; then echo "tour_class vacio"; exit 1; fi
+          echo "Clases: $LIST"
+          echo "TOUR_ONLY=$ONLY" >> "$GITHUB_ENV"
+          echo "TOUR_LIST=$LIST" >> "$GITHUB_ENV"
       - name: Grabar el recorrido
         run: |
           set +e
@@ -58,7 +82,7 @@ jobs:
           sleep 4
           xcodebuild test-without-building -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/tour.xcresult \
-            -only-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/tour.log 2>&1
+            $TOUR_ONLY CODE_SIGNING_ALLOWED=NO > build/tour.log 2>&1
           echo "$?" > build/status.txt
           # Arranque en frio real (sin la espera de reposo de las pruebas): se ve el telon y el montaje por capas.
           sleep 2
@@ -87,9 +111,59 @@ jobs:
           fi
           test -s build/tour.mp4
           test "$(cat build/status.txt)" = "0"
+      # Sin verde en silencio: cada clase elegida tiene que haber ejecutado al menos una prueba.
+      - name: Comprobar que cada clase ejecuto pruebas
+        run: |
+          FAIL=0
+          for c in $TOUR_LIST; do
+            N=$(grep -cE "^Test [Cc]ase .*MiBancoUITests\.$c[ .].* (passed|failed)" build/tour.log || true)
+            echo "$c: $N pruebas ejecutadas"
+            if [ "${N:-0}" -lt 1 ]; then echo "La clase $c no ejecuto ninguna prueba (nombre mal escrito o sin pruebas)"; FAIL=1; fi
+          done
+          test "$FAIL" = "0"
+      - name: Exportar los fotogramas del xcresult
+        run: |
+          mkdir -p build/attachments
+          xcrun xcresulttool export attachments --help || true
+          xcrun xcresulttool export attachments --path build/tour.xcresult --output-path build/attachments
+          ls build/attachments | head -n 20
+          test -f build/attachments/manifest.json
+      - name: Hojas de contacto
+        run: |
+          if ! which ffmpeg; then brew install ffmpeg; fi
+          ffmpeg -version | head -n 1
+          mkdir -p build/frames build/sheets
+          # Agrupa por rafaga y falla si falta un fotograma, sobra uno, o una clase elegida no dejo ninguna rafaga.
+          python3 -I .github/scripts/motion_sheets.py group --attachments build/attachments --frames build/frames --classes "$TOUR_LIST"
+          for dir in build/frames/*/; do
+            name=$(basename "$dir")
+            n=$(ls "$dir"/f*.png | wc -l | tr -d ' ')
+            cols=8; if [ "$n" -lt 8 ]; then cols=$n; fi
+            rows=$(( (n + 7) / 8 ))
+            ffmpeg -y -loglevel error -framerate 1 -i "$dir/f%03d.png" \
+              -vf "scale=330:-1,tile=${cols}x${rows}:padding=4:margin=4:color=0x303030" -frames:v 1 "build/sheets/$name.png"
+            cp "$dir/times.txt" "build/sheets/$name.times.txt"
+          done
+          ls -l build/sheets
+          # Una hoja por rafaga, ni una menos ni una mas.
+          python3 -I .github/scripts/motion_sheets.py verify --frames build/frames --sheets build/sheets
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: motion
+          path: build/sheets
+          if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: motion-tour
           path: build/tour.mp4
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: motion-debug
+          path: |
+            build/tour.log
+            build/attachments/manifest.json
+          if-no-files-found: ignore

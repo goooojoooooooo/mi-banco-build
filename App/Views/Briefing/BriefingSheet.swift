@@ -149,12 +149,12 @@ struct BriefingSheet: View {
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
                     AppMark(size: 28)
-                    Text("Onyx")
+                    Text(AppIdentity.displayName)
                         .titan(.captionStrong)
                         .foregroundStyle(Theme.label2)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("Onyx")
+                .accessibilityLabel(AppIdentity.displayName)
 
                 Spacer(minLength: 8)
 

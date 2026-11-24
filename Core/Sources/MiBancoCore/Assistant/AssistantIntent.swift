@@ -1617,7 +1617,7 @@ func routeAssistantQuestionWithoutAdviceGate(_ question: String, state: LedgerSt
 /// Instrucciones al modelo del dispositivo: solo clasifica la pregunta en una intención y sus parámetros. Nunca escribe texto
 /// que vea el dueño ni recibe datos bancarios.
 public let assistantRoutingInstructions =
-    "Eres el clasificador de preguntas de Onyx. No respondas al usuario ni escribas explicaciones ni cifras. "
+    "Eres el clasificador de preguntas de \(appDisplayName). No respondas al usuario ni escribas explicaciones ni cifras. "
     + "Devuelve una sola línea con una intención exacta y, si aplica, parámetros clave=valor separados por espacios. "
     + "Intenciones: SALDO, GASTO, MAYORES_PAGOS, SUSCRIPCIONES, PROXIMOS_COBROS, PRESUPUESTOS, INGRESOS, TRASPASOS, "
     + "DINERO_LIBRE, INVERSIONES, RESUMEN, CONSEJO, DESCONOCIDO. "

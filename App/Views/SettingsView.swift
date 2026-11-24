@@ -74,6 +74,20 @@ struct SettingsView: View {
             TimelineView(.everyMinute) { _ in
                 let now = AppClock.now
                 Form {
+                    // Avisos va primero: los avisos al instante son lo primero que pidió el dueño, y la guía se encuentra
+                    // sin deslizar.
+                    Section {
+                        NavigationLink {
+                            AlertsGuideView(model: model)
+                        } label: {
+                            OptionLabel(title: "Avisos al instante", detail: "Guía de 2 minutos y aviso de prueba", systemImage: "bolt")
+                        }
+                        .accessibilityIdentifier("settings-alerts-guide")
+                        .listRowBackground(Theme.grouped)
+                    } header: {
+                        SettingsHeader("Avisos")
+                    }
+
                     Section {
                         ForEach(BankID.allCases, id: \.self) { bank in
                             Button {
@@ -126,7 +140,7 @@ struct SettingsView: View {
                     } header: {
                         SettingsHeader("Bancos")
                     } footer: {
-                        SettingsFooter("Mi Banco habla con tu banco a través de Enable Banking, desde este iPhone. Tu clave no sale de aquí.")
+                        SettingsFooter("\(AppIdentity.displayName) habla con tu banco a través de Enable Banking, desde este iPhone. Tu clave no sale de aquí.")
                     }
 
                     Section {
@@ -158,18 +172,6 @@ struct SettingsView: View {
                     SettingsFooter(model.state.links.isEmpty
                         ? "Toca un saldo para corregirlo. imagin y Trade Republic no envían el saldo en sus avisos, así que lo estimamos."
                         : "Los bancos conectados ponen su saldo solos. Trade Republic y los que no conectes se corrigen aquí.")
-                }
-
-                Section {
-                    NavigationLink {
-                        AlertsGuideView(model: model)
-                    } label: {
-                        OptionLabel(title: "Avisos al instante", detail: "Guía de 2 minutos y aviso de prueba", systemImage: "bolt")
-                    }
-                    .accessibilityIdentifier("settings-alerts-guide")
-                    .listRowBackground(Theme.grouped)
-                } header: {
-                    SettingsHeader("Avisos")
                 }
 
                 Section {
@@ -205,7 +207,7 @@ struct SettingsView: View {
                     SettingsHeader("Logos")
                 } footer: {
                     VStack(alignment: .leading, spacing: Theme.Space.gutter) {
-                        SettingsFooter("Mi Banco busca en internet el logo de las tiendas donde pagas y que no conoce. El servicio de logos ve la web de la tienda, nunca tus importes ni a quién envías dinero.")
+                        SettingsFooter("\(AppIdentity.displayName) busca en internet el logo de las tiendas donde pagas y que no conoce. El servicio de logos ve la web de la tienda, nunca tus importes ni a quién envías dinero.")
                         Text(diagnostics)
                             .titan(.caption)
                             .foregroundStyle(Theme.label3)

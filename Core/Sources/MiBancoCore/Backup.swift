@@ -61,7 +61,7 @@ public func portfolioAfterRestore(current: Portfolio, backup: BackupFile) -> Por
 }
 
 public enum BackupError: Error, Equatable, Sendable {
-    /// El fichero no es una copia de Mi Banco (otro JSON, texto cualquiera...).
+    /// El fichero no es una copia de esta app (otro JSON, texto cualquiera...).
     case notABackup
     /// La copia viene de una versión más nueva de la app: no se toca nada.
     case newerVersion(Int)

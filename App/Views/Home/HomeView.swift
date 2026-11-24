@@ -31,8 +31,13 @@ struct HomeView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    /// Intensidad, Reducir movimiento y cámara lenta (el montaje por capas sale de aquí).
+    @Environment(\.motion) private var kit
 
     @State private var motion = HomeMotion()
+    /// La inclinación del teléfono que mueve la tarjeta de delante y su brillo. Solo lee los sensores mientras
+    /// `tiltRuns` (Inicio a la vista, app activa, efectos ricos); en cuanto deja de cumplirse, se para.
+    @State private var tilt = MotionTilt()
     /// La tarjeta del carrusel (y del segmentado).
     @State private var selection: AccountCard? = .all
     /// La lista que se ve: cambia tras el fundido de salida, para que la nueva entre escalonada.
@@ -59,6 +64,14 @@ struct HomeView: View {
         let entries = snapshot.list(for: snapshot.total == nil ? .all : activeListCard)
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                // El título va con el contenido (se desliza bajo la barra); al buscar, deja su sitio a los resultados.
+                if !searching {
+                    HomeTitle()
+                        .homeEntrance(.title)
+                        // Por encima del carrusel: una tarjeta que se voltea o se levanta pasa por detrás del título,
+                        // que se lee siempre entero.
+                        .zIndex(1)
+                }
                 if searching {
                     SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains,
                                   ownTransfers: snapshot.ownTransfers, query: query, zoom: zoom, onOpen: open)
@@ -70,8 +83,9 @@ struct HomeView: View {
                                  onEdit: openSettings,
                                  onOpenBank: openBankSettings,
                                  onImportInvestments: openInvestmentsSettings)
-                        .modifier(CarouselParallax(motion: motion, enabled: !reduceMotion))
-                        .staggeredEntrance(1, rise: 36, scale: 0.97)
+                        .environment(\.cardTilt, tilt)
+                        .modifier(CarouselParallax(motion: motion, enabled: !kit.reduce))
+                        .homeEntrance(.carousel)
                         .padding(.top, 2)
                     Section {
                         if activeListCard == .investments, let summary = portfolio.summary {
@@ -88,7 +102,7 @@ struct HomeView: View {
                                 onOpenAccounts: openAccounts
                             )
                             .opacity(listHidden ? 0 : 1)
-                            .staggeredEntrance(3, listIndex: 0)
+                            .homeEntrance(.row(0))
 
                             PendingMoveBanner(
                                 moves: visiblePendingMoves(for: activeListCard),
@@ -105,11 +119,11 @@ struct HomeView: View {
                             WeekBlock(card: activeListCard, week: snapshot.weeks[activeListCard] ?? WeekSpend(), pace: snapshot.pace,
                                       balance: activeListCard.bank.flatMap { snapshot.balances[$0] })
                                 .opacity(listHidden ? 0 : 1)
-                                .staggeredEntrance(4, listIndex: 1)
+                                .homeEntrance(.row(1))
                             ForEach(entries) { entry in
                                 row(entry, snapshot: snapshot)
                                     .opacity(listHidden ? 0 : 1)
-                                    .staggeredEntrance(5 + entry.order, listIndex: 2 + entry.order)
+                                    .homeEntrance(.row(2 + entry.order))
                             }
                             if entries.isEmpty {
                                 Text("Aún no hay movimientos en esta cuenta.")
@@ -124,7 +138,7 @@ struct HomeView: View {
                             .padding(.top, 12)
                             .padding(.bottom, 4)
                             .background(Theme.canvas)
-                            .staggeredEntrance(2)
+                            .homeEntrance(.segments)
                     }
                 } else {
                     HomeEmptyState(openSettings: { openSettings(nil) })
@@ -145,8 +159,8 @@ struct HomeView: View {
             motion.listOffset = offset
         }
         .safeAreaInset(edge: .top, spacing: 0) {
+            // Sus piezas (marca y botones de cristal) entran cada una a su tiempo: ver `HomeEntrance`.
             HomeTopBar(searching: $searching, query: $query, motion: motion, openBriefing: openBriefing)
-                .staggeredEntrance(0, rise: 0)
         }
         .background(Theme.canvas.ignoresSafeArea())
         .overlay(alignment: .top) {
@@ -209,6 +223,11 @@ struct HomeView: View {
         .onChange(of: searching) { _, on in
             if !on { query = "" }
         }
+        // La inclinación solo se lee con Inicio a la vista de verdad; en cualquier otro caso los sensores se paran.
+        .onChange(of: tiltRuns, initial: true) { _, runs in
+            if runs { tilt.start() } else { tilt.stop() }
+        }
+        .onDisappear { tilt.stop() }
         .task(id: snapshot.logoDomains.count) {
             await logos.prewarm(domains: Array(Set(snapshot.logoDomains.values)))
         }
@@ -226,6 +245,12 @@ struct HomeView: View {
         }
         return ListEntryView(entry: entry, logoDomain: domain, isFresh: fresh, zoom: zoom,
                              onOpen: open, onDeleteUnread: deleteUnread)
+    }
+
+    /// Cuándo se leen los sensores de inclinación: Inicio delante (ni otra pestaña ni el bloqueo), la app activa, sin
+    /// búsqueda ni hoja encima, y con efectos ricos (ni Reducir movimiento ni Bajo consumo).
+    private var tiltRuns: Bool {
+        isVisible && scenePhase == .active && !searching && !detailOpen && kit.richEffects
     }
 
     // MARK: - Lista que sigue a la tarjeta
@@ -264,17 +289,23 @@ struct HomeView: View {
 
     // MARK: - Montaje y llegada
 
-    /// Al arrancar y al desbloquear: barra, carrusel, segmentado, resumen y filas, por capas (≤ 1,2 s).
+    /// Al arrancar y al desbloquear: marca y botones, título, carrusel, segmentado, resumen y filas, por capas (ver
+    /// `HomeEntrance`). Con Reducir movimiento también, pero como un fundido sin recorrido.
     private func assemble() {
-        guard !reduceMotion, !searching else { return }
+        guard !searching else { return }
         beginEntrance(.assembly)
     }
 
+    /// Abre la ventana de una entrada. Mientras está abierta, las piezas esperan su turno; al cerrarse, todo lo que
+    /// aparezca después (filas que entran al bajar la lista) ya está en su sitio. La ventana dura lo que la entrada
+    /// más larga con la intensidad y la cámara lenta de `\.motion` (1,4 s en Equilibrado), así que una grabación a
+    /// cámara lenta no corta la entrada a medias.
     private func beginEntrance(_ scope: Entrance.Scope) {
         let token = entrance.token + 1
         entrance = Entrance(token: token, active: true, scope: scope)
+        let window = kit.seconds(1.4)
         Task {
-            try? await Task.sleep(for: .seconds(1.4))
+            try? await Task.sleep(for: .seconds(window))
             if entrance.token == token { entrance.active = false }
         }
     }

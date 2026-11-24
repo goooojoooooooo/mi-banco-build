@@ -10,7 +10,7 @@ struct InvestmentsSection: View {
     static let scrollID = "inversiones"
 
     private static let pricesExplanation =
-        "Para saber cuánto valen tus inversiones, Mi Banco pregunta a Yahoo Finance el precio de cada valor usando solo su código. No envía cuántas acciones tienes, ni importes, ni tu nombre. Si lo apagas, puedes poner los precios a mano."
+        "Para saber cuánto valen tus inversiones, \(AppIdentity.displayName) pregunta a Yahoo Finance el precio de cada valor usando solo su código. No envía cuántas acciones tienes, ni importes, ni tu nombre. Si lo apagas, puedes poner los precios a mano."
 
     private static let exportHint =
         "Cómo exportar: en Trade Republic, Perfil › Extractos › Exportar transacciones › Guardar en Archivos. Si ya importaste el extracto en Bancos, tus inversiones ya están."

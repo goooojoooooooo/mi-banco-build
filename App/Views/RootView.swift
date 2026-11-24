@@ -328,9 +328,9 @@ struct RootView: View {
             do {
                 sheet = .restore(try BackupService.preview(url, current: model.state))
             } catch BackupError.notABackup {
-                showImportNotice("Ese fichero no es una copia de Mi Banco.")
+                showImportNotice("Ese fichero no es una copia de \(AppIdentity.displayName).")
             } catch BackupError.newerVersion {
-                showImportNotice("Esa copia es de una versión más nueva de Mi Banco.")
+                showImportNotice("Esa copia es de una versión más nueva de \(AppIdentity.displayName).")
             } catch {
                 showImportNotice("No se pudo leer ese fichero.")
             }

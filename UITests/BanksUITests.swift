@@ -5,9 +5,10 @@ final class BanksUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private func launch(_ extra: [String]) -> XCUIApplication {
+    private func launch(_ extra: [String], environment: [String: String] = [:]) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-MiBancoDemo"] + extra + ["-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
+        app.launchEnvironment.merge(environment) { _, new in new }
         app.launch()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         for name in ["Permitir", "Allow"] {
@@ -146,27 +147,18 @@ final class BanksUITests: XCTestCase {
         XCTAssertTrue(refreshed.waitForExistence(timeout: 10), "U13: Actualizar no pasó a «Actualizado» tras el toque")
     }
 
-    /// U45: Ajustes › Bancos calcula «Actualizado hace…» en vivo (240 min → «hace 4 h»).
+    /// U45: Ajustes › Bancos calcula «Actualizado hace…» en vivo (240 min → «hace 4 h»). M1: el día de la demo va fijado
+    /// (`-MiBancoDemoToday`, a las 12:00) y la app corre en la hora de Madrid, así que hace 4 h son las 8:00 del mismo día
+    /// a cualquier hora en que se lance la prueba: la fila dice siempre «hace 4 h» (antes, entre las 0:00 y las 4:00 de
+    /// Madrid, salía «ayer a las …»).
     func testBankRowTimeIsLive() {
-        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoBankSyncAgo", "240"])
-        // Entre las 00:00 y las 04:00 de Madrid, hace 4 h fue ayer y la regla dice «ayer a las …» (no «hace 4 h»).
-        let row = Self.sameMadridDay(minutesAgo: 240)
-            ? app.staticTexts.matching(NSPredicate(format: "label == %@", "Actualizado hace 4 h · exacto")).firstMatch
-            : app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@ AND label ENDSWITH %@",
-                                                   "Actualizado ayer a las ", " · exacto")).firstMatch
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoBankSyncAgo", "240",
+                          "-MiBancoDemoToday", "2026-02-28"], environment: ["TZ": "Europe/Madrid"])
+        let row = app.staticTexts.matching(NSPredicate(format: "label == %@", "Actualizado hace 4 h · exacto")).firstMatch
         XCTAssertTrue(
             row.waitForExistence(timeout: 15),
-            "U45: la fila de Revolut debe mostrar «Actualizado hace 4 h · exacto» (o «ayer a las …» de madrugada)"
+            "U45: la fila de Revolut debe mostrar «Actualizado hace 4 h · exacto»"
         )
-    }
-
-    /// ¿`minutesAgo` minutos antes de ahora sigue siendo hoy en Madrid? (la regla de «hace N h» solo vale el mismo día).
-    private static func sameMadridDay(minutesAgo: Int) -> Bool {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "Europe/Madrid") ?? .current
-        let now = Date()
-        // Un minuto de margen por lo que tarda en arrancar la app.
-        return calendar.isDate(now.addingTimeInterval(Double(-minutesAgo - 1) * 60), inSameDayAs: now.addingTimeInterval(60))
     }
 
     /// U74 (B-M2) + U45: con la pantalla abierta, la fila cambia sola al pasar el minuto (59 min → 1 h). Con la línea guardada

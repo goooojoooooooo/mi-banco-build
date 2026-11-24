@@ -37,18 +37,28 @@ final class GuideUITests: XCTestCase {
         XCTAssertEqual(XCTWaiter().wait(for: [reached], timeout: 6), .completed, "\(message) (se esperaba «\(expected)»)")
     }
 
-    /// Ajustes creció con la unión #5 (Bancos, «Preparar conexión» y «Cuentas y contactos» van antes de Avisos): en un
-    /// iPhone pequeño la fila puede quedar fuera de la pantalla y una lista no crea las filas que no se ven.
+    /// «Avisos» es la primera sección de Ajustes: la fila de la guía se ve al abrir, sin deslizar.
     private func alertsGuideLink() -> XCUIElement {
-        XCTAssertTrue(app.buttons["settings-bank-rev"].waitForExistence(timeout: 15), "Ajustes no apareció")
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 15), "Ajustes no apareció")
         let link = app.buttons["settings-alerts-guide"]
-        var swipes = 0
-        while !(link.exists && link.isHittable) && swipes < 6 {
-            app.swipeUp()
-            swipes += 1
-        }
         XCTAssertTrue(link.waitForExistence(timeout: 5), "Ajustes no muestra «Avisos al instante»")
+        XCTAssertTrue(link.isHittable, "«Avisos al instante» no se puede tocar sin deslizar")
         return link
+    }
+
+    /// Avisos va lo primero en Ajustes (encima de Bancos y de «Cuentas y contactos»): la fila se ve y se toca nada más
+    /// abrir, sin deslizar, y abre la lista de guías.
+    func testAlertsRowIsFirstInSettings() throws {
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 15), "Ajustes no apareció")
+        let link = app.buttons["settings-alerts-guide"]
+        XCTAssertTrue(link.waitForExistence(timeout: 10), "Falta «Avisos al instante» en Ajustes")
+        XCTAssertTrue(link.isHittable, "«Avisos al instante» no se ve sin deslizar")
+        let bank = app.buttons["settings-bank-rev"]
+        XCTAssertTrue(bank.waitForExistence(timeout: 5), "Falta la fila de Revolut en Bancos")
+        // Bancos va antes que Saldos (donde está «Cuentas y contactos»): encima de Bancos es encima de las dos.
+        XCTAssertLessThan(link.frame.maxY, bank.frame.minY, "Avisos debe ir encima de Bancos")
+        link.tap()
+        XCTAssertTrue(app.buttons["guide-track-revolut"].waitForExistence(timeout: 5), "La fila no abrió la lista de guías")
     }
 
     private func openRevolutGuide() {

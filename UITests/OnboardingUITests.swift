@@ -169,6 +169,13 @@ final class OnboardingUITests: XCTestCase {
         }
 
         XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 15))
+        // El nombre visible es «Onyx» (rulings, RONDA 3/5 (b)): la bienvenida lo dice así, nunca con el nombre viejo.
+        XCTAssertTrue(
+            app.staticTexts["Escribe lo que tienes ahora en cada banco. Onyx lo irá actualizando."].exists,
+            "El paso 1 debe nombrar la app como «Onyx»"
+        )
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Mi Banco")).count, 0,
+                       "El paso 1 aún dice «Mi Banco»")
         let nextButton = app.buttons["onboarding-next-1"]
         XCTAssertTrue(nextButton.waitForExistence(timeout: 5))
         nextButton.tap()
@@ -177,6 +184,13 @@ final class OnboardingUITests: XCTestCase {
             app.staticTexts["Avisos al instante"].waitForExistence(timeout: 5),
             "U62: tras Seguir debe aparecer «Avisos al instante»"
         )
+        XCTAssertTrue(
+            app.staticTexts["Para enterarte de cada pago, enseña a tu iPhone a pasarle los avisos a Onyx. Te guiamos paso a paso para cada banco."]
+                .waitForExistence(timeout: 5),
+            "El paso 2 debe nombrar la app como «Onyx»"
+        )
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Mi Banco")).count, 0,
+                       "El paso 2 aún dice «Mi Banco»")
         XCTAssertTrue(
             app.buttons["Empezar la guía"].waitForExistence(timeout: 5),
             "U62: tras Seguir debe aparecer «Empezar la guía»"

@@ -38,6 +38,19 @@ final class TapSmokeTests: XCTestCase {
         return XCTWaiter().wait(for: [exp], timeout: timeout) == .completed
     }
 
+    /// La pantalla de bloqueo nombra la app como «Onyx» (rulings, RONDA 3/5 (b)), nunca con el nombre viejo.
+    func testLockShowsAppName() throws {
+        app.terminate()
+        // `-MiBancoDemoLockSeconds 12`: el bloqueo de demo dura lo bastante para mirarlo con calma.
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "12",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Desbloquear"].waitForExistence(timeout: 8), "Falta la pantalla de bloqueo")
+        XCTAssertTrue(app.staticTexts["Onyx"].exists, "El bloqueo debe decir «Onyx»")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Mi Banco")).count, 0,
+                       "El bloqueo aún dice «Mi Banco»")
+    }
+
     func testEyeTogglesPrivacy() throws {
         let hide = button("Ocultar importes")
         XCTAssertTrue(hide.waitForExistence(timeout: 5))

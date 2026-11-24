@@ -187,7 +187,7 @@ private struct LogoTaskID: Equatable {
     let downloads: Bool
 }
 
-/// Aviso con importe que Mi Banco no supo leer: tus cifras pueden no estar al día, así que se ve como una fila.
+/// Aviso con importe que la app no supo leer: tus cifras pueden no estar al día, así que se ve como una fila.
 /// Muestra su texto (2 líneas, se amplía al tocar) y se borra con la ✕.
 struct UnreadRowView: View {
     let notice: UnreadNotice

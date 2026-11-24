@@ -573,6 +573,36 @@ final class MotionShellTests: XCTestCase {
                       "«Te quedaban» no dice «importe oculto»")
     }
 
+    /// Lote 2 (2.5): con el ojo cerrado, abrir el detalle de un movimiento no monta NINGÚN texto con forma de importe:
+    /// ni el importe grande, ni «Te quedaban», ni el historial del comercio (que antes solo iba difuminado y las pruebas
+    /// lo leían). Inicio, debajo, aún tiene filas difuminadas de otra línea: por eso se cuenta cada cadena con forma de
+    /// importe antes y después de abrir la hoja, y ninguna puede aparecer ni repetirse más veces.
+    func testMovementDetailMountsNoAmountWithTheEyeClosed() throws {
+        launch(["-MiBancoDemoPrivate"])
+        waitForLaunchToEnd(30)
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
+        XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
+        func counts() -> [String: Int] {
+            var out: [String: Int] = [:]
+            for text in moneyStrings() { out[text, default: 0] += 1 }
+            return out
+        }
+        let before = counts()
+        row.tap()
+        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "No se abrió la hoja de detalle")
+        XCTAssertTrue(labelled("label == %@", "Te quedaban importe oculto").waitForExistence(timeout: 8),
+                      "«Te quedaban» no dice «importe oculto»")
+        // La hoja entera, también lo de más abajo (el historial del comercio).
+        app.swipeUp()
+        for pass in 0..<2 {
+            let after = counts()
+            for (text, times) in after where times > before[text, default: 0] {
+                XCTFail("Pasada \(pass): con el ojo cerrado el detalle monta «\(text)» (\(times) veces; antes de abrirlo, \(before[text, default: 0]))")
+            }
+        }
+    }
+
     /// La línea del total del resumen sigue leyéndose como UNA frase entera con su importe, aunque el importe ruede
     /// dentro, y es texto (no un botón nuevo ni nada tocable de más).
     func testBriefingTotalIsOneSentence() throws {

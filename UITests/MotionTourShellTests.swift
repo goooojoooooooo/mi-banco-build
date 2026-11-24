@@ -201,6 +201,9 @@ final class MotionTourShellTests: MotionTourCase {
         XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
         row.tap()
         burst("detail-amount-ojo", frames: 24, every: 0.33)
+        // Más abajo, el historial del comercio: con el ojo cerrado sus importes son máscaras, no cifras difuminadas.
+        app.swipeUp()
+        burst("detail-ojo-historial", frames: 2, every: 0.5)
     }
 
     /// El valor de una posición rueda al abrir su hoja.
@@ -208,6 +211,23 @@ final class MotionTourShellTests: MotionTourCase {
         launch(["-MiBancoDemoPosition"])
         XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 30), "No se abrió la hoja de la posición")
         burst("position-amount", frames: 12, every: 0.3)
+    }
+
+    /// La hoja de una posición con el ojo cerrado: el valor es la máscara y, más abajo, los datos y las operaciones
+    /// también (máscaras, no texto difuminado).
+    func testPositionWithTheEyeClosed() throws {
+        launch(["-MiBancoDemoPosition", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 30), "No se abrió la hoja de la posición")
+        burst("position-amount-ojo", frames: 6, every: 0.3)
+        app.swipeUp()
+        burst("position-ojo-abajo", frames: 2, every: 0.5)
+    }
+
+    /// El resumen con el ojo cerrado: ninguna cifra en ninguna línea.
+    func testBriefingWithTheEyeClosed() throws {
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 30), "La hoja del resumen no se abrió")
+        burst("briefing-total-ojo", frames: 8, every: 0.3)
     }
 
     /// El total del resumen rueda dentro de su frase.

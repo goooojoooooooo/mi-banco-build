@@ -187,6 +187,44 @@ extension View {
     func privateField(editing: Bool) -> some View { modifier(PrivateField(editing: editing)) }
 }
 
+/// El patrón de privacidad de la fase B para un importe (o una cantidad) que es texto: con el ojo cerrado el texto real
+/// NO se monta — se dibuja su máscara —, porque un texto que solo va difuminado (`.privateAmount()`) lo siguen leyendo
+/// las pruebas de toque y cualquier cliente de accesibilidad. Sin transición de contenido (la cifra no se funde con la
+/// máscara), marcado como dato privado, y VoiceOver dice «importe oculto».
+struct MaskedText: View {
+    /// El texto con el ojo abierto.
+    let shown: String
+    /// Lo que se dibuja con el ojo cerrado (no depende de las cifras).
+    let mask: String
+    /// Lo que dice VoiceOver con el ojo abierto.
+    let spoken: String
+    let hidden: Bool
+
+    /// Un importe en euros: «12,50 €» ↔ «•••,•• €».
+    init(cents: Int, sign: Bool = false, hidden: Bool) {
+        shown = sign ? signedEUR(cents) : formatEUR(cents).replacingOccurrences(of: "-", with: "−")
+        mask = maskedEUR(cents, sign: sign)
+        spoken = spokenAmount(cents, hidden: false)
+        self.hidden = hidden
+    }
+
+    /// Cualquier otro dato privado (un precio, unas acciones): la máscara es «•••,•• €» si el texto lleva «€» y
+    /// «•••» si no; `unit` se conserva detrás («••• acc.»).
+    init(_ shown: String, unit: String = "", spoken: String? = nil, hidden: Bool) {
+        self.shown = shown
+        mask = (shown.contains("€") ? "•••,••\u{00A0}€" : "•••") + unit
+        self.spoken = spoken ?? shown
+        self.hidden = hidden
+    }
+
+    var body: some View {
+        Text(hidden ? mask : shown)
+            .contentTransition(.identity)
+            .privacySensitive()
+            .accessibilityLabel(hidden ? "importe oculto" : spoken)
+    }
+}
+
 /// "340,20 euros" o "importe oculto": lo que dice VoiceOver de un importe según el modo privado.
 func spokenAmount(_ cents: Int, hidden: Bool) -> String {
     hidden ? "importe oculto" : formatEUR(cents).replacingOccurrences(of: "\u{00A0}€", with: " euros")

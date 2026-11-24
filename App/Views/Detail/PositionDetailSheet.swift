@@ -333,11 +333,11 @@ private struct PositionDetailContent: View {
             if !stacked { Spacer(minLength: 8) }
             Group {
                 if isSensitive {
-                    Text(text)
+                    // Con el ojo cerrado no se monta el dato: se dibuja su máscara.
+                    MaskedText(text, hidden: preferences.privateMode)
                         .fontWeight(.medium)
                         .foregroundStyle(tint)
                         .multilineTextAlignment(stacked ? .leading : .trailing)
-                        .privateAmount(spoken: text)
                 } else {
                     Text(text)
                         .fontWeight(.medium)
@@ -385,17 +385,15 @@ private struct PositionDetailContent: View {
             HStack(spacing: 6) {
                 Text("\(kind) ·")
                     .foregroundStyle(Theme.label)
-                Text(shares)
+                MaskedText(hidden ? "" : shares, unit: hidden ? " acc." : "", spoken: shares, hidden: hidden)
                     .foregroundStyle(Theme.label2)
-                    .privateAmount(spoken: shares)
                 Text("· \(day)")
                     .foregroundStyle(Theme.label2)
             }
             if !stacked { Spacer(minLength: 4) }
-            if let amount {
-                Text(amount)
+            if amount != nil {
+                MaskedText(cents: abs(op.cashCents), hidden: hidden)
                     .foregroundStyle(Theme.label)
-                    .privateAmount(spoken: spokenAmount(abs(op.cashCents), hidden: false))
             }
         }
         .titan(.subtitle)
@@ -438,9 +436,13 @@ private struct PositionDetailContent: View {
                         // El teclado decimal no tiene tecla de volver: «Hecho» solo quita el foco, no guarda (U75).
                         .toolbar {
                             ToolbarItemGroup(placement: .keyboard) {
-                                Spacer()
+                                // A la derecha con un marco flexible, no con un `Spacer()`: la barra del teclado se
+                                // maqueta primero con ancho cero y un `Spacer` ahí es el sospechoso del aviso de
+                                // ejecución «Invalid frame dimension» de las pruebas de inversiones (hipótesis: no
+                                // se ha podido confirmar la causa sin depurador).
                                 Button("Hecho") { priceFocused = false }
                                     .accessibilityIdentifier("manualPriceKeyboardDone")
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
 

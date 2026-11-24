@@ -70,6 +70,17 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout) { !self.element("launch-layer").exists }, "El arranque no terminó")
     }
 
+    /// Manda la app a segundo plano y la trae de vuelta. Espera a que el sistema diga que YA está en segundo plano (en un
+    /// simulador cargado tarda; con una pausa fija la app podía volver sin haber llegado a salir) y un segundo más.
+    private func sendToBackgroundAndReturn() {
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(waitUntil(15) { self.app.state == .runningBackground || self.app.state == .runningBackgroundSuspended },
+                      "La app no llegó a segundo plano")
+        Thread.sleep(forTimeInterval: 1.5)
+        app.activate()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+    }
+
     /// El carrusel es un único elemento de accesibilidad cuya etiqueta acaba en «N de 4».
     private func carousel() -> XCUIElement {
         app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", ".* [0-9] de 4$")).firstMatch
@@ -171,10 +182,7 @@ final class MotionShellTests: XCTestCase {
         waitForLaunchToEnd()
         XCTAssertTrue(waitUntil(10) { self.probe()["fin"] != "-" }, "El arranque en frío no llegó a terminar")
         XCTAssertEqual(probe()["arranques"], "1")
-        XCUIDevice.shared.press(.home)
-        Thread.sleep(forTimeInterval: 1.5)
-        app.activate()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+        sendToBackgroundAndReturn()
         for look in 0..<12 {
             XCTAssertFalse(element("launch-layer").exists, "Mirada \(look): el arranque se repitió al volver de segundo plano")
             XCTAssertFalse(element("launch-exit").exists, "Mirada \(look): la marca voló al volver de segundo plano")
@@ -194,10 +202,7 @@ final class MotionShellTests: XCTestCase {
         XCTAssertEqual(cold["bloqueoPiezas"], "1", "El bloqueo del arranque en frío no montó las piezas: \(cold)")
         XCTAssertEqual(cold["bloqueoQuieto"], "0")
         XCTAssertEqual(cold["salidas"], "1", "Tras desbloquear en frío la marca no voló: \(cold)")
-        XCUIDevice.shared.press(.home)
-        Thread.sleep(forTimeInterval: 1.5)
-        app.activate()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+        sendToBackgroundAndReturn()
         XCTAssertTrue(unlock.waitForExistence(timeout: 8), "No se mostró el bloqueo al volver de segundo plano")
         XCTAssertEqual(element("lock-mark").value as? String, "fija", "Al volver de segundo plano la marca del bloqueo debe estar quieta")
         XCTAssertFalse(element("launch-layer").exists, "El arranque se montó con el bloqueo puesto")
@@ -224,8 +229,6 @@ final class MotionShellTests: XCTestCase {
         XCTAssertEqual(result["saltos"], "0")
         let free = try XCTUnwrap(Int(result["libre"] ?? ""), "La app no apuntó cuándo dejó tocar Inicio: \(result)")
         let finished = try XCTUnwrap(Int(result["fin"] ?? ""), "La app no apuntó cuándo se quitó el arranque: \(result)")
-        // La medida queda en el registro de la prueba (para el informe).
-        print("MEDIDA arranque: deja tocar Inicio a los \(free) ms y se quita a los \(finished) ms")
         XCTAssertLessThanOrEqual(free, 1_600, "El arranque tardó \(free) ms en dejar tocar Inicio (máximo 1600)")
         XCTAssertGreaterThanOrEqual(free, 700, "El arranque dejó tocar Inicio a los \(free) ms: ¿se saltó solo?")
         // Guion: 1344 ms. El margen es para un simulador de CI cargado, no para el iPhone.

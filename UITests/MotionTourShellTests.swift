@@ -119,6 +119,8 @@ final class MotionTourShellTests: MotionTourCase {
         XCTAssertTrue(waitUntil(30) { !unlock.exists }, "El bloqueo de demo no se quitó")
         Thread.sleep(forTimeInterval: 3)
         XCUIDevice.shared.press(.home)
+        XCTAssertTrue(waitUntil(15) { self.app.state == .runningBackground || self.app.state == .runningBackgroundSuspended },
+                      "La app no llegó a segundo plano")
         Thread.sleep(forTimeInterval: 1.5)
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")

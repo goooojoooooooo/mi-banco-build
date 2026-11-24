@@ -284,6 +284,7 @@ struct RollingDigits: View {
                         .cellStyle(glyphStyle(g.small))
                 } else {
                     Text(String(g.char))
+                        .accessibilityLabel(cellLabel(g.char))
                         .cellFont(font(g.small))
                         .cellStyle(glyphStyle(g.small))
                 }
@@ -292,6 +293,13 @@ struct RollingDigits: View {
         .monospacedDigit()
         .lineLimit(1)
         .modifier(HeroTracking(euros: heroEuros))
+    }
+
+    /// La etiqueta de una celda de texto suelta («€», la coma, el signo). VoiceOver no las lee (el importe entero es UN
+    /// elemento con su etiqueta), pero las pruebas de toque ven cada texto por separado: con el ojo cerrado ninguna
+    /// celda dice «€» (las pantallas comprueban que en modo privado no queda ni un «€» a la vista de las pruebas).
+    private func cellLabel(_ char: Character) -> String {
+        hidden ? "importe oculto" : String(char)
     }
 
     private func dotVisible(_ index: Int) -> Bool {
@@ -345,7 +353,7 @@ struct RollingDigits: View {
     private func slotRow(_ glyphs: [Glyph]) -> some View {
         HStack(alignment: .lastTextBaseline, spacing: 0) {
             ForEach(glyphs) { g in
-                Text(String(g.char)).cellFont(font(g.small))
+                Text(String(g.char)).accessibilityLabel(cellLabel(g.char)).cellFont(font(g.small))
             }
         }
         .monospacedDigit()
@@ -574,6 +582,8 @@ private struct BulletCell: View {
 
     var body: some View {
         Text("•")
+            // Solo para las pruebas de toque (VoiceOver lee el importe entero como un elemento): ni «•» ni «€».
+            .accessibilityLabel("importe oculto")
             .scaleEffect(visible ? 1 : 0.3)
             .opacity(visible ? 1 : 0)
     }

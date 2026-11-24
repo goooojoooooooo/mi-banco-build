@@ -32,6 +32,8 @@ struct LockView: View {
     /// Se desbloqueó antes de que la marca terminara de montarse: el nombre y el lema, que aún no habían salido, ya no
     /// salen (no aparecen de golpe para fundirse enseguida).
     @State private var textsDropped = false
+    /// Ya desbloqueado y fundiéndose: deja pasar los toques a Inicio (no se queda delante estorbando mientras se va).
+    @State private var leaving = false
 
     private static let markSize: CGFloat = 76
 
@@ -89,6 +91,7 @@ struct LockView: View {
         // Un toque en cualquier parte deja la marca terminada. Solo cambia el dibujo: no toca `locked`.
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture().onEnded { launchFinished = true })
+        .allowsHitTesting(!leaving)
         .launchProbe("lock-mark", value: launchFinished ? "completa" : (playsLaunch ? "piezas" : "fija"))
         .sensoryFeedback(Haptics.lock, trigger: clicks)
         .task { await assembleMark(timeline) }
@@ -174,12 +177,12 @@ struct LockView: View {
         // líneas de velocidad, aunque Face ID haya sido más rápido que las piezas) y, si la marca echa a volar ahora,
         // este bloqueo deja de dibujar la suya. Esos cambios van sin animación (`.transaction` en `body`); el único que
         // se anima es el fundido del bloqueo entero. Nada de esto toca `locked`.
-        // (No se envuelven en una transacción con `disablesAnimations`: se mezcla con la del fundido y lo anula.)
         let takesTheMark = LaunchTimeline(motion).exitDuration != nil && flightTakesTheMark()
         // Si la marca aún se estaba montando y ahora sale volando, el nombre y el lema ya no llegan a salir.
         if playsLaunch, !launchFinished, takesTheMark { textsDropped = true }
         launchFinished = true
         if takesTheMark { markHandedOff = true }
+        leaving = true
         #if DEBUG
         // Para las pruebas: cómo estaba la marca del bloqueo en el instante de empezar a fundirse.
         LaunchProbe.shared.lockMarkAtUnlock = launchFinished ? "completa" : "piezas"

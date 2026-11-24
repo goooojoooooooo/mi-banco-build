@@ -135,30 +135,37 @@ private struct AppShellView: View {
                 // el arranque y la marca que vuela nunca existen con el bloqueo puesto, y la tapa nunca va encima de él.
                 // Solo se anima una cosa: el bloqueo al quitarse (`ShellState.animatesRemoval`); todo lo demás entra y sale
                 // de golpe.
+                // Cada capa lleva su `zIndex`: sin él, una vista que se está quitando de un `ZStack` pasa al fondo, y el
+                // bloqueo, en vez de fundirse sobre Inicio, desaparecía de golpe detrás de él (visto en las hojas).
                 if shell.showsLock {
                     // Entra sin animación (la captura del selector de apps nunca pilla la app a medias);
                     // al desbloquear se desvanece, porque solo ese cambio va en `withAnimation`.
                     // En el arranque en frío monta las piezas sobre su propia marca; en un re-bloqueo, la marca está quieta.
                     LockView(locked: unlockBinding, playsLaunch: shell.lockPlaysLaunch, flightTakesTheMark: flightTakesTheMark)
                         .transition(.opacity)
+                        .zIndex(1)
                 } else if shell.showsLaunch {
                     // Sin bloqueo: el arranque. Se quita cuando ya es transparente (sin transición).
                     LaunchSequence(onAssemble: { shell.apply(.launchAssembled) }, onFinish: { shell.apply(.launchFinished) })
                         .transition(.identity)
+                        .zIndex(1)
                 }
                 if let exit = shell.shownExit, let geometry = exitGeometry, geometry.id == exit.id {
                     // Aparece y se quita de golpe aunque el desbloqueo vaya animado: su primer fotograma es la marca
                     // donde estaba (el bloqueo suelta la suya en ese mismo instante) y el último no pinta nada.
+                    // Va por encima del bloqueo SOLO mientras este se está fundiendo (ya desbloqueado).
                     LaunchExit(from: geometry.from, cold: exit.cold) {
                         shell.apply(.exitFinished(id: exit.id))
                     }
                     .id(exit.id)
                     .transition(.identity)
+                    .zIndex(2)
                 }
                 if showsCover {
                     // De golpe, al ponerse y al quitarse: nunca se funde con el bloqueo ni deja un destello.
                     privacyCover
                         .transition(.identity)
+                        .zIndex(3)
                 }
             }
             .environment(\.launchAnchor, launchAnchor)

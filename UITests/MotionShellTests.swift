@@ -97,6 +97,9 @@ final class MotionShellTests: XCTestCase {
 
     /// Un toque de verdad en Inicio: el ojo cambia de «Ocultar importes» a «Mostrar importes».
     private func assertHomeResponds(_ message: String) {
+        // Mientras el bloqueo, ya desbloqueado, se funde (0,3 s a velocidad real), Inicio no recibe toques a propósito:
+        // el toque se da cuando el fundido ha terminado, y tiene que terminar.
+        XCTAssertTrue(waitUntil(8) { self.probe()["fundido"] != "1" }, "El fundido del bloqueo no termina: \(message)")
         let hide = app.buttons["Ocultar importes"]
         XCTAssertTrue(hide.waitForExistence(timeout: 8), "Falta el ojo: \(message)")
         hide.tap()

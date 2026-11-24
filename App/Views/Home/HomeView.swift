@@ -68,6 +68,9 @@ struct HomeView: View {
                 if !searching {
                     HomeTitle()
                         .homeEntrance(.title)
+                        // Por encima del carrusel: una tarjeta que se voltea o se levanta pasa por detrás del título,
+                        // que se lee siempre entero.
+                        .zIndex(1)
                 }
                 if searching {
                     SearchResults(index: snapshot.searchIndex, logoDomains: snapshot.logoDomains,

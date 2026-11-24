@@ -321,32 +321,29 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(carousel().waitForExistence(timeout: 5), "Falta el carrusel")
         XCTAssertEqual(frontCardNumber(), 1)
         /// Dónde está cada tarjeta y los contadores de DEBUG, para el mensaje de un fallo.
-        func where_() -> String {
-            let frames = ["all", "rev", "ima"].map { "\($0)=\(Int(self.any("card-front-\($0)").frame.minX))" }.joined(separator: " ")
-            return "\(carousel().label) | x: \(frames) | levantadas=\(any("card-lift-count").label) arreglos=\(any("card-rest-fixes").label)"
+        func snapshot() -> String {
+            let frames = ["all", "rev", "ima", "tr"].map { name -> String in
+                let front = self.any("card-front-\(name)")
+                return front.exists ? "\(name)=\(Int(front.frame.minX))" : "\(name)=?"
+            }.joined(separator: " ")
+            let lifts = any("card-lift-count")
+            let fixes = any("card-rest-fixes")
+            return "\(frontCardNumber()) [\(frames) lev=\(lifts.exists ? lifts.label : "?") arr=\(fixes.exists ? fixes.label : "?")]"
         }
-        carousel().swipeLeft()
-        XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 2 }, "Deslizar no pasó a Revolut: \(where_())")
-        assertEverythingAgrees(on: 2, "Tras deslizar a la izquierda")
-        carousel().swipeLeft()
-        XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 3 }, "Deslizar no pasó a imagin: \(where_())")
-        Thread.sleep(forTimeInterval: 1.5)
-        // Hacia atrás, de imagin a Revolut…
-        carousel().swipeRight()
-        let backToTwo = waitUntil(6) { self.frontCardNumber() == 2 }
-        let afterFirstBack = where_()
-        Thread.sleep(forTimeInterval: 1.5)
-        // … y de Revolut a «Todo» (la primera tarjeta).
-        carousel().swipeRight()
-        let backToOne = waitUntil(6) { self.frontCardNumber() == 1 }
-        let afterSecondBack = where_()
-        XCTAssertTrue(backToTwo, "Deslizar no volvió a Revolut: \(afterFirstBack)")
-        XCTAssertTrue(backToOne, "Deslizar no volvió a «Todo»: \(afterSecondBack) (antes: \(afterFirstBack))")
-        Thread.sleep(forTimeInterval: 1.5)
-        assertEverythingAgrees(on: 1, "Tras deslizar a la derecha")
+        // Tres a la izquierda y tres a la derecha, dejando que el carrusel se asiente entre uno y otro.
+        var trace: [String] = []
+        var numbers: [Int] = []
+        for step in 0..<6 {
+            if step < 3 { carousel().swipeLeft() } else { carousel().swipeRight() }
+            Thread.sleep(forTimeInterval: 2.5)
+            numbers.append(frontCardNumber())
+            trace.append(snapshot())
+        }
+        XCTAssertEqual(numbers, [2, 3, 4, 3, 2, 1], "Cada deslizamiento debe mover una tarjeta: \(trace.joined(separator: " → "))")
+        assertEverythingAgrees(on: 1, "Tras deslizar de vuelta")
         // La tarjeta «Todo» está de verdad en su sitio (centrada), no solo en la etiqueta.
         let front = any("card-front-all").frame
-        XCTAssertEqual(front.midX, app.windows.firstMatch.frame.midX, accuracy: 4, "«Todo» no quedó centrada: \(where_())")
+        XCTAssertEqual(front.midX, app.windows.firstMatch.frame.midX, accuracy: 4, "«Todo» no quedó centrada: \(snapshot())")
     }
 
     /// Mantener pulsada la tarjeta de delante la levanta (lo cuenta `card-lift-count`, solo en DEBUG) y soltarla NO la

@@ -156,7 +156,7 @@ struct HiddenSubscriptionsView: View {
 
 /// «24,98 € al mes · 299,76 € al año»: las dos cifras ruedan desde 0 al montar y de la anterior a la nueva si cambian
 /// (`RollingAmount`; con el ojo cerrado, «•••,•• €» y nunca una cifra). Las dos partes se colocan como un párrafo
-/// (`SentenceFlow`): si no caben en una línea (importes largos, letra grande), la segunda baja a la línea siguiente; nunca
+/// (`ParagraphFlow`): si no caben en una línea (importes largos, letra grande), la segunda baja a la línea siguiente; nunca
 /// se salen del ancho ni se montan dos copias. Con letra de accesibilidad, una debajo de la otra.
 private struct SubscriptionsHeader: View {
     let monthlyCents: Int
@@ -169,7 +169,7 @@ private struct SubscriptionsHeader: View {
         let stacked = typeSize.isAccessibilitySize
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-            : AnyLayout(SentenceFlow())
+            : AnyLayout(ParagraphFlow())
         layout {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 RollingAmount(cents: monthlyCents)

@@ -248,7 +248,7 @@ extension InsightKind {
 
 /// Una frase con un importe dentro ("Pago grande: 320,00 € en MediaMarkt"): el importe es un `RollingAmount` (rueda desde
 /// 0 la primera vez que se ve y al entrar en la pestaña, y del valor anterior al nuevo si cambia); el resto del texto no se
-/// mueve. La frase se parte en palabras y se coloca como un párrafo (`SentenceFlow`), así el importe puede ir en medio y
+/// mueve. La frase se parte en palabras y se coloca como un párrafo (`ParagraphFlow`), así el importe puede ir en medio y
 /// la frase sigue saltando de línea donde le toca. Con el modo privado no se monta ninguna cifra: la frase es un texto con
 /// la máscara del kit («•••,•• €») en el sitio del importe y «•••» en cualquier otro. Sin importe, es un texto normal.
 /// Quien la usa pone la etiqueta de VoiceOver de la fila entera.
@@ -262,7 +262,7 @@ private struct RollingSentence: View {
             Text(masked)
         } else if let split = AmountSplit(text) {
             let pieces = SentencePieces(split)
-            SentenceFlow {
+            ParagraphFlow {
                 ForEach(Array(pieces.before.enumerated()), id: \.offset) { _, word in
                     Text(word)
                 }
@@ -326,7 +326,7 @@ struct SentencePieces: Equatable {
 /// Coloca sus piezas como las palabras de un párrafo: una tras otra y, cuando la siguiente no cabe, en la línea de
 /// abajo. Cada pieza va centrada en el alto de su línea. Una pieza más ancha que la línea se queda con el ancho de la línea.
 /// También la usa la cabecera de Suscripciones («… al mes · … al año»): un solo juego de vistas que salta de línea.
-struct SentenceFlow: Layout {
+struct ParagraphFlow: Layout {
     private struct Arrangement {
         var frames: [CGRect] = []
         var size = CGSize.zero

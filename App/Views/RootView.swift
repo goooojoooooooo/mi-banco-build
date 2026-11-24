@@ -59,8 +59,8 @@ struct RootView: View {
     @State private var deleteFailed = false
     @State private var deleteErrorTick = 0
     @Namespace private var zoom
-    /// Costuras de movimiento (F1): marcos que apuntan las vistas para el arranque, el vuelo de tarjeta y el detalle.
-    @State private var launchAnchor = LaunchAnchor()
+    /// Costuras de movimiento (F1): marcos que apuntan las vistas para el vuelo de tarjeta y el detalle
+    /// (`LaunchAnchor` lo crea `AppShellView`, por encima del bloqueo y del telón).
     @State private var cardFlight = CardFlight()
     @State private var tabEntrance = TabEntrance()
     @State private var detailAmountFrames = DetailAmountFrames()
@@ -267,7 +267,6 @@ struct RootView: View {
         .onAppear(perform: applyDemoTab)
         #endif
         // Costuras de movimiento (F1): por fuera de todo, para que también las vean la hoja única y las capas.
-        .environment(\.launchAnchor, launchAnchor)
         .environment(\.cardFlight, cardFlight)
         .environment(\.tabEntrance, tabEntrance)
         .environment(\.detailAmountFrames, detailAmountFrames)

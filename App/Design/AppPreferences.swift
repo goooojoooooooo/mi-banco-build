@@ -71,7 +71,7 @@ final class AppPreferences {
         privateMode = Self.storedPrivateMode
         #if DEBUG
         if DemoMode.isActive {
-            motionLevel = Self.defaultMotionLevel
+            motionLevel = DemoMode.motionLevelOverride ?? Self.defaultMotionLevel
             pricesEnabled = false
             pricesAsked = DemoMode.asksPrices ? false : DemoMode.includesPortfolio
             // La demo no guarda nada, salvo la prueba de reinicio de la guía (`-MiBancoDemoPersistGuide`).
@@ -84,7 +84,11 @@ final class AppPreferences {
             return
         }
         #endif
+        #if DEBUG
+        motionLevel = DemoMode.motionLevelOverride ?? stored ?? Self.defaultMotionLevel
+        #else
         motionLevel = stored ?? Self.defaultMotionLevel
+        #endif
         pricesEnabled = UserDefaults.standard.bool(forKey: Self.pricesEnabledKey)
         pricesAsked = UserDefaults.standard.bool(forKey: Self.pricesAskedKey)
         guideLastStep = Self.storedGuideSteps()

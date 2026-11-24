@@ -83,7 +83,7 @@ jobs:
             esac
             SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
           else
-            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests"
+            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests -skip-testing:MiBancoUITests/MotionTourHomeTests -skip-testing:MiBancoUITests/MotionTourScreensTests -skip-testing:MiBancoUITests/MotionTourShellTests"
             # La bateria completa va en 2 simuladores salvo que se pida otro numero (experimento medido: mismas pruebas y
             # mismos resultados que en serie). Una clase sola sigue en serie, salvo que se pida `parallel_workers`.
             PARALLEL_WORKERS="${PARALLEL_WORKERS:-2}"
@@ -147,6 +147,10 @@ jobs:
             grep -E "error:" build/ui.log | sort -u | head -n 40 || true
           fi
           test "$(cat build/status.txt)" = "0"
+          # M6: una clase que no existe (o un filtro que no elige nada) sale con 0 y 0 pruebas: eso es rojo, no verde.
+          RAN=$(grep -cE "^Test [Cc]ase .* (passed|failed)" build/ui.log || true)
+          echo "Pruebas ejecutadas: ${RAN:-0}"
+          if [ "${RAN:-0}" -lt 1 ]; then echo "No se ejecuto ninguna prueba (¿existe la clase pedida?)"; exit 1; fi
       - uses: actions/upload-artifact@v4
         if: failure() || cancelled()
         with:

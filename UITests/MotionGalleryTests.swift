@@ -172,6 +172,55 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil { stepValue(1, "Autorizar") == "en curso" }, "Reiniciar no volvió al primer paso")
     }
 
+    // MARK: Banderas de grabación (solo DEBUG)
+
+    private func motionScaleReadout() -> Double? {
+        let readout = app.staticTexts["gallery.motion.scale"]
+        reveal(readout)
+        return Double(readout.label)
+    }
+
+    /// Sin ninguna bandera: tiempo real, nivel por defecto (Expresivo) y Reducir movimiento apagado.
+    func testNoRecordingFlagsLeavesTodaysBehaviour() throws {
+        launchGallery()
+        XCTAssertEqual(motionScaleReadout(), 1)
+        let level = app.buttons["Expresivo"]
+        reveal(level)
+        XCTAssertTrue(level.isSelected)
+        let reduce = reduceSwitch()
+        reveal(reduce)
+        XCTAssertEqual(reduce.value as? String, "0")
+    }
+
+    /// `-MiBancoMotionScale 4`: las piezas ven un multiplicador de tiempo de 4.
+    func testMotionScaleFlagReachesTheKit() throws {
+        launchGallery(["-MiBancoMotionScale", "4"])
+        XCTAssertEqual(motionScaleReadout(), 4)
+    }
+
+    /// Un valor que no es un número válido se ignora (tiempo real).
+    func testInvalidMotionScaleIsIgnored() throws {
+        launchGallery(["-MiBancoMotionScale", "-3"])
+        XCTAssertEqual(motionScaleReadout(), 1)
+    }
+
+    /// `-MiBancoMotionLevel subtle`: el selector de intensidad arranca en Sutil, no en el nivel por defecto.
+    func testMotionLevelFlagSelectsThatLevel() throws {
+        launchGallery(["-MiBancoMotionLevel", "subtle"])
+        let subtle = app.buttons["Sutil"]
+        reveal(subtle)
+        XCTAssertTrue(subtle.isSelected, "Sutil no quedó seleccionado por la bandera")
+        XCTAssertFalse(app.buttons["Expresivo"].isSelected)
+    }
+
+    /// `-MiBancoReduceMotion`: el interruptor de Reducir movimiento arranca encendido.
+    func testReduceMotionFlagTurnsTheSwitchOn() throws {
+        launchGallery(["-MiBancoReduceMotion"])
+        let reduce = reduceSwitch()
+        reveal(reduce)
+        XCTAssertEqual(reduce.value as? String, "1", "Reducir movimiento no arrancó encendido")
+    }
+
     /// Con el ojo cerrado, ninguna cifra real está en pantalla ni en el árbol de accesibilidad, ni durante un cambio.
     func testHiddenAmountNeverExposesDigits() throws {
         launchGallery()

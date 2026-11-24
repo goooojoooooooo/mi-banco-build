@@ -96,9 +96,21 @@ struct MotionEnvironment: ViewModifier {
     @Environment(AppPreferences.self) private var preferences: AppPreferences?
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
+    /// Banderas de grabación (solo DEBUG, leídas al arrancar): cámara lenta, intensidad y Reducir movimiento forzados.
+    private var context: MotionContext {
+        var context = MotionContext(level: preferences?.motionLevel ?? AppPreferences.defaultMotionLevel, reduce: reduceMotion, lowPower: lowPower)
+        #if DEBUG
+        context.timeMultiplier = DemoMode.motionScale
+        // Con preferencias, `AppPreferences.init` ya arranca en el nivel forzado; sin ellas (extensión, galería sin preferencias) se fuerza aquí.
+        if preferences == nil, let forced = DemoMode.motionLevelOverride { context.level = forced }
+        if DemoMode.forcesReduceMotion { context.reduce = true }
+        #endif
+        return context
+    }
+
     func body(content: Content) -> some View {
         content
-            .environment(\.motion, MotionContext(level: preferences?.motionLevel ?? AppPreferences.defaultMotionLevel, reduce: reduceMotion, lowPower: lowPower))
+            .environment(\.motion, context)
             .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
                 lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
             }

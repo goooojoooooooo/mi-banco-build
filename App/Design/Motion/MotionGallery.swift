@@ -10,7 +10,7 @@ import MiBancoCore
 enum MotionGalleryLaunch {
     private static var arguments: [String] { ProcessInfo.processInfo.arguments }
     static var isActive: Bool { arguments.contains("-MiBancoMotionGallery") }
-    static var startsReduced: Bool { arguments.contains("-MiBancoMotionReduce") }
+    static var startsReduced: Bool { arguments.contains("-MiBancoMotionReduce") || DemoMode.forcesReduceMotion }
     /// Sin `AppPreferences` en el entorno de la galería.
     static var withoutPreferences: Bool { arguments.contains("-MiBancoMotionGalleryNoPrefs") }
     /// Hasta dónde baja al abrir: una de las seis anclas de arriba (o nada).
@@ -227,6 +227,11 @@ struct MotionGallery: View {
                 censusValue(census.slots, id: "gallery.census.slots")
                 censusValue(census.frames, id: "gallery.census.frames")
             }
+            // El multiplicador de tiempo que ven las piezas (`-MiBancoMotionScale`): 1 sin bandera.
+            Text(verbatim: String(motion.timeMultiplier))
+                .titan(.subtitle)
+                .foregroundStyle(Theme.label2)
+                .accessibilityIdentifier("gallery.motion.scale")
         }
     }
 

@@ -138,6 +138,11 @@ struct HomeView: View {
         let cards = AccountCard.visible(hasInvestments: portfolio.hasPositions)
         let activeListCard = cards.contains(listCard) ? listCard : .all
         let entries = snapshot.list(for: snapshot.total == nil ? .all : activeListCard)
+        // La primera FILA (no la cabecera del día, que no cambia cuando llega otro movimiento hoy).
+        let firstRowID = entries.first { entry in
+            if case .row = entry.kind { return true }
+            return false
+        }?.id
         LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
             // El indicador de «tirar para actualizar»: no ocupa alto; se dibuja en el hueco que deja la lista al bajar.
             if !searching {
@@ -177,7 +182,7 @@ struct HomeView: View {
             }
         }
         // Una fila nueva: las demás le hacen sitio con el muelle de fila (con Reducir movimiento, sin animación).
-        .animation(kit.reduce ? nil : kit.animation(.row), value: entries.first?.id)
+        .animation(kit.reduce ? nil : kit.animation(.row), value: firstRowID)
         // Abrir o cerrar la búsqueda cambia las piezas en el acto (ningún muelle mueve la maquetación) y lo nuevo se
         // funde (`SearchSwapFade`).
         .transaction(value: searching) { $0.animation = nil }
@@ -217,6 +222,8 @@ struct HomeView: View {
     /// Lo anterior con sus capas: el aviso breve, el abanico de tarjetas y (solo DEBUG) las sondas de las pruebas.
     private func layered(_ snapshot: LedgerSnapshot) -> some View {
         scroller(snapshot)
+            // Con el abanico abierto, lo de debajo no se lee ni se recorre con VoiceOver.
+            .accessibilityHidden(fan != nil)
             .overlay(alignment: .top) {
                 if let toastText {
                     Text(toastText)
@@ -249,83 +256,107 @@ struct HomeView: View {
             .environment(\.entrance, entrance)
     }
 
+    /// Hápticas: cada tope del carrusel, «No es mío» y la llegada de un movimiento.
+    private func withFeedback<V: View>(_ view: V) -> some View {
+        view
+            .sensoryFeedback(Haptics.detent, trigger: detentTick)
+            .sensoryFeedback(Haptics.warning, trigger: flagTick)
+            // Solo un movimiento que llega de verdad, con Inicio delante: un toque suave por un pago, éxito por un ingreso.
+            .sensoryFeedback(trigger: model.arrival) { _, new in
+                guard let new, isVisible, scenePhase == .active else { return nil }
+                return Haptics.arrival(isIncome: new.isIncome)
+            }
+    }
+
+    /// La tarjeta elegida manda en la lista.
+    private func withSelectionReactions<V: View>(_ view: V) -> some View {
+        view
+            .onChange(of: selection) { old, new in
+                // `nil` nunca cambia la lista (el carrusel ya no lo escribe, pero así es imposible un vaivén).
+                guard let new, new != old else { return }
+                if !quietSelection { detentTick += 1 }
+                openRow = nil
+                showList(for: new)
+                if new == .investments {
+                    Task { await portfolio.refreshPrices(force: false) }
+                }
+            }
+            .onChange(of: portfolio.hasPositions) { _, hasPositions in
+                if !hasPositions && (selection == .investments || listCard == .investments) {
+                    selection = .all
+                    listCard = .all
+                }
+            }
+            .onChange(of: selectCardRequest, initial: true) { _, requested in
+                guard let requested else { return }
+                selectCardRequest = nil
+                let cards = AccountCard.visible(hasInvestments: portfolio.hasPositions)
+                guard cards.contains(requested) else { return }
+                closeSearch()
+                withAnimation(kit.reduce ? nil : kit.animation(.snap)) {
+                    selection = requested
+                }
+            }
+    }
+
+    /// Llegadas y montaje por capas.
+    private func withArrivalReactions<V: View>(_ view: V) -> some View {
+        view
+            .onChange(of: model.arrival) { _, new in
+                if let new { choreograph(new) }
+            }
+            // El modelo publica el movimiento un instante después de anunciar la llegada: entonces la cifra rueda, la
+            // tarjeta enseña su ✓ y la fila cae.
+            .onChange(of: model.state.movements.count) { _, _ in landArrival() }
+            .onChange(of: revealToken) { _, _ in assemble() }
+    }
+
+    /// Otra pestaña, bloqueo, app fuera de primer plano o una hoja: la búsqueda se cierra, el teclado se va y el
+    /// abanico se quita en el acto (nada se queda encima del bloqueo ni en la captura del selector de apps).
+    private func withFrontReactions<V: View>(_ view: V) -> some View {
+        view
+            .onChange(of: isVisible) { _, visible in
+                if !visible { leaveFront() }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                if phase != .active { leaveFront() }
+            }
+            .onChange(of: detailOpen) { _, open in
+                if open { fan = nil }
+            }
+            .onChange(of: searching) { _, on in
+                if !on { query = "" }
+                openRow = nil
+            }
+            .onChange(of: refresh.doneTick) { _, _ in
+                // Con Reducir movimiento no hay hueco para el indicador: lo dice el aviso breve.
+                if kit.reduce { showToast("Al día") }
+            }
+    }
+
+    /// La inclinación solo se lee con Inicio a la vista de verdad; en cualquier otro caso los sensores se paran.
+    private func withTilt<V: View>(_ view: V) -> some View {
+        view
+            .onChange(of: tiltRuns, initial: true) { _, runs in
+                if runs { tilt.start() } else { tilt.stop() }
+                #if DEBUG
+                HomeProbe.shared.tiltRunning = runs
+                #endif
+            }
+            .onDisappear { tilt.stop() }
+    }
+
     var body: some View {
         let snapshot = model.snapshot
-        layered(snapshot)
-        .sensoryFeedback(Haptics.detent, trigger: detentTick)
-        .sensoryFeedback(Haptics.warning, trigger: flagTick)
-        // Solo un movimiento que llega de verdad, con Inicio delante: un toque suave por un pago, éxito por un ingreso.
-        .sensoryFeedback(trigger: model.arrival) { _, new in
-            guard let new, isVisible, scenePhase == .active else { return nil }
-            return Haptics.arrival(isIncome: new.isIncome)
-        }
-        .onChange(of: selection) { old, new in
-            // `nil` nunca cambia la lista (el carrusel ya no lo escribe, pero así es imposible un vaivén).
-            guard let new, new != old else { return }
-            if !quietSelection { detentTick += 1 }
-            openRow = nil
-            showList(for: new)
-            if new == .investments {
-                Task { await portfolio.refreshPrices(force: false) }
+        let reacting = withFrontReactions(withArrivalReactions(withSelectionReactions(withFeedback(layered(snapshot)))))
+        withTilt(reacting)
+            .task(id: snapshot.logoDomains.count) {
+                await logos.prewarm(domains: Array(Set(snapshot.logoDomains.values)))
             }
-        }
-        .onChange(of: portfolio.hasPositions) { _, hasPositions in
-            if !hasPositions && (selection == .investments || listCard == .investments) {
-                selection = .all
-                listCard = .all
-            }
-        }
-        .onChange(of: selectCardRequest, initial: true) { _, requested in
-            guard let requested else { return }
-            selectCardRequest = nil
-            let cards = AccountCard.visible(hasInvestments: portfolio.hasPositions)
-            guard cards.contains(requested) else { return }
-            closeSearch()
-            withAnimation(kit.reduce ? nil : kit.animation(.snap)) {
-                selection = requested
-            }
-        }
-        .onChange(of: model.arrival) { _, new in
-            if let new { choreograph(new) }
-        }
-        // El modelo publica el movimiento un instante después de anunciar la llegada: entonces la cifra rueda, la
-        // tarjeta enseña su ✓ y la fila cae.
-        .onChange(of: model.state.movements.count) { _, _ in landArrival() }
-        .onChange(of: revealToken) { _, _ in assemble() }
-        // Otra pestaña, bloqueo, app fuera de primer plano o una hoja: la búsqueda se cierra, el teclado se va y el
-        // abanico se quita en el acto (nada se queda encima del bloqueo ni en la captura del selector de apps).
-        .onChange(of: isVisible) { _, visible in
-            if !visible { leaveFront() }
-        }
-        .onChange(of: scenePhase) { _, phase in
-            if phase != .active { leaveFront() }
-        }
-        .onChange(of: detailOpen) { _, open in
-            if open { fan = nil }
-        }
-        .onChange(of: searching) { _, on in
-            if !on { query = "" }
-            openRow = nil
-        }
-        .onChange(of: refresh.doneTick) { _, _ in
-            // Con Reducir movimiento no hay hueco para el indicador: lo dice el aviso breve.
-            if kit.reduce { showToast("Al día") }
-        }
-        // La inclinación solo se lee con Inicio a la vista de verdad; en cualquier otro caso los sensores se paran.
-        .onChange(of: tiltRuns, initial: true) { _, runs in
-            if runs { tilt.start() } else { tilt.stop() }
             #if DEBUG
-            HomeProbe.shared.tiltRunning = runs
+            .onAppear(perform: applyDemoLaunchState)
+            .onChange(of: motion.demoMomentTick) { _, _ in runDemoMoment() }
             #endif
-        }
-        .onDisappear { tilt.stop() }
-        .task(id: snapshot.logoDomains.count) {
-            await logos.prewarm(domains: Array(Set(snapshot.logoDomains.values)))
-        }
-        #if DEBUG
-        .onAppear(perform: applyDemoLaunchState)
-        .onChange(of: motion.demoMomentTick) { _, _ in runDemoMoment() }
-        #endif
     }
 
     private func row(_ entry: ListEntry, snapshot: LedgerSnapshot, swipes: Bool) -> ListEntryView {
@@ -335,9 +366,12 @@ struct HomeView: View {
             domain = snapshot.logoDomains[row.id]
             fresh = row.id == freshID
         }
+        // Solo la lista de Inicio lleva filas deslizables (ni el estado vacío ni la búsqueda).
+        let rowBinding: Binding<UUID?>? = swipes ? $openRow : nil
+        let onFlag: ((UUID, Bool) -> Void)? = swipes ? { id, flagged in flag(id, flagged) } : nil
         return ListEntryView(entry: entry, logoDomain: domain, isFresh: fresh, zoom: zoom,
-                             onOpen: open, onDeleteUnread: deleteUnread,
-                             openRow: swipes ? $openRow : nil, onFlag: swipes ? flag : nil)
+                             onOpen: { id in self.open(id) }, onDeleteUnread: { id in deleteUnread(id) },
+                             openRow: rowBinding, onFlag: onFlag)
     }
 
     /// Cuándo se leen los sensores de inclinación: Inicio delante (ni otra pestaña ni el bloqueo), la app activa, la

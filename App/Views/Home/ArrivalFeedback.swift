@@ -83,7 +83,7 @@ struct ArrivalHeroEffect: ViewModifier {
         let badgeFor = motion.seconds(motion.reduce ? 2.2 : 2.1)
         Task {
             try? await Task.sleep(for: .seconds(greenFor))
-            if pulse.token == token { glowing = false }
+            if displayed?.token == token { glowing = false }
             try? await Task.sleep(for: .seconds(max(0.01, badgeFor - greenFor)))
             // La insignia ya es invisible: se desmonta (no queda un importe suelto en la pantalla).
             if displayed?.token == token { displayed = nil }

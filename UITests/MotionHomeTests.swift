@@ -501,8 +501,9 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertFalse(backButton.exists, "El reverso ya estaba a la vista")
         let middle = carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
 
-        // 0,7 s: se levanta a los 0,42 s y el dedo sube antes de los 0,92 s (soltarla abre el abanico).
-        middle.press(forDuration: 0.7)
+        // 0,85 s: se levanta a los 0,42 s (más el retardo del toque dentro del carrusel) y el dedo sube poco después;
+        // si llegara a los 0,92 s con el dedo encima, el abanico se abriría igual: lo que importa es que no la voltea.
+        middle.press(forDuration: 0.85)
         XCTAssertTrue(waitUntil(5) { lifts.label == "1" }, "La pulsación larga no levantó la tarjeta: \(lifts.label)")
         XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "Soltar la tarjeta levantada no abrió el abanico: \(homeProbe())")
         Thread.sleep(forTimeInterval: 1.5)
@@ -596,6 +597,11 @@ final class MotionHomeTests: XCTestCase {
         app.buttons.matching(identifier: "movementRow").firstMatch
     }
 
+    /// Toca una tarjeta del abanico en su franja visible (arriba): el resto de la tarjeta queda bajo la siguiente.
+    private func tapFanCard(_ name: String) {
+        app.buttons["wallet-card-\(name)"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+    }
+
     /// Deslizar una fila hacia la izquierda enseña «Nota» y «No es mío»; cada acción hace lo suyo; deslizar no mueve el
     /// carrusel ni rompe el toque normal de la fila ni el desplazamiento de la lista.
     func testSwipeRowShowsActions() throws {
@@ -650,7 +656,7 @@ final class MotionHomeTests: XCTestCase {
         row.tap()
         XCTAssertTrue(close.waitForExistence(timeout: 8), "El toque normal de la fila dejó de abrir el detalle")
         close.tap()
-        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 8), .completed, "El detalle no se cerró")
+        XCTAssertTrue(waitUntil(8) { !close.exists }, "El detalle no se cerró la segunda vez")
         let top = row.frame.minY
         let start = row.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)), withVelocity: 400, thenHoldForDuration: 0.3)
@@ -670,10 +676,16 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertEqual(homeProbe()["tirones"], "0", "Un tirón corto lanzó una actualización")
 
         grab.press(forDuration: 0.1, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 420)), withVelocity: 500, thenHoldForDuration: 0.3)
-        XCTAssertTrue(waitUntil(5) { self.homeProbe()["tirones"] == "1" }, "Tirar de la lista no actualizó: \(homeProbe())")
-        XCTAssertTrue(app.staticTexts["Al día"].waitForExistence(timeout: 10), "No apareció «Al día»")
-        XCTAssertEqual(homeProbe()["alDia"], "1")
-        XCTAssertTrue(waitUntil(8) { !self.app.staticTexts["Al día"].exists }, "«Al día» no se fue")
+        // «Al día» está a la vista poco más de un segundo: se mira mientras se espera a la sonda, que cuenta cada vez
+        // que el indicador lo enseña (`alDia`).
+        var sawText = false
+        XCTAssertTrue(waitUntil(12) {
+            if self.app.staticTexts["Al día"].exists { sawText = true }
+            return self.homeProbe()["alDia"] == "1"
+        }, "Tirar de la lista no acabó en «Al día»: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["tirones"], "1", "Tirar de la lista no lanzó exactamente una actualización: \(homeProbe())")
+        if !sawText { sawText = app.staticTexts["Al día"].exists }
+        XCTAssertTrue(waitUntil(8) { !self.app.staticTexts["Al día"].exists }, "«Al día» no se fue (visto: \(sawText))")
         // Todo vuelve a su sitio y responde.
         Thread.sleep(forTimeInterval: 1)
         XCTAssertTrue(app.windows.firstMatch.frame.contains(title.frame), "El título quedó fuera de su sitio")
@@ -717,7 +729,7 @@ final class MotionHomeTests: XCTestCase {
         middle.press(forDuration: 1.6)
         XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "El abanico no se abrió la segunda vez")
         Thread.sleep(forTimeInterval: 1.5)
-        app.buttons["wallet-card-all"].tap()
+        tapFanCard("all")
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "0" }, "Tocar «Todo» no cerró el abanico")
         XCTAssertEqual(homeProbe()["vuelos"], "0", "«Todo» no vuela a ninguna pantalla")
         XCTAssertEqual(frontCardNumber(), 1)
@@ -726,7 +738,7 @@ final class MotionHomeTests: XCTestCase {
         middle.press(forDuration: 1.6)
         XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "El abanico no se abrió la tercera vez")
         Thread.sleep(forTimeInterval: 1.5)
-        app.buttons["wallet-card-rev"].tap()
+        tapFanCard("rev")
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["elegida"] == "rev" }, "Tocar la tarjeta de Revolut no la eligió: \(homeProbe())")
         XCTAssertEqual(homeProbe()["vuelos"], "1", "No se apuntó el vuelo de la tarjeta: \(homeProbe())")
         XCTAssertTrue(app.navigationBars["Revolut"].waitForExistence(timeout: 10) || app.staticTexts["Revolut"].exists,

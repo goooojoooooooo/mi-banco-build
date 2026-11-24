@@ -66,7 +66,7 @@ struct WalletFan: View {
                 }
             }
         }
-        .accessibilityAddTraits(.isModal)
+        // Inicio, debajo, queda fuera de la accesibilidad mientras el abanico está abierto (lo hace quien lo monta).
         .accessibilityAction(.escape, close)
         .sensoryFeedback(.impact(weight: .medium), trigger: pickTick)
         .onAppear {

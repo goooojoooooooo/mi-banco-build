@@ -360,7 +360,8 @@ final class MotionTourHomeTests: MotionTourCase {
         segment("Todo").tap()
         burst("wallet-fan" + suffix, frames: 20, every: 0.25)
         Thread.sleep(forTimeInterval: 1)
-        app.buttons["wallet-card-rev"].tap()
+        // En su franja visible (arriba): el resto de la tarjeta queda bajo la siguiente.
+        app.buttons["wallet-card-rev"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
         burst("wallet-fan-pick" + suffix, frames: 14, every: 0.25)
     }
 

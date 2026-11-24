@@ -224,6 +224,8 @@ final class MotionShellTests: XCTestCase {
         XCTAssertEqual(result["saltos"], "0")
         let free = try XCTUnwrap(Int(result["libre"] ?? ""), "La app no apuntó cuándo dejó tocar Inicio: \(result)")
         let finished = try XCTUnwrap(Int(result["fin"] ?? ""), "La app no apuntó cuándo se quitó el arranque: \(result)")
+        // La medida queda en el registro de la prueba (para el informe).
+        print("MEDIDA arranque: deja tocar Inicio a los \(free) ms y se quita a los \(finished) ms")
         XCTAssertLessThanOrEqual(free, 1_600, "El arranque tardó \(free) ms en dejar tocar Inicio (máximo 1600)")
         XCTAssertGreaterThanOrEqual(free, 700, "El arranque dejó tocar Inicio a los \(free) ms: ¿se saltó solo?")
         // Guion: 1344 ms. El margen es para un simulador de CI cargado, no para el iPhone.
@@ -265,11 +267,13 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(waitUntil(8) { !self.app.buttons["Cerrar"].exists }, "La hoja no se cerró")
     }
 
-    /// Con el ojo cerrado, los dos importes del detalle que ahora ruedan (el del movimiento y «Te quedaban») no aparecen
-    /// con sus cifras en ninguna etiqueta ni valor: ni mientras la hoja entra (a cámara lenta ×3: el importe rueda y
-    /// «Te quedaban» se destapa) ni cuando ya está quieta. Primero se leen las cifras con el ojo abierto.
-    /// (XCUITest también ve los textos que el modo privado difumina y oculta a VoiceOver, como los de Inicio o el
-    /// historial del comercio; por eso se cuenta cuántas veces aparece cada cifra antes y después de abrir la hoja.)
+    /// Con el ojo cerrado, los dos importes del detalle que ahora ruedan (el del movimiento y «Te quedaban») nunca se
+    /// leen: sus etiquetas dicen «importe oculto» y ninguna etiqueta ni valor nuevo dice sus cifras («12,50 euros»), ni
+    /// mientras la hoja entra (a cámara lenta ×3: el importe rueda y «Te quedaban» se destapa) ni cuando ya está quieta.
+    /// Primero se leen las cifras con el ojo abierto. Que tampoco se VEAN lo enseña la hoja de fotogramas
+    /// `detail-amount-ojo` (las cifras que ruedan se pintan en un lienzo, sin texto que XCUITest pueda leer).
+    /// (XCUITest sí ve los textos que el modo privado difumina y oculta a VoiceOver, como el historial del comercio,
+    /// que repite el importe; por eso no se buscan las cifras sueltas.)
     func testDetailAmountsObeyTheEye() throws {
         launch()
         openFirstRowDetail()
@@ -291,17 +295,24 @@ final class MotionShellTests: XCTestCase {
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
         XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
+        // Lo que dirían los dos importes si se leyeran («12,50 euros»), en etiqueta o en valor.
         func count(_ text: String) -> Int {
             app.descendants(matching: .any)
                 .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text)).count
         }
-        let before = figures.map(count)
+        let spokenFigures = figures.map { "\($0) euros" }
+        let before = spokenFigures.map(count)
+        // Las etiquetas del importe y de «Te quedaban» que NO digan «importe oculto».
+        let readable = app.descendants(matching: .any).matching(NSPredicate(
+            format: "(label BEGINSWITH %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@) AND NOT (label ENDSWITH %@)",
+            "Pago de ", "Ingreso de ", "Te quedaban ", "importe oculto"))
         row.tap()
         for pass in 0..<10 {
-            for (index, text) in figures.enumerated() {
+            XCTAssertEqual(readable.count, 0, "Pasada \(pass): con el ojo cerrado un importe del detalle se lee: «\(readable.firstMatch.label)»")
+            for (index, text) in spokenFigures.enumerated() {
                 let now = count(text)
                 XCTAssertLessThanOrEqual(
-                    now, before[index], "Pasada \(pass): con el ojo cerrado el detalle enseña «\(text)» (\(now) veces, antes \(before[index]))")
+                    now, before[index], "Pasada \(pass): con el ojo cerrado el detalle dice «\(text)» (\(now) veces, antes \(before[index]))")
             }
         }
         XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "No se abrió la hoja de detalle")

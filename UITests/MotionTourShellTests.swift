@@ -145,13 +145,17 @@ final class MotionTourShellTests: MotionTourCase {
         burst("unlock-inactive-corto", frames: 30, every: 0.2)
     }
 
-    /// Re-bloqueo (volver de segundo plano): la marca sale quieta y entera, sin piezas.
+    /// Re-bloqueo (volver de segundo plano): la marca sale quieta y entera, sin piezas (`lock-rebloqueo`, con el bloqueo
+    /// en reposo: si el bloqueo de demo cumple su tiempo con la app detrás, no se acepta y vuelve a durar 10 s desde la
+    /// vuelta). Después, el desbloqueo templado a ×8 (`unlock-templado`): el bloqueo se funde y la marca vuela, sin
+    /// bandas, hasta la ranura de la barra de Inicio.
     func testRelockIsStatic() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "10"])
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "10"], scale: 8)
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 20), "Falta la pantalla de bloqueo")
         XCTAssertTrue(waitUntil(30) { !unlock.exists }, "El bloqueo de demo no se quitó")
-        Thread.sleep(forTimeInterval: 3)
+        // El vuelo en frío (3,4 s a ×8) termina antes de salir.
+        Thread.sleep(forTimeInterval: 6)
         XCUIDevice.shared.press(.home)
         if !waitUntil(4, { self.app.state == .runningBackground || self.app.state == .runningBackgroundSuspended }) {
             // Con el simulador cargado el gesto de Inicio a veces no saca la app: Ajustes la manda atrás seguro.
@@ -162,7 +166,12 @@ final class MotionTourShellTests: MotionTourCase {
         Thread.sleep(forTimeInterval: 1.5)
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+        XCTAssertTrue(unlock.waitForExistence(timeout: 8), "No se mostró el bloqueo al volver de segundo plano")
         burst("lock-rebloqueo", frames: 6, every: 0.3)
+        XCTAssertTrue(unlock.exists, "El bloqueo se quitó durante la ráfaga: no estaba en reposo")
+        // El bloqueo de demo se quita solo: se captura desde que empieza a fundirse.
+        XCTAssertTrue(waitUntil(25) { self.probe()["fundido"] == "1" }, "El re-bloqueo de demo no se quitó")
+        burst("unlock-templado", frames: 24, every: 0.2)
     }
 
     // MARK: - Importes que ruedan en las hojas

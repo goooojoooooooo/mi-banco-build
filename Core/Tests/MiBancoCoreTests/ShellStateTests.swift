@@ -16,7 +16,7 @@ import Testing
             .unlockSucceeded, .scene(.active), .scene(.inactive), .scene(.background),
             .launchAssembled, .launchFinished, .safetyFired,
             .exitFinished(id: state.exitCount), .exitFinished(id: state.exitCount - 1),
-            .lockFadeFinished,
+            .lockFadeFinished(id: state.fadeCount), .lockFadeFinished(id: state.fadeCount - 1),
         ]
         for setting in settings {
             events.append(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
@@ -29,6 +29,7 @@ import Testing
         var copy = state
         copy.revealToken = 0
         copy.exitCount = 0
+        copy.fadeCount = 0
         if let exit = copy.exit { copy.exit = ShellState.Exit(id: 0, cold: exit.cold) }
         return copy
     }
@@ -210,7 +211,8 @@ import Testing
         }
         // Todo desbloqueo con el bloqueo delante monta Inicio exactamente una vez, en ese instante.
         for step in Self.steps where step.event == .unlockSucceeded && step.before.showsLock {
-            #expect(step.after.revealToken == step.before.revealToken + 1)
+            // (En segundo plano el desbloqueo se ignora: D-10.)
+            #expect(step.after.revealToken == step.before.revealToken + (step.before.acceptsUnlock ? 1 : 0))
         }
     }
 
@@ -259,8 +261,11 @@ import Testing
             unlocked.apply(.unlockSucceeded)
             if state.fliesOnUnlock {
                 #expect(unlocked.exit != nil && unlocked.pendingFlight == nil)
-            } else {
+            } else if state.acceptsUnlock {
                 #expect(unlocked.exit == nil && unlocked.pendingFlight != nil)
+            } else {
+                // En segundo plano no se desbloquea: ni vuelo ni vuelo pendiente.
+                #expect(unlocked == state)
             }
         }
         for state in Self.states where !state.showsLock {
@@ -283,6 +288,10 @@ import Testing
                 #expect(state.lockExitOnUnlock == .fades)
                 #expect(unlocked.lockFading)
                 #expect(!unlocked.showsCover)
+            } else if state.scene == .background {
+                // D-10: en segundo plano el bloqueo no se va de ninguna manera.
+                #expect(state.lockExitOnUnlock == nil)
+                #expect(unlocked == state)
             } else {
                 #expect(state.lockExitOnUnlock == .covered, "fuera de primer plano el bloqueo se fundiría: \(state)")
                 #expect(!unlocked.lockFading, "queda un bloqueo fundiéndose debajo de la tapa: \(state)")
@@ -332,8 +341,12 @@ import Testing
             #expect(!state.showsLock)
             // Y siempre tiene salida: al acabar el fundido, Inicio se puede tocar.
             var done = state
-            done.apply(.lockFadeFinished)
+            done.apply(.lockFadeFinished(id: state.fadeCount))
             #expect(!done.lockFading && done.homeTakesTouches)
+            // El aviso de un fundido anterior no lo da por acabado.
+            var stale = state
+            stale.apply(.lockFadeFinished(id: state.fadeCount - 1))
+            #expect(stale.lockFading && !stale.homeTakesTouches)
         }
         for step in Self.steps {
             if !step.before.lockFading && step.after.lockFading {
@@ -342,7 +355,8 @@ import Testing
             }
             if step.before.lockFading && !step.after.lockFading {
                 // Solo deja de fundirse porque el fundido acabó o porque el bloqueo vuelve a estar delante, entero.
-                #expect(step.event == .lockFadeFinished || step.after.showsLock, "el fundido se dio por acabado con \(step.event)")
+                #expect(step.event == .lockFadeFinished(id: step.before.fadeCount) || step.after.showsLock,
+                        "el fundido se dio por acabado con \(step.event)")
             }
         }
         // La secuencia del toque tardío: desbloqueo en primer plano; mientras dura el fundido nada devuelve los toques a
@@ -358,13 +372,111 @@ import Testing
         state.apply(.scene(.inactive))
         state.apply(.scene(.active))
         #expect(!state.homeTakesTouches)
-        state.apply(.lockFadeFinished)
+        state.apply(.lockFadeFinished(id: state.fadeCount))
         #expect(state.homeTakesTouches)
         // Sin bloqueo nunca hay fundido: Inicio se toca en cuanto el arranque lo deja (eso lo mide la capa del arranque).
         var open = ShellState(lockApplies: false, relocksOnBackground: false)
         #expect(open.homeTakesTouches && !open.lockFading)
-        open.apply(.lockFadeFinished)
+        open.apply(.lockFadeFinished(id: open.fadeCount))
         #expect(open.homeTakesTouches)
+    }
+
+    /// m-1 de la segunda re-revisión: desbloqueo, re-bloqueo y otro desbloqueo dentro de lo que dura un fundido. El
+    /// aviso de fin del primer fundido llega durante el segundo y NO le devuelve los toques a Inicio antes de tiempo.
+    @Test func aStaleFadeEndNeverEndsALaterFade() {
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        state.apply(.unlockSucceeded)
+        let first = state.fadeCount
+        #expect(state.lockFading)
+        state.apply(.scene(.background))
+        #expect(state.showsLock && !state.lockFading)
+        state.apply(.scene(.active))
+        state.apply(.unlockSucceeded)
+        let second = state.fadeCount
+        #expect(second == first + 1 && state.lockFading)
+        state.apply(.lockFadeFinished(id: first))
+        #expect(state.lockFading && !state.homeTakesTouches, "el fin del primer fundido acabó el segundo")
+        state.apply(.lockFadeFinished(id: second))
+        #expect(!state.lockFading && state.homeTakesTouches)
+        // En todo el recorrido: solo el número del fundido en curso lo acaba, y cada fundido nuevo estrena número.
+        for step in Self.steps {
+            if !step.before.lockFading && step.after.lockFading { #expect(step.after.fadeCount == step.before.fadeCount + 1) }
+            if case .lockFadeFinished(let id) = step.event, step.before.lockFading, id != step.before.fadeCount {
+                #expect(step.after.lockFading)
+            }
+        }
+    }
+
+    // MARK: D-10 · Con el bloqueo activado, la app nunca está desbloqueada en segundo plano
+
+    @Test func theAppIsNeverUnlockedInTheBackgroundWithTheLockEnabled() {
+        #expect(Self.states.contains { $0.scene == .background && $0.relocksOnBackground })
+        #expect(Self.states.contains { $0.scene == .background && !$0.relocksOnBackground && !$0.locked })
+        for state in Self.states where state.scene == .background && state.relocksOnBackground {
+            #expect(state.locked, "desbloqueada en segundo plano con el bloqueo activado: \(state)")
+            if state.lockApplies { #expect(state.showsLock && state.hidesHome && !state.homeTakesTouches) }
+        }
+        // Ningún suceso desbloquea en segundo plano, con ningún ajuste: el éxito de la autenticación se ignora entero.
+        for step in Self.steps where step.before.scene == .background && step.event == .unlockSucceeded {
+            #expect(step.after == step.before, "un desbloqueo en segundo plano cambió algo: \(step.before)")
+        }
+        for state in Self.states {
+            #expect(state.acceptsUnlock == (state.scene != .background))
+        }
+        // La secuencia de la revisión: Face ID está comprobando (escena inactiva), el usuario sale de la app (segundo
+        // plano) y el éxito llega entonces. La app sigue bloqueada; al volver, el bloqueo está delante y un éxito nuevo
+        // (ya en primer plano) sí desbloquea, y el siguiente paso por segundo plano vuelve a bloquear.
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        state.apply(.scene(.inactive))
+        state.apply(.scene(.background))
+        #expect(!state.acceptsUnlock)
+        state.apply(.unlockSucceeded)
+        #expect(state.showsLock && state.revealToken == 0 && state.exit == nil && state.pendingFlight == nil && !state.lockFading)
+        #expect(state.lockPlaysLaunch, "sigue siendo el arranque en frío: Inicio no se ha enseñado")
+        state.apply(.scene(.inactive))
+        state.apply(.scene(.active))
+        #expect(state.showsLock && state.acceptsUnlock)
+        state.apply(.unlockSucceeded)
+        #expect(!state.showsLock && state.revealToken == 1)
+        state.apply(.scene(.background))
+        #expect(state.showsLock)
+        // Lo mismo tras un re-bloqueo: desbloqueada, a segundo plano (se bloquea) y un éxito tardío del intento anterior.
+        state.apply(.unlockSucceeded)
+        #expect(state.showsLock && state.revealToken == 1)
+    }
+
+    // MARK: La vista pinta lo que dice el reductor
+
+    @Test func theViewDrawsTheLayersInThisOrder() {
+        // La altura crece con el orden de las capas y la tapa es la más alta: nada puede quedar encima de ella.
+        for state in Self.states {
+            for scene in ShellState.Scene.allCases {
+                let layers = state.layers(liveScene: scene)
+                let heights = layers.map(ShellState.zIndex(of:))
+                #expect(heights == heights.sorted(), "capas fuera de orden: \(layers)")
+                #expect(Set(heights).count == heights.count, "dos capas a la misma altura: \(layers)")
+                #expect(layers.first == .home)
+                #expect(layers.contains(.cover) == ShellState.showsCover(scene: scene, showsLock: state.showsLock))
+                #expect(!(layers.contains(.lock) && layers.contains(.launch)))
+                if scene != .active { #expect(layers.last == .lock || layers.last == .cover) }
+            }
+            #expect(state.layers == state.layers(liveScene: state.scene))
+        }
+        for layer in ShellState.Layer.allCases where layer != .cover {
+            #expect(ShellState.zIndex(of: layer) < ShellState.zIndex(of: .cover))
+        }
+        #expect(ShellState.zIndex(of: .exit) > ShellState.zIndex(of: .lock))
+    }
+
+    @Test func voiceOverDoesNotReadHomeUnderTheBlackLaunch() {
+        for state in Self.states {
+            #expect(state.hidesHomeFromVoiceOver == (state.showsLock || (state.showsLaunch && state.coldStart)))
+            if state.hidesHome { #expect(state.hidesHomeFromVoiceOver) }
+        }
+        var state = ShellState(lockApplies: false, relocksOnBackground: false)
+        #expect(state.hidesHomeFromVoiceOver && !state.hidesHome)
+        state.apply(.launchAssembled)
+        #expect(!state.hidesHomeFromVoiceOver, "Inicio ya se está montando a la vista: VoiceOver puede leerlo")
     }
 
     // MARK: (e) El bloqueo solo lo quita el desbloqueo

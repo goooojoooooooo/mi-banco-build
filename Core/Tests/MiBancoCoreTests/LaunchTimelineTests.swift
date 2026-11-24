@@ -232,13 +232,44 @@ import Testing
             #expect(mid.flight > 0.3 && mid.flight < 1.05)
             #expect(mid.mark == 1)
             let end = timeline.frame(at: timeline.duration)
-            // Al final la marca está en su ranura (como mucho un 6 % de rebote) y la capa ya no pinta nada.
-            #expect(abs(end.flight - 1) < 0.06)
+            // Al final la marca está EXACTAMENTE en su ranura y la capa ya no pinta nada.
+            #expect(end.flight == 1)
             #expect(end.black == 0)
             #expect(end.mark == 0)
             let after = timeline.frame(at: timeline.duration + 5)
             #expect(after.black == 0)
             #expect(after.mark == 0)
+            #expect(after.flight == 1)
+        }
+    }
+
+    /// La marca que vuela aterriza en la ranura de la barra de Inicio, que aparece en ese mismo instante: el último
+    /// fotograma del vuelo es exactamente 1 (ni un punto antes ni después), llega sin salto y sin pasarse más de un 6 %.
+    @Test func theFlightEndsExactlyOnTheSlot() throws {
+        for timeline in [expressive, balanced] {
+            let flight = try #require(timeline.flightAt)
+            var previous = 0.0
+            var highest = 0.0
+            for t in stride(from: flight, through: timeline.duration, by: 0.001) {
+                let now = timeline.frame(at: t).flight
+                #expect(abs(now - previous) < 0.02, "el vuelo salta en \(t)")
+                previous = now
+                highest = max(highest, now)
+            }
+            #expect(highest < 1.06)
+            #expect(abs(previous - 1) < 0.02)
+            #expect(timeline.frame(at: timeline.duration).flight == 1)
+            // Lo mismo tras un toque que lo salta, y en la salida del bloqueo.
+            #expect(timeline.frame(at: timeline.duration, skipped: true).flight == 1)
+            let exit = try #require(timeline.exitDuration)
+            #expect(timeline.exitFrame(at: exit, bands: true).flight == 1)
+            #expect(timeline.exitFrame(at: exit + 3, bands: false).flight == 1)
+            var before = 0.0
+            for t in stride(from: 0.0, through: exit, by: 0.001) {
+                let now = timeline.exitFrame(at: t, bands: false).flight
+                #expect(abs(now - before) < 0.02, "la salida salta en \(t)")
+                before = now
+            }
         }
     }
 
@@ -303,7 +334,7 @@ import Testing
             #expect(start.sheen == nil)
             #expect(start.lines == nil)
             let end = timeline.exitFrame(at: duration, bands: true)
-            #expect(abs(end.flight - 1) < 0.06)
+            #expect(end.flight == 1)
             #expect(end.mark == 0)
             #expect(end.black == 0)
             // Sin bandas (desbloqueo que no es el arranque en frío): solo vuela la marca.

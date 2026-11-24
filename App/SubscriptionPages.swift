@@ -11,6 +11,8 @@ extension LedgerSnapshot {
         let amountCents: Int
         /// "Próximo cobro: hoy" / "mañana" / "domingo, 22 nov".
         let nextCharge: String
+        /// El próximo cobro cae hoy: la fila lleva la etiqueta «HOY».
+        let chargesToday: Bool
         /// "Sube 1,00 €" / "Baja 1,00 €"; nil si el precio no ha cambiado.
         let priceChange: String?
         let priceWentUp: Bool
@@ -33,6 +35,12 @@ extension LedgerSnapshot {
                                    subscriptions: [Subscription], hidden: [Subscription]) -> SubscriptionExtras {
         var out = SubscriptionExtras()
         out.subscriptions = subscriptions.map { subscriptionRow($0, now: now, calendar: calendar) }
+        #if DEBUG
+        // Demo (`-MiBancoDemoChargeToday`): la primera fila se cobra hoy, para poder ver la etiqueta «HOY».
+        if DemoMode.isActive, DemoMode.chargesToday, let first = subscriptions.first {
+            out.subscriptions[0] = subscriptionRow(first, now: now, calendar: calendar, nextDate: now)
+        }
+        #endif
         let totals = subscriptionTotals(subscriptions)
         out.monthlyCents = totals.monthlyCents
         out.yearlyCents = totals.yearlyCents
@@ -43,7 +51,9 @@ extension LedgerSnapshot {
         return out
     }
 
-    static func subscriptionRow(_ s: Subscription, now: Date, calendar: Calendar) -> SubscriptionRow {
+    /// `nextDate`: solo la demo lo pasa (otra fecha de cobro para la fila); lo normal es la de la suscripción.
+    static func subscriptionRow(_ s: Subscription, now: Date, calendar: Calendar, nextDate: Date? = nil) -> SubscriptionRow {
+        let next = nextDate ?? s.nextDate
         var change: String?
         var up = false
         if let previous = s.previousAmountCents, previous != s.amountCents {
@@ -52,7 +62,8 @@ extension LedgerSnapshot {
         }
         return SubscriptionRow(
             id: "\(s.bank.rawValue)|\(s.id)", merchant: s.merchant, bank: s.bank, amountCents: s.amountCents,
-            nextCharge: nextChargeText(s.nextDate, now: now, calendar: calendar), priceChange: change, priceWentUp: up,
+            nextCharge: nextChargeText(next, now: now, calendar: calendar),
+            chargesToday: calendar.isDate(next, inSameDayAs: now), priceChange: change, priceWentUp: up,
             logoDomain: MiBancoCore.logoDomain(merchant: s.merchant, isShop: true, isIncome: false))
     }
 

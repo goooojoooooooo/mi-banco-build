@@ -120,13 +120,14 @@ struct BudgetsView: View {
                 BudgetBar(status: status, name: barName, index: index, textTrailingInset: stacked ? 0 : 10)
                     .padding(.leading, stacked ? 0 : 54)
                     .transition(.opacity)
+                    .accessibilityIdentifier("\(identifier(scope)).barra")
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(minHeight: 64)
         .animation(reduceMotion ? nil : Theme.Motion.reveal, value: status != nil)
-        .staggeredEntrance(index, rise: 10)
+        .motionEntrance(index, rise: 10)
     }
 
     private func name(_ scope: BudgetScope) -> String {

@@ -29,6 +29,10 @@ struct LaunchSequence: View {
     @State private var passesTouches = false
     @State private var assembled = false
     @State private var clicks = 0
+    /// El guion ha terminado: el reloj se para aquí mismo (además de quitarse la capa).
+    @State private var finished = false
+    /// El ancho del nombre que vuela, para que aterrice del tamaño del de la barra.
+    @State private var nameWidth: CGFloat = 0
 
     private static let markSize: CGFloat = 96
     private static let nameSize: CGFloat = 15
@@ -37,10 +41,10 @@ struct LaunchSequence: View {
         let timeline = LaunchTimeline(motion)
         GeometryReader { proxy in
             LaunchStage(
-                timeline: timeline, act: .launch, start: start, skippedAt: skippedAt, finished: false,
+                timeline: timeline, act: .launch, start: start, skippedAt: skippedAt, finished: finished,
                 timeMultiplier: motion.timeMultiplier
             ) { frame in
-                scene(frame, size: proxy.size, topInset: proxy.safeAreaInsets.top)
+                scene(frame, size: proxy.size, topInset: proxy.safeAreaInsets.top, pieces: timeline.style == .pieces)
             }
         }
         .ignoresSafeArea()
@@ -53,7 +57,13 @@ struct LaunchSequence: View {
         .sensoryFeedback(Haptics.lock, trigger: clicks)
         .task(id: skippedAt) { await run(timeline) }
         .onAppear {
+            // Con piezas, la marca y el nombre vuelan a la ranura de la barra de Inicio: mientras tanto la ranura no
+            // dibuja los suyos (nunca dos marcas). Con solo fundido nada vuela y la ranura se queda como está.
+            if timeline.style == .pieces { anchor?.flying = .markAndName }
             #if DEBUG
+            if let began = LaunchProbe.shared.appInitAt {
+                LaunchProbe.shared.mountedAfterMs = Int(((Date().timeIntervalSince1970 - began) * 1000).rounded())
+            }
             LaunchProbe.shared.launches += 1
             LaunchProbe.shared.style = timeline.style == .pieces ? "piezas" : "fundido"
             LaunchProbe.shared.startsAt = start.timeIntervalSince1970
@@ -62,32 +72,43 @@ struct LaunchSequence: View {
     }
 
     /// Todo lo que se ve en un fotograma. Solo se mueven transformaciones y opacidades.
-    private func scene(_ frame: LaunchFrame, size: CGSize, topInset: CGFloat) -> some View {
+    private func scene(_ frame: LaunchFrame, size: CGSize, topInset: CGFloat, pieces: Bool) -> some View {
         let center = CGPoint(x: size.width / 2, y: size.height * 0.45)
-        let slot = anchor?.brandFrame ?? LaunchGeometry.fallbackSlot(topInset: topInset)
+        // Con la ranura de Inicio a la vista, la marca y el nombre ATERRIZAN en ella, enteros, y en ese instante la
+        // capa se quita y la ranura dibuja los suyos en el mismo sitio. Sin ranura, se deshacen por el camino.
+        let brand = anchor?.brandFrame
+        let lands = pieces && brand != nil
+        let slot = brand ?? LaunchGeometry.fallbackSlot(topInset: topInset)
+        let markSide = lands ? anchor?.brandMarkSide : nil
         let flight = CGFloat(frame.flight)
-        let target = LaunchGeometry.markTarget(in: slot)
+        let target = LaunchGeometry.markTarget(in: slot, markSide: markSide)
         let nameHome = CGPoint(x: center.x, y: center.y + Self.markSize / 2 + 28)
         let tracking = CGFloat(0.42 - 0.24 * frame.name) * Self.nameSize
-        let landing = LaunchGeometry.landingOpacity(flight: flight, hasSlot: anchor?.brandFrame != nil)
+        let dissolve = LaunchGeometry.landingOpacity(flight: flight, hasSlot: false)
+        let nameSlot = LaunchGeometry.nameTarget(in: slot, markSide: markSide, gap: lands ? anchor?.brandGap : nil)
+        // Al aterrizar, el nombre tiene el ancho del de la barra (el mismo tipo; solo difiere con el texto ampliado).
+        let nameScale = lands && nameWidth > 0 ? nameSlot.width / nameWidth : 0.7
         return ZStack {
             Theme.canvas.opacity(frame.black)
             LaunchSkyCanvas(frame: frame, center: center)
             LaunchMark(frame: frame, size: Self.markSize)
                 .scaleEffect(1 + (target.side / Self.markSize - 1) * flight)
                 .position(LaunchGeometry.lerp(center, target.center, flight))
-                .opacity(frame.mark * landing)
+                .opacity(lands ? 1 : frame.mark * dissolve)
             Text(AppIdentity.displayName.uppercased())
                 .font(.system(size: Self.nameSize, weight: .semibold))
                 .tracking(tracking)
                 .foregroundStyle(Theme.label)
+                .lineLimit(1)
                 .fixedSize()
-                // El interletraje también va detrás de la última letra: se compensa para que quede centrado.
-                .offset(x: tracking / 2)
-                .scaleEffect(1 - 0.3 * min(1, flight))
-                .position(LaunchGeometry.lerp(nameHome, LaunchGeometry.nameTarget(in: slot), flight))
-                // Durante el vuelo el nombre se va apagando: en la ranura ya está el de la barra.
-                .opacity(frame.name * frame.mark * Double(max(0, 1 - flight / 0.7)))
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { nameWidth = $0 }
+                // El interletraje también va detrás de la última letra: en el centro se compensa para que quede
+                // centrado; en la ranura no (el nombre de la barra es el mismo texto, con ese mismo hueco detrás).
+                .offset(x: tracking / 2 * (lands ? 1 - min(1, flight) : 1))
+                .scaleEffect(1 + (nameScale - 1) * min(1, flight))
+                .position(LaunchGeometry.lerp(nameHome, nameSlot.center, flight))
+                // Sin ranura, el nombre se va apagando durante el vuelo.
+                .opacity(lands ? frame.name : frame.name * frame.mark * Double(max(0, 1 - flight / 0.7)))
             if !frame.joined {
                 LaunchHalvesCanvas(
                     frame: frame, center: center, markSize: Self.markSize, distanceScale: motion.level.distanceScale)
@@ -132,6 +153,11 @@ struct LaunchSequence: View {
         #if DEBUG
         LaunchProbe.shared.finishedAfterMs = Int((Date().timeIntervalSince(began) * 1000).rounded())
         #endif
+        // El reloj se para aquí (su último fotograma es el final exacto del guion: la marca en su ranura) y, en esta
+        // misma actualización, la ranura de la barra vuelve a dibujar su marca y la capa se quita: ni un fotograma con
+        // dos marcas ni uno sin ninguna.
+        finished = true
+        anchor?.flying = nil
         onFinish()
     }
 
@@ -161,6 +187,10 @@ struct LaunchExit: View {
     @Environment(\.motion) private var motion
     @Environment(\.launchAnchor) private var anchor
     @State private var start = Date()
+    /// Inicio tiene su ranura a la vista: la marca aterriza en ella, entera (se decide una vez, al echar a volar).
+    @State private var landsOnSlot: Bool?
+    /// El vuelo ha terminado: el reloj se para aquí mismo (además de quitarse la capa).
+    @State private var finished = false
 
     var body: some View {
         let timeline = LaunchTimeline(motion)
@@ -168,7 +198,7 @@ struct LaunchExit: View {
             if timeline.exitDuration != nil {
                 GeometryReader { proxy in
                     LaunchStage(
-                        timeline: timeline, act: .exit(bands: cold), start: start, finished: false,
+                        timeline: timeline, act: .exit(bands: cold), start: start, finished: finished,
                         timeMultiplier: motion.timeMultiplier
                     ) { frame in
                         scene(frame, topInset: proxy.safeAreaInsets.top)
@@ -184,9 +214,22 @@ struct LaunchExit: View {
             let seconds = (timeline.exitDuration ?? 0) * max(motion.timeMultiplier, 0.01)
             if seconds > 0 { try? await Task.sleep(for: .seconds(seconds), tolerance: LaunchClock.tolerance) }
             guard !Task.isCancelled else { return }
+            // En la misma actualización: el reloj se para en su último fotograma (la marca exactamente en la ranura),
+            // la ranura de la barra vuelve a dibujar la suya y esta capa se quita.
+            finished = true
+            anchor?.flying = nil
             onFinish()
         }
         .onAppear {
+            if timeline.exitDuration != nil {
+                let lands = anchor?.brandFrame != nil
+                landsOnSlot = lands
+                // La marca de la barra la lleva esta: la ranura no dibuja la suya hasta que aterrice.
+                if lands { anchor?.flying = .mark }
+                #if DEBUG
+                if lands { LaunchProbe.shared.landings += 1 }
+                #endif
+            }
             #if DEBUG
             if timeline.exitDuration != nil {
                 LaunchProbe.shared.exits += 1
@@ -201,9 +244,11 @@ struct LaunchExit: View {
 
     private func scene(_ frame: LaunchFrame, topInset: CGFloat) -> some View {
         let home = CGPoint(x: from.midX, y: from.midY)
-        let slot = anchor?.brandFrame ?? (cold ? LaunchGeometry.fallbackSlot(topInset: topInset) : from)
+        let brand = anchor?.brandFrame
+        let lands = landsOnSlot ?? (brand != nil)
+        let slot = brand ?? (cold ? LaunchGeometry.fallbackSlot(topInset: topInset) : from)
         let flight = CGFloat(frame.flight)
-        let target = LaunchGeometry.markTarget(in: slot)
+        let target = LaunchGeometry.markTarget(in: slot, markSide: lands && brand != nil ? anchor?.brandMarkSide : nil)
         return ZStack {
             Color.clear
             if cold {
@@ -212,7 +257,8 @@ struct LaunchExit: View {
             AppMark(size: from.width)
                 .scaleEffect(1 + (target.side / max(from.width, 1) - 1) * flight)
                 .position(LaunchGeometry.lerp(home, target.center, flight))
-                .opacity(frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: anchor?.brandFrame != nil))
+                // Con ranura llega entera hasta ella; sin ranura se deshace por el camino.
+                .opacity(lands ? 1 : frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: false))
         }
         .accessibilityHidden(true)
     }
@@ -226,15 +272,18 @@ enum LaunchGeometry {
         CGRect(x: 20, y: (topInset > 0 ? topInset : 59) + 14, width: 78, height: 22)
     }
 
-    /// La ranura lleva la marca a la izquierda y el nombre a su derecha: la marca es un cuadrado del alto de la ranura.
-    static func markTarget(in slot: CGRect) -> (center: CGPoint, side: CGFloat) {
-        let side = min(slot.height, slot.width)
+    /// La ranura lleva la marca a la izquierda y el nombre a su derecha. La marca es un cuadrado de `markSide` (lo
+    /// apunta la ranura de Inicio) centrado en vertical; sin ese dato, del alto de la ranura.
+    static func markTarget(in slot: CGRect, markSide: CGFloat? = nil) -> (center: CGPoint, side: CGFloat) {
+        let side = min(markSide ?? slot.height, slot.width)
         return (CGPoint(x: slot.minX + side / 2, y: slot.midY), side)
     }
 
-    static func nameTarget(in slot: CGRect) -> CGPoint {
-        let side = min(slot.height, slot.width)
-        return CGPoint(x: slot.minX + side + (slot.width - side) / 2, y: slot.midY)
+    /// Dónde va el nombre dentro de la ranura: a la derecha de la marca y su hueco, hasta el borde.
+    static func nameTarget(in slot: CGRect, markSide: CGFloat? = nil, gap: CGFloat? = nil) -> (center: CGPoint, width: CGFloat) {
+        let side = min(markSide ?? slot.height, slot.width)
+        let left = min(slot.maxX, slot.minX + side + (gap ?? 0))
+        return (CGPoint(x: (left + slot.maxX) / 2, y: slot.midY), slot.maxX - left)
     }
 
     /// Con la ranura de Inicio a la vista, la marca llega entera hasta ella. Si aún no hay ranura (vuela hacia donde

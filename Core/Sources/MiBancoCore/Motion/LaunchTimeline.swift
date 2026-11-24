@@ -214,7 +214,14 @@ public struct LaunchTimeline: Equatable, Sendable {
         }
         if n > Self.flightStart {
             let damping = MotionMath.scaled(fly, level: level).dampingFraction
-            frame.flight = Self.spring(n - Self.flightStart, response: fly.response, dampingFraction: damping)
+            let raw = Self.spring(n - Self.flightStart, response: fly.response, dampingFraction: damping)
+            // Al final del guion el muelle no está exactamente en 1 (se queda un 1 % corto o se pasa un 3 %, según la
+            // intensidad): lo que falta se reparte suave, para que la marca termine EXACTAMENTE en su ranura, que es
+            // donde en ese instante aparece la de la barra de Inicio.
+            let span = Self.end - Self.flightStart
+            let rest = 1 - Self.spring(span, response: fly.response, dampingFraction: damping)
+            let x = min(1, (n - Self.flightStart) / span)
+            frame.flight = n >= Self.end - Self.epsilon ? 1 : raw + rest * x * x * (3 - 2 * x)
         }
         frame.black = 1 - Self.easeOut(Self.window(n, Self.flightStart, Self.blackGone))
         frame.mark = 1 - Self.window(n, Self.markFadeStart, Self.end)

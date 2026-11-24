@@ -6,24 +6,30 @@ import MiBancoCore
 /// Ajustes son el mismo estado) se guarda en UserDefaults; cambiarlo dentro de `withAnimation` anima cada importe.
 @MainActor @Observable
 final class AppPreferences {
-    static let privateModeKey = "privateMode"
+    nonisolated static let privateModeKey = "privateMode"
 
-    /// El modo privado guardado (con la misma clave y el mismo ajuste de la demo que lee `init`): para quien no tiene las
-    /// preferencias en el entorno y aun así nunca debe enseñar un importe que el dueño tiene oculto.
-    static var storedPrivateMode: Bool {
+    /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arrancar
+    /// con `-MiBancoDemoPrivate`, para que la demo nunca toque el ojo del dueño y, aun así, quien observe lo guardado
+    /// (`RollingAmount` sin preferencias) lo vea cambiar en vivo.
+    nonisolated(unsafe) static let privateModeStore: UserDefaults = {
         #if DEBUG
-        if DemoMode.isActive { return DemoMode.startsPrivate }
+        if DemoMode.isActive, let demo = UserDefaults(suiteName: "MiBancoDemoPreferences") {
+            demo.set(DemoMode.startsPrivate, forKey: privateModeKey)
+            return demo
+        }
         #endif
-        return UserDefaults.standard.bool(forKey: privateModeKey)
-    }
+        return .standard
+    }()
+
+    /// El modo privado guardado (la misma clave y el mismo almacén que lee `init`): para quien no tiene las preferencias
+    /// en el entorno y aun así nunca debe enseñar un importe que el dueño tiene oculto.
+    static var storedPrivateMode: Bool { privateModeStore.bool(forKey: privateModeKey) }
+
+    nonisolated static let pricesEnabledKey = "investmentPrices"
+    nonisolated static let pricesAskedKey = "investmentPricesAsked"
 
     var privateMode: Bool {
-        didSet {
-            #if DEBUG
-            if DemoMode.isActive { return }
-            #endif
-            UserDefaults.standard.set(privateMode, forKey: Self.privateModeKey)
-        }
+        didSet { Self.privateModeStore.set(privateMode, forKey: Self.privateModeKey) }
     }
 
     static let motionLevelKey = "motionLevel"
@@ -40,16 +46,83 @@ final class AppPreferences {
         }
     }
 
+    /// Permiso para consultar precios diarios en Yahoo Finance (solo ISIN/símbolo; apagado por defecto).
+    var pricesEnabled: Bool {
+        didSet {
+            #if DEBUG
+            if DemoMode.isActive { return }
+            #endif
+            UserDefaults.standard.set(pricesEnabled, forKey: Self.pricesEnabledKey)
+        }
+    }
+
+    /// Si ya se ha mostrado y respondido la pregunta inicial de precios en Ajustes › Inversiones.
+    var pricesAsked: Bool {
+        didSet {
+            #if DEBUG
+            if DemoMode.isActive { return }
+            #endif
+            UserDefaults.standard.set(pricesAsked, forKey: Self.pricesAskedKey)
+        }
+    }
+
     init() {
         let stored = UserDefaults.standard.string(forKey: Self.motionLevelKey).flatMap(MotionLevel.init(rawValue:))
         privateMode = Self.storedPrivateMode
         #if DEBUG
         if DemoMode.isActive {
-            motionLevel = Self.defaultMotionLevel
+            motionLevel = DemoMode.motionLevelOverride ?? Self.defaultMotionLevel
+            pricesEnabled = false
+            pricesAsked = DemoMode.asksPrices ? false : DemoMode.includesPortfolio
+            // La demo no guarda nada, salvo la prueba de reinicio de la guía (`-MiBancoDemoPersistGuide`).
+            if DemoMode.persistsGuideProgress {
+                if DemoMode.resetsGuideProgress { UserDefaults.standard.removeObject(forKey: Self.guideStepKey) }
+                guideLastStep = Self.storedGuideSteps()
+            } else {
+                guideLastStep = DemoMode.guideProgressSeed
+            }
             return
         }
         #endif
+        #if DEBUG
+        motionLevel = DemoMode.motionLevelOverride ?? stored ?? Self.defaultMotionLevel
+        #else
         motionLevel = stored ?? Self.defaultMotionLevel
+        #endif
+        pricesEnabled = UserDefaults.standard.bool(forKey: Self.pricesEnabledKey)
+        pricesAsked = UserDefaults.standard.bool(forKey: Self.pricesAskedKey)
+        guideLastStep = Self.storedGuideSteps()
+    }
+
+    // MARK: Guía de avisos: el último paso de cada guía
+
+    static let guideStepKey = "guideLastStep"
+
+    /// Último paso (desde 0) en que se quedó cada guía de Atajos, por `GuideTrack.rawValue`. Vive aquí y no en el libro:
+    /// es una preferencia del aparato, y iOS puede cerrar la app mientras él está en Atajos. Se lee con tolerancia.
+    /// Se guarda con el número de pasos que tenía la guía («8/22» = paso 9 de 22): si la guía cambia de largo, no se retoma.
+    private(set) var guideLastStep: [String: String]
+
+    func guideResume(_ track: GuideTrack) -> Int? {
+        guideResumeIndex(saved: GuideSavedStep(stored: guideLastStep[track.rawValue]), total: guideSteps(for: track).count)
+    }
+
+    /// Guarda el paso al que llega una guía; en el primero (o al terminar) no queda nada que retomar.
+    func setGuideStep(_ track: GuideTrack, _ index: Int?) {
+        if let index, index > 0 {
+            guideLastStep[track.rawValue] = GuideSavedStep(step: index, of: guideSteps(for: track).count).stored
+        } else {
+            guideLastStep.removeValue(forKey: track.rawValue)
+        }
+        #if DEBUG
+        if DemoMode.isActive && !DemoMode.persistsGuideProgress { return }
+        #endif
+        UserDefaults.standard.set(guideLastStep, forKey: Self.guideStepKey)
+    }
+
+    /// Lo guardado con la forma antigua (un número suelto) se descarta al leerlo: no hay retoma.
+    private static func storedGuideSteps() -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: guideStepKey)?.compactMapValues { $0 as? String } ?? [:]
     }
 }
 
@@ -66,6 +139,23 @@ private struct PrivateAmount: ViewModifier {
             .opacity(hidden ? 0.75 : 1)
             .privacySensitive()
             .accessibilityHidden(hidden)
+    }
+}
+
+/// Un importe con etiqueta explícita (U8): oculta visualmente en modo privado y sustituye la etiqueta por «importe oculto»
+/// en el propio texto, sin ocultar el nodo (así VoiceOver lee «importe oculto» y XCUITest nunca ve «€» ni «%»).
+private struct PrivateAmountSpoken: ViewModifier {
+    let spoken: String
+    let radius: CGFloat
+    @Environment(AppPreferences.self) private var preferences
+
+    func body(content: Content) -> some View {
+        let hidden = preferences.privateMode
+        content
+            .blur(radius: hidden ? radius : 0, opaque: false)
+            .opacity(hidden ? 0.75 : 1)
+            .privacySensitive()
+            .accessibilityLabel(hidden ? "importe oculto" : spoken)
     }
 }
 
@@ -87,6 +177,11 @@ private struct PrivateField: ViewModifier {
 extension View {
     /// `radius`: 9 para importes de fila, más para las cifras grandes.
     func privateAmount(radius: CGFloat = 9) -> some View { modifier(PrivateAmount(radius: radius)) }
+
+    /// Variante U8 con etiqueta hablada explícita («importe oculto» cuando el ojo está cerrado).
+    func privateAmount(spoken: String, radius: CGFloat = 9) -> some View {
+        modifier(PrivateAmountSpoken(spoken: spoken, radius: radius))
+    }
 
     /// Para campos de texto con importe: ver `PrivateField`.
     func privateField(editing: Bool) -> some View { modifier(PrivateField(editing: editing)) }

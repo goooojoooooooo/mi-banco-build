@@ -64,8 +64,9 @@ struct MorphingButton: View {
             Text(title)
                 .font(.body.weight(.semibold))
                 .foregroundStyle(.black)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
+                // Sin tope de líneas ni encogimiento: un título largo con el texto más grande crece hacia abajo (el alto
+                // sale del título) en vez de encogerse y luego cortarse.
+                .fixedSize(horizontal: false, vertical: true)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)

@@ -115,7 +115,8 @@ private func parse(_ csv: String, _ bank: BankID, now: Date = at(11, 20)) throws
     }
 
     @Test func caixabankBalanceIsClippedToNowAndPicksNewestDateNotFirstRow() throws {
-        // Fichero del más antiguo al más nuevo: gana la fecha más reciente, no la primera fila.
+        // Fichero del más antiguo al más nuevo: gana el último movimiento del día más reciente (C, 8,00 €), no la primera
+        // fila ni la primera de ese día. (R32: antes esperaba 900, el saldo de B, que es anterior a C.)
         let csv = """
         Fecha;Fecha valor;Movimiento;Más datos;Importe;Saldo
         17/11/2026;17/11/2026;A;;-1,00;10,00
@@ -124,7 +125,193 @@ private func parse(_ csv: String, _ bank: BankID, now: Date = at(11, 20)) throws
 
         """
         let s = try parse(csv, .ima, now: at(11, 18, 15))
-        #expect(s.latestBalance == StatementBalance(cents: 900, at: at(11, 18, 15)))
+        #expect(s.latestBalance == StatementBalance(cents: 800, at: at(11, 18, 15)))
+    }
+
+    /// R32 B1: el saldo de cierre es el del último movimiento en el tiempo, sea cual sea el orden del fichero.
+    @Test func caixabankClosingBalanceDoesNotDependOnFileOrder() throws {
+        let header = "Fecha;Fecha valor;Movimiento;Más datos;Importe;Saldo\n"
+        func closing(_ rows: [String]) throws -> Int? {
+            try parse(header + rows.joined(separator: "\n") + "\n", .ima, now: at(11, 20, 12)).latestBalance?.cents
+        }
+        // Más nuevo primero, varias filas el último día.
+        #expect(try closing(["18/11/2026;18/11/2026;C;;-1,00;8,00", "18/11/2026;18/11/2026;B;;-1,00;9,00",
+                             "17/11/2026;17/11/2026;A;;-1,00;10,00"]) == 800)
+        // Más antiguo primero.
+        #expect(try closing(["17/11/2026;17/11/2026;A;;-1,00;10,00", "18/11/2026;18/11/2026;B;;-1,00;9,00",
+                             "18/11/2026;18/11/2026;C;;-1,00;8,00"]) == 800)
+        // Todo el mismo día: solo la cadena del saldo dice el sentido.
+        #expect(try closing(["18/11/2026;18/11/2026;B;;-1,00;9,00", "18/11/2026;18/11/2026;C;;-1,00;8,00"]) == 800)
+        #expect(try closing(["18/11/2026;18/11/2026;C;;-1,00;8,00", "18/11/2026;18/11/2026;B;;-1,00;9,00"]) == 800)
+    }
+
+    /// R32: la cabecera con «Concepto» en lugar de «Movimiento» también es CaixaBank.
+    @Test func caixabankDetectionAcceptsConceptoAlias() throws {
+        let csv = "Fecha;Concepto;Importe;Saldo\n18/11/2026;COMPRA MERCADONA;-23,45;1.284,55\n"
+        let s = try parse(csv, .ima)
+        #expect(s.format == .caixabank)
+        #expect(s.records.map(\.amountCents) == [-2345])
+    }
+
+    // MARK: R32 B2, B3: filas ilegibles
+
+    @Test func tradeRepublicUnreadableAmountFeeOrTaxIsIgnoredNotZero() throws {
+        let rows = [
+            ["datetime": "2026-11-18T09:00:00Z", "category": "CASH", "amount": "-5.00", "currency": "EUR", "transaction_id": "ok"],
+            ["datetime": "2026-11-18T09:01:00Z", "category": "CASH", "amount": "abc", "fee": "-1.00", "currency": "EUR",
+             "transaction_id": "bad-amount"],
+            ["datetime": "2026-11-18T09:02:00Z", "category": "CASH", "amount": "-5.00", "fee": "x1", "currency": "EUR",
+             "transaction_id": "bad-fee"],
+            ["datetime": "2026-11-18T09:03:00Z", "category": "CASH", "amount": "-5.00", "tax": "??", "currency": "EUR",
+             "transaction_id": "bad-tax"],
+            ["datetime": "2026-11-18T09:04:00Z", "category": "CASH", "amount": "-5.00", "fee": "", "currency": "EUR",
+             "transaction_id": "empty-fee-is-fine"],
+        ]
+        let csv = ([trHeaders.joined(separator: ",")] + rows.map(trLine)).joined(separator: "\n") + "\n"
+        let s = try parse(csv, .tr)
+        #expect(s.records.map(\.ref) == ["tr|ok", "tr|empty-fee-is-fine"])
+        #expect(s.records.map(\.amountCents) == [-500, -500])
+        #expect(s.ignoredRows == 3)
+        let exported = try parseTradeRepublicExport(try CSVTable.parse(Data(csv.utf8)))
+        #expect(exported.map(\.hasUnreadableAmount) == [false, true, true, true, false])
+    }
+
+    @Test func unterminatedQuoteAtEndOfFileIsUnreadable() throws {
+        #expect(throws: StatementError.unreadable) { try CSVTable.parse(Data("a,b\n1,\"abierta\n2,3\n".utf8)) }
+        #expect(throws: StatementError.unreadable) { try parse(revolutCSV + "Card Payment,Current,\"2026-11-18 13:05:11\n", .rev) }
+        // Cerrada al final del fichero no es un error.
+        let closed = try CSVTable.parse(Data("a,b\n1,\"cerrada\"".utf8))
+        #expect(closed.rows == [["1", "cerrada"]])
+    }
+
+    @Test func rowsWithAnotherCellCountAreIgnoredAndCounted() throws {
+        let short = "Card Payment,Current,2026-11-18 13:05:11,2026-11-19 09:00:00,Cafe,-2.00\n"
+        let long = "Card Payment,Current,2026-11-18 14:05:11,2026-11-19 09:00:00,Cafe,-2.00,0.00,EUR,COMPLETED,10.00,extra\n"
+        let s = try parse(revolutCSV + short + long, .rev)
+        #expect(s.records.map(\.amountCents) == [-2050, 10_000, -1250])
+        #expect(s.ignoredRows == 3 + 2)
+        let table = try CSVTable.parse(Data((revolutCSV + short + long).utf8))
+        #expect(table.malformedRows == 2)
+        #expect(table.rows.allSatisfy { $0.count == table.headers.count })
+        // CaixaBank: sin la celda «Más datos» el importe quedaría desplazado a otra columna.
+        let shifted = caixaCSV + "18/11/2026;18/11/2026;COMPRA;-5,00;9,00\n"
+        let c = try parse(shifted, .ima)
+        #expect(c.records.map(\.amountCents) == [-2345, 125_000])
+        #expect(c.ignoredRows == 1)
+        // Si todas las filas están mal no es un fichero vacío: se cuentan.
+        let onlyBad = try parse(revolutHeader + "\n1,2\n", .rev)
+        #expect(onlyBad.records.isEmpty)
+        #expect(onlyBad.ignoredRows == 1)
+    }
+
+    @Test func tradeRepublicRowHasPublicInitAndUsesPassedCalendar() throws {
+        let row = TradeRepublicRow(type: "BUY", amountCents: -1000, feeCents: -100, currency: "EUR", transactionID: "t")
+        #expect(row.cashEffectCents == -1100)
+        #expect(row.datetime == nil && row.hasUnreadableAmount == false)
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = .gmt
+        let csv = ([trHeaders.joined(separator: ",")]
+            + [trLine(["date": "2026-11-18", "amount": "5.00", "currency": "EUR", "transaction_id": "d"])]).joined(separator: "\n") + "\n"
+        let table = try CSVTable.parse(Data(csv.utf8))
+        let inUTC = try parseTradeRepublicExport(table, calendar: utc)
+        #expect(inUTC[0].date == utc.date(from: DateComponents(year: 2026, month: 11, day: 18, hour: 12)))
+        let inMadrid = try parseTradeRepublicExport(table, calendar: madrid)
+        #expect(inMadrid[0].date == at(11, 18, 12))
+        #expect(inUTC[0].date != inMadrid[0].date)
+        let s = try parseStatement(Data(csv.utf8), expected: .tr, now: at(11, 20), calendar: utc)
+        #expect(s.records[0].timing.date == inUTC[0].date)
+    }
+
+    @Test func tradeRepublicRepeatedTransactionIDCarriesCentsInSuffix() throws {
+        let rows = [
+            ["datetime": "2026-11-18T09:00:00Z", "amount": "-5.00", "currency": "EUR", "transaction_id": "dup"],
+            ["datetime": "2026-11-18T09:00:00Z", "amount": "-7.00", "currency": "EUR", "transaction_id": "dup"],
+            ["datetime": "2026-11-18T09:00:00Z", "amount": "-7.00", "currency": "EUR", "transaction_id": "dup"],
+        ]
+        let csv = ([trHeaders.joined(separator: ",")] + rows.map(trLine)).joined(separator: "\n") + "\n"
+        let s = try parse(csv, .tr)
+        #expect(s.records.map(\.ref) == ["tr|dup", "tr|dup|-700", "tr|dup|-700|2"])
+        // Un fichero que solo trae las dos primeras da las mismas claves a esas dos filas.
+        let overlap = ([trHeaders.joined(separator: ",")] + rows.prefix(2).map(trLine)).joined(separator: "\n") + "\n"
+        #expect(try parse(overlap, .tr).records.map(\.ref) == ["tr|dup", "tr|dup|-700"])
+    }
+
+    // MARK: R32 B4, B5: saldo más antiguo y claves por valores leídos
+
+    @Test func importingAnOlderStatementNeverReplacesANewerBalance() throws {
+        // A mano, de hoy.
+        var manual = Ledger()
+        manual.setBalance(.rev, cents: 50_000, now: at(11, 20, 10))
+        manual.importStatement(try parse(revolutCSV, .rev), now: at(11, 20, 12), calendar: madrid)
+        #expect(manual.state.balances[.rev]?.origin == .manual)
+        #expect(manual.state.balances[.rev]?.cents == 50_000)
+        #expect(manual.state.movements.count == 3)
+        // De la API, de hoy.
+        var bank = Ledger()
+        bank.adoptBalance(.rev, cents: 777, at: at(11, 20, 10), origin: .bank)
+        bank.importStatement(try parse(revolutCSV, .rev), now: at(11, 20, 12), calendar: madrid)
+        #expect(bank.state.balances[.rev]?.origin == .bank)
+        #expect(bank.state.balances[.rev]?.cents == 777)
+        // Un extracto más reciente que la lectura sí la sustituye, también a una puesta a mano.
+        var older = Ledger()
+        older.setBalance(.rev, cents: 50_000, now: at(11, 1))
+        older.importStatement(try parse(revolutCSV, .rev), now: at(11, 20, 12), calendar: madrid)
+        #expect(older.state.balances[.rev]?.origin == .statement)
+        #expect(older.state.balances[.rev]?.cents == 32_770)
+    }
+
+    @Test func sameStatementExportedWithOtherFormatsAddsNothing() throws {
+        var l = Ledger()
+        l.importStatement(try parse(revolutCSV, .rev), now: at(11, 20), calendar: madrid)
+        let header = "Type;Product;Started Date;Completed Date;Description;Amount;Fee;Currency;State;Balance"
+        let row = "Card Payment;Current;2026-11-18T13:05:11;2026-11-19T09:00:00;  MERCADONA ;-12,50;0,00;EUR;COMPLETED;327,70"
+        let variant = try parse(header + "\n" + row + "\n", .rev)
+        #expect(variant.records[0].ref == (try parse(revolutCSV, .rev)).records[2].ref)
+        let report = l.importStatement(variant, now: at(11, 21), calendar: madrid)
+        #expect(report.added == 0)
+        #expect(l.state.movements.count == 3)
+
+        var c = Ledger()
+        c.importStatement(try parse(caixaCSV, .ima), now: at(11, 20), calendar: madrid)
+        let other = """
+        Fecha;Fecha valor;Movimiento;Más datos;Importe;Saldo
+        18-11-2026;18-11-2026;compra tarj. 5402XXXXXXXX1234   mercadona;;-23.45;1284.55
+
+        """
+        let again = c.importStatement(try parse(other, .ima), now: at(11, 21), calendar: madrid)
+        #expect(again.added == 0)
+        #expect(c.state.movements.count == 2)
+    }
+
+    /// Libros con filas importadas con la clave de la versión anterior (hash del texto de las celdas): al reimportar se
+    /// reconocen por `legacyRefs`, pasan a la clave nueva y no se duplican.
+    @Test func rowsImportedWithTheOldRefSchemeAreNotDuplicated() throws {
+        let oldRevolut = "r|" + fnv1aHex("2026-11-18 13:05:11|-12.50|Mercadona") + "|0"
+        let oldCaixa = "c|" + fnv1aHex("18/11/2026|-23,45|COMPRA TARJ. 5402XXXXXXXX1234 MERCADONA|1.284,55") + "|0"
+        let oldTR = "tr|" + fnv1aHex(["1794993300", "-1250", "CARD_TRANSACTION", "Mercadona", ""].joined(separator: "|")) + "|0"
+        func stored(_ bank: BankID, _ ref: String, _ cents: Int, _ date: Date, dayOnly: Bool) -> Movement {
+            Movement(bank: bank, amountCents: cents, merchant: "x", kind: .payment, source: .statement, date: date,
+                     statementRef: ref, bankStatus: .booked, importedAt: at(11, 19), dayOnly: dayOnly)
+        }
+        var rev = Ledger(state: LedgerState(movements: [stored(.rev, oldRevolut, -1250, at(11, 18, 13, 5, 11), dayOnly: false)]))
+        let revReport = rev.importStatement(try parse(revolutCSV, .rev), now: at(11, 20), calendar: madrid)
+        #expect(revReport.added == 2)
+        #expect(rev.state.movements.count == 3)
+        let newRef = try parse(revolutCSV, .rev).records[2].ref
+        #expect(newRef != oldRevolut)
+        #expect(rev.state.movements.contains { $0.statementRef == newRef })
+        #expect(!rev.state.movements.contains { $0.statementRef == oldRevolut })
+
+        var caixa = Ledger(state: LedgerState(movements: [stored(.ima, oldCaixa, -2345, at(11, 18, 12), dayOnly: true)]))
+        #expect(caixa.importStatement(try parse(caixaCSV, .ima), now: at(11, 20), calendar: madrid).added == 1)
+        #expect(caixa.state.movements.count == 2)
+
+        var tr = Ledger(state: LedgerState(movements: [stored(.tr, oldTR, -1250, Date(timeIntervalSince1970: 1_794_993_300), dayOnly: false)]))
+        let noID = ([trHeaders.joined(separator: ",")] + [trLine(["datetime": "2026-11-18T09:15:00Z", "type": "CARD_TRANSACTION",
+            "name": "Mercadona", "amount": "-12.50", "currency": "EUR"])]).joined(separator: "\n") + "\n"
+        #expect(tr.importStatement(try parse(noID, .tr), now: at(11, 20), calendar: madrid).added == 0)
+        #expect(tr.state.movements.count == 1)
+        #expect(tr.state.movements[0].statementRef != oldTR)
     }
 
     @Test func missingColumnIsNamed() {
@@ -332,5 +519,79 @@ private func parse(_ csv: String, _ bank: BankID, now: Date = at(11, 20)) throws
     @Test func nonEuroStatementRowsAreNeverCounted() throws {
         let s = try parse(revolutCSV, .rev)
         #expect(!s.records.contains { $0.amountCents == -300 })
+    }
+
+    // MARK: Ronda U0–U68 (U46, U47, U51)
+
+    @Test func extractoTRCuentaAparteLasInversiones() throws {
+        var rows: [[String: String]] = []
+        for i in 1...14 {
+            rows.append([
+                "datetime": "2026-11-10T09:0\(i % 10):00Z",
+                "type": i % 2 == 0 ? "INTEREST" : "CARD_TRANSACTION",
+                "amount": i % 2 == 0 ? "1.50" : "-5.00",
+                "currency": "EUR",
+                "name": i % 2 == 0 ? "Intereses" : "Café \(i)",
+                "transaction_id": "reg-\(i)",
+            ])
+        }
+        for i in 1...6 {
+            rows.append([
+                "datetime": "2026-11-11T10:0\(i):00Z",
+                "type": "BUY",
+                "asset_class": "STOCK",
+                "name": "Apple",
+                "symbol": "US0378331005",
+                "shares": "1",
+                "price": "180.00",
+                "amount": "-180.00",
+                "currency": "EUR",
+                "transaction_id": "inv-\(i)",
+            ])
+        }
+        let csv = ([trHeaders.joined(separator: ",")] + rows.map(trLine)).joined(separator: "\n") + "\n"
+        let parsed = try parse(csv, .tr)
+        var ledger = Ledger()
+        let first = ledger.importStatement(parsed, now: at(11, 20), calendar: madrid)
+        #expect(importSummary(first) == "14 movimientos nuevos, 6 operaciones de inversión nuevas")
+
+        let second = ledger.importStatement(parsed, now: at(11, 20, 12), calendar: madrid)
+        #expect(importSummary(second) == "0 movimientos nuevos, 20 ya estaban")
+    }
+
+    @Test func vistaPreviaDiceLoQueCambia() throws {
+        let parsed = try parse(revolutCSV, .rev)
+        let empty = Ledger()
+        let previewEmpty = empty.previewImport(parsed, now: at(11, 20, 12), calendar: madrid)
+        #expect(previewEmpty.addsPeriod == true)
+        #expect(previewEmpty.adoptsBalance == true)
+
+        var populated = Ledger()
+        populated.importStatement(parsed, now: at(11, 20, 12), calendar: madrid)
+        populated.adoptBalance(.rev, cents: 99_999, at: at(11, 20, 11), origin: .bank)
+        let previewAgain = populated.previewImport(parsed, now: at(11, 20, 12), calendar: madrid)
+        #expect(previewAgain.addsPeriod == false)
+        #expect(previewAgain.adoptsBalance == false)
+        #expect(statementZeroNewNote(previewAgain) == "Nada nuevo que importar: todo esto ya estaba.")
+
+        #expect(statementZeroNewNote(ReconcileReport(addsPeriod: true, adoptsBalance: true))
+            == "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto y el saldo del extracto.")
+        #expect(statementZeroNewNote(ReconcileReport(addsPeriod: true, adoptsBalance: false))
+            == "Los movimientos ya estaban, pero al importar se actualiza el periodo cubierto.")
+        #expect(statementZeroNewNote(ReconcileReport(addsPeriod: false, adoptsBalance: true))
+            == "Los movimientos ya estaban, pero al importar se actualiza el saldo con el del extracto.")
+    }
+
+    @Test func periodoConAno() {
+        func ymd(_ y: Int, _ m: Int, _ d: Int) -> Date {
+            madrid.date(from: DateComponents(year: y, month: m, day: d, hour: 12))!
+        }
+        let now2026 = ymd(2026, 11, 20)
+        #expect(statementRangeText(first: ymd(2024, 3, 12), last: ymd(2026, 11, 20), now: now2026, calendar: madrid)
+            == "Del 12 mar 2024 al 20 nov 2026")
+        #expect(statementRangeText(first: ymd(2025, 11, 21), last: ymd(2026, 11, 20), now: now2026, calendar: madrid)
+            == "Del 21 nov 2025 al 20 nov 2026")
+        #expect(statementRangeText(first: ymd(2026, 11, 1), last: ymd(2026, 11, 20), now: now2026, calendar: madrid)
+            == "Del 1 nov al 20 nov")
     }
 }

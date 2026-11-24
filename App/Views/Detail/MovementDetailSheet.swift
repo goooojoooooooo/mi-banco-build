@@ -13,6 +13,15 @@ struct MovementDetailSheet: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var entrance = Entrance()
 
+    /// Solo en la demo de capturas con la hoja abierta por argumento (la fase de escena parpadea en el simulador de CI).
+    private var demoKeepsVisible: Bool {
+        #if DEBUG
+        return DemoMode.isActive && DemoMode.opensDetail
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         Group {
             if let movement = model.movement(id) {
@@ -25,7 +34,7 @@ struct MovementDetailSheet: View {
         .environment(\.entrance, entrance)
         // Segunda línea de defensa (la primera: RootView cierra la hoja): fuera de primer plano, la hoja es negra.
         .overlay {
-            if scenePhase != .active {
+            if scenePhase != .active && !demoKeepsVisible {
                 Theme.canvas
                     .ignoresSafeArea()
                     .accessibilityHidden(true)
@@ -79,7 +88,7 @@ private struct DetailContent: View {
                         .multilineTextAlignment(.center)
                         .padding(.top, 12)
                         .staggeredEntrance(5, rise: 8)
-                    Text("\(DateText.moment(movement.date)) · \(movement.bank.displayName)")
+                    Text("\(DateText.moment(movement.date, dayOnly: movement.dayOnly)) · \(movement.bank.displayName)")
                         .titan(.subtitle)
                         .foregroundStyle(Theme.label2)
                         .padding(.top, 3)
@@ -130,6 +139,11 @@ private struct DetailContent: View {
                         }
                     }
                     DetailPair(key: "Tipo", divided: true) { Text(kindText) }
+                    // Un traspaso entre tus cuentas no es gasto: no tiene categoría (la fila vuelve al apagar el interruptor).
+                    if movement.kind == .payment && !snapshot.ownTransfers.contains(movement.id) {
+                        CategoryPickerRow(movement: movement, current: snapshot.categories[movement.id] ?? .sinCategoria, model: model)
+                    }
+                    OwnTransferRow(movement: movement, isOn: snapshot.ownTransfers.contains(movement.id), model: model)
                 }
                 .staggeredEntrance(7)
 
@@ -195,9 +209,10 @@ private struct DetailContent: View {
     }
 
     private var kindText: String {
-        if movement.source == .wallet { return "Apple Pay" }
         if movement.source == .bank { return "Tu banco" }
         if movement.source == .statement { return "Extracto importado" }
+        if movement.bankRef != nil { return "Aviso · confirmado por tu banco" }
+        if movement.source == .wallet { return "Apple Pay" }
         if movement.kind == .income { return "Ingreso" }
         return movement.isShop ? "Compra con tarjeta" : "Pago"
     }

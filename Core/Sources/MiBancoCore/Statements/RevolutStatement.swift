@@ -35,40 +35,48 @@ func parseRevolutStatement(_ table: CSVTable, calendar: Calendar) throws -> Pars
     var records: [BankRecord] = []
     var ignored = 0
     var counter = OccurrenceCounter()
+    var legacyCounter = OccurrenceCounter()
     var latest: (date: Date, cents: Int)?
 
     for row in table.rows {
-        let stateText = normalizeHeader(row.cell(state))
-        let productText = normalizeHeader(row.cell(product))
+        let stateText = normalizeHeader(table.cell(row, state))
+        let productText = normalizeHeader(table.cell(row, product))
         guard ["completed", "completado"].contains(stateText),
               product == nil || productText.isEmpty || ["current", "actual", "corriente"].contains(productText),
-              row.cell(currency).uppercased() == "EUR",
-              let startedAt = parseStatementTimestamp(row.cell(started), calendar: calendar),
-              let gross = parseStatementDecimal(row.cell(amount)) else {
+              table.cell(row, currency).uppercased() == "EUR",
+              let startedAt = parseStatementTimestamp(table.cell(row, started), calendar: calendar),
+              let gross = parseStatementDecimal(table.cell(row, amount)) else {
             ignored += 1
             continue
         }
         var feeCents = 0
-        if fee != nil, !row.cell(fee).isEmpty {
-            guard let f = parseStatementDecimal(row.cell(fee)) else {
+        if fee != nil, !table.cell(row, fee).isEmpty {
+            guard let f = parseStatementDecimal(table.cell(row, fee)) else {
                 ignored += 1
                 continue
             }
             feeCents = f
         }
         let cents = gross - feeCents
-        let text = row.cell(description)
+        let text = table.cell(row, description)
         let name = cleanBankMerchant(text)
-        let typeText = normalizeHeader(row.cell(type))
-        let key = [row.cell(started), row.cell(amount), text].joined(separator: "|")
+        let typeText = normalizeHeader(table.cell(row, type))
+        // La clave sale de los valores LEÍDOS (segundos, céntimos, descripción normalizada), no del texto de las celdas:
+        // la misma exportación con otro formato de fecha o de número da la misma clave.
+        let key = [String(Int(startedAt.timeIntervalSince1970)), String(cents), normalizedStatementText(text)]
+            .joined(separator: "|")
         let ref = "r|" + fnv1aHex(key) + "|" + String(counter.next(key))
+        // La clave de la versión anterior (texto de las celdas), para reconocer filas ya importadas con ella.
+        let legacyKey = [table.cell(row, started), table.cell(row, amount), text].joined(separator: "|")
+        let legacyRef = "r|" + fnv1aHex(legacyKey) + "|" + String(legacyCounter.next(legacyKey))
         records.append(BankRecord(
             ref: ref, bank: .rev, amountCents: cents, timing: .exact(startedAt), status: .booked,
             merchant: name.isEmpty ? nil : name,
-            isShop: typeText.contains("card payment") || typeText.contains("pago con tarjeta")))
+            isShop: typeText.contains("card payment") || typeText.contains("pago con tarjeta"),
+            legacyRefs: legacyRef == ref ? [] : [legacyRef]))
 
-        if let b = parseStatementDecimal(row.cell(balance)) {
-            let doneAt = parseStatementTimestamp(row.cell(completed), calendar: calendar) ?? startedAt
+        if let b = parseStatementDecimal(table.cell(row, balance)) {
+            let doneAt = parseStatementTimestamp(table.cell(row, completed), calendar: calendar) ?? startedAt
             if latest == nil || doneAt >= latest!.date { latest = (doneAt, b) }
         }
     }

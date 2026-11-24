@@ -60,25 +60,30 @@ public enum StatementFormat: String, Sendable {
         ]
         if revolutSignatures.filter({ table.column($0) != nil }).count >= 2 { return .revolut }
 
-        if table.column(["movimiento"]) != nil, table.column(["saldo"]) != nil || table.column(["fecha valor"]) != nil {
+        if table.column(["movimiento", "concepto"]) != nil, table.column(["saldo"]) != nil || table.column(["fecha valor"]) != nil {
             return .caixabank
         }
         return nil
     }
 }
 
-/// Lee un extracto CSV del banco esperado. Orden de errores: sin filas -> `.empty`; formato no reconocido ->
+/// Lee un extracto CSV del banco esperado. Orden de errores: sin filas -> `.empty`; comilla sin cerrar -> `.unreadable`; formato no reconocido ->
 /// `.unknownFormat`; de otro banco -> `.wrongBank`; faltan columnas -> `.missingColumns`.
 public func parseStatement(_ data: Data, expected bank: BankID, now: Date, calendar: Calendar) throws -> ParsedStatement {
     let table = try CSVTable.parse(data)
-    guard !table.rows.isEmpty else { throw StatementError.empty }
+    guard !table.rows.isEmpty || table.malformedRows > 0 else { throw StatementError.empty }
     guard let format = StatementFormat.detect(table) else { throw StatementError.unknownFormat }
     guard format.bank == bank else { throw StatementError.wrongBank(detected: format.bank) }
+    let parsed: ParsedStatement
     switch format {
-    case .revolut: return try parseRevolutStatement(table, calendar: calendar)
-    case .caixabank: return try parseCaixaBankStatement(table, now: now, calendar: calendar)
-    case .tradeRepublic: return try parseTradeRepublicStatement(table, calendar: calendar)
+    case .revolut: parsed = try parseRevolutStatement(table, calendar: calendar)
+    case .caixabank: parsed = try parseCaixaBankStatement(table, now: now, calendar: calendar)
+    case .tradeRepublic: parsed = try parseTradeRepublicStatement(table, calendar: calendar)
     }
+    // Las filas con un número de celdas distinto al de la cabecera no se leyeron: cuentan como ignoradas.
+    guard table.malformedRows > 0 else { return parsed }
+    return ParsedStatement(format: parsed.format, records: parsed.records, ignoredRows: parsed.ignoredRows + table.malformedRows,
+                           latestBalance: parsed.latestBalance)
 }
 
 // MARK: Ayudantes comunes
@@ -129,6 +134,14 @@ func parseStatementTimestamp(_ raw: String, calendar: Calendar) -> Date? {
     let back = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
     guard back.year == y, back.month == mo, back.day == d, back.hour == h, back.minute == mi, back.second == sec else { return nil }
     return offset.map { date.addingTimeInterval(-TimeInterval($0)) } ?? date
+}
+
+/// Texto de una fila para su clave: sin mayúsculas ni tildes y con los espacios colapsados, para que dos exportaciones
+/// de la misma fila con otro formato de espacios o mayúsculas den la misma clave.
+func normalizedStatementText(_ s: String) -> String {
+    s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        .split(whereSeparator: { $0.isWhitespace })
+        .joined(separator: " ")
 }
 
 /// Cuenta repeticiones para que dos filas idénticas del mismo fichero tengan claves distintas y estables.

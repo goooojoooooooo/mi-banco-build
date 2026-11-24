@@ -21,9 +21,12 @@ public enum SyncPolicy {
     public static let backoff: TimeInterval = 21_600
     public static let overlapDays = 7
     public static let firstHistoryDays = 365
+    /// Un pendiente de hace más días que esto está atascado: la ventana no llega hasta él y, si una consulta completa ya
+    /// no lo trae, se quita (R52).
+    public static let pendingReachDays = 45
 
     public static func decide(
-        _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar
+        _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar, oldestPending: Date? = nil
     ) -> SyncDecision {
         guard let link else { return .skip(.notConnected) }
         if now >= link.consentValidUntil || link.problem == .consentExpired || link.problem == .keyRejected {
@@ -47,7 +50,15 @@ public enum SyncPolicy {
         }
         let base = link.lastSuccessAt.map { calendar.startOfDay(for: $0) }
             ?? dayStart(daysBefore: firstHistoryDays, of: now, calendar)
-        let from = calendar.date(byAdding: .day, value: -overlapDays, to: base) ?? base
+        var from = calendar.date(byAdding: .day, value: -overlapDays, to: base) ?? base
+        // La consulta llega siempre hasta el pendiente más antiguo (sin pasar del máximo): así su registro apuntado
+        // vuelve en el lote y un pendiente no se da por desaparecido solo porque la ventana avanzó. Uno atascado (más de
+        // `pendingReachDays` días) no ensancha la ventana (R52).
+        if let oldestPending, !Ledger.isStuckPending(oldestPending, now: now, calendar: calendar) {
+            let floor = dayStart(daysBefore: firstHistoryDays, of: now, calendar)
+            let reach = max(calendar.startOfDay(for: oldestPending), floor)
+            if reach < from { from = reach }
+        }
         return .fetch(dateFrom: from, strategy: link.historyLoaded ? .standard : .longest)
     }
 
@@ -114,10 +125,12 @@ public struct BankFetchPlan: Equatable, Sendable {
 
 /// Bancos a consultar ahora, en orden estable (el de `BankID.allCases`). La app solo ejecuta esta lista.
 public func banksToFetch(
-    links: [BankID: BankLinkInfo], trigger: SyncTrigger, now: Date, calendar: Calendar
+    links: [BankID: BankLinkInfo], trigger: SyncTrigger, now: Date, calendar: Calendar,
+    oldestPending: [BankID: Date] = [:]
 ) -> [BankFetchPlan] {
     BankID.allCases.compactMap { bank in
-        guard case let .fetch(dateFrom, strategy) = SyncPolicy.decide(links[bank], trigger: trigger, now: now, calendar: calendar)
+        guard case let .fetch(dateFrom, strategy) = SyncPolicy.decide(
+            links[bank], trigger: trigger, now: now, calendar: calendar, oldestPending: oldestPending[bank])
         else { return nil }
         return BankFetchPlan(bank: bank, dateFrom: dateFrom, strategy: strategy)
     }
@@ -133,6 +146,43 @@ public func syncProblem(for error: Error) -> SyncProblem {
         }
     }
     return error is URLError ? .offline : .unknown
+}
+
+/// ¿Es un fallo del banco o de la red (se anota, gasta un intento y puede poner espera)? Un fallo local (Llavero sin
+/// desbloquear tras reiniciar, credenciales ilegibles, disco) o una cancelación no lo es: no se anota nada.
+public func isBankFailure(_ error: Error) -> Bool {
+    error is BankingClientError || error is URLError
+}
+
+/// Por qué no se pudo leer la sesión guardada del Llavero.
+public enum SessionReadFailure: Equatable, Sendable {
+    /// El móvil aún no se ha desbloqueado tras reiniciar (`errSecInteractionNotAllowed`): pasa solo, no se anota nada.
+    case deviceLocked
+    /// Dato ilegible o cualquier otro error del Llavero: no se arregla solo; se trata como sesión que falta.
+    case unreadable
+}
+
+/// `true` = se anota como fallo de consentimiento (hay que renovar); `false` = sin resultado, se reintenta más tarde.
+public func recordsSessionReadFailure(_ failure: SessionReadFailure) -> Bool {
+    failure == .unreadable
+}
+
+/// Qué hacer con el fallo de una consulta una vez terminada, según si la conexión sigue siendo la misma.
+public enum SyncFailureAction: Equatable, Sendable {
+    /// Anotar el fallo en la conexión y, si el problema es de consentimiento, borrar la sesión del Llavero.
+    case record(deleteSession: Bool)
+    /// Una reconexión o renovación ocurrió mientras tanto (otra sesión o conexión más nueva que el intento): el fallo
+    /// es de la sesión vieja. No se anota nada ni se toca el Llavero.
+    case drop
+}
+
+/// `startedSessionID`: la sesión con la que arrancó la consulta (nil si no había). `currentSessionID`: la que hay ahora
+/// en el Llavero. `link`: la conexión ahora en el libro. `attemptAt`: cuándo se anotó el intento.
+public func syncFailureAction(
+    problem: SyncProblem, startedSessionID: String?, currentSessionID: String?, link: BankLinkInfo?, attemptAt: Date
+) -> SyncFailureAction {
+    guard let link, link.connectedAt <= attemptAt, startedSessionID == currentSessionID else { return .drop }
+    return .record(deleteSession: problem == .consentExpired)
 }
 
 extension BankLinkInfo {

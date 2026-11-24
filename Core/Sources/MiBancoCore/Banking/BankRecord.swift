@@ -33,10 +33,15 @@ public struct BankRecord: Equatable, Sendable {
     public var balanceAfterCents: Int?
     /// true = operación de inversión (compra o venta de valores): mueve el saldo pero no es gasto.
     public var excludedFromSpending: Bool
+    /// Claves con las que una versión anterior de la app guardó esta misma fila (solo los extractos). Un movimiento del
+    /// libro que lleve una de ellas es esta fila: se reconoce y pasa a la clave nueva en lugar de duplicarse.
+    public var legacyRefs: [String]
+    /// Día en que el banco lo apuntó (`booking_date`, a mediodía), solo en los apuntados. `timing` prefiere el día del pago.
+    public var bookedDay: Date?
 
     public init(ref: String, bank: BankID, amountCents: Int, timing: RecordTiming, status: BankStatus,
                 merchant: String? = nil, isShop: Bool = false, balanceAfterCents: Int? = nil,
-                excludedFromSpending: Bool = false) {
+                excludedFromSpending: Bool = false, legacyRefs: [String] = [], bookedDay: Date? = nil) {
         self.ref = ref
         self.bank = bank
         self.amountCents = amountCents
@@ -46,6 +51,8 @@ public struct BankRecord: Equatable, Sendable {
         self.isShop = isShop
         self.balanceAfterCents = balanceAfterCents
         self.excludedFromSpending = excludedFromSpending
+        self.legacyRefs = legacyRefs
+        self.bookedDay = bookedDay
     }
 }
 
@@ -130,7 +137,8 @@ public func bankRecords(from transactions: [EBTransaction], bank: BankID, calend
         }
         out.append(BankRecord(
             ref: ref ?? "", bank: bank, amountCents: cents, timing: timing, status: status, merchant: merchant,
-            isShop: isShop, balanceAfterCents: t.balanceAfterTransaction?.euroCents))
+            isShop: isShop, balanceAfterCents: t.balanceAfterTransaction?.euroCents,
+            bookedDay: status == .booked ? t.bookingDate.flatMap { noonOfDay($0, calendar: calendar)?.date } : nil))
     }
     return out
 }

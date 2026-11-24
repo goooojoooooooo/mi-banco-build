@@ -2,11 +2,20 @@ name: motion-video
 run-name: motion-video ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      tour_class:
+        description: "Clases de recorrido a grabar, separadas por espacios o comas (por defecto las cuatro; un flujo graba solo la suya)"
+        type: string
+        default: "MotionTourTests MotionTourHomeTests MotionTourScreensTests MotionTourShellTests"
+      runner:
+        description: "Runner macOS (por defecto Namespace Apple silicon)"
+        type: string
+        default: "namespace-profile-onyx"
 permissions:
   contents: read
 jobs:
   video:
-    runs-on: macos-15-intel
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -14,7 +23,7 @@ jobs:
         run: |
           ls -d /Applications/Xcode*.app
           XCODE=/Applications/Xcode_26.2.app
-          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)"; fi
+          if [ ! -d "$XCODE" ]; then XCODE="$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)"; fi
           echo "Usando $XCODE"
           sudo xcode-select -s "$XCODE"
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
@@ -23,8 +32,11 @@ jobs:
       - name: Crear y arrancar el simulador (maximo 10 min)
         timeout-minutes: 14
         run: |
-          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
-          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
+          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS .*com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9]+-[0-9]+$" | sort -V | tail -1 || true)
+          if [ -z "$RUNTIME_LINE" ]; then
+            RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
+          fi
+          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
@@ -42,6 +54,24 @@ jobs:
             -destination "id=$UDID" -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO > build/compile.log 2>&1 \
             || { grep -E "error:" build/compile.log | sort -u | head -n 40; tail -n 40 build/compile.log; exit 1; }
           tail -n 5 build/compile.log
+      - name: Elegir las clases de recorrido
+        env:
+          TOUR_CLASS: ${{ inputs.tour_class }}
+        run: |
+          CLASSES="$(echo "${TOUR_CLASS:-MotionTourTests MotionTourHomeTests MotionTourScreensTests MotionTourShellTests}" | tr ',' ' ')"
+          ONLY=""
+          LIST=""
+          for c in $CLASSES; do
+            case "$c" in
+              *[!A-Za-z0-9_]*) echo "tour_class solo admite letras, numeros y _ : $c"; exit 1 ;;
+            esac
+            ONLY="$ONLY -only-testing:MiBancoUITests/$c"
+            LIST="$LIST $c"
+          done
+          if [ -z "$LIST" ]; then echo "tour_class vacio"; exit 1; fi
+          echo "Clases: $LIST"
+          echo "TOUR_ONLY=$ONLY" >> "$GITHUB_ENV"
+          echo "TOUR_LIST=$LIST" >> "$GITHUB_ENV"
       - name: Grabar el recorrido
         run: |
           set +e
@@ -50,7 +80,7 @@ jobs:
           sleep 4
           xcodebuild test-without-building -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/tour.xcresult \
-            -only-testing:MiBancoUITests/MotionTourTests CODE_SIGNING_ALLOWED=NO > build/tour.log 2>&1
+            $TOUR_ONLY CODE_SIGNING_ALLOWED=NO > build/tour.log 2>&1
           echo "$?" > build/status.txt
           # Arranque en frio real (sin la espera de reposo de las pruebas): se ve el telon y el montaje por capas.
           sleep 2
@@ -79,9 +109,82 @@ jobs:
           fi
           test -s build/tour.mp4
           test "$(cat build/status.txt)" = "0"
+      # Sin verde en silencio: cada clase elegida tiene que haber ejecutado al menos una prueba.
+      - name: Comprobar que cada clase ejecuto pruebas
+        run: |
+          FAIL=0
+          for c in $TOUR_LIST; do
+            N=$(grep -cE "^Test [Cc]ase .*MiBancoUITests\.$c[ .].* (passed|failed)" build/tour.log || true)
+            echo "$c: $N pruebas ejecutadas"
+            if [ "${N:-0}" -lt 1 ]; then echo "La clase $c no ejecuto ninguna prueba (nombre mal escrito o sin pruebas)"; FAIL=1; fi
+          done
+          test "$FAIL" = "0"
+      - name: Exportar los fotogramas del xcresult
+        run: |
+          mkdir -p build/attachments
+          xcrun xcresulttool export attachments --help || true
+          xcrun xcresulttool export attachments --path build/tour.xcresult --output-path build/attachments
+          ls build/attachments | head -n 20
+          test -f build/attachments/manifest.json
+      - name: Hojas de contacto
+        run: |
+          if ! which ffmpeg; then brew install ffmpeg; fi
+          ffmpeg -version | head -n 1
+          mkdir -p build/frames build/sheets
+          # El manifiesto liga cada fichero exportado con el nombre del adjunto («<rafaga>-NN»); se agrupan por rafaga.
+          python3 - <<'PY'
+          import json, os, re, shutil
+          base = "build/attachments"
+          manifest = json.load(open(os.path.join(base, "manifest.json")))
+          groups = {}
+          for test in manifest:
+              for att in test.get("attachments", []):
+                  exported = att.get("exportedFileName")
+                  human = att.get("suggestedHumanReadableName") or exported or ""
+                  if not exported:
+                      continue
+                  stem = os.path.splitext(human)[0]
+                  # Xcode añade «_<indice>_<UUID>» al nombre sugerido.
+                  stem = re.sub(r"_\d+_[0-9A-Fa-f-]{36}$", "", stem)
+                  m = re.match(r"^(.+)-(\d{2})$", stem)
+                  if not m:
+                      continue
+                  groups.setdefault(m.group(1), []).append((int(m.group(2)), os.path.join(base, exported)))
+          if not groups:
+              raise SystemExit("El manifiesto no tiene adjuntos con nombre <rafaga>-NN")
+          for name, items in sorted(groups.items()):
+              items.sort()
+              folder = os.path.join("build/frames", name)
+              os.makedirs(folder, exist_ok=True)
+              for i, (_, path) in enumerate(items, start=1):
+                  shutil.copy(path, os.path.join(folder, "f%03d.png" % i))
+              print(name, len(items), "fotogramas")
+          PY
+          for dir in build/frames/*/; do
+            name=$(basename "$dir")
+            n=$(ls "$dir" | wc -l | tr -d ' ')
+            cols=8; if [ "$n" -lt 8 ]; then cols=$n; fi
+            rows=$(( (n + 7) / 8 ))
+            ffmpeg -y -loglevel error -framerate 1 -i "$dir/f%03d.png" \
+              -vf "scale=330:-1,tile=${cols}x${rows}:padding=4:margin=4:color=0x303030" -frames:v 1 "build/sheets/$name.png"
+          done
+          ls -l build/sheets
+          test -n "$(ls build/sheets/*.png 2>/dev/null)"
+          # Cada clase elegida tiene que haber dejado al menos una hoja (si no, la tuberia se rompio en silencio).
+          echo "Hojas: $(ls build/sheets | tr '\n' ' ')"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: motion-tour
-          path: build/tour.mp4
+          name: motion
+          path: |
+            build/sheets
+            build/tour.mp4
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: motion-debug
+          path: |
+            build/tour.log
+            build/attachments/manifest.json
+          if-no-files-found: ignore

@@ -80,4 +80,34 @@ import Testing
         #expect(parseSignedEuropeanAmount("12.50") == 1250)
         #expect(parseSignedEuropeanAmount("23,45-") == -2345)
     }
+
+    // MARK: R39 — filas con celdas sobrantes vacías o cabecera con columnas sin nombre
+
+    @Test func extraTrailingEmptyCellsAreTrimmed() throws {
+        let t = try parse("a;b;c\n1;2;3;\n4;5;6;;\n7;8;9\n")
+        #expect(t.headers == ["a", "b", "c"])
+        #expect(t.rows == [["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"]])
+        #expect(t.malformedRows == 0)
+    }
+
+    @Test func missingTrailingCellsArePaddedOnlyUnderUnnamedHeaders() throws {
+        let t = try parse("a;b;c;\n1;2;3\n4;5;6;\n")
+        #expect(t.headers == ["a", "b", "c", ""])
+        #expect(t.rows == [["1", "2", "3", ""], ["4", "5", "6", ""]])
+        #expect(t.malformedRows == 0)
+        // Falta una columna con nombre: no se rellena.
+        let named = try parse("a;b;c;d\n1;2;3\n")
+        #expect(named.rows.isEmpty)
+        #expect(named.malformedRows == 1)
+    }
+
+    @Test func rowWithARealExtraValueIsStillRejected() throws {
+        let t = try parse("a;b;c\n1;2;3;x\n4;5;6;;x\n7;8;9\n")
+        #expect(t.rows == [["7", "8", "9"]])
+        #expect(t.malformedRows == 2)
+        // Cabecera con columna sin nombre y fila corta en dos: solo falta una sin nombre y otra con nombre.
+        let mixed = try parse("a;b;;d\n1;2\n")
+        #expect(mixed.rows.isEmpty)
+        #expect(mixed.malformedRows == 1)
+    }
 }

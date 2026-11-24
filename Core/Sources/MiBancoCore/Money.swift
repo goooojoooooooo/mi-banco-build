@@ -50,3 +50,31 @@ func containsForeignAmount(_ text: String) -> Bool {
     let pattern = symbol + sp + #"\d"# + "|" + #"\d"# + sp + symbol
     return text.contains(try! Regex(pattern))
 }
+
+/// Céntimos -> euros enteros ("1.235 €"), con las mitades hacia fuera del cero. Mismo formato que `formatEUR`, sin decimales.
+public func formatEURWhole(_ cents: Int) -> String {
+    let euros = (cents.magnitude + 50) / 100
+    var grouped = ""
+    for (i, ch) in String(euros).reversed().enumerated() {
+        if i > 0 && i % 3 == 0 { grouped.append(".") }
+        grouped.append(ch)
+    }
+    let sign = cents < 0 && euros > 0 ? "-" : ""
+    return "\(sign)\(String(grouped.reversed()))\u{00A0}€"
+}
+
+/// Variación porcentual entera de `previous` a `current`, con las mitades hacia fuera del cero; nil si `previous == 0`.
+public func changePercent(from previous: Int, to current: Int) -> Int? {
+    guard previous != 0 else { return nil }
+    let numerator = (current - previous).magnitude * 100
+    let denominator = previous.magnitude
+    let rounded = Int((numerator * 2 + denominator) / (denominator * 2))
+    return (current < previous) == (previous > 0) ? -rounded : rounded
+}
+
+/// "+12 %", "-30 %", "0 %" (con espacio duro antes del %). Por encima de 999 % no se escribe la cifra: ">999 %"
+/// (cabe en la columna de 66 pt; con tope 999 la cifra nunca necesita separador de miles).
+public func formatSignedPercent(_ percent: Int) -> String {
+    if percent > 999 { return ">999\u{00A0}%" }
+    return "\(percent > 0 ? "+" : "")\(percent)\u{00A0}%"
+}

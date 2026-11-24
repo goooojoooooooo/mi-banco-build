@@ -3,8 +3,7 @@ import UIKit
 import UserNotifications
 import MiBancoCore
 
-/// Contenido de la sección `Avisos al instante`: guía numerada de Atajos y botón de prueba.
-/// Los nombres que hay que buscar en Atajos van resaltados; el resto, apagado.
+/// Contenido de la sección `Avisos al instante`: las guías por pasos (`GuideView`) y el botón de prueba.
 struct AlertsGuideRows: View {
     let model: LedgerModel
     @Environment(\.openURL) private var openURL
@@ -12,47 +11,12 @@ struct AlertsGuideRows: View {
     @State private var testState: TestState = .idle
     /// El icono del botón pasa a ✓ un momento y vuelve al avión: el botón se puede usar otra vez.
     @State private var showsCheck = false
-    @ScaledMetric(relativeTo: .callout) private var badgeSize: CGFloat = 24
 
     private enum TestState: Equatable { case idle, sending, sent, denied }
 
-    private struct Step: Identifiable {
-        let id: Int
-        /// Markdown: lo que va en **negrita** es lo que se ve en Atajos.
-        let text: String
-        var optional = false
-    }
-
-    private let steps: [Step] = [
-        Step(id: 1, text: "Abre **Atajos**, ve a **Automatización** y pulsa\u{00A0}**+**."),
-        Step(id: 2, text: "Elige **Notificación** y selecciona **Revolut**. Marca **Ejecutar inmediatamente** y desactiva **Notificar al ejecutar**."),
-        Step(id: 3, text: "Añade la acción **Registrar aviso** de Mi Banco. En **Banco** escribe Revolut; en **Título**, **Subtítulo** y **Cuerpo** elige los datos de la notificación."),
-        Step(id: 4, text: "Repite los pasos con **Trade Republic**."),
-        Step(id: 5, text: "Para Apple Pay, crea otra automatización de **Cartera**, elige tus tarjetas y añade **Registrar pago con Cartera** de Mi Banco, con su **Banco**, **Importe** y **Comercio**.", optional: true),
-    ]
-
     var body: some View {
         Group {
-            Text("Tu iPhone le pasa a Mi Banco los avisos de tus bancos. Se configura una vez, en la app Atajos.")
-                .font(Theme.font(.subheadline))
-                .foregroundStyle(Theme.label2)
-                .listRowBackground(Theme.grouped)
-
-            ForEach(steps) { step in
-                stepRow(step)
-                    .listRowBackground(Theme.grouped)
-                    .listRowSeparatorTint(Theme.separator)
-            }
-
-            Label {
-                Text("imagin no avisa de los pagos: solo verás al instante los que hagas con Apple Pay.")
-                    .font(Theme.font(.footnote))
-                    .foregroundStyle(Theme.label2)
-            } icon: {
-                Image(systemName: "info.circle")
-                    .foregroundStyle(Theme.label2)
-            }
-            .listRowBackground(Theme.grouped)
+            GuideView(model: model)
 
             VStack(alignment: .leading, spacing: Theme.Space.tight) {
                 Text("Cuando termines, pruébalo:")
@@ -74,6 +38,7 @@ struct AlertsGuideRows: View {
                                 .transition(.opacity)
                         } else {
                             Label("Probar aviso", systemImage: "paperplane")
+                                .labelStyle(.titleAndIcon)
                                 .font(Theme.font(.body, weight: .semibold))
                                 .foregroundStyle(.black)
                                 .fixedSize()
@@ -133,66 +98,6 @@ struct AlertsGuideRows: View {
         }
     }
 
-    private func stepRow(_ step: Step) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Theme.Space.row) {
-            if step.optional {
-                Color.clear.frame(width: badgeSize, height: 1)
-            } else {
-                Text("\(step.id)")
-                    .font(Theme.font(.footnote, weight: .semibold))
-                    .foregroundStyle(Theme.label)
-                    .frame(width: badgeSize, height: badgeSize)
-                    .background(Color.white.opacity(0.12), in: Circle())
-            }
-            VStack(alignment: .leading, spacing: Theme.Space.small) {
-                if step.optional {
-                    Text("Opcional")
-                        .font(Theme.font(.caption, weight: .semibold))
-                        .foregroundStyle(Theme.label2)
-                }
-                Text(Self.styled(step.text))
-                    .fixedSize(horizontal: false, vertical: true)
-                if step.id == 1 {
-                    Button {
-                        if let url = URL(string: "shortcuts://") { openURL(url) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Abrir Atajos")
-                            Image(systemName: "arrow.up.forward")
-                                .font(Theme.font(.caption, weight: .semibold))
-                        }
-                        .font(Theme.font(.footnote, weight: .semibold))
-                        .foregroundStyle(Theme.label)
-                        .padding(.horizontal, Theme.Space.row)
-                        .frame(minHeight: 32)
-                        .background(Color.white.opacity(0.12), in: Capsule())
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.pressable)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(.vertical, Theme.Space.tight)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel((step.optional ? "Opcional. " : "Paso \(step.id). ") + step.text.replacingOccurrences(of: "**", with: ""))
-        .modifier(OpenShortcutsAction(enabled: step.id == 1) {
-            if let url = URL(string: "shortcuts://") { openURL(url) }
-        })
-    }
-
-    /// Markdown -> texto de 15 pt: lo resaltado en el color de texto y seminegrita, el resto apagado.
-    private static func styled(_ markdown: String) -> AttributedString {
-        var text = (try? AttributedString(markdown: markdown)) ?? AttributedString(markdown)
-        for run in text.runs {
-            let strong = run.inlinePresentationIntent?.contains(.stronglyEmphasized) ?? false
-            text[run.range][AttributeScopes.SwiftUIAttributes.ForegroundColorAttribute.self] = strong ? Theme.label : Theme.label2
-            text[run.range][AttributeScopes.SwiftUIAttributes.FontAttribute.self] = Theme.font(.callout, weight: strong ? .semibold : .regular)
-        }
-        return text
-    }
-
     /// Igual que el camino real, pero sin tocar el libro de movimientos.
     private func sendTest() async {
         testState = .sending
@@ -233,18 +138,4 @@ struct AlertsGuideRows: View {
     private static let testMerchant = "Prueba"
     private static let testAmountCents = -1
     private static let testActivityLifetime: Duration = .seconds(20)
-}
-
-/// El paso 1 se lee entero con VoiceOver y ofrece "Abrir Atajos" como acción.
-private struct OpenShortcutsAction: ViewModifier {
-    let enabled: Bool
-    let open: () -> Void
-
-    func body(content: Content) -> some View {
-        if enabled {
-            content.accessibilityAction(named: "Abrir Atajos", open)
-        } else {
-            content
-        }
-    }
 }

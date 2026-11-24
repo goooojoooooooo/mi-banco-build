@@ -593,14 +593,18 @@ final class MotionGalleryTests: XCTestCase {
         launchGallery()
         XCTAssertTrue(waitUntil { self.amountLabel() == "3.774,75 euros" })
         let ids = ["gallery.amount", "gallery.row.expense", "gallery.row.income", "gallery.row.plain", "gallery.row.long",
-                   "gallery.row.huge", "gallery.row.buttonAboveAmount", "gallery.row.buttonAmount", "gallery.row.buttonBelowAmount"]
+                   "gallery.row.huge", "gallery.row.buttonAboveAmount", "gallery.row.buttonAmount", "gallery.row.buttonBelowAmount",
+                   // Lote 2: la frase con el importe en línea, el importe en euros enteros y la cifra con millares.
+                   "gallery.sentence.amount", "gallery.whole.amount", "gallery.thousands.amount"]
+        // El importe en euros enteros se lee sin céntimos («1.290 euros»): es un importe, pero no una etiqueta con decimales.
+        let wholeEuroAmounts = 1
         for id in ids {
             XCTAssertTrue(any(id).label.hasSuffix(" euros"), "\(id) no es un importe a la vista: «\(any(id).label)»")
         }
         // Toda etiqueta con cifras es uno de esos importes o un botón que lleva uno dentro.
         let money = NSPredicate(format: "label MATCHES %@", #".*[0-9]{1,3}(\.[0-9]{3})*,[0-9]{2}.*"#)
         let buttons = app.buttons.matching(money).count
-        XCTAssertEqual(moneyLabelCount(), ids.count + buttons,
+        XCTAssertEqual(moneyLabelCount(), ids.count - wholeEuroAmounts + buttons,
                        "Etiquetas con cifras: \(moneyLabelCount()), importes \(ids.count), botones con importe \(buttons)")
         // Que acabe de rodar el protagonista (cuenta desde 0 al abrir).
         Thread.sleep(forTimeInterval: 2)

@@ -325,7 +325,8 @@ struct SentencePieces: Equatable {
 
 /// Coloca sus piezas como las palabras de un párrafo: una tras otra y, cuando la siguiente no cabe, en la línea de
 /// abajo. Cada pieza va centrada en el alto de su línea. Una pieza más ancha que la línea se queda con el ancho de la línea.
-private struct SentenceFlow: Layout {
+/// También la usa la cabecera de Suscripciones («… al mes · … al año»): un solo juego de vistas que salta de línea.
+struct SentenceFlow: Layout {
     private struct Arrangement {
         var frames: [CGRect] = []
         var size = CGSize.zero

@@ -463,6 +463,37 @@ final class MotionTourScreensTests: MotionTourCase {
         importPreview("import-preview-eye", extra: ["-MiBancoDemoPrivate"])
     }
 
+    // MARK: - Bienvenida y guía de avisos
+
+    /// La primera vez: tres líneas de titanio cruzan la pantalla en diagonal, se ensanchan en bandas tenues y las piezas
+    /// del primer paso llegan una tras otra; la marca va quieta.
+    func testWelcome() throws {
+        launch(["-MiBancoDemoOnboarding", "1"])
+        burst("welcome", frames: 24, every: 0.3)
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
+    }
+
+    /// Con Reducir movimiento: sin barrido; las bandas y las piezas aparecen con un fundido.
+    func testWelcomeReduce() throws {
+        launch(["-MiBancoDemoOnboarding", "1", "-MiBancoReduceMotion"])
+        burst("welcome-reduce", frames: 10, every: 0.3)
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
+    }
+
+    /// La guía de avisos: «Siguiente» desliza la página 70 pt hacia el lado al que se avanza y, medio segundo después,
+    /// un aro de «toca aquí» sale de lo que hay que tocar en el dibujo.
+    func testAlertsGuide() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAlertsGuide", "rev", "1"])
+        let next = app.buttons["guide-next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 20), "No se abrió la guía")
+        Thread.sleep(forTimeInterval: 6)
+        XCTAssertTrue(next.isHittable, "«Siguiente» no se puede tocar")
+        next.tap()
+        burst("alerts-guide", frames: 22, every: 0.3)
+        let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
+        XCTAssertTrue(counter.label.contains("Paso 2 de"), "La ráfaga no avanzó al paso 2: \(counter.label)")
+    }
+
     /// Tocar «Importar»: el tercer paso corre de 67 a 100, el botón se transforma (rueda y ✓) y se vuelve al banco.
     func testImportConfirm() throws {
         launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport"])

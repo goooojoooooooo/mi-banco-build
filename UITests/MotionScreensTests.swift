@@ -145,13 +145,26 @@ final class MotionScreensTests: XCTestCase {
         let total = element("gasto.total")
         XCTAssertTrue(total.label.hasPrefix("Gastado en "), "El total no dice de qué mes es: \(total.label)")
         XCTAssertTrue(total.label.hasSuffix(" euros"), "El total no dice su importe: \(total.label)")
+        // La previsión dice su frase entera, con su cifra en euros («…en unos 371 €»), aunque en pantalla esté contando.
+        let forecast = element("gasto.prevision")
+        XCTAssertTrue(forecast.waitForExistence(timeout: 5), "Gasto no enseña la previsión del mes en curso")
+        XCTAssertNotNil(forecast.label.range(of: "[0-9][\u{00A0} ]€", options: .regularExpression),
+                        "La previsión no dice su importe: \(forecast.label)")
+        XCTAssertGreaterThan(forecast.label.count, 12, "La previsión no dice su frase: \(forecast.label)")
         let chart = element("gasto.grafico")
         XCTAssertTrue(chart.waitForExistence(timeout: 5), "Gasto no tiene el gráfico del mes")
         XCTAssertTrue(chart.label.hasPrefix("Gráfico del gasto de "), "El gráfico no dice qué es: \(chart.label)")
-        XCTAssertTrue(value(chart).contains(" euros frente a "), "El gráfico no dice sus importes: \(value(chart))")
+        // Lo de este mes va hasta hoy; lo del mes anterior es el mes ENTERO y el gráfico lo dice con su nombre («octubre
+        // entero»): no compara en voz alta medio mes con uno completo sin avisar.
+        let previousName = chart.label.components(separatedBy: " frente a ").last ?? ""
+        XCTAssertFalse(previousName.isEmpty, "El gráfico no dice con qué mes compara: \(chart.label)")
+        XCTAssertNotNil(value(chart).range(of: "^[0-9.]+,[0-9]{2} euros; \(previousName) entero: [0-9.]+,[0-9]{2} euros$",
+                                           options: .regularExpression),
+                        "El gráfico no dice «\(previousName) entero»: \(value(chart))")
+        XCTAssertFalse(value(chart).contains(" frente a "), "El gráfico sigue comparando sin decir que el mes anterior va entero")
         // Lo que dice el gráfico es el total del mes.
         let spent = total.label.components(separatedBy: ": ").last ?? ""
-        XCTAssertTrue(value(chart).hasPrefix(spent), "El gráfico («\(value(chart))») y el total («\(spent)») no coinciden")
+        XCTAssertTrue(value(chart).hasPrefix(spent + ";"), "El gráfico («\(value(chart))») y el total («\(spent)») no coinciden")
         // Mes anterior: otro gráfico (otro mes en su etiqueta) y otro total.
         let before = chart.label
         let previous = app.buttons["gasto.mesAnterior"]
@@ -160,7 +173,7 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(waitFor(NSPredicate(format: "label != %@", before), chart, timeout: 8),
                       "El gráfico no cambió con el mes: \(chart.label)")
         let pastSpent = element("gasto.total").label.components(separatedBy: ": ").last ?? ""
-        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", pastSpent), chart, timeout: 8),
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", pastSpent + ";"), chart, timeout: 8),
                       "El gráfico del mes pasado («\(value(chart))») no sigue a su total («\(pastSpent)»)")
         // Las filas siguen abriendo su categoría (la barra nueva no se come el toque).
         app.buttons["gasto.mesSiguiente"].tap()
@@ -296,7 +309,7 @@ final class MotionScreensTests: XCTestCase {
 
     /// Con el ojo cerrado, Próximos cobros no enseña ningún importe con cifras y VoiceOver dice «importe oculto».
     func testPrivateModeHidesAmountsInUpcomingCalendar() throws {
-        openGasto(["-MiBancoDemoPrivate"])
+        openGasto(["-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"])
         let link = element("gasto.proximos")
         scrollDown(to: link)
         XCTAssertTrue(link.isHittable, "No se puede abrir Próximos cobros")
@@ -309,9 +322,89 @@ final class MotionScreensTests: XCTestCase {
             .matching(NSPredicate(format: "label CONTAINS %@", "importe oculto"))
         XCTAssertTrue(hiddenAmounts.firstMatch.waitForExistence(timeout: 8), "VoiceOver no dice «importe oculto» en Próximos cobros")
         XCTAssertEqual(visibleAmounts(), [], "Próximos cobros enseña importes con el ojo cerrado")
-        // Ni un dígito pegado a una coma decimal en ninguna etiqueta (un importe sin su «€»).
-        let decimals = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", ".*[0-9],[0-9]{2}.*"))
+        // Ni un dígito pegado a una coma decimal en ninguna etiqueta (un importe sin su «€»), aunque la etiqueta tenga
+        // varias líneas.
+        let decimals = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", "(?s).*[0-9],[0-9]{2}.*"))
         XCTAssertEqual(decimals.allElementsBoundByIndex.map { $0.label }, [], "Próximos cobros enseña cifras con el ojo cerrado")
+        // Lo que se DIBUJA (las filas ignoran a sus hijos, así que la etiqueta no lo cuenta): cada importe dice en su
+        // valor el texto que pinta. Con el ojo cerrado tiene que ser la máscara: ni un dígito. Con un desenfoque encima
+        // de la cifra, aquí saldría «dibujado: −13,99 €».
+        let drawn = calendar.descendants(matching: .any).matching(NSPredicate(format: "value BEGINSWITH %@", "dibujado: "))
+        let texts = drawn.allElementsBoundByIndex.map { self.value($0) }
+        XCTAssertGreaterThanOrEqual(texts.count, 4, "La demo trae un cobro y tres saldos previstos: \(texts)")
+        for text in texts {
+            XCTAssertNil(text.range(of: "[0-9]", options: .regularExpression), "Con el ojo cerrado se dibuja una cifra: \(text)")
+            XCTAssertTrue(text.contains("•"), "Con el ojo cerrado no se dibuja la máscara: \(text)")
+        }
+    }
+
+    /// Caso de control: con el ojo abierto, esas mismas filas dibujan sus cifras (la comprobación de arriba puede fallar).
+    func testUpcomingCalendarDrawsAmountsWithTheEyeOpen() throws {
+        openGasto(["-MiBancoDemoDrawnAmounts"])
+        let link = element("gasto.proximos")
+        scrollDown(to: link)
+        link.tap()
+        let calendar = app.scrollViews["upcoming-calendar-scroll"]
+        XCTAssertTrue(calendar.waitForExistence(timeout: 8), "No se abrió Próximos cobros")
+        let drawn = calendar.descendants(matching: .any).matching(NSPredicate(format: "value BEGINSWITH %@", "dibujado: "))
+        XCTAssertTrue(drawn.firstMatch.waitForExistence(timeout: 8), "Las filas no dicen lo que dibujan")
+        let texts = drawn.allElementsBoundByIndex.map { self.value($0) }
+        XCTAssertGreaterThanOrEqual(texts.count, 4, "La demo trae un cobro y tres saldos previstos: \(texts)")
+        for text in texts {
+            XCTAssertNotNil(text.range(of: "[0-9],[0-9]{2}", options: .regularExpression), "Con el ojo abierto falta la cifra: \(text)")
+        }
+    }
+
+    // MARK: - Reducir movimiento apaga las entradas de Gasto; una barra no avisa tras salir de su pestaña
+
+    /// Con Reducir movimiento forzado (`-MiBancoReduceMotion`), Gasto no juega ninguna entrada, ni al entrar en la pestaña
+    /// ni al cambiar de mes; sin la bandera, sí.
+    func testReduceMotionSwitchesOffSpendingEntrances() throws {
+        launch(["-MiBancoReduceMotion", "-MiBancoDemoEntranceCount"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "No se ve Inicio")
+        XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "No se abre Gasto")
+        let count = element("gasto.entradas")
+        XCTAssertTrue(count.waitForExistence(timeout: 5), "Gasto no dice cuántas entradas ha jugado")
+        XCTAssertEqual(value(count), "0", "Con Reducir movimiento Gasto jugó su entrada de pestaña")
+        app.buttons["gasto.mesAnterior"].tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(value(count), "0", "Con Reducir movimiento Gasto jugó la entrada del cambio de mes")
+
+        // Control: sin la bandera, entrar en la pestaña y cambiar de mes son dos entradas.
+        app.terminate()
+        launch(["-MiBancoDemoEntranceCount"])
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "No se ve Inicio")
+        XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "No se abre Gasto")
+        XCTAssertTrue(count.waitForExistence(timeout: 5), "Gasto no dice cuántas entradas ha jugado")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "1"), count, timeout: 5),
+                      "Sin Reducir movimiento Gasto no jugó su entrada de pestaña: \(value(count))")
+        app.buttons["gasto.mesAnterior"].tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "2"), count, timeout: 5),
+                      "Sin Reducir movimiento el cambio de mes no jugó su entrada: \(value(count))")
+    }
+
+    /// El aviso del 90 % espera 0,3 s (del kit) a que la barra llegue al límite. Si en esa espera se sale de la pestaña,
+    /// la barra ya no se ve y no avisa. A cámara lenta ×20 la espera dura unos 7 s: da tiempo a salir.
+    func testBudgetDoesNotWarnAfterLeavingTheTab() throws {
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoBudgets", "-MiBancoDemoBudgetWarnings", "-MiBancoMotionScale", "20"])
+        let field = app.textFields["presupuestos.mes"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "No se ve Presupuestos")
+        let bar = element("presupuestos.mes.barra")
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "El presupuesto del mes no tiene barra")
+        let spent = try XCTUnwrap(spentCents(in: bar.label), "No se lee lo gastado en «\(bar.label)»")
+        // Punto de partida: al 50 %, en blanco.
+        setLimit(field, cents: spent * 2)
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 0, blanca"), bar, timeout: 15),
+                      "Al 50 % la barra no va en blanco: \(value(bar))")
+        // Cruza el 90 % y, sin esperar, se va a Inicio: la barra deja de verse antes de que llegue el aviso.
+        setLimit(field, cents: spent * 100 / 95)
+        app.tabBars.buttons["Inicio"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 5), "No dio tiempo a salir a Inicio antes del aviso")
+        Thread.sleep(forTimeInterval: 10)
+        XCTAssertTrue(selectTab("Gasto", until: bar), "No volvió a Presupuestos")
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", ", 95 por ciento"), bar, timeout: 10),
+                      "La barra no lleva el límite nuevo: \(bar.label)")
+        XCTAssertEqual(value(bar), "avisos 0, ámbar", "La barra avisó después de salir de su pestaña")
     }
 
     // MARK: - Suscripciones (B1, B2)
@@ -334,6 +427,31 @@ final class MotionScreensTests: XCTestCase {
         // La fila sigue tomando su pulsación larga (la etiqueta «HOY» no la tapa).
         rows.element(boundBy: 0).press(forDuration: 1.2)
         XCTAssertTrue(app.buttons["Esto no es una suscripción"].waitForExistence(timeout: 5), "No salió el menú de ocultar")
+    }
+
+    /// Con la letra en XXXL (el tamaño más grande que no es de accesibilidad) e importes de cuatro y cinco cifras, la
+    /// cabecera de Suscripciones salta de línea: no se sale del ancho de la pantalla ni se recorta. Deja una captura.
+    func testSubscriptionsHeaderWrapsAtXXXL() throws {
+        openGasto(["-MiBancoDemoBigSubscriptions",
+                   "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryExtraExtraExtraLarge"])
+        let link = element("gasto.suscripciones")
+        scrollDown(to: link)
+        link.tap()
+        let totals = element("suscripciones.total")
+        XCTAssertTrue(totals.waitForExistence(timeout: 8), "No se ve Suscripciones")
+        XCTAssertNotNil(totals.label.range(of: #"^[0-9]\.[0-9]{3},[0-9]{2} euros al mes, [0-9]{2}\.[0-9]{3},[0-9]{2} euros al año$"#,
+                                           options: .regularExpression), "La demo no trae los importes largos: \(totals.label)")
+        Thread.sleep(forTimeInterval: 2)
+        let screen = app.frame
+        let frame = totals.frame
+        let shot = XCTAttachment(screenshot: app.screenshot())
+        shot.name = "suscripciones-cabecera-xxxl"
+        shot.lifetime = .keepAlways
+        add(shot)
+        XCTAssertGreaterThanOrEqual(frame.minX, screen.minX + 19, "La cabecera se sale por la izquierda: \(frame)")
+        XCTAssertLessThanOrEqual(frame.maxX, screen.maxX - 19, "La cabecera se sale por la derecha: \(frame) en \(screen)")
+        // Dos líneas: una sola línea de este tamaño de letra mide unos 30 pt.
+        XCTAssertGreaterThanOrEqual(frame.height, 44, "La cabecera no ha saltado de línea: \(frame)")
     }
 
     // MARK: - Avisos: el importe del aviso (B1)
@@ -622,6 +740,31 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertEqual(balance.label, "Saldo: importe oculto")
         Thread.sleep(forTimeInterval: 2.5)
         XCTAssertEqual(visibleAmounts(), [], "«Conectado» enseña importes con el ojo cerrado")
+    }
+
+    // MARK: - Bienvenida (B8)
+
+    /// La bienvenida llega con todas sus piezas (título, texto, saldos y «Seguir», que se puede tocar) y, con el ojo
+    /// cerrado, un saldo ya escrito y sin editar es la máscara: ni se enseña ni se dice.
+    func testWelcomeArrivesAndMasksATypedBalance() throws {
+        launch(["-MiBancoDemoOnboarding", "1", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 20), "La bienvenida no enseña «Tus saldos»")
+        let next = app.buttons["onboarding-next-1"]
+        XCTAssertTrue(next.waitForExistence(timeout: 8), "La bienvenida no tiene «Seguir»")
+        XCTAssertTrue(waitFor(hittable, next, timeout: 8), "«Seguir» no se puede tocar")
+        let field = app.textFields["Saldo de Revolut"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Falta el saldo de Revolut")
+        field.tap()
+        field.typeText("340,20")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "340,20"), field, timeout: 5),
+                      "Mientras se escribe, el campo no enseña lo escrito: \(value(field))")
+        // Se pasa a otro campo: el de Revolut deja de editarse y, con el ojo cerrado, se tapa.
+        let other = app.textFields["Saldo de imagin"]
+        XCTAssertTrue(other.waitForExistence(timeout: 5), "Falta el saldo de imagin")
+        other.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "importe oculto"), field, timeout: 5),
+                      "Con el ojo cerrado, el saldo escrito se sigue leyendo: \(value(field))")
+        XCTAssertEqual(visibleAmounts(), [], "La bienvenida enseña importes con el ojo cerrado")
     }
 
     // MARK: - Importar un extracto: pasos y vista previa (B6)

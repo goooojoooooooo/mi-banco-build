@@ -3,11 +3,13 @@ import SwiftUI
 
 /// Bienvenida de primera ejecución en tres pasos (Plan 4b, tarea 12).
 /// Se muestra en lugar de la barra de pestañas mientras `model.needsOnboarding` es verdadero; el bloqueo queda por encima.
+/// Al aparecer, tres líneas de titanio cruzan la pantalla y se ensanchan en bandas (`WelcomeBands`); la marca va quieta
+/// (el arranque ya la ha dibujado) y las piezas del primer paso llegan una tras otra.
 struct OnboardingView: View {
     let model: LedgerModel
     let onFinish: (_ openBanksSettings: Bool) -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
 
     @State private var step: Int = {
         #if DEBUG
@@ -17,7 +19,8 @@ struct OnboardingView: View {
         #endif
         return 1
     }()
-    @State private var drawn: CGFloat = 0
+    /// La marca va quieta: ya dibujada desde el primer fotograma.
+    private let drawn: CGFloat = 1
     @State private var showAlertsGuide = false
     @Namespace private var dotsNamespace
 
@@ -52,19 +55,16 @@ struct OnboardingView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
-            .background(Theme.canvas.ignoresSafeArea())
+            .background {
+                ZStack {
+                    Theme.canvas
+                    WelcomeBands()
+                }
+                .ignoresSafeArea()
+            }
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(isPresented: $showAlertsGuide) {
                 AlertsGuideView(model: model)
-            }
-        }
-        .onAppear {
-            if reduceMotion {
-                drawn = 1
-            } else {
-                withAnimation(Theme.Motion.markDraw.delay(0.1)) {
-                    drawn = 1
-                }
             }
         }
     }
@@ -110,7 +110,7 @@ struct OnboardingView: View {
     }
 
     private var stepTransition: AnyTransition {
-        if reduceMotion {
+        if motion.reduce {
             return .opacity
         }
         return .asymmetric(
@@ -120,7 +120,7 @@ struct OnboardingView: View {
     }
 
     private func advance(to nextStep: Int) {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.cardSettle) {
+        withAnimation(motion.animation(.snap)) {
             step = nextStep
         }
     }

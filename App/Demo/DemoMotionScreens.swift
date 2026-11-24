@@ -13,6 +13,17 @@ extension DemoMode {
     /// y la etiqueta «HOY» necesita una para verse). Solo cambia la fila de Suscripciones, no el libro.
     static var chargesToday: Bool { arguments.contains("-MiBancoDemoChargeToday") }
 
+    /// `-MiBancoDemoBigSubscriptions`: la cabecera de Suscripciones enseña sus dos importes multiplicados por cien
+    /// (solo lo que se dibuja, no el libro), para probar que con importes largos y letra grande salta de línea.
+    static var bigSubscriptionTotals: Bool { arguments.contains("-MiBancoDemoBigSubscriptions") }
+
+    /// `-MiBancoDemoEntranceCount`: Gasto dice (en un elemento de accesibilidad invisible) cuántas entradas ha jugado.
+    static var exposesEntranceCount: Bool { arguments.contains("-MiBancoDemoEntranceCount") }
+
+    /// `-MiBancoDemoDrawnAmounts`: en Próximos cobros cada fila con importe dice, como valor de accesibilidad, el texto
+    /// que DIBUJA («dibujado: −•••,•• €»). Así una prueba puede fallar si con el ojo cerrado se dibuja una cifra.
+    static var exposesDrawnAmounts: Bool { arguments.contains("-MiBancoDemoDrawnAmounts") }
+
     /// `-MiBancoDemoConnectScript`: en la pantalla de un banco, «Conectar» o «Renovar conexión» recorre el trámite entero
     /// sin red (Verificar › Conectar › Importar › conectado, y después la lista llenándose por primera vez). En la demo el
     /// conector de verdad se queda en el primer paso; esto solo hace de banco: la pantalla y su porcentaje son los reales.

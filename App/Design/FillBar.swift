@@ -10,6 +10,8 @@ import MiBancoCore
 /// `delay` (segundos al nivel Equilibrado) retrasa el llenado de entrada: así una lista de barras se llena en escalera.
 /// Dentro de una entrada por capas (`\.entrance`, al entrar en la pestaña) la barra se vacía y se vuelve a llenar.
 /// `onWarn` avisa a quien la usa de cada cruce (el mismo instante que la háptica).
+/// `onWarnedChange` le dice a quien la usa el color que la barra DIBUJA (ámbar o no), también al nacer: así un texto de
+/// al lado puede cambiar de color con ella, en el mismo instante y con el mismo fundido.
 /// Solo avisa una barra que se está viendo: su pantalla está delante (`onAppear`/`onDisappear` y lo que diga quien la
 /// aloja en `\.fillBarsOnScreen`) y la app, activa. Una barra tapada por otra pantalla, en otra pestaña o con la app en
 /// segundo plano se queda con el ámbar nuevo, sin pulso, sin vibración y sin `onWarn`; al volver a verse ya está pasada
@@ -21,6 +23,7 @@ struct FillBar: View {
     var label = "Progreso"
     var delay: Double = 0
     var onWarn: (() -> Void)? = nil
+    var onWarnedChange: ((Bool) -> Void)? = nil
 
     @Environment(\.motion) private var motion
     @Environment(\.entrance) private var entrance
@@ -28,6 +31,10 @@ struct FillBar: View {
     @Environment(\.fillBarsOnScreen) private var hostOnScreen
     /// Su pantalla está delante (entre `onAppear` y `onDisappear`).
     @State private var visible = false
+    /// Lo que dicen AHORA quien la aloja y la escena. Van en estado (no se leen del entorno dentro de la espera): la
+    /// tarea que espera el ámbar guarda una copia de la vista y el entorno de esa copia es el del instante en que nació.
+    @State private var hostLive = true
+    @State private var sceneLive = true
     @State private var shown: Double = 0
     @State private var warned = false
     @State private var warnCount = 0
@@ -79,8 +86,12 @@ struct FillBar: View {
             if animatesOnAppear { fill(to: value, animated: true, entering: true) } else { landed = entrance.token }
         }
         .onDisappear { visible = false }
+        .onChange(of: hostOnScreen, initial: true) { _, now in hostLive = now }
+        .onChange(of: scenePhase, initial: true) { _, now in sceneLive = now == .active }
         // Se observa la fracción limpia: un NaN (distinto de sí mismo) no relanza el cambio en cada pasada.
         .onChange(of: value) { _, new in change(to: new) }
+        // Quien la usa sabe en todo momento de qué color va la barra (dentro de la misma animación que el cambio).
+        .onChange(of: warned, initial: true) { _, now in onWarnedChange?(now) }
         // Una entrada por capas nueva (se entra en la pestaña): la barra, que ya está vacía (`drawn`), se llena otra vez.
         .onChange(of: entrance.token) { _, _ in
             guard replays else { return }
@@ -125,7 +136,7 @@ struct FillBar: View {
     }
 
     /// La barra se está viendo: su pantalla está delante y la app, activa. Solo entonces avisa.
-    private var isOnScreen: Bool { visible && hostOnScreen && scenePhase == .active }
+    private var isOnScreen: Bool { visible && hostLive && sceneLive }
 
     private func change(to target: Double) {
         pending?.cancel()
@@ -142,7 +153,8 @@ struct FillBar: View {
             pending = Task {
                 try? await Task.sleep(for: .seconds(motion.seconds(0.3)))
                 guard !Task.isCancelled, isOver(latest) else { return }
-                // Si mientras esperaba ha dejado de verse (otra pantalla, la app a segundo plano), tampoco avisa.
+                // Si mientras esperaba ha dejado de verse (otra pantalla, otra pestaña, la app a segundo plano), tampoco
+                // avisa: lo que se comprueba aquí es estado vivo, no el entorno que la tarea capturó al nacer.
                 guard isOnScreen else {
                     warned = true
                     return

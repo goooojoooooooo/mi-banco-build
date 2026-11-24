@@ -9,8 +9,11 @@ struct MonthSelector: View {
     let canGoForward: Bool
     let step: (Int) -> Void
 
+    @Environment(\.motion) private var motion
+
     var body: some View {
         // Flechas en los extremos (la izquierda alineada con el título grande) y el mes centrado entre ambas.
+        // El nombre del mes se cruza con el anterior con los tiempos del kit (intensidad, cámara lenta, Reducir movimiento).
         HStack(spacing: 0) {
             arrow("chevron.left", label: "Mes anterior", id: "gasto.mesAnterior", enabled: canGoBack) { step(-1) }
             Spacer(minLength: 0)
@@ -21,6 +24,7 @@ struct MonthSelector: View {
                     .id(title)
                     .transition(.opacity)
             }
+            .animation(motion.calmAnimation(.enter), value: title)
             .frame(minHeight: 44)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Mes: \(title)")

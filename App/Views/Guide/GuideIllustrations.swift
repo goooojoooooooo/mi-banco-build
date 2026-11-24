@@ -5,10 +5,13 @@ import MiBancoCore
 // con lo que hay que tocar resaltado por un aro blanco de 2 pt que late. Los nombres salen de `GuideNames`.
 
 /// Aro blanco de 2 pt que late cada 1,6 s. Con Reducir movimiento se queda quieto.
+/// Al aparecer el paso, además, un aro de «toca aquí» sale una vez de lo que hay que tocar (`TapRing`: crece de 0,4 a
+/// 1,5 y se apaga en 760 ms, medio segundo después de que el paso llegue).
 private struct PulseRing: ViewModifier {
     let radius: CGFloat
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var on = false
+    @State private var taps = 0
 
     func body(content: Content) -> some View {
         content
@@ -20,7 +23,17 @@ private struct PulseRing: ViewModifier {
                     .scaleEffect(reduceMotion || !on ? 1 : 1.04)
                     .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: on)
             }
-            .onAppear { on = true }
+            .overlay {
+                GeometryReader { geo in
+                    TapRing(trigger: taps, size: 40, delay: 0.52)
+                        .position(x: geo.size.width * 0.72, y: geo.size.height / 2)
+                }
+                .allowsHitTesting(false)
+            }
+            .onAppear {
+                on = true
+                taps += 1
+            }
     }
 }
 

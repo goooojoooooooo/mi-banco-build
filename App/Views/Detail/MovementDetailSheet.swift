@@ -62,8 +62,13 @@ private struct DetailContent: View {
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @ScaledMetric(relativeTo: .largeTitle) private var amountSize: CGFloat = 46
     @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 60
+    /// El importe entra (sube y aparece) y, cuando se ha posado, «Te quedaban» deja de estar oculto y rueda desde 0:
+    /// nunca enseña su cifra final antes de contar.
+    @State private var amountShown = false
+    @State private var amountLanded = false
     @State private var editingNote = false
     @State private var noteText = ""
     @State private var noteSaved = false
@@ -93,17 +98,25 @@ private struct DetailContent: View {
                         .foregroundStyle(Theme.label2)
                         .padding(.top, 3)
                         .staggeredEntrance(5, rise: 8)
-                    CountingAmount(cents: movement.amountCents, style: .plain(sign: true))
+                    // El importe rueda (`RollingAmount` ya oculta las cifras con el ojo cerrado y se encoge si no cabe).
+                    RollingAmount(cents: movement.amountCents, style: .plain(sign: true))
                         .font(.system(size: amountSize, weight: .semibold))
                         .tracking(-amountSize * 0.03)
-                        .monospacedDigit()
                         .foregroundStyle(movement.amountCents > 0 && !movement.flaggedNotMine ? Theme.income : Theme.label)
-                        .strikethrough(movement.flaggedNotMine, color: Theme.label3)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .privateAmount(radius: 14)
+                        // «No es mío»: la raya se dibuja encima (las cifras que ruedan no son texto que se pueda tachar).
+                        .overlay {
+                            if movement.flaggedNotMine {
+                                Capsule()
+                                    .fill(Theme.label3)
+                                    .frame(height: max(1.5, amountSize * 0.055))
+                                    .offset(y: amountSize * 0.06)
+                                    .transition(.opacity)
+                            }
+                        }
                         .padding(.top, 10)
-                        .staggeredEntrance(6, rise: 10)
+                        .opacity(amountShown ? 1 : 0)
+                        .offset(y: amountShown ? 0 : motion.distance(10))
+                        .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(movement.amountCents < 0 ? "Pago de" : "Ingreso de") \(spokenAmount(abs(movement.amountCents), hidden: hidden))")
                     if movement.flaggedNotMine {
                         Label("No es tuyo: no cuenta en tu gasto", systemImage: "exclamationmark.triangle.fill")
@@ -123,7 +136,10 @@ private struct DetailContent: View {
                     if let after = snapshot.balanceAfter[movement.id] {
                         DetailPair(key: "Te quedaban") {
                             HStack(spacing: 6) {
-                                CountingAmount(cents: after).privateAmount()
+                                // Empieza oculto: ni un 0 ni la cifra final hasta que el importe de arriba se posa.
+                                RollingAmount(cents: after, revealed: amountLanded)
+                                    .opacity(amountLanded ? 1 : 0)
+                                    .animation(motion.fade, value: amountLanded)
                                 if snapshot.balances[movement.bank]?.estimated ?? false {
                                     Text("estimado").titan(.meta).foregroundStyle(Theme.label3)
                                 }
@@ -205,6 +221,23 @@ private struct DetailContent: View {
         .sensoryFeedback(Haptics.success, trigger: noteSaved) { _, new in new }
         .onChange(of: noteFocused) { _, focused in
             if !focused && editingNote { commitNote() }
+        }
+        .onAppear(perform: landAmount)
+        .task {
+            // Respaldo: si la animación de entrada no llegara a avisar, «Te quedaban» no se queda oculto.
+            try? await Task.sleep(for: .seconds(motion.seconds(0.8) + 1))
+            amountShown = true
+            amountLanded = true
+        }
+    }
+
+    /// El importe entra con el muelle de vuelo (con Reducir movimiento, un fundido) y al posarse destapa «Te quedaban».
+    private func landAmount() {
+        guard !amountShown else { return }
+        withAnimation(motion.animation(.fly).delay(motion.seconds(0.3)), completionCriteria: .logicallyComplete) {
+            amountShown = true
+        } completion: {
+            amountLanded = true
         }
     }
 

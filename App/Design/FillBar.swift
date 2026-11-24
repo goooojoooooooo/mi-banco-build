@@ -7,13 +7,27 @@ import MiBancoCore
 /// desplazarse). Solo se anima `scaleEffect` (la barra va recortada a su pista). Con Reducir movimiento se llena con un
 /// fundido y el ámbar se queda. `warnAt = nil` la deja siempre blanca.
 /// `label` dice qué mide la barra («Comida»); VoiceOver lee ese nombre y el porcentaje.
+/// `delay` (segundos al nivel Equilibrado) retrasa el llenado de entrada: así una lista de barras se llena en escalera.
+/// Dentro de una entrada por capas (`\.entrance`, al entrar en la pestaña) la barra se vacía y se vuelve a llenar.
+/// `onWarn` avisa a quien la usa de cada cruce (el mismo instante que la háptica).
+/// Solo avisa una barra que se está viendo: su pantalla está delante (`onAppear`/`onDisappear` y lo que diga quien la
+/// aloja en `\.fillBarsOnScreen`) y la app, activa. Una barra tapada por otra pantalla, en otra pestaña o con la app en
+/// segundo plano se queda con el ámbar nuevo, sin pulso, sin vibración y sin `onWarn`; al volver a verse ya está pasada
+/// y sale en ámbar sin avisar (como la que nace pasada).
 struct FillBar: View {
     let fraction: Double
     var warnAt: Double? = 0.9
     var animatesOnAppear = true
     var label = "Progreso"
+    var delay: Double = 0
+    var onWarn: (() -> Void)? = nil
 
     @Environment(\.motion) private var motion
+    @Environment(\.entrance) private var entrance
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.fillBarsOnScreen) private var hostOnScreen
+    /// Su pantalla está delante (entre `onAppear` y `onDisappear`).
+    @State private var visible = false
     @State private var shown: Double = 0
     @State private var warned = false
     @State private var warnCount = 0
@@ -22,16 +36,18 @@ struct FillBar: View {
     @State private var latest: Double = 0
     @State private var appeared = false
     @State private var pending: Task<Void, Never>?
+    /// La entrada por capas en la que la barra ya se ha llenado (ver `drawn`).
+    @State private var landed = -1
 
     var body: some View {
         ZStack(alignment: .leading) {
             Rectangle().fill(Color(hex: "#2E2E32"))
             Rectangle()
                 .fill(Theme.label)
-                .scaleEffect(x: MotionMath.unit(shown), anchor: .leading)
+                .scaleEffect(x: MotionMath.unit(drawn), anchor: .leading)
             Rectangle()
                 .fill(Theme.warning)
-                .scaleEffect(x: MotionMath.unit(shown), anchor: .leading)
+                .scaleEffect(x: MotionMath.unit(drawn), anchor: .leading)
                 .opacity(warned ? 1 : 0)
             Rectangle()
                 .fill(Theme.warning)
@@ -39,8 +55,8 @@ struct FillBar: View {
                     content.opacity(v)
                 } keyframes: { _ in
                     KeyframeTrack {
-                        CubicKeyframe(0.9, duration: 0.45)
-                        CubicKeyframe(0.0, duration: 0.45)
+                        CubicKeyframe(0.9, duration: motion.seconds(0.45))
+                        CubicKeyframe(0.0, duration: motion.seconds(0.45))
                     }
                 }
         }
@@ -51,6 +67,7 @@ struct FillBar: View {
         .accessibilityLabel(label)
         .accessibilityValue("\(MotionMath.percent(value)) %")
         .onAppear {
+            visible = true
             // Reaparecer al desplazarse una lista no repite nada.
             guard !appeared else { return }
             appeared = true
@@ -59,47 +76,91 @@ struct FillBar: View {
             // Nace pasada del límite: ámbar ya puesto, sin pulso ni háptica.
             warned = over
             shown = animatesOnAppear && !motion.reduce ? 0 : value
-            if animatesOnAppear { fill(to: value, animated: true) }
+            if animatesOnAppear { fill(to: value, animated: true, entering: true) } else { landed = entrance.token }
         }
+        .onDisappear { visible = false }
         // Se observa la fracción limpia: un NaN (distinto de sí mismo) no relanza el cambio en cada pasada.
         .onChange(of: value) { _, new in change(to: new) }
+        // Una entrada por capas nueva (se entra en la pestaña): la barra, que ya está vacía (`drawn`), se llena otra vez.
+        .onChange(of: entrance.token) { _, _ in
+            guard replays else { return }
+            fill(to: value, animated: true, entering: true)
+        }
     }
 
     /// La fracción limpia (`MotionMath.finite`): la barra, el porcentaje y el aviso leen la misma. Con presupuesto 0
     /// (gasto / 0 = ∞) es 0: barra vacía, «0 %» y sin ámbar ni vibración.
     private var value: Double { MotionMath.finite(fraction) }
 
+    /// Mientras dura una entrada por capas, la barra se repite con ella (nunca con Reducir movimiento).
+    private var replays: Bool {
+        animatesOnAppear && entrance.active && entrance.scope == .assembly && !motion.reduce
+    }
+
+    /// Lo que se dibuja: 0 desde que empieza una entrada por capas hasta que la barra arranca en ella (`landed`), y
+    /// después lo de siempre. El paso a 0 llega con el cambio del entorno, sin animación; el llenado, con su muelle.
+    private var drawn: Double { replays && landed != entrance.token ? 0 : shown }
+
     private func isOver(_ value: Double) -> Bool {
         MotionMath.isOver(value, warnAt: warnAt)
     }
 
-    private func fill(to target: Double, animated: Bool) {
+    /// `entering`: el llenado de entrada (al aparecer o al repetirse la entrada), que espera su `delay`.
+    private func fill(to target: Double, animated: Bool, entering: Bool = false) {
+        let token = entrance.token
         if motion.reduce {
-            withAnimation(motion.fade) { shown = target }
+            withAnimation(motion.fade) {
+                shown = target
+                landed = token
+            }
             return
         }
         let spring = Animation.spring(
             response: motion.seconds(0.62),
             dampingFraction: 1 - min(0.62, 0.22 * motion.level.bounceScale))
-        withAnimation(animated ? spring : nil) { shown = target }
+        withAnimation(animated ? spring.delay(entering ? motion.seconds(max(0, delay)) : 0) : nil) {
+            shown = target
+            landed = token
+        }
     }
+
+    /// La barra se está viendo: su pantalla está delante y la app, activa. Solo entonces avisa.
+    private var isOnScreen: Bool { visible && hostOnScreen && scenePhase == .active }
 
     private func change(to target: Double) {
         pending?.cancel()
         latest = target
         fill(to: target, animated: true)
         if isOver(target), !warned {
-            // El ámbar entra cuando la barra llega al límite, con pulso y aviso. Si el valor cambia antes, la tarea se
-            // cancela y, además, se vuelve a comprobar el valor en vivo.
+            // Sin verse no hay aviso: se queda con el ámbar, sin pulso, sin vibración y sin `onWarn`.
+            guard isOnScreen else {
+                warned = true
+                return
+            }
+            // El ámbar entra cuando la barra llega al límite (a media carrera de su muelle), con pulso y aviso. Si el valor
+            // cambia antes, la tarea se cancela y, además, se vuelve a comprobar el valor en vivo.
             pending = Task {
-                try? await Task.sleep(for: .seconds(motion.seconds(0.2)))
+                try? await Task.sleep(for: .seconds(motion.seconds(0.3)))
                 guard !Task.isCancelled, isOver(latest) else { return }
+                // Si mientras esperaba ha dejado de verse (otra pantalla, la app a segundo plano), tampoco avisa.
+                guard isOnScreen else {
+                    warned = true
+                    return
+                }
                 withAnimation(motion.calmAnimation(.row)) { warned = true }
                 pulse += 1
                 warnCount += 1
+                onWarn?()
             }
         } else if !isOver(target), warned {
             withAnimation(motion.calmAnimation(.row)) { warned = false }
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Si las barras de esta parte de la pantalla se están viendo. Lo pone quien las aloja cuando `onDisappear` no basta:
+    /// la raíz de una pila de navegación sigue «aparecida» debajo de la pantalla que se le empuja encima, y una pestaña que
+    /// no es la elegida sigue viva. Por defecto, sí.
+    @Entry var fillBarsOnScreen = true
 }

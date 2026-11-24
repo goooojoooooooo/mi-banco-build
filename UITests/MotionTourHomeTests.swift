@@ -12,8 +12,16 @@ final class MotionTourHomeTests: MotionTourCase {
 
     private func waitForHome() {
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "Inicio no aparece")
-        // Que termine el montaje del arranque (a cámara lenta) antes de tocar nada.
+        // Mientras está la capa del arranque (a cámara lenta dura varios segundos), un toque la salta en vez de llegar
+        // a Inicio: se espera a que se quite y, después, a que termine el montaje por capas.
+        let layer = app.descendants(matching: .any).matching(identifier: "launch-layer").firstMatch
+        let limit = Date().addingTimeInterval(30)
+        while layer.exists && Date() < limit { Thread.sleep(forTimeInterval: 0.2) }
         Thread.sleep(forTimeInterval: 7)
+    }
+
+    private func element(_ id: String) -> XCUIElement {
+        app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
     private func segment(_ title: String) -> XCUIElement {
@@ -241,5 +249,251 @@ final class MotionTourHomeTests: MotionTourCase {
 
     func testCarouselLandingSubtle() throws {
         glideBurst("carousel-landing-subtle", level: "subtle", scale: 1, frames: 20, every: 0.04, zoomed: true)
+    }
+
+    // MARK: Lote 2 — A4: llega un movimiento
+
+    /// `-MiBancoDemoCardMoment arrival|arrivalIncome`: tocar el segmento ya elegido ingesta un movimiento por el camino
+    /// real. El modelo lo publica 0,56 s después (tiempo real): la cifra rueda, el ✓ con el importe salta sobre la cifra
+    /// y la fila cae con su luz.
+    private func arrivalBurst(_ name: String, moment: String, extra: [String] = [], from segmentTitle: String = "Todo",
+                              frames: Int = 24, every: TimeInterval = 0.4) {
+        launch(["-MiBancoDemoCardMoment", moment] + extra)
+        waitForHome()
+        segment(segmentTitle).tap()
+        burst(name, frames: frames, every: every)
+    }
+
+    func testArrivalPayment() throws {
+        arrivalBurst("arrival-payment", moment: "arrival")
+    }
+
+    func testArrivalPaymentEyeClosed() throws {
+        arrivalBurst("arrival-payment-eye", moment: "arrival", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    func testArrivalIncome() throws {
+        arrivalBurst("arrival-income", moment: "arrivalIncome")
+    }
+
+    func testArrivalIncomeEyeClosed() throws {
+        arrivalBurst("arrival-income-eye", moment: "arrivalIncome", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    func testArrivalPaymentReduceMotion() throws {
+        arrivalBurst("arrival-payment-reduce", moment: "arrival", extra: ["-MiBancoReduceMotion"], frames: 16, every: 0.3)
+    }
+
+    /// Con la tarjeta de otro banco delante: el carrusel se desliza hasta la del banco del pago.
+    func testArrivalPaymentGlide() throws {
+        arrivalBurst("arrival-payment-glide", moment: "arrival", extra: ["-MiBancoDemoCard", "rev"], from: "Revolut")
+    }
+
+    // MARK: Lote 2 — A5: listas
+
+    /// Cambiar de tarjeta: la lista sale con un fundido y la nueva entra escalonada (34 ms × 0,8ⁿ).
+    private func listStagger(_ name: String, extra: [String], frames: Int = 16, every: TimeInterval = 0.2) {
+        launch(extra)
+        waitForHome()
+        segment("imagin").tap()
+        burst(name, frames: frames, every: every)
+    }
+
+    func testListStagger() throws {
+        listStagger("list-stagger", extra: [])
+    }
+
+    func testListStaggerEyeClosed() throws {
+        listStagger("list-stagger-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    func testListStaggerReduceMotion() throws {
+        listStagger("list-stagger-reduce", extra: ["-MiBancoReduceMotion"], frames: 12, every: 0.12)
+    }
+
+    /// `-MiBancoDemoCardMoment rowSwipe`: la primera fila se abre (como al deslizarla) y, al tocar otra vez, se cierra.
+    private func rowSwipe(_ suffix: String, extra: [String], frames: Int = 12) {
+        launch(["-MiBancoDemoCardMoment", "rowSwipe"] + extra)
+        waitForHome()
+        segment("Todo").tap()
+        burst("row-swipe" + suffix, frames: frames, every: 0.2)
+        Thread.sleep(forTimeInterval: 1.5)
+        segment("Todo").tap()
+        burst("row-swipe-close" + suffix, frames: frames, every: 0.2)
+    }
+
+    func testRowSwipe() throws {
+        rowSwipe("", extra: [])
+    }
+
+    func testRowSwipeEyeClosed() throws {
+        rowSwipe("-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    func testRowSwipeReduceMotion() throws {
+        rowSwipe("-reduce", extra: ["-MiBancoReduceMotion"], frames: 6)
+    }
+
+    /// `-MiBancoDemoCardMoment refresh`: la actualización de «tirar para actualizar» sin dedo: la lista baja, la ola
+    /// brilla, dice «Al día» y se recoge. (El tirón con el dedo no se puede fotografiar mientras se arrastra.)
+    func testPullRefresh() throws {
+        launch(["-MiBancoDemoCardMoment", "refresh"])
+        waitForHome()
+        segment("Todo").tap()
+        burst("pull-refresh", frames: 28, every: 0.4)
+    }
+
+    func testPullRefreshReduceMotion() throws {
+        launch(["-MiBancoDemoCardMoment", "refresh", "-MiBancoReduceMotion"])
+        waitForHome()
+        segment("Todo").tap()
+        burst("pull-refresh-reduce", frames: 16, every: 0.4)
+    }
+
+    // MARK: Lote 2 — A6: abanico de tarjetas
+
+    /// `-MiBancoDemoCardMoment fan`: el abanico se abre; después, tocar la tarjeta de Revolut: las demás caen y se abre
+    /// la pantalla del banco.
+    private func fanBursts(_ suffix: String, extra: [String]) {
+        launch(["-MiBancoDemoCardMoment", "fan"] + extra)
+        waitForHome()
+        segment("Todo").tap()
+        burst("wallet-fan" + suffix, frames: 20, every: 0.25)
+        Thread.sleep(forTimeInterval: 1)
+        app.buttons["wallet-card-rev"].tap()
+        burst("wallet-fan-pick" + suffix, frames: 14, every: 0.25)
+    }
+
+    func testWalletFan() throws {
+        fanBursts("", extra: [])
+    }
+
+    func testWalletFanEyeClosed() throws {
+        fanBursts("-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    func testWalletFanReduceMotion() throws {
+        fanBursts("-reduce", extra: ["-MiBancoReduceMotion"])
+    }
+
+    /// El camino de verdad: mantener el dedo sobre la tarjeta (se levanta a los 0,42 s y a los 0,92 s se abre el
+    /// abanico). La pulsación bloquea la prueba 1,6 s, así que la ráfaga empieza con el abanico a medio abrir; después,
+    /// «Cerrar»: las tarjetas vuelven bajo la tarjeta de la que salieron.
+    func testWalletFanFromLongPress() throws {
+        launch()
+        waitForHome()
+        carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
+        burst("wallet-fan-hold", frames: 16, every: 0.25)
+        app.buttons["wallet-fan-close"].tap()
+        burst("wallet-fan-close", frames: 12, every: 0.2)
+    }
+
+    // MARK: Lote 2 — A7: tarjeta de inversiones
+
+    private func investments(_ name: String, extra: [String]) {
+        launch(["-MiBancoDemoPortfolio"] + extra)
+        waitForHome()
+        segment("Cartera").tap()
+        burst(name, frames: 20, every: 0.3)
+    }
+
+    func testInvestments() throws {
+        investments("investments", extra: [])
+    }
+
+    func testInvestmentsEyeClosed() throws {
+        investments("investments-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    // MARK: Lote 2 — A8: «Mover dinero»
+
+    /// Abre «Mover dinero» desde «Todo» y elige Revolut como destino: queda en el paso del importe.
+    private func openMoveAmountStep() {
+        let move = app.buttons["Mover dinero"]
+        XCTAssertTrue(move.waitForExistence(timeout: 10), "Falta «Mover dinero»")
+        move.tap()
+        let target = element("move-target-rev")
+        XCTAssertTrue(target.waitForExistence(timeout: 10), "Falta Revolut como destino")
+        target.tap()
+        XCTAssertTrue(app.buttons["1"].waitForExistence(timeout: 10), "No se llegó al teclado")
+        Thread.sleep(forTimeInterval: 1.5)
+    }
+
+    /// `-MiBancoDemoKeypadDelay 0.8`: cada tecla hace efecto 0,8 s después del toque, así que la ráfaga ya está en marcha
+    /// cuando el dígito entra. Con «123» escrito, el «4» entra y aparece el punto de millar; después se borra.
+    private func keypad(_ suffix: String, extra: [String], frames: Int = 14) {
+        launch(["-MiBancoDemoKeypadDelay", "0.8"] + extra)
+        waitForHome()
+        openMoveAmountStep()
+        for key in ["1", "2", "3"] {
+            app.buttons[key].tap()
+            Thread.sleep(forTimeInterval: 2.6)
+        }
+        app.buttons["4"].tap()
+        burst("keypad" + suffix, frames: frames, every: 0.2)
+        Thread.sleep(forTimeInterval: 1)
+        app.buttons["keypad-backspace"].tap()
+        burst("keypad-delete" + suffix, frames: frames, every: 0.2)
+    }
+
+    func testKeypad() throws {
+        keypad("", extra: [])
+    }
+
+    func testKeypadEyeClosed() throws {
+        keypad("-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    func testKeypadReduceMotion() throws {
+        keypad("-reduce", extra: ["-MiBancoReduceMotion"], frames: 8)
+    }
+
+    /// Deslizar «Desliza para preparar»: el paso «listo» (el ✓ salta y se traza; el titular, los datos y los botones
+    /// entran por turnos; el botón principal se enciende a los 0,9 s). Después, «Copiar IBAN» → «Copiado».
+    private func success(_ suffix: String, extra: [String], copies: Bool) {
+        launch(extra)
+        waitForHome()
+        openMoveAmountStep()
+        for key in ["2", "0"] {
+            app.buttons[key].tap()
+            Thread.sleep(forTimeInterval: 0.8)
+        }
+        let slider = element("move-slide")
+        XCTAssertTrue(slider.waitForExistence(timeout: 10), "Falta «Desliza para preparar»")
+        let frame = slider.frame
+        let origin = slider.coordinate(withNormalizedOffset: .zero)
+        let from = origin.withOffset(CGVector(dx: 28, dy: frame.height / 2))
+        let to = origin.withOffset(CGVector(dx: frame.width - 6, dy: frame.height / 2))
+        from.press(forDuration: 0.3, thenDragTo: to, withVelocity: 400, thenHoldForDuration: 0.1)
+        burst("success-sheet" + suffix, frames: 24, every: 0.3)
+        guard copies else { return }
+        let again = app.scrollViews["move-ready-scroll"].buttons["Copiar IBAN"]
+        XCTAssertTrue(again.waitForExistence(timeout: 10), "Falta «Copiar IBAN»")
+        again.tap()
+        burst("move-money", frames: 16, every: 0.25)
+    }
+
+    func testSuccessSheet() throws {
+        success("", extra: [], copies: true)
+    }
+
+    func testSuccessSheetEyeClosed() throws {
+        success("-eye", extra: ["-MiBancoDemoPrivate"], copies: false)
+    }
+
+    func testSuccessSheetReduceMotion() throws {
+        success("-reduce", extra: ["-MiBancoReduceMotion"], copies: false)
+    }
+
+    // MARK: Lote 2 — menores: la búsqueda cambia el contenido sin mover la maquetación
+
+    func testSearchSwap() throws {
+        launch()
+        waitForHome()
+        app.buttons["Buscar movimientos"].tap()
+        burst("search-open", frames: 10, every: 0.15)
+        Thread.sleep(forTimeInterval: 1)
+        app.buttons["Cancelar"].tap()
+        burst("search-close", frames: 10, every: 0.15)
     }
 }

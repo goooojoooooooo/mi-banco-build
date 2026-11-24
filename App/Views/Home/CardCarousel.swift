@@ -11,6 +11,7 @@ import MiBancoCore
 /// - Un deslizamiento programado (segmentado, llegada) llega con el rebote de su muelle `snap`: se pasa y vuelve. El
 ///   del dedo frena con la física del sistema, sin nada añadido.
 /// - Mantener pulsada la tarjeta de delante 0,42 s la levanta (`.lift`); al soltar vuelve, y soltar no la voltea.
+///   Seguir pulsándola medio segundo más, o soltarla sin haber arrastrado nada, abre el abanico de tarjetas (`onFan`).
 /// - La primera vez que se ve Inicio, la tarjeta asoma unos grados (la pista de que se puede voltear).
 /// - Con Reducir movimiento: tarjetas planas, sin levantar, y el cambio programado es un fundido.
 struct CardCarousel: View {
@@ -25,6 +26,8 @@ struct CardCarousel: View {
     let onEdit: (BankID?) -> Void
     var onOpenBank: (BankID) -> Void = { _ in }
     var onImportInvestments: () -> Void = {}
+    /// La tarjeta levantada pide abrirse en abanico (seguir pulsando, o soltarla).
+    var onFan: () -> Void = {}
 
     /// Tarjetas que ya se han visto: su cifra contó desde 0 la primera vez.
     @State private var seen: Set<AccountCard> = []
@@ -44,6 +47,10 @@ struct CardCarousel: View {
     @State private var liftTimer: Task<Void, Never>?
     /// Cuándo se soltó la última tarjeta levantada: ese soltar no cuenta como toque.
     @State private var liftReleasedAt = Date.distantPast
+    /// El abanico se abrió con el dedo aún sobre la tarjeta: cuando ese dedo suba, no cuenta como toque.
+    @State private var heldIntoFan = false
+    /// La pista del volteo ya está pedida en esta sesión (se apunta como vista cuando de verdad empieza).
+    @State private var peekScheduled = false
     /// Reducir movimiento: mientras el carrusel cambia de tarjeta por programa, se funde (no viaja).
     @State private var crossFaded = false
     /// La pista del volteo: cuántas veces ha asomado cada tarjeta y cuánto espera antes de asomar.
@@ -61,8 +68,8 @@ struct CardCarousel: View {
     @State private var fingerLandings = 0
     @State private var fingerLandedOn = 0
     @State private var fingerSettling = false
-    @Environment(\.cardTilt) private var tilt
     #endif
+    @Environment(\.cardTilt) private var tilt
     @Environment(\.motion) private var kit
     @Environment(\.entrance) private var entrance
     @Environment(AppPreferences.self) private var preferences
@@ -103,6 +110,8 @@ struct CardCarousel: View {
             onPressing: { down in pressing(card, down) },
             onOpenBank: onOpenBank,
             onImportInvestments: onImportInvestments)
+            // Solo la tarjeta de delante sigue la inclinación del teléfono: las vecinas no se redibujan con cada lectura.
+            .environment(\.cardTilt, card == current ? tilt : nil)
             .lift(lifted == card)
     }
 
@@ -169,8 +178,11 @@ struct CardCarousel: View {
                 #if DEBUG
                 probeFinger(old, new)
                 #endif
+                motion.carouselIdle = new == .idle
                 if new == .idle, old != .idle { landed() }
             }
+            // Dónde está la tarjeta de delante en pantalla: de ahí sale el abanico (se lee al abrirlo).
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { motion.carouselFrame = $0 }
             .sensoryFeedback(Haptics.edge, trigger: motion.carouselOverscrolled) { _, new in new }
             .sensoryFeedback(Haptics.flip, trigger: flipped)
             .onScrollGeometryChange(for: Bool.self) { geometry in
@@ -195,13 +207,6 @@ struct CardCarousel: View {
                 if scrollTarget != nil { return }
                 // El dedo dejó el carrusel en otra tarjeta: eso pasa a ser la elegida.
                 guard new != selection else { return }
-                #if DEBUG
-                // Solo para probar la prueba (`-MiBancoDemoFingerLoses`): aquí el programa le gana al dedo.
-                if DemoMode.fingerLosesToGlide, let chosen = selection {
-                    glide(to: chosen)
-                    return
-                }
-                #endif
                 selection = new
             }
             .onChange(of: selection) { _, new in
@@ -331,7 +336,7 @@ struct CardCarousel: View {
         scrollTargetToken += 1
         let token = scrollTargetToken
         if kit.reduce {
-            withAnimation(.easeOut(duration: 0.11 * kit.timeMultiplier)) {
+            withAnimation(kit.fade) {
                 crossFaded = true
             } completion: {
                 guard scrollTargetToken == token else { return }
@@ -361,7 +366,7 @@ struct CardCarousel: View {
         var still = Transaction()
         still.disablesAnimations = true
         withTransaction(still) { scrolledID = card }
-        withAnimation(.easeOut(duration: 0.17 * kit.timeMultiplier)) { crossFaded = false }
+        withAnimation(kit.fade) { crossFaded = false }
     }
 
     /// Fin de un desplazamiento programado. Si el dedo lo interrumpió y dejó el carrusel en otra tarjeta, esa pasa a ser
@@ -371,8 +376,9 @@ struct CardCarousel: View {
         scrollTarget = nil
         guard let shown = scrolledID, shown != selection else { return }
         #if DEBUG
-        // Solo para probar la prueba (`-MiBancoDemoFingerLoses`): el carrusel vuelve a la tarjeta del programa.
-        if DemoMode.fingerLosesToGlide, let chosen = selection {
+        // Solo para probar la prueba (`-MiBancoDemoGlideWins`): la regresión exacta. El dedo interrumpió el
+        // deslizamiento programado y dejó el carrusel en otra tarjeta, pero gana el programa: vuelve a la suya.
+        if DemoMode.glideWinsOverFinger, let chosen = selection {
             glide(to: chosen)
             return
         }
@@ -399,7 +405,7 @@ struct CardCarousel: View {
         // Red de seguridad: quieto y sin deslizamiento programado en curso, la tarjeta elegida es la que se ve. Si el
         // scroll no llegó a informar de ella (su identificador puede llegar vacío en el borde), se pone aquí de acuerdo:
         // carrusel, segmentado y lista nunca se quedan diciendo cosas distintas.
-        if measured, scrollTarget == nil, abs(position - CGFloat(index)) < 0.2, cards[index] != current, !fingerLoses {
+        if measured, scrollTarget == nil, abs(position - CGFloat(index)) < 0.2, cards[index] != current {
             #if DEBUG
             restFixes += 1
             #endif
@@ -429,10 +435,28 @@ struct CardCarousel: View {
                 try? await Task.sleep(for: .milliseconds(420))
                 guard !Task.isCancelled, canLift(card) else { return }
                 pressLifted = card
+                // Seguir pulsando medio segundo más (también tiempo del dedo): las tarjetas se abren en abanico.
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, pressLifted == card else { return }
+                pressLifted = nil
+                liftReleasedAt = Date()
+                heldIntoFan = true
+                onFan()
             }
+        } else if heldIntoFan {
+            // El dedo que abrió el abanico sube: ni voltea ni vuelve a abrir nada.
+            heldIntoFan = false
+            liftReleasedAt = Date()
         } else if pressLifted != nil {
             pressLifted = nil
             liftReleasedAt = Date()
+            // Soltar la tarjeta levantada también abre el abanico, salvo que el botón se soltara porque el carrusel o
+            // la lista empezaron a deslizarse (eso se sabe un instante después).
+            Task {
+                try? await Task.sleep(for: .milliseconds(60))
+                guard motion.carouselIdle, motion.listIdle, pressLifted == nil, flipped == nil else { return }
+                onFan()
+            }
         }
     }
 
@@ -443,9 +467,16 @@ struct CardCarousel: View {
         #if DEBUG
         if DemoMode.isActive { return }
         #endif
-        guard !UserDefaults.standard.bool(forKey: Self.peekKey) else { return }
-        UserDefaults.standard.set(true, forKey: Self.peekKey)
-        peek(current, after: kit.seconds(1.3))
+        guard !peekScheduled, !UserDefaults.standard.bool(forKey: Self.peekKey) else { return }
+        peekScheduled = true
+        let delay = kit.seconds(1.3)
+        peek(current, after: delay)
+        // Se apunta como vista cuando la tarjeta empieza a asomar, no antes: si la app se cierra durante la espera,
+        // la pista sale la próxima vez.
+        Task {
+            try? await Task.sleep(for: .seconds(delay))
+            UserDefaults.standard.set(true, forKey: Self.peekKey)
+        }
     }
 
     private func peek(_ card: AccountCard, after delay: Double) {
@@ -477,7 +508,8 @@ struct CardCarousel: View {
                 try? await Task.sleep(for: .milliseconds(800))
                 withAnimation(kit.reduce ? nil : kit.animation(.snap)) { selection = target }
             }
-        case nil:
+        case .arrival, .arrivalIncome, .fan, .refresh, .rowSwipe, nil:
+            // Estos los atiende Inicio (`HomeView.runDemoMoment`).
             break
         }
     }
@@ -507,19 +539,9 @@ struct CardCarousel: View {
     }
     #endif
 
-    /// Solo en DEBUG puede ser verdad (`-MiBancoDemoFingerLoses`): la variante «el programa le gana al dedo» con la
-    /// que se comprueba que la prueba de deslizar a medias se pone roja.
-    private var fingerLoses: Bool {
-        #if DEBUG
-        return DemoMode.fingerLosesToGlide
-        #else
-        return false
-        #endif
-    }
-
     private func tap(_ card: AccountCard) {
-        // Soltar una tarjeta levantada no es un toque: no la voltea.
-        guard pressLifted == nil, Date().timeIntervalSince(liftReleasedAt) > 0.35 else { return }
+        // Soltar una tarjeta levantada (o el dedo que abrió el abanico) no es un toque: no la voltea.
+        guard pressLifted == nil, !heldIntoFan, Date().timeIntervalSince(liftReleasedAt) > 0.35 else { return }
         guard card == current else {
             withAnimation(kit.reduce ? nil : kit.animation(.snap)) { selection = card }
             return

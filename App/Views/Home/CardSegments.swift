@@ -29,7 +29,7 @@ struct CardSegments: View {
                 .accessibilityAddTraits((selection ?? .all) == card ? [.isSelected] : [])
             }
         }
-        .animation(.easeOut(duration: 0.2), value: selection)
+        .animation(kit.fade, value: selection)
         .background(alignment: .leading) {
             GeometryReader { geo in
                 SegmentIndicator(

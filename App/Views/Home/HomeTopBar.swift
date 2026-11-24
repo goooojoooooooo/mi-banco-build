@@ -12,7 +12,8 @@ struct HomeTopBar: View {
     var openBriefing: () -> Void = {}
 
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Intensidad, Reducir movimiento y cámara lenta: el ojo y la lupa se mueven con esto.
+    @Environment(\.motion) private var kit
     @FocusState private var fieldFocused: Bool
     @Namespace private var glass
     @ScaledMetric(relativeTo: .subheadline) private var nameSize: CGFloat = 15
@@ -46,7 +47,7 @@ struct HomeTopBar: View {
                             .font(.system(size: 18, weight: .medium))
                             .contentTransition(.symbolEffect(.replace))
                             // El símbolo cambia con su propia animación, también cuando ocultar va sin ella.
-                            .animation(.easeOut(duration: 0.2), value: hidden)
+                            .animation(kit.fade, value: hidden)
                             .foregroundStyle(Theme.label)
                             .frame(width: 44, height: 44)
                             .glassSurface(Circle())
@@ -111,6 +112,8 @@ struct HomeTopBar: View {
         // El nombre no crece sin límite: comparte fila con los dos botones.
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityLabel("Tu resumen")
+        // Control por voz: lo que se ve es el nombre de la app, así que también responde a él («Toca Onyx»).
+        .accessibilityInputLabels(["Tu resumen", "Resumen", AppIdentity.displayName])
         .accessibilityIdentifier("home-briefing-button")
     }
 
@@ -151,8 +154,9 @@ struct HomeTopBar: View {
 
     private func togglePrivacy() {
         if preferences.privateMode {
-            // Al mostrar, los importes que se difuminan (filas, frases) vuelven con un fundido.
-            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.privacy) {
+            // Al mostrar, lo que aún se difumine en otras pantallas vuelve con un fundido (los importes de Inicio son
+            // máscaras que cambian en el acto, y los que ruedan hacen su propia entrada).
+            withAnimation(kit.fade) {
                 preferences.privateMode = false
             }
         } else {
@@ -163,13 +167,14 @@ struct HomeTopBar: View {
         AccessibilityNotification.Announcement(preferences.privateMode ? "Importes ocultos" : "Importes visibles").post()
     }
 
+    /// La lupa se transforma en el campo con el muelle de encaje (con Reducir movimiento, un fundido).
     private func startSearch() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph) { searching = true }
+        withAnimation(kit.animation(.snap)) { searching = true }
     }
 
     private func cancel() {
         fieldFocused = false
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph) {
+        withAnimation(kit.animation(.snap)) {
             searching = false
             query = ""
         }

@@ -96,7 +96,8 @@ private struct CardPressStyle: ButtonStyle {
 /// Una cara del volteo: gira alrededor del eje Y con perspectiva y solo se ve (y se toca) mientras mira hacia delante.
 /// Con peso: de canto (90°) la tarjeta está un 5 % más grande (× el recorrido del nivel), lleva encima una sombra negra
 /// del 50 % y un brillo que la cruza de lado a lado durante el giro. Solo cambian escala, giro y opacidades.
-/// Con Reducir movimiento no gira ni crece: las dos caras se funden.
+/// Con Reducir movimiento no gira ni crece: la cara que se va se apaga del todo y después entra la otra (son caras
+/// llenas de texto: fundidas una sobre otra se leerían dos textos a la vez).
 private struct FlipFace: ViewModifier, Animatable {
     var angle: Double
     let isBack: Bool
@@ -129,7 +130,7 @@ private struct FlipFace: ViewModifier, Animatable {
             }
             .scaleEffect(1 + 0.05 * motion.level.distanceScale * edgeOn)
             .rotation3DEffect(.degrees(reduce ? 0 : a), axis: (x: 0, y: 1, z: 0), perspective: 0.5)
-            .opacity(reduce ? 1 - abs(a) / 180 : (facing ? 1 : 0))
+            .opacity(reduce ? max(0, 1 - abs(a) / 90) : (facing ? 1 : 0))
             .allowsHitTesting(facing)
             .accessibilityHidden(!facing)
     }
@@ -176,6 +177,11 @@ private struct CardFront: View {
 
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.motion) private var motion
+    /// Llega dinero: la cifra grande en verde 1,3 s (lo decide `ArrivalHeroEffect`).
+    @State private var glowing = false
+    /// La ficha del cambio de hoy (Inversiones) ya ha entrado.
+    @State private var chipShown = false
 
     private var secondary: Color { contrast == .increased ? Theme.card2High : Theme.card2 }
 
@@ -184,7 +190,8 @@ private struct CardFront: View {
             header
             Group {
                 if let cents = heroCents {
-                    HeroBalance(cents: cents, revealed: revealed, centsColor: secondary)
+                    HeroBalance(cents: cents, revealed: revealed, centsColor: glowing ? Theme.income : secondary)
+                        .foregroundStyle(glowing ? Theme.income : Theme.label)
                         .accessibilityIdentifier("card-hero-\(card.rawValue)")
                 } else {
                     // Sin saldo o sin precios: una raya, nunca "0,00 €".
@@ -194,6 +201,10 @@ private struct CardFront: View {
                         .accessibilityLabel(card == .investments ? "Sin precio" : "Sin saldo")
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Llega un movimiento de esta tarjeta: ✓ con el importe arriba a la derecha (verde y con halo si es dinero
+            // que entra); con el ojo cerrado, solo un latido de la máscara.
+            .modifier(ArrivalHeroEffect(card: card, glowing: $glowing))
             .padding(.top, 14)
             Spacer(minLength: 18)
             if card == .all {
@@ -240,13 +251,23 @@ private struct CardFront: View {
                     } ?? ""
                     let session = PositionFormatting.sessionPhrase(changeDay: changeDay)
                     let line = "\(eur)\(pct) \(session)"
-                    Text(line)
+                    // La ficha del cambio de hoy: verde si sube, blanca si no. Entra con un pequeño salto cuando la tarjeta
+                    // se ve por primera vez. Con el ojo cerrado, sin cifras («+••• € (+••• %) hoy»).
+                    MaskedAmountText(line, masked: maskingAmounts(line, everyNumber: true))
                         .titan(.subtitle)
                         .fontWeight(.medium)
-                        .foregroundStyle(todayCents > 0 ? Theme.income : secondary)
+                        .foregroundStyle(todayCents > 0 ? Theme.income : Theme.label)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .privateAmount(spoken: line)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .scaleEffect(chipShown || motion.reduce ? 1 : 0.8, anchor: .leading)
+                        .opacity(chipShown ? 1 : 0)
+                        .onAppear { showChip(revealed) }
+                        .onChange(of: revealed) { _, now in showChip(now) }
+                        .accessibilityIdentifier("card-investments-change")
+                        .padding(.bottom, 3)
                 }
                 if let gainCents = summary.gainCents {
                     let eur = formatSignedEUR(gainCents).replacingOccurrences(of: "-", with: "\u{2212}")
@@ -264,12 +285,11 @@ private struct CardFront: View {
                         }
                     }()
                     let line = "\(eur)\(pct) desde la compra\(partial)"
-                    Text(line)
+                    MaskedAmountText(line, masked: maskingAmounts(line, everyNumber: true))
                         .titan(.meta)
                         .foregroundStyle(secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                        .privateAmount(spoken: line)
                 }
                 let hasMixedTimes: Bool = {
                     guard let oldest = summary.oldestPriceAt, let newest = summary.pricedAt else { return false }
@@ -316,6 +336,13 @@ private struct CardFront: View {
                 }
             }
         }
+    }
+
+    /// La ficha del cambio entra una vez, cuando la tarjeta se ve (un salto corto con el muelle `snap`; con Reducir
+    /// movimiento, un fundido).
+    private func showChip(_ visible: Bool) {
+        guard visible, !chipShown else { return }
+        withAnimation(motion.animation(.snap).delay(motion.seconds(0.18))) { chipShown = true }
     }
 
     @ViewBuilder
@@ -405,7 +432,6 @@ private struct CardBack: View {
     let onImportInvestments: () -> Void
 
     @Environment(\.colorSchemeContrast) private var contrast
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motion) private var motion
     @State private var refreshing = false
     @State private var refreshedCheck = false
@@ -572,9 +598,10 @@ private struct CardBack: View {
         Task {
             _ = await BankSync.shared.refresh(trigger: .manual, only: bank)
             refreshing = false
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { refreshedCheck = true }
+            withAnimation(motion.calmAnimation(.snap)) { refreshedCheck = true }
+            // Tiempo de lectura (real), no de una animación.
             try? await Task.sleep(for: .seconds(2.0))
-            withAnimation(.easeOut(duration: 0.25)) { refreshedCheck = false }
+            withAnimation(motion.fade) { refreshedCheck = false }
         }
     }
 
@@ -591,9 +618,8 @@ private struct CardBack: View {
                 HStack(spacing: 6) {
                     Text(hasIncomplete ? "Coste parcial:" : "Coste:")
                         .titan(.cardTitle)
-                    Text(formatEUR(summary.costCents))
+                    MaskedAmountText(formatEUR(summary.costCents), masked: maskedEUR(summary.costCents, sign: false))
                         .titan(.cardTitle)
-                        .privateAmount()
                 }
                 .padding(.top, 14)
             }

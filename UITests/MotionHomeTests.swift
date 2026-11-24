@@ -846,8 +846,8 @@ final class MotionHomeTests: XCTestCase {
         let ready = app.scrollViews["move-ready-scroll"]
         XCTAssertTrue(ready.waitForExistence(timeout: 5), "Falta el paso «listo»")
         for word in ["Enviado", "enviado", "Enviada", "enviada"] {
-            let predicate = NSPredicate(format: "label CONTAINS %@", word)
-            XCTAssertEqual(ready.descendants(matching: .any).matching(predicate).count, 0, "El paso «listo» dice «\(word)»")
+            let said = ready.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", word)).count
+            XCTAssertEqual(said, 0, "El paso «listo» dice «\(word)»")
         }
         let again = ready.buttons["Copiar IBAN"]
         XCTAssertTrue(again.waitForExistence(timeout: 6), "Falta «Copiar IBAN»")

@@ -174,7 +174,9 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(exit.waitForExistence(timeout: 60), "Tras desbloquear en frío la marca no vuela")
         XCTAssertEqual(exit.value as? String, "frio")
         XCTAssertFalse(element("launch-layer").exists, "Tras desbloquear se montó la capa del arranque")
-        XCTAssertTrue(waitUntil(40) { !unlock.exists }, "El bloqueo de demo no terminó de quitarse")
+        // El vuelo (17 s a ×40) dura más que el fundido del bloqueo (13 s): cuando acaba, el bloqueo ya no está.
+        XCTAssertTrue(waitUntil(45) { !exit.exists }, "La marca no terminó de volar")
+        XCTAssertFalse(unlock.exists, "El bloqueo sigue ahí después del vuelo")
         // El toque de antes no atravesó el bloqueo: el ojo sigue sin haberse tocado.
         XCTAssertTrue(eye.exists, "El toque sobre el bloqueo llegó al ojo de Inicio")
         XCTAssertFalse(app.buttons["Mostrar importes"].exists, "El toque sobre el bloqueo llegó al ojo de Inicio")
@@ -265,10 +267,10 @@ final class MotionShellTests: XCTestCase {
 
     /// I-2: Face ID suele ser más rápido que las piezas. Si el desbloqueo llega con la marca del bloqueo a medio montar
     /// (aquí a los 0,4 s; a ×50 las piezas tardarían 55 s), el bloqueo empieza a fundirse con la marca ya TERMINADA y la
-    /// marca echa a volar una sola vez. Lo que dice la marca del bloqueo en ese instante lo apunta la propia app
-    /// (`marcaAlDesbloquear`): XCUITest deja de ver el bloqueo en cuanto empieza a quitarse (comprobado: el elemento
-    /// `lock-mark` ya no existe aunque el fundido dure 17 s), así que no puede leerlo él. Si alguna vez lo viera, tiene
-    /// que decir lo mismo. Que no se ven piezas ni dos marcas lo enseñan las hojas `unlock-early` y `unlock-early-mitad`.
+    /// marca echa a volar una sola vez. Cómo estaba la marca del bloqueo en ese instante lo apunta la propia app
+    /// (`marcaAlDesbloquear`); si además XCUITest alcanza a ver el bloqueo mientras se funde (17 s a ×50), su marca
+    /// tiene que decir lo mismo. Que no se ven piezas ni dos marcas lo enseñan las hojas `unlock-early` y
+    /// `unlock-early-mitad`.
     func testUnlockBeforeThePiecesFinishHandsOverAFinishedMark() throws {
         launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "0.4", "-MiBancoMotionScale", "50"])
         let exit = element("launch-exit")
@@ -284,6 +286,10 @@ final class MotionShellTests: XCTestCase {
         XCTAssertEqual(result["bloqueoPiezas"], "1", "El bloqueo no llegó a montar las piezas: \(result)")
         XCTAssertEqual(result["salidas"], "1", "La marca no voló exactamente una vez: \(result)")
         XCTAssertEqual(result["montajes"], "1", "Inicio no se montó exactamente una vez: \(result)")
+        // El vuelo (21 s a ×50) dura más que el fundido del bloqueo (17 s): cuando acaba, el bloqueo ya no está.
+        XCTAssertTrue(waitUntil(45) { !exit.exists }, "La marca no terminó de volar")
+        XCTAssertFalse(app.buttons["Desbloquear"].exists, "El bloqueo sigue ahí después del vuelo")
+        XCTAssertEqual(probe()["montajes"], "1", "Inicio se volvió a montar: \(probe())")
         assertHomeResponds("Tras desbloquear a mitad de las piezas, Inicio no responde")
     }
 

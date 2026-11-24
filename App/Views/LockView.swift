@@ -81,6 +81,10 @@ struct LockView: View {
                 }
             }
         }
+        // Lo que cambia DENTRO del bloqueo (la marca que queda terminada o se entrega a la que vuela, las piezas y las
+        // líneas que desaparecen) cambia de golpe, aunque ocurra en la misma actualización que el fundido de salida. El
+        // fundido lo aplica quien quita el bloqueo, por fuera de esta vista: a ese no le afecta.
+        .transaction { $0.animation = nil }
         .background(Theme.canvas.ignoresSafeArea())
         // Un toque en cualquier parte deja la marca terminada. Solo cambia el dibujo: no toca `locked`.
         .contentShape(Rectangle())
@@ -166,18 +170,16 @@ struct LockView: View {
     /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto. El fundido lee `\.motion`:
     /// obedece la intensidad, Reducir movimiento (también el forzado al grabar) y la cámara lenta.
     private func unlockWithFade() {
-        // Antes de fundirse, y sin animación, el DIBUJO queda como lo va a recoger la salida: la marca terminada (ni
-        // mitades en el aire ni líneas de velocidad, aunque Face ID haya sido más rápido que las piezas) y, si la marca
-        // echa a volar ahora, este bloqueo deja de dibujar la suya. Nada de esto toca `locked`.
-        var still = Transaction()
-        still.disablesAnimations = true
-        withTransaction(still) {
-            let takesTheMark = LaunchTimeline(motion).exitDuration != nil && flightTakesTheMark()
-            // Si la marca aún se estaba montando y ahora sale volando, el nombre y el lema ya no llegan a salir.
-            if playsLaunch, !launchFinished, takesTheMark { textsDropped = true }
-            launchFinished = true
-            if takesTheMark { markHandedOff = true }
-        }
+        // Antes de fundirse, el DIBUJO queda como lo va a recoger la salida: la marca terminada (ni mitades en el aire ni
+        // líneas de velocidad, aunque Face ID haya sido más rápido que las piezas) y, si la marca echa a volar ahora,
+        // este bloqueo deja de dibujar la suya. Esos cambios van sin animación (`.transaction` en `body`); el único que
+        // se anima es el fundido del bloqueo entero. Nada de esto toca `locked`.
+        // (No se envuelven en una transacción con `disablesAnimations`: se mezcla con la del fundido y lo anula.)
+        let takesTheMark = LaunchTimeline(motion).exitDuration != nil && flightTakesTheMark()
+        // Si la marca aún se estaba montando y ahora sale volando, el nombre y el lema ya no llegan a salir.
+        if playsLaunch, !launchFinished, takesTheMark { textsDropped = true }
+        launchFinished = true
+        if takesTheMark { markHandedOff = true }
         #if DEBUG
         // Para las pruebas: cómo estaba la marca del bloqueo en el instante de empezar a fundirse.
         LaunchProbe.shared.lockMarkAtUnlock = launchFinished ? "completa" : "piezas"

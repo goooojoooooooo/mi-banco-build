@@ -29,6 +29,34 @@ final class MotionTourScreensTests: MotionTourCase {
         Thread.sleep(forTimeInterval: 3)
     }
 
+    /// Toca una pestaña como entra de verdad en la barra de cristal de iOS 26: una pulsación corta (un toque sintético
+    /// seco muchas veces no entra).
+    private func press(tab name: String) {
+        app.tabBars.buttons[name].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
+    }
+
+    /// Abre una pestaña y espera a verla; si no entra, lo intenta otra vez (pulsación corta y, si no, toque).
+    private func open(tab name: String, until target: XCUIElement) {
+        for _ in 0..<3 {
+            press(tab: name)
+            if target.waitForExistence(timeout: 6) { return }
+            app.tabBars.buttons[name].tap()
+            if target.waitForExistence(timeout: 6) { return }
+        }
+        XCTFail("La pestaña \(name) no se abre")
+    }
+
+    /// Entra en una pestaña, vuelve a Inicio y deja todo asentado: así se sabe que la barra toma el toque antes de la
+    /// ráfaga. La ráfaga se saca en la SEGUNDA entrada, que repite la misma entrada por capas que la primera (lo que el
+    /// dueño ve cada vez que cambia de pestaña).
+    private func rehearse(tab name: String, until target: XCUIElement) {
+        waitForHome()
+        open(tab: name, until: target)
+        Thread.sleep(forTimeInterval: 1.5)
+        open(tab: "Inicio", until: app.staticTexts["Tu dinero"])
+        Thread.sleep(forTimeInterval: 3)
+    }
+
     /// Gasto abierto por argumento y ya asentado.
     private func launchGasto(_ extra: [String] = []) {
         launch(["-MiBancoDemoScreen", "gasto"] + extra)
@@ -58,8 +86,8 @@ final class MotionTourScreensTests: MotionTourCase {
     /// categorías se llenan una tras otra.
     private func spendingMonth(_ name: String, extra: [String], frames: Int, every: TimeInterval) {
         launch(extra)
-        waitForHome()
-        app.tabBars.buttons["Gasto"].tap()
+        rehearse(tab: "Gasto", until: element("gasto.total"))
+        press(tab: "Gasto")
         burst(name, frames: frames, every: every)
         XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 10), "La ráfaga no es de Gasto: la pestaña no se abrió")
         XCTAssertTrue(element("gasto.grafico").exists, "Gasto no tiene gráfico")
@@ -163,8 +191,8 @@ final class MotionTourScreensTests: MotionTourCase {
 
     private func alerts(_ name: String, extra: [String]) {
         launch(extra)
-        waitForHome()
-        app.tabBars.buttons["Avisos"].tap()
+        rehearse(tab: "Avisos", until: app.navigationBars["Avisos"])
+        press(tab: "Avisos")
         burst(name, frames: 14, every: 0.3)
         XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 10), "La ráfaga no es de Avisos: la pestaña no se abrió")
     }

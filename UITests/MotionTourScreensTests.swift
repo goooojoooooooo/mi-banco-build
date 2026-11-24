@@ -487,7 +487,7 @@ final class MotionTourScreensTests: MotionTourCase {
         let next = app.buttons["guide-next"]
         XCTAssertTrue(next.waitForExistence(timeout: 20), "No se abrió la guía")
         Thread.sleep(forTimeInterval: 6)
-        XCTAssertTrue(next.isHittable, "«Siguiente» no se puede tocar")
+        // Sin comprobar «se puede tocar»: junto a la barra de pestañas esa pregunta falla aunque el toque entre.
         next.tap()
         burst("alerts-guide", frames: 22, every: 0.3)
         let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch

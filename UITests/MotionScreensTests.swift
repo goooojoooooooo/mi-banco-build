@@ -743,6 +743,28 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertEqual(visibleAmounts(), [], "«Conectado» enseña importes con el ojo cerrado")
     }
 
+    // MARK: - Guía de avisos (B8)
+
+    /// «Siguiente» y «Atrás» siguen pasando de página (ahora se deslizan 70 pt con el muelle del kit).
+    func testGuidePagesStillTurn() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAlertsGuide", "rev", "1"])
+        let next = app.buttons["guide-next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 20), "No se abrió la guía")
+        let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
+        XCTAssertTrue(counter.waitForExistence(timeout: 5), "La guía no dice en qué paso está")
+        XCTAssertTrue(counter.label.contains("Paso 1 de"), "La guía no empieza en el paso 1: \(counter.label)")
+        next.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", "Paso 2 de"), counter, timeout: 6),
+                      "«Siguiente» no pasó al paso 2: \(counter.label)")
+        let back = app.buttons["guide-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 5), "En el paso 2 falta «Atrás»")
+        back.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", "Paso 1 de"), counter, timeout: 6),
+                      "«Atrás» no volvió al paso 1: \(counter.label)")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "guide-drawing").firstMatch.exists,
+                      "El paso no enseña su dibujo")
+    }
+
     // MARK: - Bienvenida (B8)
 
     /// La bienvenida llega con todas sus piezas (título, texto, saldos y «Seguir», que se puede tocar) y, con el ojo

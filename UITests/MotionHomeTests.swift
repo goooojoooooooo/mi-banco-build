@@ -132,10 +132,18 @@ final class MotionHomeTests: XCTestCase {
         // Además, contra la pantalla: la tarjeta ocupa de 32 pt a (ancho − 32 pt); lo que mide XCUITest de una vista
         // dentro de un giro 3D no siempre es fiable, así que la cifra se comprueba también con esos márgenes.
         let screen = app.windows.firstMatch.frame
-        for (name, frame) in [("la cifra grande", heroFrame)] + ["rev", "ima", "tr"].map({ ("el saldo de \($0)", any("card-bank-\($0)").frame) }) {
-            XCTAssertGreaterThanOrEqual(frame.minX, 31, "\(category): \(name) \(frame) se sale por la izquierda de la tarjeta")
-            XCTAssertLessThanOrEqual(frame.maxX, screen.width - 31, "\(category): \(name) \(frame) se sale por la derecha de la tarjeta")
-            XCTAssertGreaterThan(frame.width, 20, "\(category): \(name) \(frame) no tiene ancho")
+        var measured: [(name: String, frame: CGRect)] = [(name: "la cifra grande", frame: heroFrame)]
+        for bank in ["rev", "ima", "tr"] {
+            let frame: CGRect = any("card-bank-" + bank).frame
+            measured.append((name: "el saldo de " + bank, frame: frame))
+        }
+        for item in measured {
+            let left: CGFloat = item.frame.minX
+            let right: CGFloat = item.frame.maxX
+            let limit: CGFloat = screen.width - 31
+            XCTAssertGreaterThanOrEqual(left, 31, "\(category): \(item.name) se sale por la izquierda de la tarjeta: \(item.frame)")
+            XCTAssertLessThanOrEqual(right, limit, "\(category): \(item.name) se sale por la derecha de la tarjeta: \(item.frame)")
+            XCTAssertGreaterThan(item.frame.width, 20, "\(category): \(item.name) no tiene ancho: \(item.frame)")
         }
         XCTAssertTrue(cardFrame.contains(heroFrame), "\(category): la cifra \(heroFrame) se sale de la tarjeta \(card.frame)")
         XCTAssertGreaterThanOrEqual(heroFrame.height, 24, "\(category): la cifra grande queda diminuta: \(heroFrame)")

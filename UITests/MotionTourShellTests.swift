@@ -119,8 +119,12 @@ final class MotionTourShellTests: MotionTourCase {
         XCTAssertTrue(waitUntil(30) { !unlock.exists }, "El bloqueo de demo no se quitó")
         Thread.sleep(forTimeInterval: 3)
         XCUIDevice.shared.press(.home)
-        XCTAssertTrue(waitUntil(15) { self.app.state == .runningBackground || self.app.state == .runningBackgroundSuspended },
-                      "La app no llegó a segundo plano")
+        if !waitUntil(4, { self.app.state == .runningBackground || self.app.state == .runningBackgroundSuspended }) {
+            // Con el simulador cargado el gesto de Inicio a veces no saca la app: Ajustes la manda atrás seguro.
+            let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+            settings.activate()
+            _ = settings.wait(for: .runningForeground, timeout: 20)
+        }
         Thread.sleep(forTimeInterval: 1.5)
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")

@@ -70,12 +70,21 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout) { !self.element("launch-layer").exists }, "El arranque no terminó")
     }
 
-    /// Manda la app a segundo plano y la trae de vuelta. Espera a que el sistema diga que YA está en segundo plano (en un
-    /// simulador cargado tarda; con una pausa fija la app podía volver sin haber llegado a salir) y un segundo más.
+    /// Manda la app a segundo plano y la trae de vuelta. Primero con el gesto de Inicio; si a los 4 s el sistema no dice
+    /// que la app está en segundo plano (pasó dos veces con dos simuladores en paralelo: la app seguía delante y, claro,
+    /// no se bloqueaba), se abre Ajustes, que la manda atrás seguro. Luego espera 1,5 s y la trae de vuelta.
     private func sendToBackgroundAndReturn() {
+        func inBackground() -> Bool {
+            app.state == .runningBackground || app.state == .runningBackgroundSuspended
+        }
         XCUIDevice.shared.press(.home)
-        XCTAssertTrue(waitUntil(15) { self.app.state == .runningBackground || self.app.state == .runningBackgroundSuspended },
-                      "La app no llegó a segundo plano")
+        if !waitUntil(4, inBackground) {
+            let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+            settings.activate()
+            _ = settings.wait(for: .runningForeground, timeout: 20)
+            XCTAssertTrue(waitUntil(10, inBackground),
+                          "La app no llegó a segundo plano ni con el gesto de Inicio ni abriendo Ajustes (estado \(app.state.rawValue))")
+        }
         Thread.sleep(forTimeInterval: 1.5)
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")

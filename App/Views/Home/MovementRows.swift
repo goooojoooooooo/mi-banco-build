@@ -102,6 +102,9 @@ struct MovementRowView: View {
                         .lineLimit(1)
                         .fixedSize()
                         .privateAmount()
+                        // Apunta dónde está el importe en pantalla: el del detalle sale volando desde aquí. Solo
+                        // apunta el marco (no cambia el diseño ni los toques) y se lee al tocar la fila, nunca al dibujar.
+                        .detailAmountSource(id: movement.id)
                     if isFresh && movement.amountCents > 0 {
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 17, weight: .semibold))

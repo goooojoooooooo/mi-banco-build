@@ -49,6 +49,14 @@ final class MotionHomeTests: XCTestCase {
         app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", Self.money)).count
     }
 
+    /// Para el mensaje de un fallo: qué elementos llevan una etiqueta con forma de dinero (los primeros).
+    private func moneyLabels() -> String {
+        let found = app.descendants(matching: .any).matching(NSPredicate(format: "label MATCHES %@", Self.money))
+        return found.allElementsBoundByIndex.prefix(6)
+            .map { "[\($0.elementType.rawValue) id=\($0.identifier) label=\($0.label)]" }
+            .joined(separator: " ")
+    }
+
     private func waitUntil(_ timeout: TimeInterval = 5, _ condition: () -> Bool) -> Bool {
         let end = Date().addingTimeInterval(timeout)
         while Date() < end {
@@ -74,7 +82,8 @@ final class MotionHomeTests: XCTestCase {
         let end = Date().addingTimeInterval(6.5)
         var samples = 0
         while Date() < end {
-            XCTAssertEqual(moneyLabelCount(), 0, "Hay un importe a la vista con el ojo cerrado (muestra \(samples))")
+            let count = moneyLabelCount()
+            XCTAssertEqual(count, 0, "Hay un importe a la vista con el ojo cerrado (muestra \(samples)): \(count > 0 ? moneyLabels() : "")")
             XCTAssertEqual(hero.label, "importe oculto", "La cifra grande no dice «importe oculto»")
             samples += 1
             Thread.sleep(forTimeInterval: 0.3)
@@ -93,7 +102,8 @@ final class MotionHomeTests: XCTestCase {
             after.append(moneyLabelCount())
             Thread.sleep(forTimeInterval: 0.05)
         }
-        XCTAssertEqual(after, Array(repeating: 0, count: after.count), "Importes a la vista al cerrar el ojo: \(after)")
+        XCTAssertEqual(after, Array(repeating: 0, count: after.count),
+                       "Importes a la vista al cerrar el ojo: \(after) \(moneyLabelCount() > 0 ? moneyLabels() : "")")
         XCTAssertEqual(hero.label, "importe oculto")
     }
 
@@ -185,12 +195,12 @@ final class MotionHomeTests: XCTestCase {
         launchLockedAndUnlock(["-MiBancoDemoCardElements"] + extra)
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 10), "Inicio no aparece tras desbloquear")
         let eye = app.buttons["Ocultar importes"]
-        XCTAssertTrue(waitUntil(6) { eye.exists && eye.isHittable }, "El ojo no se puede tocar tras el montaje")
-        XCTAssertTrue(app.buttons["home-briefing-button"].isHittable, "La marca no se puede tocar tras el montaje")
+        XCTAssertTrue(eye.waitForExistence(timeout: 6), "Falta el ojo tras el montaje")
+        XCTAssertTrue(app.buttons["home-briefing-button"].exists, "Falta la marca tras el montaje")
         let hero = any("card-hero-all")
         XCTAssertTrue(waitUntil(6) { hero.exists && hero.label.hasSuffix(" euros") }, "La cifra grande no aparece")
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
-        XCTAssertTrue(waitUntil(6) { row.exists && row.isHittable }, "La primera fila no se puede tocar tras el montaje")
+        XCTAssertTrue(row.waitForExistence(timeout: 6), "Falta la primera fila tras el montaje")
         // El montaje ha terminado: cada pieza ocupa su sitio (nada se quedó desplazado ni encogido).
         Thread.sleep(forTimeInterval: 2.5)
         let window = app.windows.firstMatch.frame
@@ -200,7 +210,14 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(app.buttons["Mostrar importes"].waitForExistence(timeout: 5), "El ojo no respondió tras el montaje")
         app.buttons["Mostrar importes"].tap()
         row.tap()
-        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "La fila no abrió su detalle tras el montaje")
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8), "La fila no abrió su detalle tras el montaje")
+        close.tap()
+        // Y la marca abre «Tu resumen».
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 8), .completed, "El detalle no se cerró")
+        app.buttons["home-briefing-button"].tap()
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 10), "La marca no abrió «Tu resumen» tras el montaje")
     }
 
     func testHomeBuildsInLayersAfterUnlock() throws {
@@ -219,10 +236,18 @@ final class MotionHomeTests: XCTestCase {
         // 1,4 s × 1,12 × 3 ≈ 4,7 s de ventana; después todo está en su sitio y se puede tocar.
         Thread.sleep(forTimeInterval: 7)
         let search = app.buttons["Buscar movimientos"]
-        XCTAssertTrue(search.isHittable, "La lupa no se puede tocar tras el montaje a cámara lenta")
+        XCTAssertTrue(search.exists, "Falta la lupa tras el montaje a cámara lenta")
         XCTAssertGreaterThanOrEqual(search.frame.width, 43, "La lupa se quedó encogida: \(search.frame)")
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
-        XCTAssertTrue(row.isHittable, "La primera fila no se puede tocar tras el montaje a cámara lenta")
+        XCTAssertTrue(row.exists, "Falta la primera fila tras el montaje a cámara lenta")
+        row.tap()
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10), "La fila no abrió su detalle tras el montaje a cámara lenta")
+        close.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 10), .completed, "El detalle no se cerró")
+        search.tap()
+        XCTAssertTrue(app.textFields.firstMatch.waitForExistence(timeout: 8), "La lupa no abrió la búsqueda tras el montaje a cámara lenta")
     }
 
     // MARK: A3 — tarjetas
@@ -288,7 +313,10 @@ final class MotionHomeTests: XCTestCase {
         carousel().swipeLeft()
         XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 2 }, "Deslizar no pasó a Revolut: \(carousel().label)")
         assertEverythingAgrees(on: 2, "Tras deslizar a la izquierda")
-        carousel().swipeRight()
+        // Hacia atrás, con el dedo empezando en mitad de la tarjeta (lejos del borde de la pantalla).
+        let from = carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        let to = carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5))
+        from.press(forDuration: 0.05, thenDragTo: to)
         XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 1 }, "Deslizar no volvió a «Todo»: \(carousel().label)")
         assertEverythingAgrees(on: 1, "Tras deslizar a la derecha")
     }
@@ -327,8 +355,6 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 2 }, "El segmento no cambió de tarjeta: \(carousel().label)")
         Thread.sleep(forTimeInterval: 1.5)
         assertEverythingAgrees(on: 2, "Con Reducir movimiento")
-        let hero = any("card-hero-rev")
-        XCTAssertTrue(waitUntil(5) { hero.exists && hero.isHittable }, "La tarjeta de Revolut no quedó a la vista")
         let middle = carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45))
         middle.tap()
         XCTAssertTrue(app.buttons["Editar saldo"].waitForExistence(timeout: 8), "Un toque no volteó la tarjeta con Reducir movimiento")
@@ -337,7 +363,8 @@ final class MotionHomeTests: XCTestCase {
         segment("Todo").tap()
         XCTAssertTrue(waitUntil(6) { self.frontCardNumber() == 1 }, "No volvió a «Todo»: \(carousel().label)")
         Thread.sleep(forTimeInterval: 1.5)
-        let all = any("card-hero-all")
-        XCTAssertTrue(waitUntil(5) { all.exists && all.isHittable }, "La tarjeta «Todo» no quedó a la vista")
+        // A la vista de verdad: una vista invisible no recibe toques, y este toque voltea «Todo».
+        middle.tap()
+        XCTAssertTrue(app.buttons["Editar saldos"].waitForExistence(timeout: 8), "La tarjeta «Todo» no quedó a la vista tras el fundido")
     }
 }

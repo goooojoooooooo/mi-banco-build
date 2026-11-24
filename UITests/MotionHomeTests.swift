@@ -346,23 +346,6 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertEqual(front.midX, app.windows.firstMatch.frame.midX, accuracy: 4, "«Todo» no quedó centrada: \(snapshot())")
     }
 
-    /// SONDA TEMPORAL: qué pieza del carrusel impide deslizar hacia atrás.
-    func testProbeWhichPieceBlocksSwipingBack() throws {
-        var report: [String] = []
-        for probe in 0...7 {
-            launchHome(["-MiBancoDemoCarouselProbe", "\(probe)"])
-            carousel().swipeLeft()
-            Thread.sleep(forTimeInterval: 2.5)
-            let there = frontCardNumber()
-            carousel().swipeRight()
-            Thread.sleep(forTimeInterval: 2.5)
-            let back = frontCardNumber()
-            report.append("\(probe):\(there)\(back)")
-            app.terminate()
-        }
-        XCTFail("SONDA: \(report.joined(separator: " "))")
-    }
-
     /// Mantener pulsada la tarjeta de delante la levanta (lo cuenta `card-lift-count`, solo en DEBUG) y soltarla NO la
     /// voltea; después, un toque corto sí la voltea y otro la devuelve.
     func testLongPressLiftsWithoutFlipping() throws {

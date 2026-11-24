@@ -16,9 +16,6 @@ extension DemoMode {
 
     /// `-MiBancoDemoCardMoment lift|tilt|peek` (solo con `-MiBancoDemo`): tocar el segmento que YA está elegido dispara
     /// ese momento en la tarjeta de delante, para sacarlo en una ráfaga de fotogramas.
-    /// SONDA TEMPORAL: `-MiBancoDemoCarouselProbe <n>` apaga una pieza del carrusel.
-    static var carouselProbe: Int { value(after: "-MiBancoDemoCarouselProbe").flatMap(Int.init) ?? 0 }
-
     static var cardMoment: CardMoment? {
         guard isActive else { return nil }
         return value(after: "-MiBancoDemoCardMoment").flatMap(CardMoment.init(rawValue:))

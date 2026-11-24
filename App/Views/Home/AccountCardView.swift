@@ -22,6 +22,8 @@ struct AccountCardView: View {
     var isFront = false
     let onFlip: () -> Void
     let onEdit: () -> Void
+    /// El dedo baja (true) o sube (false) sobre la cara delantera: con eso el carrusel decide levantar la tarjeta.
+    var onPressing: (Bool) -> Void = { _ in }
     var onOpenBank: (BankID) -> Void = { _ in }
     var onImportInvestments: () -> Void = {}
 
@@ -48,7 +50,7 @@ struct AccountCardView: View {
                     revealed: revealed
                 )
             }
-            .buttonStyle(PressableButtonStyle(scale: 0.985))
+            .buttonStyle(CardPressStyle(onPressing: onPressing))
             .accessibilityIdentifier("card-front-\(card.rawValue)")
             .modifier(FlipFace(angle: flipped ? 180 : 0, isBack: false))
 
@@ -69,7 +71,25 @@ struct AccountCardView: View {
                 .modifier(FlipFace(angle: flipped ? 180 : 0, isBack: true))
         }
         .animation(flipAnimation, value: flipped)
-        .unlessProbe(5) { $0.modifier(FlipPeek(trigger: peek, delay: peekDelay)).modifier(TiltedCard(active: isFront && !flipped)) }
+        .modifier(FlipPeek(trigger: peek, delay: peekDelay))
+        .modifier(TiltedCard(active: isFront && !flipped))
+    }
+}
+
+/// El botón de la cara delantera: se hunde un poco al tocar (0,985; con Reducir movimiento, solo baja la opacidad) y
+/// avisa de cuándo baja y sube el dedo. El aviso sale del propio botón, que ya convive con el scroll del carrusel:
+/// así «mantener pulsada» no necesita un gesto aparte.
+private struct CardPressStyle: ButtonStyle {
+    let onPressing: (Bool) -> Void
+    @Environment(\.motion) private var motion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !motion.reduce ? 0.985 : 1)
+            .opacity(configuration.isPressed && motion.reduce ? 0.7 : 1)
+            .animation(configuration.isPressed ? motion.animation(.pressIn) : motion.calmAnimation(.snap),
+                       value: configuration.isPressed)
+            .onChange(of: configuration.isPressed) { _, pressed in onPressing(pressed) }
     }
 }
 

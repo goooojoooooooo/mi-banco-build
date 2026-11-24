@@ -37,9 +37,11 @@ struct CardCarousel: View {
     /// Rebote de encaje: cuántas veces se ha parado el carrusel en cada tarjeta y en qué sentido venía la última vez.
     @State private var settles: [AccountCard: Int] = [:]
     @State private var settleDirection: CGFloat = 0
-    /// La tarjeta levantada con una pulsación larga. Vuelve a `nil` sola al soltar o si el gesto se cancela (por
-    /// ejemplo, porque el carrusel empieza a deslizarse).
-    @GestureState private var pressLifted: AccountCard? = nil
+    /// La tarjeta levantada con una pulsación larga. Vuelve a `nil` al subir el dedo o si el sistema suelta el botón
+    /// (por ejemplo, porque el carrusel empieza a deslizarse).
+    @State private var pressLifted: AccountCard?
+    /// La espera de 0,42 s con el dedo encima; se cancela en cuanto el dedo sube.
+    @State private var liftTimer: Task<Void, Never>?
     /// Cuándo se soltó la última tarjeta levantada: ese soltar no cuenta como toque.
     @State private var liftReleasedAt = Date.distantPast
     /// Reducir movimiento: mientras el carrusel cambia de tarjeta por programa, se funde (no viaja).
@@ -78,7 +80,7 @@ struct CardCarousel: View {
     // El cuerpo va en piezas (tarjeta, paginado, seguimiento, sincronía, sonda de pruebas): entero, el compilador no
     // llega a comprobar los tipos de una sola expresión tan larga.
 
-    /// Una tarjeta con su rebote de encaje, su «levantar» y el gesto que la levanta.
+    /// Una tarjeta con su rebote de encaje y su «levantar» (la levanta mantener el dedo sobre su botón: ver `pressing`).
     private func cardView(_ card: AccountCard) -> some View {
         AccountCardView(
             card: card, balances: snapshot.balances,
@@ -93,19 +95,18 @@ struct CardCarousel: View {
             peekDelay: peekDelay,
             isFront: card == current,
             onFlip: { tap(card) }, onEdit: { onEdit(card.bank) },
+            onPressing: { down in pressing(card, down) },
             onOpenBank: onOpenBank,
             onImportInvestments: onImportInvestments)
-            .unlessProbe(2) { $0.modifier(SettleBounce(tick: settles[card, default: 0], direction: settleDirection)) }
-            .unlessProbe(3) { $0.lift(lifted == card) }
-            // Simultáneo con el toque de la tarjeta y con el deslizamiento del carrusel: no les quita nada.
-            .unlessProbe(1) { $0.simultaneousGesture(liftGesture(card)) }
+            .modifier(SettleBounce(tick: settles[card, default: 0], direction: settleDirection))
+            .lift(lifted == card)
     }
 
     /// El paginado: las tarjetas en fila, cada una girada, encogida y apagada según lo lejos que esté del centro.
     private var pager: some View {
         let reduce = kit.reduce
         // ±22° × el recorrido del nivel, con el tope de 34° de la maqueta.
-        let turn: Double = probeIs(7) ? 22 : 22 * kit.level.distanceScale
+        let turn: Double = 22 * kit.level.distanceScale
         return ScrollView(.horizontal) {
             HStack(spacing: CarouselMetrics.spacing) {
                 ForEach(cards, id: \.self) { card in
@@ -125,7 +126,7 @@ struct CardCarousel: View {
                             if visible { seen.insert(card) }
                         }
                         // La tarjeta levantada pasa por encima de sus vecinas.
-                        .unlessProbe(4) { $0.zIndex(lifted == card ? 1 : 0) }
+                        .zIndex(lifted == card ? 1 : 0)
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -373,7 +374,7 @@ struct CardCarousel: View {
     /// El carrusel se ha parado. Si está en otra tarjeta que la última vez, esa tarjeta da su rebote de encaje en el
     /// sentido en que venía. Un toque (el dedo baja y sube sin mover nada) no cuenta.
     private func landed() {
-        guard !cards.isEmpty, !probeIs(6) else { return }
+        guard !cards.isEmpty else { return }
         let position = motion.carouselPosition
         let index = min(max(Int(position.rounded()), 0), cards.count - 1)
         // Red de seguridad: quieto y sin deslizamiento programado en curso, la tarjeta elegida es la que se ve. Si el
@@ -398,19 +399,27 @@ struct CardCarousel: View {
         !kit.reduce && card == current && flipped != card
     }
 
-    /// Mantener pulsada 0,42 s sin mover el dedo más de 8 pt levanta la tarjeta; sigue levantada mientras el dedo
-    /// siga encima. Si el carrusel empieza a deslizarse, el sistema cancela el gesto y la tarjeta baja.
-    private func liftGesture(_ card: AccountCard) -> some Gesture {
-        LongPressGesture(minimumDuration: 0.42, maximumDistance: 8)
-            .sequenced(before: DragGesture(minimumDistance: 0))
-            .updating($pressLifted) { value, state, _ in
-                guard case .second(true, _) = value, canLift(card) else { return }
-                state = card
+    /// El dedo baja o sube sobre la cara delantera de una tarjeta (lo dice el propio botón de la tarjeta). Con el dedo
+    /// 0,42 s encima, la tarjeta se levanta y sigue levantada hasta que el dedo sube; si el carrusel (o la lista)
+    /// empieza a deslizarse, el sistema suelta el botón y la tarjeta baja.
+    /// A propósito NO es un gesto añadido a la tarjeta: una pulsación larga encadenada con un arrastre, aunque
+    /// simultánea, le quitaba al carrusel el deslizamiento hacia atrás (lo pilló la prueba de deslizar en los dos
+    /// sentidos). El botón ya convive con el scroll.
+    private func pressing(_ card: AccountCard, _ down: Bool) {
+        liftTimer?.cancel()
+        liftTimer = nil
+        if down {
+            guard canLift(card) else { return }
+            liftTimer = Task {
+                // El umbral de la pulsación larga: tiempo real del dedo, no el de una animación.
+                try? await Task.sleep(for: .milliseconds(420))
+                guard !Task.isCancelled, canLift(card) else { return }
+                pressLifted = card
             }
-            .onEnded { value in
-                guard case .second(true, _) = value, canLift(card) else { return }
-                liftReleasedAt = Date()
-            }
+        } else if pressLifted != nil {
+            pressLifted = nil
+            liftReleasedAt = Date()
+        }
     }
 
     /// Montaje de Inicio con movimiento, fuera de la demo y solo la primera vez: la tarjeta de delante asoma cuando el
@@ -543,20 +552,5 @@ private struct SettleBounce: ViewModifier {
                 SpringKeyframe(1, duration: rest, spring: spring)
             }
         }
-    }
-}
-
-// SONDA TEMPORAL (se quita antes de cerrar el lote): apaga una pieza del carrusel para localizar una regresión.
-func probeIs(_ n: Int) -> Bool {
-    #if DEBUG
-    return DemoMode.carouselProbe == n
-    #else
-    return false
-    #endif
-}
-
-extension View {
-    @ViewBuilder func unlessProbe<V: View>(_ n: Int, @ViewBuilder _ apply: (Self) -> V) -> some View {
-        if probeIs(n) { self } else { apply(self) }
     }
 }

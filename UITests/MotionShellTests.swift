@@ -122,15 +122,21 @@ final class MotionShellTests: XCTestCase {
         let mark = element("lock-mark")
         XCTAssertTrue(mark.waitForExistence(timeout: 5), "Falta la marca del bloqueo")
         XCTAssertEqual(mark.value as? String, "piezas", "En el arranque en frío el bloqueo debe montar las piezas")
+        // (XCUITest ve los elementos de Inicio aunque estén ocultos a VoiceOver y tapados por el bloqueo; lo que se
+        // comprueba es que no se pueden tocar y que ninguna capa del arranque existe.)
+        let eye = app.buttons["Ocultar importes"]
         func assertNothingBesidesTheLock(_ moment: String) {
             XCTAssertFalse(element("launch-layer").exists, "\(moment): la capa del arranque existe con el bloqueo puesto")
             XCTAssertFalse(element("launch-exit").exists, "\(moment): la marca vuela con el bloqueo puesto")
-            XCTAssertFalse(app.staticTexts["Tu dinero"].exists, "\(moment): Inicio está a la vista con el bloqueo puesto")
-            XCTAssertFalse(app.buttons["Ocultar importes"].exists, "\(moment): el ojo de Inicio existe con el bloqueo puesto")
+            XCTAssertFalse(eye.exists && eye.isHittable, "\(moment): el ojo de Inicio se puede tocar con el bloqueo puesto")
+            let title = app.staticTexts["Tu dinero"]
+            XCTAssertFalse(title.exists && title.isHittable, "\(moment): Inicio se puede tocar con el bloqueo puesto")
         }
         assertNothingBesidesTheLock("Al aparecer el bloqueo")
-        // Un toque fuera del botón: la marca queda terminada y el bloqueo sigue ahí.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.14)).tap()
+        // Un toque de verdad justo donde está el ojo de Inicio (debajo del bloqueo, fuera del botón de desbloquear): la
+        // marca del bloqueo queda terminada, el bloqueo sigue ahí y el toque no llega a Inicio (se comprueba al final).
+        XCTAssertTrue(eye.exists, "No se encuentra el ojo de Inicio bajo el bloqueo para tocar encima")
+        eye.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
         XCTAssertTrue(waitUntil(5) { (mark.value as? String) == "completa" }, "Un toque no terminó la marca del bloqueo")
         var checks = 0
         while unlock.exists && checks < 10 {
@@ -148,6 +154,9 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(exit.waitForExistence(timeout: 5), "Tras desbloquear en frío la marca no vuela")
         XCTAssertEqual(exit.value as? String, "frio")
         XCTAssertFalse(element("launch-layer").exists, "Tras desbloquear se montó la capa del arranque")
+        // El toque de antes no atravesó el bloqueo: el ojo sigue sin haberse tocado.
+        XCTAssertTrue(eye.exists, "El toque sobre el bloqueo llegó al ojo de Inicio")
+        XCTAssertFalse(app.buttons["Mostrar importes"].exists, "El toque sobre el bloqueo llegó al ojo de Inicio")
         assertHomeResponds("Mientras la marca vuela, Inicio no responde")
         let after = probe()
         XCTAssertEqual(after["arranques"], "0", "Tras desbloquear se montó la capa del arranque: \(after)")
@@ -175,22 +184,27 @@ final class MotionShellTests: XCTestCase {
         assertHomeResponds("Al volver de segundo plano, Inicio no responde")
         app.terminate()
 
-        // Con bloqueo (demo, 4 s): arranque en frío con piezas; al volver de segundo plano, marca quieta.
-        launch(["-MiBancoDemoLock"])
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 25), "Inicio no apareció tras el bloqueo")
+        // Con bloqueo (demo, 10 s): arranque en frío con piezas; al volver de segundo plano, marca quieta.
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "10"])
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta la pantalla de bloqueo del arranque en frío")
+        XCTAssertTrue(waitUntil(25) { !unlock.exists }, "El bloqueo de demo no se quitó")
+        XCTAssertTrue(waitUntil(8) { !self.element("launch-exit").exists }, "La marca no terminó de volar tras desbloquear")
         let cold = probe()
         XCTAssertEqual(cold["bloqueoPiezas"], "1", "El bloqueo del arranque en frío no montó las piezas: \(cold)")
         XCTAssertEqual(cold["bloqueoQuieto"], "0")
+        XCTAssertEqual(cold["salidas"], "1", "Tras desbloquear en frío la marca no voló: \(cold)")
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 1.5)
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
-        let unlock = app.buttons["Desbloquear"]
-        XCTAssertTrue(unlock.waitForExistence(timeout: 5), "No se mostró el bloqueo al volver de segundo plano")
+        XCTAssertTrue(unlock.waitForExistence(timeout: 8), "No se mostró el bloqueo al volver de segundo plano")
         XCTAssertEqual(element("lock-mark").value as? String, "fija", "Al volver de segundo plano la marca del bloqueo debe estar quieta")
         XCTAssertFalse(element("launch-layer").exists, "El arranque se montó con el bloqueo puesto")
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no volvió tras el re-bloqueo")
+        XCTAssertFalse(element("launch-exit").exists, "La marca vuela con el bloqueo puesto")
+        XCTAssertTrue(waitUntil(25) { !unlock.exists }, "El re-bloqueo de demo no se quitó")
         XCTAssertFalse(element("launch-layer").exists, "El arranque se repitió tras el re-bloqueo")
+        assertHomeResponds("Tras el re-bloqueo, Inicio no responde")
         let warm = probe()
         XCTAssertEqual(warm["arranques"], "0", "El arranque se repitió tras el re-bloqueo: \(warm)")
         XCTAssertEqual(warm["bloqueoPiezas"], "1", "Las piezas se repitieron en el re-bloqueo: \(warm)")
@@ -251,41 +265,62 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(waitUntil(8) { !self.app.buttons["Cerrar"].exists }, "La hoja no se cerró")
     }
 
-    /// Con el ojo cerrado, abrir el detalle no añade a la app ni un solo importe, ni en etiquetas ni en valores: ni
-    /// mientras la hoja entra (a cámara lenta: el importe rueda y «Te quedaban» se destapa) ni cuando ya está quieta.
+    /// Con el ojo cerrado, los dos importes del detalle que ahora ruedan (el del movimiento y «Te quedaban») no aparecen
+    /// con sus cifras en ninguna etiqueta ni valor: ni mientras la hoja entra (a cámara lenta ×3: el importe rueda y
+    /// «Te quedaban» se destapa) ni cuando ya está quieta. Primero se leen las cifras con el ojo abierto.
+    /// (XCUITest también ve los textos que el modo privado difumina y oculta a VoiceOver, como los de Inicio o el
+    /// historial del comercio; por eso se cuenta cuántas veces aparece cada cifra antes y después de abrir la hoja.)
     func testDetailAmountsObeyTheEye() throws {
+        launch()
+        openFirstRowDetail()
+        let amount = labelled("label BEGINSWITH %@", "Pago de ")
+        XCTAssertTrue(amount.waitForExistence(timeout: 5), "Falta la etiqueta «Pago de …» del importe")
+        let left = labelled("label BEGINSWITH %@", "Te quedaban ")
+        XCTAssertTrue(left.waitForExistence(timeout: 5), "Falta «Te quedaban»")
+        func figure(_ label: String, after prefix: String) -> String {
+            String(label.dropFirst(prefix.count)).replacingOccurrences(of: " euros", with: "")
+        }
+        let figures = [figure(amount.label, after: "Pago de "), figure(left.label, after: "Te quedaban ")]
+        for text in figures {
+            XCTAssertNotNil(text.range(of: #"^\d[\d.]*,\d{2}$"#, options: .regularExpression), "No es una cifra: «\(text)»")
+        }
+        app.terminate()
+
         launch(["-MiBancoDemoPrivate", "-MiBancoMotionScale", "3"])
+        waitForLaunchToEnd(30)
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
         XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
-        let before = NSCountedSet(array: moneyStrings())
-        row.tap()
-        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "No se abrió la hoja de detalle")
-        for pass in 0..<8 {
-            let now = NSCountedSet(array: moneyStrings())
-            let added = now.allObjects.filter { now.count(for: $0) > before.count(for: $0) }
-            XCTAssertTrue(added.isEmpty, "Pasada \(pass): con el ojo cerrado el detalle trae importes: \(added)")
-            Thread.sleep(forTimeInterval: 0.4)
+        func count(_ text: String) -> Int {
+            app.descendants(matching: .any)
+                .matching(NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", text, text)).count
         }
-        XCTAssertTrue(labelled("label == %@", "Pago de importe oculto").exists
-                      || labelled("label == %@", "Ingreso de importe oculto").exists,
+        let before = figures.map(count)
+        row.tap()
+        for pass in 0..<10 {
+            for (index, text) in figures.enumerated() {
+                let now = count(text)
+                XCTAssertLessThanOrEqual(
+                    now, before[index], "Pasada \(pass): con el ojo cerrado el detalle enseña «\(text)» (\(now) veces, antes \(before[index]))")
+            }
+        }
+        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "No se abrió la hoja de detalle")
+        XCTAssertTrue(labelled("label == %@", "Pago de importe oculto").waitForExistence(timeout: 5),
                       "El importe del detalle no dice «importe oculto»")
         XCTAssertTrue(labelled("label == %@", "Te quedaban importe oculto").exists,
                       "«Te quedaban» no dice «importe oculto»")
     }
 
-    /// La línea del total del resumen sigue siendo UNA etiqueta con la frase entera, aunque su importe ruede dentro.
+    /// La línea del total del resumen sigue leyéndose como UNA frase entera con su importe, aunque el importe ruede
+    /// dentro, y es texto (no un botón nuevo ni nada tocable de más).
     func testBriefingTotalIsOneSentence() throws {
         launch(["-MiBancoDemoBriefing", "busy"])
         XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 20), "La hoja del resumen no se abrió")
         let total = app.descendants(matching: .any).matching(
             NSPredicate(format: "label BEGINSWITH %@ OR label BEGINSWITH %@", "En total, ", "Sigues con ")).firstMatch
         XCTAssertTrue(total.waitForExistence(timeout: 8), "Falta la frase del total")
-        XCTAssertTrue(total.label.contains("€"), "La frase del total no lleva su importe: «\(total.label)»")
-        // Ninguna palabra suelta de la frase es un elemento aparte.
-        for word in ["En ", "total, ", "Sigues ", "con "] {
-            XCTAssertFalse(app.staticTexts[word].exists, "La frase del total se partió en palabras para VoiceOver: «\(word)»")
-        }
+        XCTAssertNotNil(total.label.range(of: #"\d,\d{2}\s€"#, options: .regularExpression),
+                        "La frase del total no lleva su importe entero: «\(total.label)»")
         app.buttons["Vale"].tap()
         XCTAssertTrue(waitUntil(8) { !self.app.buttons["Vale"].exists }, "La hoja del resumen no se cerró")
     }

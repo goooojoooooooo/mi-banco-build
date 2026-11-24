@@ -113,8 +113,11 @@ final class MotionTourShellTests: MotionTourCase {
 
     /// Re-bloqueo (volver de segundo plano): la marca sale quieta y entera, sin piezas.
     func testRelockIsStatic() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "8"])
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 40), "Inicio no apareció tras el bloqueo")
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "10"])
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 20), "Falta la pantalla de bloqueo")
+        XCTAssertTrue(waitUntil(30) { !unlock.exists }, "El bloqueo de demo no se quitó")
+        Thread.sleep(forTimeInterval: 3)
         XCUIDevice.shared.press(.home)
         Thread.sleep(forTimeInterval: 1.5)
         app.activate()

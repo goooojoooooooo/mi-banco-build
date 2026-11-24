@@ -207,8 +207,12 @@ private struct AppShellView: View {
                     if lockEnabled { locked = true }
                 default:
                     speaker.stop()
-                    // Fuera de primer plano la marca no sigue volando (en la demo la fase de escena no cuenta).
-                    if !sceneActive { launchExit = nil }
+                    // Fuera de primer plano no sigue ni la marca volando ni el arranque (en la demo la fase de escena no
+                    // cuenta: parpadea en el simulador de CI).
+                    if !sceneActive {
+                        launchExit = nil
+                        if launching && !showsLock { finishLaunch() }
+                    }
                 }
             }
             .onChange(of: lockEnabled) { _, _ in

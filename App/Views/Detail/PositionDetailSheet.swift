@@ -107,14 +107,11 @@ private struct PositionDetailContent: View {
                         .staggeredEntrance(5, rise: 8)
 
                     if let cents = value.valueCents {
-                        CountingAmount(cents: cents, style: .plain(sign: false))
+                        // Rueda; con el ojo cerrado `RollingAmount` dibuja la máscara y VoiceOver dice «importe oculto».
+                        RollingAmount(cents: cents, style: .plain(sign: false))
                             .font(.system(size: amountSize, weight: .semibold))
                             .tracking(-amountSize * 0.03)
-                            .monospacedDigit()
                             .foregroundStyle(Theme.label)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.5)
-                            .privateAmount(spoken: spokenAmount(cents, hidden: false), radius: 14)
                             .padding(.top, 10)
                             .staggeredEntrance(6, rise: 10)
                     } else {

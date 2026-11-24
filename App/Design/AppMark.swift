@@ -20,11 +20,18 @@ enum MarkPalette {
     /// Ola de titanio. Los puntos son relativos a la caja de 24 de `WaveShape`, ajustados a la caja real de la ola
     /// (x 4…20, y ≈ 11,2…16,8): equivale al degradado (0,0) → (1; 0,35) de su caja en el prototipo.
     static let wave = LinearGradient(
-        stops: [.init(color: Color(hex: "#FFFFFF"), location: 0),
-                .init(color: Color(hex: "#D7DADF"), location: 0.45),
-                .init(color: Color(hex: "#9DA2AA"), location: 0.75),
-                .init(color: Color(hex: "#F3F4F6"), location: 1)],
-        startPoint: UnitPoint(x: 4 / 24, y: 11.2 / 24), endPoint: UnitPoint(x: 20 / 24, y: 13.16 / 24))
+        gradient: waveGradient, startPoint: waveStart, endPoint: waveEnd)
+
+    /// Los colores y los extremos de la ola por separado: las piezas del arranque la dibujan en un `Canvas`.
+    static var waveGradient: Gradient {
+        Gradient(stops: [
+            .init(color: Color(hex: "#FFFFFF"), location: 0),
+            .init(color: Color(hex: "#D7DADF"), location: 0.45),
+            .init(color: Color(hex: "#9DA2AA"), location: 0.75),
+            .init(color: Color(hex: "#F3F4F6"), location: 1)])
+    }
+    static let waveStart = UnitPoint(x: 4 / 24, y: 11.2 / 24)
+    static let waveEnd = UnitPoint(x: 20 / 24, y: 13.16 / 24)
 }
 
 /// La marca de la app: pieza negra con su canto de titanio y la ola. Todos los parámetros van de 0 a 1:
@@ -38,6 +45,9 @@ struct AppMark: View {
     var glow: CGFloat = 0
     var sheen: CGFloat? = nil
     var head = false
+    /// El cuerpo de la pieza llegando (arranque en piezas): su opacidad y su escala. El canto y la ola no cambian.
+    var bodyOpacity: CGFloat = 1
+    var bodyScale: CGFloat = 1
 
     var body: some View {
         // Todo se mide en la caja de 120 del prototipo.
@@ -48,6 +58,8 @@ struct AppMark: View {
 
         ZStack(alignment: .topLeading) {
             shape.fill(MarkPalette.body)
+                .opacity(min(max(bodyOpacity, 0), 1))
+                .scaleEffect(bodyScale)
             RoundedRectangle(cornerRadius: 30.4 * u, style: .continuous)
                 .inset(by: 0.65 * u)
                 .trim(from: 0, to: min(max(edge, 0), 1))

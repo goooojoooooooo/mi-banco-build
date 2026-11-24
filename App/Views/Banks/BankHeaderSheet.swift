@@ -217,31 +217,33 @@ private struct BankMiniTitle: View {
 
     var body: some View {
         let m = BankHeaderMath.miniTitle(scroll.progress)
-        VStack(spacing: 1) {
-            Text(title)
-                .titan(.option)
-                .fontWeight(.semibold)
-                .foregroundStyle(Theme.label)
-                .lineLimit(1)
-            if let balanceCents {
-                Text(hidden ? maskedEUR(balanceCents, sign: false) : formatEUR(balanceCents).replacingOccurrences(of: "-", with: "\u{2212}"))
-                    .titan(.caption)
-                    .foregroundStyle(Theme.label2)
+        // Con la hoja abajo el título NO se monta: así no existe para nadie (un elemento suelto con opacidad 0 o marcado
+        // como oculto sigue apareciendo en las pruebas de toque). Solo se monta mientras se ve.
+        if m > 0.01 {
+            VStack(spacing: 1) {
+                Text(title)
+                    .titan(.option)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.label)
                     .lineLimit(1)
-                    .contentTransition(.identity)
-                    .privacySensitive()
+                if let balanceCents {
+                    Text(hidden ? maskedEUR(balanceCents, sign: false) : formatEUR(balanceCents).replacingOccurrences(of: "-", with: "\u{2212}"))
+                        .titan(.caption)
+                        .foregroundStyle(Theme.label2)
+                        .lineLimit(1)
+                        .contentTransition(.identity)
+                        .privacySensitive()
+                }
             }
+            // La barra es una guía de orientación: con letra enorme se queda en un tamaño que cabe en ella.
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(balanceCents.map { "\(title), \(spokenAmount($0, hidden: hidden))" } ?? title)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityIdentifier("bank-mini-title")
+            .opacity(m)
+            .offset(y: reduce ? 0 : (1 - m) * 8)
         }
-        // La barra es una guía de orientación: con letra enorme se queda en un tamaño que cabe en ella.
-        .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(balanceCents.map { "\(title), \(spokenAmount($0, hidden: hidden))" } ?? title)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("bank-mini-title")
-        .accessibilityHidden(m < 0.5)
-        // La opacidad va por FUERA del elemento de accesibilidad: a 0 (hoja abajo) el título no existe para nadie.
-        .opacity(m)
-        .offset(y: reduce ? 0 : (1 - m) * 8)
     }
 }
 

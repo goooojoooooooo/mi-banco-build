@@ -23,7 +23,9 @@ enum AlertPoster {
     /// `merchantMonth`: compras y gasto de este mes en ese comercio (con este pago). `todaySpentCents`: gastado hoy.
     static func post(movement m: Movement, balance: Int?, estimated: Bool, balances: [String: Int], previousBalance: Int?,
                      merchantMonth: MerchantHistory? = nil, todaySpentCents: Int? = nil) async {
-        let text = alertText(for: m, balance: balance, estimated: estimated)
+        // Ojo cerrado al componerlo: ni importe ni saldo en el texto plegado (decisión del dueño).
+        let hidden = eyeClosed
+        let text = alertText(for: m, balance: balance, estimated: estimated, hidden: hidden)
         let content = UNMutableNotificationContent()
         content.title = text.title
         content.body = text.body
@@ -44,13 +46,15 @@ enum AlertPoster {
         }
         if let todaySpentCents { info["todaySpent"] = todaySpentCents }
         // I-2 (N1): el ojo de la app en el momento del aviso (clave nueva; las de arriba no cambian). La vista ampliada
-        // dibuja máscaras si esto o la suite compartida dicen ojo cerrado. El texto plegado (título y cuerpo) lo
-        // compone el sistema con `alertText` y NO cambia: decisión del dueño.
-        if let eye = SharedPrivacy.read(from: SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)) {
-            info[SharedPrivacy.key] = eye
-        }
+        // dibuja máscaras si esto o la suite compartida dicen ojo cerrado.
+        info[SharedPrivacy.key] = hidden
         content.userInfo = info
         await add(content, id: m.id.uuidString)
+    }
+
+    /// El ojo de la app ahora mismo (la fuente de verdad: el almacén de `AppPreferences`), para componer avisos.
+    static var eyeClosed: Bool {
+        AppPreferences.privateModeStore.bool(forKey: AppPreferences.privateModeKey)
     }
 
     /// Sin importes ni texto del aviso.

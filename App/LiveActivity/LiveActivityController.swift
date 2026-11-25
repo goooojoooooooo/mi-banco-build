@@ -17,7 +17,8 @@ enum LiveActivityController {
     static func show(movement: Movement, balance: Int?, estimated: Bool, total: Int?) async -> Bool {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return false }
 
-        let text = alertText(for: movement, balance: balance, estimated: estimated)
+        // La alerta de la Live Activity usa el mismo texto que el aviso: con el ojo cerrado, sin cifras.
+        let text = alertText(for: movement, balance: balance, estimated: estimated, hidden: AlertPoster.eyeClosed)
         let state = MovementActivityAttributes.ContentState(
             bank: movement.bank.rawValue, balanceCents: balance, estimated: estimated,
             lastAmountCents: movement.amountCents, merchant: movement.merchant, kind: movement.kind.rawValue,
@@ -65,10 +66,8 @@ enum LiveActivityController {
         }
     }
 
-    /// I-2: el ojo de la app, tal cual lo copia en la suite compartida (`SharedPrivacy`). Sin suite, abierto.
-    private static var eyeClosed: Bool {
-        SharedPrivacy.read(from: SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)) ?? false
-    }
+    /// I-2: el ojo de la app ahora mismo (el mismo que usan los avisos).
+    private static var eyeClosed: Bool { AlertPoster.eyeClosed }
 
     /// I-2: el ojo ha cambiado: la Live Activity que esté en pantalla pasa a máscaras (o vuelve a cifras) en silencio,
     /// sin alerta ni sonido y sin alargar su caducidad.

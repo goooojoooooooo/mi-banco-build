@@ -21,10 +21,13 @@ enum InsightNotifier {
         defaults.set(posted, forKey: postedKey)
 
         let center = UNUserNotificationCenter.current()
+        // Ojo cerrado al componerlos: sin cifras (decisión del dueño). Con el ojo abierto, el texto de siempre.
+        let hidden = AlertPoster.eyeClosed
         for insight in fresh {
+            let text = notificationText(for: insight, hidden: hidden)
             let content = UNMutableNotificationContent()
-            content.title = insight.title
-            content.body = insight.detail ?? ""
+            content.title = text.title
+            content.body = text.body
             content.sound = .default
             content.categoryIdentifier = category
             content.threadIdentifier = "insight.\(insight.kind.rawValue)"
@@ -71,6 +74,8 @@ enum AlertScheduler {
         let settings = state.alertSettings
         // Lo que no es gasto (traspasos, sin confirmar, pareja probable), una vez para el resumen y las suscripciones.
         let notSpending = spendingExclusions(in: state, now: now)
+        // El ojo al programarlos: con el ojo cerrado, sin cifras. Al cambiar el ojo se vuelven a programar.
+        let hidden = AlertPoster.eyeClosed
 
         if settings.weeklyDigest, let first = nextSunday8pm(after: now, calendar: calendar) {
             for week in 0..<weeklyCount {
@@ -80,7 +85,10 @@ enum AlertScheduler {
                     let summary = weekSummary(movements: state.movements, weekContaining: fire, calendar: calendar,
                                               notSpending: notSpending)
                     guard summary.spentCents > 0 || summary.previousWeekSpentCents > 0 else { continue }
-                    let text = weeklyDigestText(for: state, weekContaining: fire, calendar: calendar, notSpending: notSpending)
+                    // Con el ojo cerrado al programarlo, el texto neutro (se rehace al cambiar el ojo).
+                    let text = weeklyDigestNotificationText(
+                        weeklyDigestText(for: state, weekContaining: fire, calendar: calendar, notSpending: notSpending),
+                        hidden: hidden)
                     out.append(request(id: weeklyIDs[week], title: text.title, body: text.body, kind: .weeklyDigest,
                                        at: fire, calendar: calendar))
                 } else {
@@ -100,9 +108,10 @@ enum AlertScheduler {
                 let dayBefore = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: sub.nextDate))
                 guard let dayBefore, let fire = calendar.date(bySettingHour: 10, minute: 0, second: 0, of: dayBefore),
                       fire > now else { continue }
-                out.append(request(id: subscriptionIDs[index],
-                                   title: "Mañana se cobra \(sub.merchant): \(formatEUR(sub.amountCents))",
-                                   body: "En \(sub.bank.displayName)", kind: .subscriptionUpcoming, at: fire, calendar: calendar))
+                let text = subscriptionReminderText(merchant: sub.merchant, amountCents: sub.amountCents, bank: sub.bank,
+                                                    hidden: hidden)
+                out.append(request(id: subscriptionIDs[index], title: text.title, body: text.body,
+                                   kind: .subscriptionUpcoming, at: fire, calendar: calendar))
                 index += 1
             }
         }

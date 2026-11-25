@@ -379,26 +379,35 @@ final class MotionTourScreensTests: MotionTourCase {
         start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 70, thenHoldForDuration: 0.7)
     }
 
-    /// La hoja sube a pasos cortos sobre la cabecera (que se queda atrás, se encoge y se apaga), sus esquinas se cuadran
-    /// al llegar arriba y el título pequeño «Banco · saldo» entra en la barra; después baja y la cabecera vuelve.
-    /// Cada fotograma se saca con la hoja quieta en un punto distinto del recorrido.
+    /// La hoja sube sobre la cabecera (que se queda atrás, se encoge y se apaga), sus esquinas se cuadran al llegar arriba
+    /// y el título pequeño «Banco · saldo» entra en la barra; después baja y la cabecera vuelve. Al soltar a medio camino
+    /// la hoja se asienta sola (abajo o acoplada): los fotogramas se sacan seguidos justo después de soltar, así se ve el
+    /// asentamiento a medio recorrido (a cámara lenta ×4).
+    /// f1 en reposo · f2–f4 un arrastre corto que vuelve abajo · f5–f10 un arrastre largo que se acopla · f11–f16 baja.
     private func bankSheetDock(_ name: String, extra: [String]) {
         let row = bankRow("rev", extra)
         row.tap()
         XCTAssertTrue(element("bank-movements-title").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
         Thread.sleep(forTimeInterval: 7)
         let start = Date()
-        frame(name, 1, since: start)
-        // Once pasos de unos 40 pt hacia arriba (el recorrido entero de la hoja son unos 300 pt).
-        for step in 0..<11 {
-            drag(from: 0.62, to: 0.62 - 0.042)
-            frame(name, 2 + step, since: start)
+        var index = 1
+        frame(name, index, since: start)
+        let settle = { (count: Int) in
+            for _ in 0..<count {
+                index += 1
+                self.frame(name, index, since: start)
+                Thread.sleep(forTimeInterval: 0.12)
+            }
         }
-        // Y de vuelta, en cuatro pasos largos.
-        for step in 0..<4 {
-            drag(from: 0.40, to: 0.40 + 0.13)
-            frame(name, 13 + step, since: start)
-        }
+        // Un arrastre corto (unos 50 pt, menos de media cabecera): al soltar, vuelve abajo.
+        drag(from: 0.62, to: 0.56)
+        settle(3)
+        // Uno largo (unos 200 pt, más de media cabecera): al soltar, termina de subir y se acopla.
+        drag(from: 0.70, to: 0.46)
+        settle(6)
+        // Y baja: al soltar a medio camino, vuelve abajo y la cabecera vuelve.
+        drag(from: 0.36, to: 0.62)
+        settle(6)
         XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "Al bajar la hoja no volvió la cabecera")
     }
 

@@ -30,12 +30,10 @@ struct BankLinkView: View {
     @State private var errorTick = 0
     /// Lo que la hoja ha subido sobre la cabecera.
     @State private var scroll = BankHeaderScroll()
-    /// El porcentaje del trámite visto en esta pantalla (`nil` = ninguno).
-    @State private var progress: StepPercent?
+    /// El porcentaje del trámite visto en esta pantalla y «Banco, conectado» (lo mueve solo la fase real; Core).
+    @State private var progress = BankConnectProgress()
     /// Cuándo empezó el paso en curso.
     @State private var stepStarted = Date()
-    /// «Banco, conectado» a la vista.
-    @State private var success = false
     /// Se ha conectado desde esta pantalla: la lista puede estar llenándose por primera vez.
     @State private var connectedHere = false
     /// Se abrió con una tarjeta volando hacia aquí.
@@ -44,8 +42,11 @@ struct BankLinkView: View {
     @State private var flightTimedOut = false
     #if DEBUG
     @State private var didShowDemoImport = false
-    /// Guion de demo (`-MiBancoDemoConnectScript`): hace de banco; `nil` = manda el conector.
-    @State private var demoStage: BankConnectStage?
+    /// Guion de demo (`-MiBancoDemoConnectScript`): una máquina `ConnectFlow` a la que el guion manda los eventos de
+    /// verdad; su fase sustituye a la del conector (`nil` = manda el conector).
+    @State private var demoFlow: ConnectFlow?
+    /// Cada vuelta del guion; una vuelta vieja que despierta tras esperar se retira.
+    @State private var demoRun = 0
     @State private var demoFirstFill = false
     #endif
 
@@ -83,99 +84,48 @@ struct BankLinkView: View {
         return computed
     }
 
-    private var canCancelWaiting: Bool {
-        switch connector.phase {
-        case .opening(let b), .waitingForBank(let b):
-            b == bank
-        default:
-            false
-        }
-    }
-
     private var showsForgetEverything: Bool {
         BankingCredentials.isReady || !model.state.links.isEmpty
     }
 
-    private var needsResumeForThisBank: Bool {
-        if case .needsResume(let b) = connector.phase { return b == bank }
-        return false
+    // MARK: El trámite de conexión, paso a paso
+
+    /// La fase REAL del trámite: la del conector (en la demo con guion, la de la máquina `ConnectFlow` del guion, que
+    /// recibe los mismos eventos que la del conector).
+    private var phase: ConnectPhase {
+        #if DEBUG
+        if let demoFlow { return demoFlow.phase }
+        #endif
+        return connector.phase
     }
 
+    /// La fase traducida para ESTE banco (Core: `BankConnectProgress`). La primera carga de movimientos tras conectar
+    /// cuenta dentro del tercer paso solo si el trámite se ha visto en esta pantalla.
+    private var stage: BankConnectStage {
+        progress.stage(of: phase, bank: bank, syncing: syncStatus.running.contains(bank))
+    }
+
+    private var needsResumeForThisBank: Bool { stage == .needsResume }
+
     private var failedMessageForThisBank: String? {
-        if case let .failed(b, msg) = connector.phase, b == bank { return msg }
+        if case .failed(let message) = stage { return message }
         return nil
     }
 
     private var aspspChoicesForThisBank: [EBASPSP]? {
-        if case let .chooseASPSP(b, list) = connector.phase, b == bank { return list }
+        if case .chooseASPSP(let list) = stage { return list }
         return nil
     }
 
-    // MARK: El trámite de conexión, paso a paso
-
-    /// La fase REAL del conector para este banco. La primera carga de movimientos tras conectar cuenta dentro del tercer
-    /// paso (solo si el trámite se ha visto en esta pantalla): el 100 llega cuando el banco está conectado y esa carga
-    /// no está en marcha.
-    private var stage: BankConnectStage {
-        #if DEBUG
-        if let demoStage { return demoStage }
-        #endif
-        switch connector.phase {
-        case .opening(let b) where b == bank: return .step(0)
-        case .waitingForBank(let b) where b == bank: return .step(1)
-        case .finishing(let b) where b == bank: return .step(2)
-        case .connected(let b) where b == bank:
-            return progress?.isRunning == true && syncStatus.running.contains(bank) ? .step(2) : .connected
-        case .failed(let b, _) where b == bank: return .failed
-        default: return .none
-        }
-    }
-
-    /// El porcentaje que se dibuja: el de esta pantalla o, en el primer instante de un paso (antes de apuntarlo), uno
-    /// recién empezado en ese paso.
-    private var shownProgress: StepPercent? {
-        if let progress { return progress }
-        if case .step(let index) = stage {
-            var fresh = StepPercent()
-            fresh.enter(step: index)
-            return fresh
-        }
-        return nil
-    }
-
-    private var stepCaption: String? {
-        switch stage {
-        case .step(let index): index >= 2 ? "Terminando con \(bank.displayName)…" : "Esperando a \(bank.displayName)…"
-        case .none, .connected, .failed: nil
-        }
-    }
+    /// El porcentaje que se dibuja (Core decide cuál).
+    private var shownProgress: StepPercent? { progress.shown(for: stage) }
 
     private func stageChanged(to new: BankConnectStage) {
-        switch new {
-        case .step(let index):
-            if let current = progress, current.isRunning, index >= current.step {
-                guard index > current.step else { return }
-                progress?.enter(step: index)
-            } else {
-                // Un trámite nuevo (o uno que vuelve a empezar): el porcentaje arranca de cero en su paso.
-                var fresh = StepPercent()
-                fresh.enter(step: index)
-                progress = fresh
-                success = false
-            }
-            stepStarted = Date()
-        case .connected:
-            guard progress?.isRunning == true else { return }
-            progress?.succeed()
-            success = true
-            connectedHere = true
-        case .failed:
-            guard let current = progress, current.isRunning else { return }
-            let stretch = max(0.05, motion.level.timeScale * motion.timeMultiplier)
-            progress?.fail(shown: current.value(elapsed: Date().timeIntervalSince(stepStarted) / stretch))
-        case .none:
-            // Cancelado, «Dejarlo» o vuelta a reposo: no queda trámite que enseñar (el éxito sí se queda hasta «Listo»).
-            if progress?.outcome != .succeeded { progress = nil }
+        let stretch = max(0.05, motion.level.timeScale * motion.timeMultiplier)
+        switch progress.apply(new, elapsed: Date().timeIntervalSince(stepStarted) / stretch) {
+        case .stepStarted: stepStarted = Date()
+        case .succeeded: connectedHere = true
+        case .failed, .none: break
         }
     }
 
@@ -189,24 +139,73 @@ struct BankLinkView: View {
         Task { await connector.connect(bank) }
     }
 
+    /// «Cancelar» la espera.
+    private func cancelWaiting() {
+        #if DEBUG
+        if demoFlow != nil {
+            demoRun += 1
+            demoFlow?.handle(.cancel)
+            return
+        }
+        #endif
+        connector.cancelWebSession()
+    }
+
+    /// «Dejarlo» (y al salir de la pantalla con un fallo).
+    private func resetTransientPhase() {
+        #if DEBUG
+        if demoFlow != nil {
+            demoFlow?.handle(.reset)
+            return
+        }
+        #endif
+        connector.resetTransientPhase()
+    }
+
+    /// «Seguir» tras cortar la espera.
+    private func resume() {
+        #if DEBUG
+        if demoFlow != nil {
+            runDemoConnectScript()
+            return
+        }
+        #endif
+        Task { await connector.resume() }
+    }
+
     private func dismissSuccess() {
-        success = false
-        progress = nil
+        progress.dismissSuccess()
     }
 
     #if DEBUG
-    /// Hace de banco en la demo: cada paso dura lo que diga `-MiBancoDemoConnectStep`, luego conectado y la lista
-    /// llenándose por primera vez. La pantalla (pasos, porcentaje, éxito, esqueleto) es la de verdad.
+    /// Hace de banco en la demo: manda a una `ConnectFlow` los eventos de verdad con `-MiBancoDemoConnectStep` segundos
+    /// entre ellos (abrir, banco abierto, vuelta válida, conectado; o, con `-MiBancoDemoConnectFails`, un fallo mientras
+    /// se espera al banco). Su fase entra por el mismo sitio que la del conector; la pantalla (pasos, porcentaje, éxito,
+    /// fallo, esqueleto) es la de verdad.
     private func runDemoConnectScript() {
-        guard demoStage == nil || demoStage == .connected else { return }
+        var flow = demoFlow ?? ConnectFlow()
+        guard !flow.phase.isActive else { return }
+        flow.handle(.start(bank))
+        demoFlow = flow
+        demoRun += 1
+        let run = demoRun
+        let target = bank
         Task {
             let wait = DemoMode.connectScriptStepSeconds
-            for index in 0..<3 {
-                demoStage = .step(index)
-                try? await Task.sleep(for: .seconds(wait))
+            try? await Task.sleep(for: .seconds(wait))
+            guard run == demoRun else { return }
+            demoFlow?.handle(.webOpened(target))
+            try? await Task.sleep(for: .seconds(wait))
+            guard run == demoRun else { return }
+            if DemoMode.connectScriptFails {
+                demoFlow?.handle(.failed(target, ConnectMessage.tooSlow))
+                return
             }
+            demoFlow?.handle(.callback(.valid(target)))
+            try? await Task.sleep(for: .seconds(wait))
+            guard run == demoRun else { return }
             demoFirstFill = true
-            demoStage = .connected
+            demoFlow?.handle(.succeeded(target))
             try? await Task.sleep(for: .seconds(DemoMode.connectScriptFillSeconds))
             demoFirstFill = false
         }
@@ -274,7 +273,7 @@ struct BankLinkView: View {
         }
         .onDisappear {
             if failedMessageForThisBank != nil {
-                connector.resetTransientPhase()
+                resetTransientPhase()
             }
         }
         .onChange(of: stage) { _, new in stageChanged(to: new) }
@@ -301,7 +300,7 @@ struct BankLinkView: View {
                 }
             }
             // La pantalla se abre con el trámite ya en marcha (se volvió a ella a mitad): se apunta su paso.
-            if case .step = stage, progress == nil { stageChanged(to: stage) }
+            if case .step = stage, progress.percent == nil { stageChanged(to: stage) }
         }
     }
 
@@ -318,7 +317,7 @@ struct BankLinkView: View {
                 }
                 .motionEntrance(0)
 
-                if success {
+                if progress.success {
                     BankConnectedFlash(bank: bank, status: lines.primary, balanceCents: balance?.cents,
                                        onShowMovements: {
                                            dismissSuccess()
@@ -368,7 +367,7 @@ struct BankLinkView: View {
             // Donde aterriza la tarjeta que vuela desde Inicio.
             .cardFlightDestination()
 
-            if !success {
+            if !progress.success {
                 VStack(alignment: .leading, spacing: 10) {
                     phaseRows
                     actionRows(lines: lines)
@@ -387,7 +386,7 @@ struct BankLinkView: View {
         .padding(.horizontal, 24)
         .padding(.top, 8)
         .padding(.bottom, 26)
-        .animation(motion.calmAnimation(.enter), value: success)
+        .animation(motion.calmAnimation(.enter), value: progress.success)
         .assemblesOnFirstAppear()
     }
 
@@ -396,16 +395,17 @@ struct BankLinkView: View {
         if let shown = shownProgress, !needsResumeForThisBank {
             VStack(alignment: .leading, spacing: 14) {
                 StepperProgress(steps: BankConnectStage.steps, current: shown.step, finished: false,
-                                caption: stepCaption, percent: shown, since: stepStarted, spins: true, identifier: "bank-steps")
+                                caption: stage.caption(bankName: bank.displayName), percent: shown, since: stepStarted,
+                                spins: true, identifier: "bank-steps")
                     // Los títulos de los extremos sobresalen de su nodo.
                     .padding(.horizontal, 30)
                     .padding(.top, 4)
 
                 if let failed = failedMessageForThisBank {
                     failedRows(failed)
-                } else if canCancelWaiting {
+                } else if stage.canCancel {
                     Button {
-                        connector.cancelWebSession()
+                        cancelWaiting()
                     } label: {
                         Text("Cancelar")
                             .titan(.option)
@@ -427,7 +427,7 @@ struct BankLinkView: View {
 
                 HStack(spacing: 10) {
                     Button {
-                        Task { await connector.resume() }
+                        resume()
                     } label: {
                         Text("Seguir")
                             .titan(.option)
@@ -453,7 +453,7 @@ struct BankLinkView: View {
                 }
 
                 Button {
-                    connector.resetTransientPhase()
+                    resetTransientPhase()
                 } label: {
                     Text("Dejarlo")
                         .titan(.subtitle)
@@ -512,7 +512,7 @@ struct BankLinkView: View {
             .buttonStyle(.pressable)
 
             Button {
-                connector.resetTransientPhase()
+                resetTransientPhase()
             } label: {
                 Text("Dejarlo")
                     .titan(.subtitle)
@@ -526,7 +526,7 @@ struct BankLinkView: View {
 
     @ViewBuilder
     private func actionRows(lines: BankStatusLines) -> some View {
-        if shownProgress == nil && !needsResumeForThisBank && failedMessageForThisBank == nil && aspspChoicesForThisBank == nil {
+        if progress.showsStartActions(for: stage) {
             switch lines.action {
             case .connect:
                 Button {

@@ -225,6 +225,29 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertEqual(visibleAmounts(), [], "Presupuestos enseña importes con el ojo cerrado")
     }
 
+    /// Con el ojo cerrado, los límites de Presupuestos no DIBUJAN ninguna cifra (ni tapada por un desenfoque: en su sitio
+    /// va la máscara) y VoiceOver dice «importe oculto». Con `-MiBancoDemoDrawnAmounts` cada campo dice lo que dibuja.
+    func testPrivateModeMasksBudgetLimits() throws {
+        continueAfterFailure = true
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoBudgets", "-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"])
+        let month = app.textFields["presupuestos.mes"]
+        XCTAssertTrue(month.waitForExistence(timeout: 20), "No se ve Presupuestos")
+        let fields = app.textFields.matching(NSPredicate(format: "identifier BEGINSWITH %@", "presupuestos.")).allElementsBoundByIndex
+        var masked = 0
+        for field in fields {
+            let said = value(field)
+            XCTAssertNil(said.range(of: "[0-9]", options: .regularExpression),
+                         "El límite \(field.identifier) se lee o se dibuja con cifras con el ojo cerrado: \(said)")
+            if said.hasPrefix("importe oculto") {
+                masked += 1
+                XCTAssertTrue(said.contains("dibujado: "), "El límite \(field.identifier) no dice lo que dibuja: \(said)")
+            }
+        }
+        XCTAssertTrue(value(month).hasPrefix("importe oculto"), "El límite del mes no está oculto: \(value(month))")
+        XCTAssertGreaterThanOrEqual(masked, 2, "La demo trae al menos dos límites puestos y no salen ocultos (\(masked))")
+        XCTAssertEqual(visibleAmounts(), [], "Presupuestos enseña importes con el ojo cerrado")
+    }
+
     // MARK: - Presupuestos: el aviso del 90 % (B2)
 
     /// «412,30 euros» -> 41230.
@@ -630,6 +653,55 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Primera actualización: últimos 12 meses (lo que dé el banco)"].exists, "Falta el historial")
     }
 
+    /// «p=0.412;cabecera=0.000;titulo=0.000;solape=0.000;curvas=0.000» -> diccionario.
+    private func dockProbe(_ probe: XCUIElement) -> [String: Double] {
+        var out: [String: Double] = [:]
+        for part in value(probe).split(separator: ";") {
+            let pair = part.split(separator: "=")
+            if pair.count == 2, let number = Double(pair[1]) { out[String(pair[0])] = number }
+        }
+        return out
+    }
+
+    /// La hoja nunca enseña dos saldos a la vez: el saldo grande se ha ido del todo antes de que el título pequeño
+    /// empiece a entrar (en las curvas, para cualquier punto del recorrido, y en lo que se ha dibujado de verdad mientras
+    /// se arrastra). Y al soltar a medio camino, la hoja se asienta abajo o acoplada, la que esté más cerca: nunca se queda
+    /// entre medias.
+    func testBankSheetNeverShowsTwoBalancesAndSettles() throws {
+        openBank("rev", ["-MiBancoDemoDockProbe"])
+        let probe = element("bank-dock-probe")
+        XCTAssertTrue(probe.waitForExistence(timeout: 10), "La pantalla del banco no tiene la sonda de la hoja")
+        let balance = element("bank-header-balance")
+        XCTAssertTrue(waitFor(hittable, balance, timeout: 8), "El saldo grande no está a la vista")
+        let curves = try XCTUnwrap(dockProbe(probe)["curvas"], "La sonda no dice el solape de las curvas: \(value(probe))")
+        XCTAssertLessThanOrEqual(curves, 0.02, "En algún punto del recorrido se ven a la vez el saldo grande y el título pequeño")
+        let settled = { (what: String) -> Double in
+            Thread.sleep(forTimeInterval: 2.5)
+            let p = self.dockProbe(probe)["p"] ?? -1
+            XCTAssertTrue(p <= 0.01 || p >= 0.99, "\(what): la hoja se quedó a medio camino (p = \(p))")
+            return p
+        }
+
+        // Un arrastre corto hacia arriba (menos de media cabecera) y soltar: vuelve abajo.
+        drag(from: 0.60, to: 0.54)
+        XCTAssertLessThanOrEqual(settled("Arrastre corto hacia arriba"), 0.01, "Un arrastre corto no devolvió la hoja abajo")
+        // Uno más largo (más de media cabecera): se acopla, con el título pequeño en la barra.
+        drag(from: 0.70, to: 0.45)
+        XCTAssertGreaterThanOrEqual(settled("Arrastre largo hacia arriba"), 0.99, "Un arrastre largo no acopló la hoja")
+        XCTAssertTrue(element("bank-mini-title").exists, "Acoplada la hoja, falta el título pequeño")
+        // Un tirón corto hacia abajo desde acoplada: se queda acoplada.
+        drag(from: 0.40, to: 0.47)
+        XCTAssertGreaterThanOrEqual(settled("Arrastre corto hacia abajo"), 0.99, "Un arrastre corto desacopló la hoja")
+        // Uno largo hacia abajo: vuelve abajo y vuelve el saldo grande.
+        drag(from: 0.30, to: 0.75)
+        XCTAssertLessThanOrEqual(settled("Arrastre largo hacia abajo"), 0.01, "Un arrastre largo no devolvió la hoja abajo")
+        XCTAssertTrue(waitFor(hittable, balance, timeout: 5), "Con la hoja abajo no vuelve el saldo grande")
+
+        // En todo lo que se ha dibujado (cada paso del dedo y de los asentamientos), nunca los dos saldos a la vez.
+        let seen = try XCTUnwrap(dockProbe(probe)["solape"], "La sonda no dice el solape visto: \(value(probe))")
+        XCTAssertLessThanOrEqual(seen, 0.02, "Mientras se movía la hoja se vieron a la vez el saldo grande y el título pequeño")
+    }
+
     /// Si una tarjeta viene volando desde Inicio, la cabecera la espera; pero si no llega (hoy nadie la hace aterrizar),
     /// la cabecera aparece igual: la pantalla nunca se queda sin cabecera. A cámara lenta ×8 el plazo dura unos 8 s.
     func testBankHeaderWaitsForAFlightButNeverStaysHidden() throws {
@@ -748,6 +820,41 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertEqual(balance.label, "Saldo: importe oculto")
         Thread.sleep(forTimeInterval: 2.5)
         XCTAssertEqual(visibleAmounts(), [], "«Conectado» enseña importes con el ojo cerrado")
+    }
+
+    /// El banco falla mientras se le espera (el guion manda el `failed` de verdad a la máquina de la conexión): el
+    /// porcentaje se queda congelado donde estaba (nunca 100), sale el mensaje de siempre con «Empezar de nuevo», no sale
+    /// «conectado»; y «Empezar de nuevo» arranca otra vez desde el primer paso.
+    func testConnectFailureFreezesPercent() throws {
+        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "3", "-MiBancoDemoConnectFails"])
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 10), "Falta «Renovar conexión»")
+        renew.tap()
+        let percent = element("bank-steps-percent")
+        XCTAssertTrue(percent.waitForExistence(timeout: 5), "Renovar no enseñó los pasos con su porcentaje")
+
+        let message = app.staticTexts["El banco tardó demasiado. Vuelve a intentarlo."]
+        XCTAssertTrue(message.waitForExistence(timeout: 20), "El fallo del banco no enseñó su mensaje")
+        let restart = app.buttons["Empezar de nuevo"]
+        XCTAssertTrue(waitFor(hittable, restart, timeout: 5), "Tras el fallo no se puede «Empezar de nuevo»")
+        XCTAssertTrue(percent.exists, "El porcentaje desapareció al fallar (tiene que quedarse congelado)")
+        let frozen = percent.label
+        let shown = try XCTUnwrap(stepAndPercent(frozen), "No se lee el porcentaje: \(frozen)")
+        XCTAssertEqual(shown.step, 2, "Falló esperando al banco, pero el paso no es el segundo: \(frozen)")
+        XCTAssertGreaterThanOrEqual(shown.percent, 34, "El porcentaje bajó al fallar: \(frozen)")
+        XCTAssertLessThan(shown.percent, 67, "El porcentaje pasó el tope de un paso que falló: \(frozen)")
+        Thread.sleep(forTimeInterval: 2.5)
+        XCTAssertEqual(percent.label, frozen, "El porcentaje siguió moviéndose tras el fallo")
+        XCTAssertFalse(percent.label.contains("100"), "Un fallo enseña 100")
+        XCTAssertFalse(element("bank-connected-title").exists, "Un fallo enseña «conectado»")
+        XCTAssertFalse(app.buttons["bank-cancel-wait"].exists, "Tras el fallo sigue «Cancelar»")
+
+        // «Empezar de nuevo»: otro trámite desde el primer paso; el mensaje se va.
+        restart.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), message, timeout: 5), "El mensaje del fallo no se fue")
+        XCTAssertTrue(waitFor(NSPredicate(format: "label BEGINSWITH %@", "Paso 1 de 3"), percent, timeout: 5),
+                      "«Empezar de nuevo» no volvió al primer paso: \(percent.label)")
+        XCTAssertTrue(app.staticTexts["Esperando a imagin…"].waitForExistence(timeout: 3), "Falta lo que se está haciendo")
     }
 
     // MARK: - Guía de avisos (B8)

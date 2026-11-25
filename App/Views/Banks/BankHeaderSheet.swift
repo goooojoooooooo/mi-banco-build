@@ -24,16 +24,35 @@ enum BankHeaderMath {
 
     /// La cabecera se encoge hasta un 10 % (× la intensidad, como mucho 1,3).
     static func headerScale(_ p: CGFloat, distanceScale: CGFloat) -> CGFloat { 1 - 0.1 * min(1.3, distanceScale) * unit(p) }
-    /// La cabecera se apaga un poco antes de que la hoja llegue arriba.
-    static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - 1.05 * unit(p)) }
+    /// Donde la cabecera (con el saldo grande) ya se ha apagado del todo.
+    static let headerGone: CGFloat = 0.62
+    /// Donde empieza a entrar el título pequeño: después de `headerGone`, con un hueco entre los dos, así que nunca se
+    /// ven a la vez el saldo grande y el del título pequeño.
+    static let miniStart: CGFloat = 0.70
+
+    /// La cabecera se apaga mientras la hoja sube y ha desaparecido en p = 0,62.
+    static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - unit(p) / headerGone) }
     /// Las acciones rápidas se apagan antes que el resto.
     static func actionsOpacity(_ p: CGFloat) -> CGFloat { unit(1 - 1.7 * unit(p)) }
     /// Esquinas de la hoja: 30 pt hasta p = 0,82 y de ahí a 0.
     static func cornerRadius(_ p: CGFloat) -> CGFloat { 30 * (1 - unit((unit(p) - 0.82) / 0.18)) }
     /// El título pequeño («Banco · saldo») entra entre p = 0,7 y 1.
-    static func miniTitle(_ p: CGFloat) -> CGFloat { unit((unit(p) - 0.7) / 0.3) }
-    /// La barra negra llega con el título pequeño (p 0,74–0,94): el saldo grande ya no se ve debajo.
-    static func barOpacity(_ p: CGFloat) -> CGFloat { unit((unit(p) - 0.74) / 0.2) }
+    static func miniTitle(_ p: CGFloat) -> CGFloat { unit((unit(p) - miniStart) / (1 - miniStart)) }
+    /// La barra negra llega en cuanto la cabecera se ha ido (p 0,62–0,82), antes que el título pequeño.
+    static func barOpacity(_ p: CGFloat) -> CGFloat { unit((unit(p) - headerGone) / 0.2) }
+
+    /// Lo que se ven a la vez la cabecera y el título pequeño en `p` (0 = nunca los dos).
+    static func overlap(_ p: CGFloat) -> CGFloat { min(headerOpacity(p), miniTitle(p)) }
+
+    /// El mayor solape de las dos curvas en todo el recorrido (p de 0 a 1 en pasos de 0,005).
+    static var maxOverlap: CGFloat { (0...200).map { overlap(CGFloat($0) / 200) }.max() ?? 0 }
+
+    /// Al soltar a medio camino: dónde se asienta la hoja (lo desplazado), abajo (0) o acoplada (`dock`), la más cercana;
+    /// `nil` si ya está en uno de los dos (o más allá: leyendo los movimientos, o tirando hacia abajo).
+    static func settleTarget(offset: CGFloat, dock: CGFloat) -> CGFloat? {
+        guard offset.isFinite, dock > 1, offset > 0.5, offset < dock - 0.5 else { return nil }
+        return offset < dock / 2 ? 0 : dock
+    }
 }
 
 /// La pantalla de un banco: una hoja que sube sobre una cabecera oscura (momento 5 de los vídeos del dueño).
@@ -78,9 +97,19 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
             scroll.viewport = max(0, new)
         }
         .accessibilityIdentifier("bank-screen-scroll")
+        // Al soltar a medio camino, la hoja nunca se queda entre medias: se asienta abajo o acoplada.
+        .onScrollPhaseChange { _, new in
+            if new == .idle { settle() }
+        }
         .background { BankHeaderBackdrop() }
         .overlay(alignment: .top) {
-            BankHeaderBar(scroll: scroll, title: title, balanceCents: balanceCents, hidden: hidden, reduce: motion.reduce)
+            BankHeaderBar(scroll: scroll, title: title, balanceCents: balanceCents, hidden: hidden, reduce: motion.reduce,
+                          fade: motion.fade)
+            #if DEBUG
+            if DemoMode.exposesDockProbe {
+                BankDockProbe(scroll: scroll)
+            }
+            #endif
         }
         // El título del sistema no se dibuja (el banco ya está en la cabecera y, acoplada la hoja, en el título pequeño):
         // en su sitio va una pieza vacía. El nombre de la pantalla sigue siendo el del banco para VoiceOver y la pila.
@@ -105,6 +134,26 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
             withAnimation(motion.reduce ? motion.fade : spring) { entered = true }
         }
     }
+
+    /// La hoja quedó parada entre abajo y acoplada: va a la más cercana con el muelle de la hoja del kit. Con Reducir
+    /// movimiento no viaja: salta a su sitio y la cabecera, la barra y el título pequeño se funden (ver sus `fade`).
+    private func settle() {
+        guard let target = BankHeaderMath.settleTarget(offset: scroll.offset, dock: scroll.dock) else { return }
+        let move = {
+            if target > 0 {
+                position.scrollTo(id: Self.sheetID, anchor: .top)
+            } else {
+                position.scrollTo(edge: .top)
+            }
+        }
+        if motion.reduce {
+            var jump = Transaction()
+            jump.disablesAnimations = true
+            withTransaction(jump, move)
+        } else {
+            withAnimation(motion.animation(.sheet), move)
+        }
+    }
 }
 
 /// La cabecera: va dentro del desplazamiento (sus botones se tocan) y compensa lo desplazado para quedarse atrás.
@@ -127,9 +176,21 @@ private struct BankHeaderLayer<Content: View>: View {
             .scaleEffect(motion.reduce ? 1 : BankHeaderMath.headerScale(p, distanceScale: motion.level.distanceScale), anchor: .top)
             // Sube al 32 % de lo desplazado (paralaje); con Reducir movimiento se queda quieta bajo la hoja.
             .offset(y: motion.reduce ? y : 0.68 * y)
-            .opacity(BankHeaderMath.headerOpacity(p))
+            // Con Reducir movimiento, cuando la hoja salta a su sitio al soltar, la cabecera se funde (no viaja).
+            .animation(motion.reduce ? motion.fade : nil) { $0.opacity(BankHeaderMath.headerOpacity(p)) }
             .opacity(entered && shown ? 1 : 0)
             .offset(y: entered ? 0 : motion.distance(12))
+            // Lo que sube por encima del borde de arriba de la zona visible (la barra, con el botón de volver) no se
+            // dibuja: la cabecera se corta ahí, con un borde suave de hasta 16 pt por debajo, nunca por encima.
+            .mask(alignment: .top) {
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                        .frame(height: min(16, y))
+                    Rectangle()
+                        .frame(height: 4000)
+                }
+                .offset(y: y)
+            }
             // Tapada por la hoja ya no se toca ni se lee.
             .allowsHitTesting(p < 0.5 && shown)
             .accessibilityHidden(p > 0.6 || !shown)
@@ -192,19 +253,24 @@ private struct BankHeaderBar: View {
     let balanceCents: Int?
     let hidden: Bool
     let reduce: Bool
+    /// El fundido del kit: con Reducir movimiento, la barra y el título pequeño se funden cuando la hoja salta a su sitio.
+    let fade: Animation
 
     var body: some View {
         GeometryReader { geo in
             let inset = geo.safeAreaInsets.top
+            let p = scroll.progress
             ZStack(alignment: .bottom) {
                 Color.black
                     .overlay(alignment: .bottom) { Rectangle().fill(.white.opacity(0.08)).frame(height: 0.5) }
-                    .opacity(BankHeaderMath.barOpacity(scroll.progress))
+                    .animation(reduce ? fade : nil) { $0.opacity(BankHeaderMath.barOpacity(p)) }
                     .accessibilityHidden(true)
                 BankMiniTitle(scroll: scroll, title: title, balanceCents: balanceCents, hidden: hidden, reduce: reduce)
                     .frame(height: 44)
                     // Sitio para el botón de volver a la izquierda (y lo mismo a la derecha, para quedar centrado).
                     .padding(.horizontal, 76)
+                    // Con Reducir movimiento (sin recorrido), su llegada y su ida también son un fundido.
+                    .animation(reduce ? fade : nil, value: BankHeaderMath.miniTitle(p))
             }
             .frame(width: geo.size.width, height: inset)
             .offset(y: -inset)
@@ -250,9 +316,38 @@ private struct BankMiniTitle: View {
             .accessibilityIdentifier("bank-mini-title")
             .opacity(m)
             .offset(y: reduce ? 0 : (1 - m) * 8)
+            .transition(.opacity)
         }
     }
 }
+
+#if DEBUG
+/// Solo en la demo con `-MiBancoDemoDockProbe`: un elemento invisible que dice lo acoplada que está la hoja (`p`), la
+/// opacidad con la que se dibuja la cabecera (el saldo grande) y la del título pequeño, el mayor solape de las dos visto
+/// en cada cambio de lo desplazado y el mayor solape de las curvas en todo el recorrido. Así una prueba puede fallar si
+/// se ven dos saldos a la vez o si la hoja se queda a medio camino.
+private struct BankDockProbe: View {
+    let scroll: BankHeaderScroll
+    @State private var seen: CGFloat = 0
+
+    var body: some View {
+        let p = scroll.progress
+        let text = String(format: "p=%.3f;cabecera=%.3f;titulo=%.3f;solape=%.3f;curvas=%.3f",
+                          Double(p), Double(BankHeaderMath.headerOpacity(p)), Double(BankHeaderMath.miniTitle(p)),
+                          Double(seen), Double(BankHeaderMath.maxOverlap))
+        Color.clear
+            .frame(width: 1, height: 1)
+            .accessibilityElement()
+            .accessibilityLabel("Sonda de la hoja")
+            .accessibilityValue(text)
+            .accessibilityIdentifier("bank-dock-probe")
+            .allowsHitTesting(false)
+            .onChange(of: p, initial: true) { _, new in
+                seen = max(seen, BankHeaderMath.overlap(new))
+            }
+    }
+}
+#endif
 
 /// Se apaga con la cabecera, más deprisa que ella: para las acciones rápidas (1 − 1,7·p).
 private struct FadesWithBankHeader: ViewModifier {

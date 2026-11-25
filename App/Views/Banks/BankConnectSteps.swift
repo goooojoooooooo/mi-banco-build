@@ -1,18 +1,7 @@
 import MiBancoCore
 import SwiftUI
 
-/// En qué punto del trámite de conexión está ESTE banco, tal como lo cuenta el conector de verdad.
-enum BankConnectStage: Equatable {
-    /// Nada en marcha.
-    case none
-    /// Paso en curso: 0 = Verificar (abriendo), 1 = Conectar (esperando al banco), 2 = Importar (terminando y primera carga).
-    case step(Int)
-    /// Conectado de verdad.
-    case connected
-    case failed
-
-    static let steps = ["Verificar", "Conectar", "Importar"]
-}
+// En qué punto del trámite está ESTE banco y su porcentaje: `BankConnectStage` y `BankConnectProgress` (Core).
 
 /// «Banco conectado» (momento 4 de los vídeos del dueño, final): el ✓ blanco salta de 0,4 a 1 con un destello de luz,
 /// el título, el estado y el saldo llegan con 70 ms entre ellos, el saldo cuenta desde 0 mientras su fila llega (nunca

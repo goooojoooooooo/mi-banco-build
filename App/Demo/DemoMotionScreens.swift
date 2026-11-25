@@ -25,9 +25,18 @@ extension DemoMode {
     static var exposesDrawnAmounts: Bool { arguments.contains("-MiBancoDemoDrawnAmounts") }
 
     /// `-MiBancoDemoConnectScript`: en la pantalla de un banco, «Conectar» o «Renovar conexión» recorre el trámite entero
-    /// sin red (Verificar › Conectar › Importar › conectado, y después la lista llenándose por primera vez). En la demo el
-    /// conector de verdad se queda en el primer paso; esto solo hace de banco: la pantalla y su porcentaje son los reales.
+    /// sin red (Verificar › Conectar › Importar › conectado, y después la lista llenándose por primera vez). Hace de banco
+    /// mandando los eventos de verdad (`start`, `webOpened`, `callback`, `succeeded`/`failed`) a una máquina `ConnectFlow`
+    /// de la pantalla; su fase entra por el mismo sitio que la del conector y la traduce `BankConnectProgress` (Core).
     static var scriptsConnect: Bool { isActive && arguments.contains("-MiBancoDemoConnectScript") }
+
+    /// `-MiBancoDemoConnectFails`: el banco del guion falla mientras se le espera (segundo paso) con el mensaje de siempre
+    /// («El banco tardó demasiado…»), en vez de conectar.
+    static var connectScriptFails: Bool { isActive && arguments.contains("-MiBancoDemoConnectFails") }
+
+    /// `-MiBancoDemoDockProbe`: la pantalla del banco lleva un elemento invisible (`bank-dock-probe`) que dice lo acoplada
+    /// que está la hoja, la opacidad del saldo grande y la del título pequeño, el mayor solape visto y el de las curvas.
+    static var exposesDockProbe: Bool { isActive && arguments.contains("-MiBancoDemoDockProbe") }
 
     /// Segundos que el banco de mentira tarda en cada paso del guion (`-MiBancoDemoConnectStep <s>`; por defecto 2,2).
     static var connectScriptStepSeconds: Double {

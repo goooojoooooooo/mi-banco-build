@@ -23,9 +23,8 @@ struct BriefingSheet: View {
     @Environment(AppPreferences.self) private var preferences
 
     /// B1: cada entrada de la hoja estrena número; cada bloque entra solo (120 ms × 0,92ⁿ) y `entranceCompleted` llega
-    /// al final de una animación propia (el reloj de la entrada), o antes con un toque.
+    /// cuando ha entrado el último bloque (`finishEntranceLater`), o antes con un toque.
     @State private var entranceToken = 0
-    @State private var entranceClock: Double = 0
     @State private var entranceCompleted = false
     /// true solo si el dueño tocó durante la entrada para terminarla al instante (corta también la cuenta de 0,9 s).
     @State private var userSkippedEntrance = false
@@ -120,8 +119,8 @@ struct BriefingSheet: View {
                     .accessibilityHidden(true)
             }
         }
-        // El reloj de la entrada (B1, `animationClock`): no dibuja nada.
-        .animationClock(entranceClock)
+        // B1: la entrada se da por acabada cuando ha entrado el último bloque (o antes, con un toque).
+        .task(id: entranceToken) { await finishEntranceLater(token: entranceToken) }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .sensoryFeedback(Haptics.detent, trigger: feedbackTick)
@@ -603,7 +602,13 @@ struct BriefingSheet: View {
         .overlay(alignment: .top) {
             if speaker.activeTarget == .briefing {
                 VoiceWave(speaking: true)
-                    .alignmentGuide(.top) { d in d[.bottom] + 6 }
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity)
+                    // Sobre el negro de la hoja: el texto que pasa por debajo no se cruza con las barras.
+                    .background(Theme.canvas)
+                    // Encima de «Vale», no sobre él (hoja `briefing-voice`, run8: con la guía de alineación quedaba
+                    // encima del botón).
+                    .offset(y: -(52 + 8))
                     .transition(.opacity)
                     .accessibilityIdentifier("voice-wave")
             }
@@ -635,14 +640,17 @@ struct BriefingSheet: View {
         userSkippedEntrance = false
         entranceCompleted = false
         entranceToken += 1
-        let token = entranceToken
-        let total = motion.reduce ? 0.25 : motion.seconds(0.12) + motion.stagger(7, firstGap: 0.12, decay: 0.92)
+    }
+
+    /// La entrada se da por acabada cuando ha entrado el último bloque: su espera lee `\.motion` (intensidad,
+    /// Reducir movimiento y cámara lenta). Un toque la acaba antes.
+    private func finishEntranceLater(token: Int) async {
+        guard token > 0 else { return }
+        let total = motion.reduce ? motion.pause(0.25) : motion.seconds(0.12) + motion.stagger(7, firstGap: 0.12, decay: 0.92)
             + motion.seconds(0.5)
-        withAnimation(.linear(duration: total), completionCriteria: .removed) {
-            entranceClock = entranceClock == 0 ? 1 : 0
-        } completion: {
-            if entranceToken == token { entranceCompleted = true }
-        }
+        try? await Task.sleep(for: .seconds(total))
+        guard !Task.isCancelled, entranceToken == token else { return }
+        entranceCompleted = true
     }
 
     private func completeEntrance() {

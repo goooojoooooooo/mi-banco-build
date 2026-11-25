@@ -12,7 +12,8 @@ struct SpendingView: View {
     var openMoveMoney: (MoveRequest) -> Void = { _ in }
     @Binding var openBudgetsRequest: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// El movimiento del kit: intensidad, cámara lenta y Reducir movimiento (el del sistema o el forzado para grabar).
+    @Environment(\.motion) private var motion
     /// El mes elegido (su inicio) y hacia dónde se fue, en un solo valor: cambian en la misma transacción.
     /// nil = el mes actual. Si ese mes deja de existir (otra lista de meses), se vuelve al actual.
     @State private var selection = Selection()
@@ -111,6 +112,18 @@ struct SpendingView: View {
                             .padding(.top, Theme.Space.section)
                             .motionEntrance(5, listIndex: 3)
                     }
+                    #if DEBUG
+                    // Solo en la demo con `-MiBancoDemoEntranceCount`: cuántas entradas (de pestaña o de mes) ha jugado
+                    // Gasto, para comprobar desde una prueba que Reducir movimiento las apaga. En la app de verdad, nada.
+                    if DemoMode.isActive, DemoMode.exposesEntranceCount {
+                        Color.clear
+                            .frame(width: 1, height: 1)
+                            .accessibilityElement()
+                            .accessibilityLabel("Entradas de Gasto")
+                            .accessibilityValue("\(entrance.token)")
+                            .accessibilityIdentifier("gasto.entradas")
+                    }
+                    #endif
                 }
                 .padding(.bottom, Theme.Space.section)
                 // Las barras de la raíz solo avisan (ámbar con pulso y vibración) si Gasto es la pestaña que se ve y no
@@ -171,16 +184,16 @@ struct SpendingView: View {
             path = [.budgets]
         }
         .onChange(of: isVisible) { _, visible in
-            guard visible, !reduceMotion else { return }
+            guard visible, !motion.reduce else { return }
             begin(.assembly)
         }
     }
 
     private var blockTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
+        guard !motion.reduce else { return .opacity }
         // El mes que entra se construye en el mismo render que cambia la dirección, así que siempre lleva la buena;
         // el que sale solo se funde (su transición se fijó antes del cambio y no puede conocer hacia dónde vas).
-        let x = CGFloat(selection.direction) * 28
+        let x = CGFloat(selection.direction) * motion.distance(28)
         return .asymmetric(insertion: .opacity.combined(with: .offset(x: x)), removal: .opacity)
     }
 
@@ -189,8 +202,8 @@ struct SpendingView: View {
         let target = index + step
         guard target >= 0, target < months.count else { return }
         tick += 1
-        if !reduceMotion { begin(.list) }
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
+        if !motion.reduce { begin(.list) }
+        withAnimation(motion.calmAnimation(.enter)) {
             // El mes en curso se guarda como nil: así sigue al mes nuevo cuando cambia el mes con la app abierta.
             selection = Selection(month: target == months.count - 1 ? nil : months[target], direction: step)
         }
@@ -199,8 +212,10 @@ struct SpendingView: View {
     private func begin(_ scope: Entrance.Scope) {
         let token = entrance.token + 1
         entrance = Entrance(token: token, active: true, scope: scope)
+        // La ventana de la entrada dura 1,2 s del kit: sigue la intensidad y la cámara lenta.
+        let window = motion.seconds(MotionEntranceWindow.seconds)
         Task {
-            try? await Task.sleep(for: .seconds(1.2))
+            try? await Task.sleep(for: .seconds(window))
             if entrance.token == token { entrance.active = false }
         }
     }

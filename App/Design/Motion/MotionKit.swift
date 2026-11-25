@@ -126,22 +126,4 @@ struct MotionEnvironment: ViewModifier {
 
 extension View {
     func motionEnvironment() -> some View { modifier(MotionEnvironment()) }
-
-    /// Un reloj para encadenar pasos con el final de una animación (sin `Task.sleep`): quien lo usa cambia `value`
-    /// dentro de `withAnimation(.linear(duration: d), completionCriteria: .removed) { … } completion: { … }` y la
-    /// animación dura `d` aunque no se vea nada. (Una opacidad de `Color.clear` no vale: no hay nada que animar y la
-    /// finalización llega al instante.)
-    func animationClock(_ value: Double) -> some View { modifier(AnimationClock(value: value)) }
-}
-
-/// Un valor animable que no dibuja nada: existe para que SwiftUI anime algo (y avise al terminar).
-private struct AnimationClock: ViewModifier, Animatable {
-    var value: Double
-
-    nonisolated var animatableData: Double {
-        get { value }
-        set { value = newValue }
-    }
-
-    func body(content: Content) -> some View { content }
 }

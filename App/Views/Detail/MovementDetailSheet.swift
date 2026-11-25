@@ -83,11 +83,8 @@ private struct DetailContent: View {
     @State private var slotFrame: CGRect?
     @State private var landingStarted = false
     /// El vuelo espera a que la hoja se pose (su subida o su zoom la lleva el sistema): mientras se mueve, el sitio
-    /// medido del importe no es el final. Reloj propio (sin `Task.sleep`).
+    /// medido del importe no es el final.
     @State private var flightArmed = false
-    @State private var flyClock: Double = 0
-    /// Respaldo sin `Task.sleep`: una animación de vigilancia que, al acabar, posa el importe si su vuelo no avisó.
-    @State private var watchdog: Double = 0
     @State private var editingNote = false
     @State private var noteText = ""
     @State private var noteSaved = false
@@ -253,11 +250,9 @@ private struct DetailContent: View {
         .onChange(of: noteFocused) { _, focused in
             if !focused && editingNote { commitNote() }
         }
-        // Los relojes del respaldo y de la espera del vuelo (`animationClock`): no dibujan nada.
-        .animationClock(watchdog)
-        .animationClock(flyClock)
         .onAppear(perform: landAmount)
-        .onAppear(perform: armWatchdog)
+        .task { await backstop() }
+        .task(id: flightArmed) { await flightAfterPresentation() }
     }
 
     /// D1. El importe sale volando desde donde estaba en la fila (si se abrió desde una fila de Inicio y se conocen
@@ -269,13 +264,7 @@ private struct DetailContent: View {
         if !motion.reduce, amountOrigin != nil {
             // La presentación de la hoja (subida o zoom desde el logo) la anima el sistema, a su velocidad: el vuelo
             // sale cuando ha terminado (0,45 s reales), desde donde estaba el importe en la fila hasta su sitio ya quieto.
-            guard !flightArmed else { return }
             flightArmed = true
-            withAnimation(.linear(duration: 0.45), completionCriteria: .removed) {
-                flyClock = 1
-            } completion: {
-                startFlight()
-            }
             return
         }
         startFlight()
@@ -303,20 +292,27 @@ private struct DetailContent: View {
         }
     }
 
+    /// La espera del vuelo: la presentación de la hoja la lleva el sistema a su velocidad (no va a cámara lenta), así
+    /// que son 0,45 s reales; después, el vuelo con lo medido.
+    private func flightAfterPresentation() async {
+        guard flightArmed, !landingStarted else { return }
+        try? await Task.sleep(for: .seconds(0.45))
+        guard !Task.isCancelled else { return }
+        startFlight()
+    }
+
     /// Respaldo (m-5): si el vuelo no llegara a avisar de que se posó, a los 0,8 s (según intensidad y cámara lenta)
-    /// más 1 s el importe se funde en su sitio y «Te quedaban» rueda. Nunca de golpe y sin `Task.sleep`: es el final de
-    /// una animación propia.
-    private func armWatchdog() {
-        withAnimation(.linear(duration: motion.seconds(0.8) + motion.pause(1)), completionCriteria: .removed) {
-            watchdog = 1
-        } completion: {
-            guard !amountLanded else { return }
-            withAnimation(motion.fade) {
-                amountShown = true
-                if flyDelta != .zero { flight = 1 }
-            }
-            amountLanded = true
+    /// más 1 s de pausa (cámara lenta incluida) el importe se FUNDE en su sitio y «Te quedaban» rueda: nunca aparece
+    /// de golpe. La espera es una pausa que lee `\.motion` (se probó a encadenarla al final de una animación invisible
+    /// y SwiftUI la daba por acabada al instante: «Te quedaban» se destapaba antes de tiempo, run 45608404581).
+    private func backstop() async {
+        try? await Task.sleep(for: .seconds(motion.seconds(0.8) + motion.pause(1) + (amountOrigin == nil ? 0 : 0.45)))
+        guard !Task.isCancelled, !amountLanded else { return }
+        withAnimation(motion.fade) {
+            amountShown = true
+            if flyDelta != .zero { flight = 1 }
         }
+        amountLanded = true
     }
 
     private var kindText: String {

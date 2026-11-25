@@ -12,6 +12,20 @@ final class MotionTourScreensTests: MotionTourCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
+    /// Abre la app y espera a que la capa del arranque se haya quitado: mientras está, un toque la salta en vez de llegar a
+    /// la pantalla, y lo que se anime debajo no se ve. A cámara lenta el arranque dura varios segundos.
+    override func launch(_ extra: [String] = [], scale: Double = 4) {
+        super.launch(extra, scale: scale)
+        waitForLaunchToEnd()
+    }
+
+    private func waitForLaunchToEnd() {
+        let layer = element("launch-layer")
+        _ = layer.waitForExistence(timeout: 3)
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: layer)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 120), .completed, "El arranque no terminó")
+    }
+
     /// Arrastra la pantalla hacia arriba un tercio, despacio y sin inercia, hasta que el elemento se pueda tocar.
     private func scrollDown(to el: XCUIElement, drags: Int = 16) {
         var left = drags
@@ -225,5 +239,308 @@ final class MotionTourScreensTests: MotionTourCase {
     /// Con el ojo cerrado: el cobro y los saldos previstos son «•••,•• €» en todos los fotogramas de la entrada.
     func testUpcomingCalendarEye() throws {
         upcomingCalendar("upcoming-calendar-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    // MARK: - Avisos: los avisos entran desde la derecha; el umbral de una regla aparece
+
+    /// Entrar en la pestaña Avisos: cada aviso llega desde 40 pt a la derecha, uno tras otro, y su importe rueda.
+    func testAlertsEnter() throws {
+        alertsEnter("alerts-enter", extra: [])
+    }
+
+    func testAlertsEnterEye() throws {
+        alertsEnter("alerts-enter-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    /// A cámara lenta ×10 (no ×4): el primer fotograma llega más de un segundo después del toque y a ×4 la entrada ya
+    /// estaba casi acabada.
+    private func alertsEnter(_ name: String, extra: [String]) {
+        launch(extra, scale: 10)
+        rehearse(tab: "Avisos", until: app.navigationBars["Avisos"])
+        press(tab: "Avisos")
+        burst(name, frames: 18, every: 0.3)
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 10), "La ráfaga no es de Avisos: la pestaña no se abrió")
+    }
+
+    /// Encender «Saldo bajo»: la fila de su umbral aparece con el muelle `row` (con el ojo cerrado, el umbral es la máscara).
+    private func alertsRule(_ name: String, extra: [String]) {
+        launch(["-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules"] + extra)
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 20), "No se ve Avisos")
+        let toggle = app.switches.matching(NSPredicate(format: "label BEGINSWITH %@", "Saldo bajo")).firstMatch
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "Falta el interruptor de «Saldo bajo»")
+        Thread.sleep(forTimeInterval: 3)
+        scrollDown(to: toggle)
+        XCTAssertTrue(toggle.isHittable, "El interruptor no se puede tocar")
+        toggle.tap()
+        Thread.sleep(forTimeInterval: 4)
+        toggle.tap()
+        burst(name, frames: 12, every: 0.2)
+        XCTAssertTrue(app.textFields["Avisar por debajo de"].waitForExistence(timeout: 8), "La ráfaga no enseña el umbral")
+    }
+
+    func testAlertsRule() throws {
+        alertsRule("alerts-rule", extra: [])
+    }
+
+    func testAlertsRuleEye() throws {
+        alertsRule("alerts-rule-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    // MARK: - Ajustes: el ✓ de un saldo guardado; las filas de Bancos entran
+
+    /// Guardar un saldo a mano: el ✓ se traza junto al campo y da un pequeño bote.
+    /// A cámara lenta ×12: el ✓ aparece (fundido), da su bote y se queda; a ×4 todo eso pasaba antes del primer fotograma.
+    private func settingsSave(_ name: String, extra: [String]) {
+        launch(["-MiBancoDemoScreen", "ajustes"] + extra, scale: 12)
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let field = app.textFields["Saldo de Revolut"]
+        scrollDown(to: field)
+        XCTAssertTrue(field.isHittable, "El saldo de Revolut no se puede tocar")
+        Thread.sleep(forTimeInterval: 1)
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.5)).tap()
+        field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 14) + "512,34")
+        Thread.sleep(forTimeInterval: 0.5)
+        field.typeText("\n")
+        burst(name, frames: 14, every: 0.3)
+    }
+
+    func testSettingsSave() throws {
+        settingsSave("settings-save", extra: [])
+    }
+
+    /// Con el ojo cerrado: al soltar el campo, el saldo vuelve a ser la máscara; el ✓ salta igual.
+    func testSettingsSaveEye() throws {
+        settingsSave("settings-save-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    /// Entrar en Ajustes por primera vez: las filas de Bancos llegan una tras otra (a cámara lenta ×10). Se ensaya con
+    /// otra pestaña (Gasto) para saber que la barra toma el toque; Ajustes no se ha abierto aún cuando empieza la ráfaga.
+    func testBanksList() throws {
+        launch(["-MiBancoDemoBanks"], scale: 10)
+        rehearse(tab: "Gasto", until: element("gasto.total"))
+        press(tab: "Ajustes")
+        burst("banks-list", frames: 16, every: 0.3)
+        XCTAssertTrue(app.buttons["settings-bank-rev"].waitForExistence(timeout: 10), "La ráfaga no es de Ajustes")
+    }
+
+    // MARK: - La pantalla de un banco: la hoja sube sobre la cabecera oscura
+
+    /// Ajustes con los bancos de la demo conectados y la fila del banco lista para tocar.
+    private func bankRow(_ id: String, _ extra: [String]) -> XCUIElement {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"] + extra)
+        let row = app.buttons["settings-bank-\(id)"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "Falta la fila del banco en Ajustes")
+        Thread.sleep(forTimeInterval: 3)
+        XCTAssertTrue(row.isHittable, "La fila del banco no se puede tocar")
+        return row
+    }
+
+    /// Abrir el banco: la cabecera sube 12 pt, su saldo cuenta desde 0 y la hoja llega desde 260 pt más abajo.
+    private func bankSheet(_ name: String, extra: [String], frames: Int = 16) {
+        let row = bankRow("rev", extra)
+        row.tap()
+        burst(name, frames: frames, every: 0.25)
+        XCTAssertTrue(element("bank-movements-title").waitForExistence(timeout: 10), "La ráfaga no es de la pantalla del banco")
+    }
+
+    func testBankSheet() throws {
+        bankSheet("bank-sheet", extra: [])
+    }
+
+    func testBankSheetEye() throws {
+        bankSheet("bank-sheet-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    /// En «Sutil»: recorridos más cortos y casi sin rebote.
+    func testBankSheetSubtle() throws {
+        bankSheet("bank-sheet-subtle", extra: ["-MiBancoMotionLevel", "subtle"])
+    }
+
+    /// Con Reducir movimiento: nada viaja; la cabecera y la hoja se funden.
+    func testBankSheetReduce() throws {
+        bankSheet("bank-sheet-reduce", extra: ["-MiBancoReduceMotion"], frames: 10)
+    }
+
+    /// Un fotograma de una hoja que no depende del tiempo sino de lo que se ha desplazado: el mismo formato de adjunto
+    /// que `burst` («<nombre>-NN_tTTT»), para que el workflow lo ponga en su hoja de contacto.
+    private func frame(_ name: String, _ index: Int, since start: Date) {
+        let screenshot = app.screenshot()
+        let tenths = Int((Date().timeIntervalSince(start) * 10).rounded())
+        let attachment = XCTAttachment(screenshot: screenshot, quality: .original)
+        attachment.name = "\(name)-" + String(format: "%02d", index) + "_t" + String(format: "%03d", tenths)
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func drag(from: CGFloat, to: CGFloat) {
+        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+        let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
+        // Despacio y soltando en parado: con más velocidad la lista sigue sola al soltar y se salta medio recorrido.
+        start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 70, thenHoldForDuration: 0.7)
+    }
+
+    /// La hoja sube sobre la cabecera (que se queda atrás, se encoge y se apaga), sus esquinas se cuadran al llegar arriba
+    /// y el título pequeño «Banco · saldo» entra en la barra; después baja y la cabecera vuelve. Al soltar a medio camino
+    /// la hoja se asienta sola (abajo o acoplada): los fotogramas se sacan seguidos justo después de soltar, así se ve el
+    /// asentamiento a medio recorrido (a cámara lenta ×4).
+    /// f1 en reposo · f2–f4 un arrastre corto que vuelve abajo · f5–f10 un arrastre largo que se acopla · f11–f16 baja.
+    private func bankSheetDock(_ name: String, extra: [String]) {
+        let row = bankRow("rev", extra)
+        row.tap()
+        XCTAssertTrue(element("bank-movements-title").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
+        Thread.sleep(forTimeInterval: 7)
+        let start = Date()
+        var index = 1
+        frame(name, index, since: start)
+        let settle = { (count: Int) in
+            for _ in 0..<count {
+                index += 1
+                self.frame(name, index, since: start)
+                Thread.sleep(forTimeInterval: 0.12)
+            }
+        }
+        // Un arrastre corto (unos 50 pt, menos de media cabecera): al soltar, vuelve abajo.
+        drag(from: 0.62, to: 0.56)
+        settle(3)
+        // Uno largo (unos 200 pt, más de media cabecera): al soltar, termina de subir y se acopla.
+        drag(from: 0.70, to: 0.46)
+        settle(6)
+        // Y baja: al soltar a medio camino, vuelve abajo y la cabecera vuelve.
+        drag(from: 0.36, to: 0.62)
+        settle(6)
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "Al bajar la hoja no volvió la cabecera")
+    }
+
+    func testBankSheetDock() throws {
+        bankSheetDock("bank-sheet-dock", extra: [])
+    }
+
+    func testBankSheetDockEye() throws {
+        bankSheetDock("bank-sheet-dock-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    /// Con Reducir movimiento la cabecera no viaja ni se encoge: solo se apaga bajo la hoja.
+    func testBankSheetDockReduce() throws {
+        bankSheetDock("bank-sheet-dock-reduce", extra: ["-MiBancoReduceMotion"])
+    }
+
+    // MARK: - Conectar un banco: pasos con porcentaje y «conectado»
+
+    /// «Renovar conexión» con el banco de mentira de la demo: Verificar › Conectar › Importar con su porcentaje (que se
+    /// frena antes de cada tope y solo llega a 100 al conectar) y, al final, «imagin, conectado»: el ✓ blanco salta con
+    /// su destello, el título, el estado y el saldo llegan uno tras otro, el saldo cuenta desde 0 y los botones suben.
+    private func bankConnected(_ name: String, extra: [String], frames: Int = 32) {
+        let row = bankRow("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "2.4", "-MiBancoDemoConnectFill", "6"] + extra)
+        row.tap()
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 10), "Falta «Renovar conexión»")
+        Thread.sleep(forTimeInterval: 6)
+        XCTAssertTrue(renew.isHittable, "«Renovar conexión» no se puede tocar")
+        renew.tap()
+        burst(name, frames: frames, every: 0.5)
+        XCTAssertTrue(element("bank-connected-title").waitForExistence(timeout: 15), "La ráfaga no llegó a «conectado»")
+    }
+
+    func testBankConnected() throws {
+        bankConnected("bank-connected", extra: [])
+    }
+
+    func testBankConnectedEye() throws {
+        bankConnected("bank-connected-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    func testBankConnectedSubtle() throws {
+        bankConnected("bank-connected-subtle", extra: ["-MiBancoMotionLevel", "subtle"])
+    }
+
+    /// Con Reducir movimiento: el porcentaje salta de tope en tope con un fundido, los nodos se funden y el ✓ sigue.
+    func testBankConnectedReduce() throws {
+        bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion"], frames: 22)
+    }
+
+    /// Tras conectar, la lista se llena por primera vez: fichas grises con un brillo que las barre y, al llegar los
+    /// movimientos, las filas entran una tras otra.
+    func testSkeleton() throws {
+        let row = bankRow("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "0.5", "-MiBancoDemoConnectFill", "5"])
+        row.tap()
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 10), "Falta «Renovar conexión»")
+        Thread.sleep(forTimeInterval: 6)
+        renew.tap()
+        XCTAssertTrue(element("skeleton-rows").waitForExistence(timeout: 10), "Tras conectar no se ve el esqueleto")
+        burst("skeleton", frames: 24, every: 0.3)
+        XCTAssertTrue(app.buttons.matching(identifier: "movementRow").firstMatch.waitForExistence(timeout: 10),
+                      "Tras el esqueleto no llegaron las filas")
+    }
+
+    // MARK: - Importar un extracto: pasos, vista previa y «Importar»
+
+    /// Leer › Revisar con su porcentaje y, después, la vista previa: sus piezas entran una tras otra y el recuento cuenta.
+    private func importPreview(_ name: String, extra: [String]) {
+        // La importación se abre tocando la fila del banco (con el arranque ya terminado): si se abriera sola al arrancar,
+        // sus pasos pasarían debajo de la capa del arranque.
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImportOnOpen"] + extra)
+        let row = app.buttons["settings-bank-rev"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "Falta la fila de Revolut en Ajustes")
+        Thread.sleep(forTimeInterval: 2)
+        row.tap()
+        burst(name, frames: 26, every: 0.3)
+        XCTAssertTrue(app.staticTexts["import-summary"].waitForExistence(timeout: 10), "La ráfaga no llegó a la vista previa")
+    }
+
+    func testImportPreview() throws {
+        importPreview("import-preview", extra: [])
+    }
+
+    func testImportPreviewEye() throws {
+        importPreview("import-preview-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    // MARK: - Bienvenida y guía de avisos
+
+    /// La primera vez: tres líneas de titanio cruzan la pantalla en diagonal, se ensanchan en bandas tenues y las piezas
+    /// del primer paso llegan una tras otra; la marca va quieta.
+    func testWelcome() throws {
+        // Sin esperar al arranque: la bienvenida empieza cuando el arranque deja ver lo de debajo, y la ráfaga los coge
+        // seguidos (primero las piezas del arranque, luego las bandas y las piezas de la bienvenida).
+        super.launch(["-MiBancoDemoOnboarding", "1"])
+        burst("welcome", frames: 32, every: 0.4)
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
+    }
+
+    /// Con Reducir movimiento: sin barrido; las bandas y las piezas aparecen con un fundido.
+    func testWelcomeReduce() throws {
+        super.launch(["-MiBancoDemoOnboarding", "1", "-MiBancoReduceMotion"])
+        burst("welcome-reduce", frames: 14, every: 0.3)
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
+    }
+
+    /// La guía de avisos: «Siguiente» desliza la página 70 pt hacia el lado al que se avanza y, medio segundo después,
+    /// un aro de «toca aquí» sale de lo que hay que tocar en el dibujo.
+    func testAlertsGuide() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAlertsGuide", "rev", "1"])
+        let next = app.buttons["guide-next"]
+        XCTAssertTrue(next.waitForExistence(timeout: 20), "No se abrió la guía")
+        Thread.sleep(forTimeInterval: 6)
+        // Sin comprobar «se puede tocar»: junto a la barra de pestañas esa pregunta falla aunque el toque entre.
+        next.tap()
+        burst("alerts-guide", frames: 22, every: 0.3)
+        let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
+        XCTAssertTrue(counter.label.contains("Paso 2 de"), "La ráfaga no avanzó al paso 2: \(counter.label)")
+    }
+
+    /// Tocar «Importar»: el tercer paso corre de 67 a 100, el botón se transforma (rueda y ✓) y se vuelve al banco.
+    func testImportConfirm() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImportOnOpen"])
+        let row = app.buttons["settings-bank-rev"]
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "Falta la fila de Revolut en Ajustes")
+        row.tap()
+        let confirm = app.buttons["import-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 30), "Falta «Importar»")
+        Thread.sleep(forTimeInterval: 5)
+        XCTAssertTrue(confirm.isHittable, "«Importar» no se puede tocar")
+        confirm.tap()
+        burst("import-confirm", frames: 14, every: 0.2)
+        XCTAssertTrue(app.buttons["bank-import-statement"].waitForExistence(timeout: 10), "Tras importar no volvió al banco")
     }
 }

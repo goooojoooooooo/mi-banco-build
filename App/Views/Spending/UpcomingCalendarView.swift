@@ -193,6 +193,8 @@ struct UpcomingCalendarView: View {
         let logo = logos.image(merchant: charge.name, domain: domain, isShop: true)
         let spoken = "\(charge.name), \(charge.bank.displayName), \(spokenAmount(charge.cents, hidden: hidden))"
             + (overdue.map { ", \($0)" } ?? "")
+        // Lo que se dibuja: la cifra o, con el ojo cerrado, la máscara del kit («−•••,•• €»), no un desenfoque.
+        let drawnAmount = hidden ? maskedEUR(-charge.cents, sign: false) : "\u{2212}\(formatEUR(charge.cents))"
         return HStack(spacing: 12) {
             MerchantTile(image: logo, symbol: "repeat", size: 28)
             VStack(alignment: .leading, spacing: 2) {
@@ -210,8 +212,7 @@ struct UpcomingCalendarView: View {
                 }
             }
             Spacer(minLength: 8)
-            // Con el ojo cerrado no se monta ninguna cifra: la máscara del kit («−•••,•• €»), no un desenfoque.
-            Text(hidden ? maskedEUR(-charge.cents, sign: false) : "\u{2212}\(formatEUR(charge.cents))")
+            Text(drawnAmount)
                 .titan(.option)
                 .foregroundStyle(Theme.label)
                 .contentTransition(.identity)
@@ -228,10 +229,12 @@ struct UpcomingCalendarView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
+        .accessibilityValue(drawnForTests(drawnAmount))
     }
 
     private func incomeRow(_ income: ExpectedIncome, divided: Bool, hidden: Bool) -> some View {
         let spoken = "\(income.name), ingreso estimado en \(income.bank.displayName), \(spokenAmount(income.cents, hidden: hidden))"
+        let drawnAmount = hidden ? maskedEUR(income.cents, sign: true) : "+\(formatEUR(income.cents))"
         return HStack(spacing: 12) {
             BankLogo(bank: income.bank, size: 28)
             VStack(alignment: .leading, spacing: 2) {
@@ -243,7 +246,7 @@ struct UpcomingCalendarView: View {
                     .foregroundStyle(Theme.label3)
             }
             Spacer(minLength: 8)
-            Text(hidden ? maskedEUR(income.cents, sign: true) : "+\(formatEUR(income.cents))")
+            Text(drawnAmount)
                 .titan(.option)
                 .foregroundStyle(Theme.income)
                 .contentTransition(.identity)
@@ -260,6 +263,7 @@ struct UpcomingCalendarView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
+        .accessibilityValue(drawnForTests(drawnAmount))
     }
 
     @ViewBuilder
@@ -371,6 +375,8 @@ struct UpcomingCalendarView: View {
                         let estimated = day.estimatedBanks.contains(bank)
                         let below = day.belowFloor.contains(bank)
                         let text = (estimated ? "≈\u{00A0}" : "") + formatEUR(cents).replacingOccurrences(of: "-", with: "\u{2212}")
+                        // Lo que se dibuja: la cifra o, con el ojo cerrado, la máscara (con su «≈» si el saldo es estimado).
+                        let drawn = hidden ? (estimated ? "≈\u{00A0}" : "") + maskedEUR(cents, sign: false) : text
                         let spokenParts = [
                             bank.displayName,
                             spokenAmount(cents, hidden: hidden),
@@ -381,8 +387,7 @@ struct UpcomingCalendarView: View {
                             Text(bank.shortName)
                                 .titan(.caption)
                                 .foregroundStyle(Theme.label3)
-                            // Con el ojo cerrado, la máscara (con su «≈» si el saldo es estimado), nunca la cifra.
-                            Text(hidden ? (estimated ? "≈\u{00A0}" : "") + maskedEUR(cents, sign: false) : text)
+                            Text(drawn)
                                 .titan(.meta)
                                 .fontWeight(.medium)
                                 .foregroundStyle(below ? Theme.warning : Theme.label2)
@@ -395,6 +400,7 @@ struct UpcomingCalendarView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel(spokenParts.joined(separator: ", "))
+                        .accessibilityValue(drawnForTests(drawn))
                     }
                 }
             }
@@ -433,4 +439,15 @@ struct UpcomingCalendarView: View {
             estimated: estimated
         ).first(where: \.fits)?.bank
     }
+}
+
+/// Solo en la demo con `-MiBancoDemoDrawnAmounts`: el texto que un importe DIBUJA en pantalla, como valor de
+/// accesibilidad de su fila («dibujado: −•••,•• €»). Las filas ignoran a sus hijos, así que una prueba de toque no ve lo
+/// dibujado de otra forma: con esto puede exigir que, con el ojo cerrado, no se dibuje ningún dígito. En la app de
+/// verdad, nada.
+private func drawnForTests(_ text: String) -> String {
+    #if DEBUG
+    if DemoMode.isActive, DemoMode.exposesDrawnAmounts { return "dibujado: " + text }
+    #endif
+    return ""
 }

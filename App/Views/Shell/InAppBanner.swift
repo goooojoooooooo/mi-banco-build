@@ -7,7 +7,7 @@ import MiBancoCore
 /// desde arriba: no cambia el tamaño de nada) y enseña «Te quedan», que rueda, y dos acciones; a los 3,4 s se recoge y
 /// a los 3,65 s sube y se va. Con Reducir movimiento: aparece con un fundido, se despliega a los 0,9 s sin moverse y
 /// se funde a los 3,2 s. Los tiempos son pausas de la interfaz (`motion.pause`: siguen la cámara lenta de las
-/// grabaciones) y se encadenan con el final de animaciones propias, sin `Task.sleep`.
+/// grabaciones).
 ///
 /// NUNCA es una hoja: va dentro de `RootView`, que está debajo del bloqueo y de la tapa; existe solo mientras
 /// `ShellState.shownBanner` lo dice (se quita al bloquear y al salir de primer plano). Con el ojo cerrado, sus
@@ -24,7 +24,6 @@ struct InAppBanner: View {
     @State private var dropped = false
     @State private var open: CGFloat = 0
     @State private var leftRevealed = false
-    @State private var clock: Double = 0
     @State private var headHeight: CGFloat = 0
     @State private var fullHeight: CGFloat = 0
 
@@ -52,8 +51,7 @@ struct InAppBanner: View {
         .padding(.horizontal, 10)
         .offset(y: dropped || motion.reduce ? 0 : -160)
         .opacity(motion.reduce ? (dropped ? 1 : 0) : 1)
-        .animationClock(clock)
-        .onAppear(perform: run)
+        .task { await run() }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("in-app-banner")
     }
@@ -120,45 +118,36 @@ struct InAppBanner: View {
 
     // MARK: El guion
 
-    /// Cae; a los 0,95 s se despliega y «Te quedan» rueda; a los 3,4 s se recoge; a los 3,65 s sube y se va.
-    private func run() {
+    /// Cae; a los 0,95 s se despliega y «Te quedan» rueda; a los 3,4 s se recoge; a los 3,65 s sube y se va. Las
+    /// esperas son pausas de la interfaz que leen `\.motion` (cámara lenta de las grabaciones incluida); si el aviso
+    /// se quita antes (bloqueo, segundo plano, toque), la tarea se cancela con él.
+    private func run() async {
         if motion.reduce {
             withAnimation(motion.fade) { dropped = true }
-            after(0.9) {
-                leftRevealed = true
-                open = 1
-                after(2.3) {
-                    withAnimation(motion.fade, completionCriteria: .logicallyComplete) { dropped = false } completion: {
-                        onFinished()
-                    }
-                }
-            }
+            guard await pause(0.9) else { return }
+            leftRevealed = true
+            withAnimation(motion.fade) { open = 1 }
+            guard await pause(2.3) else { return }
+            withAnimation(motion.fade) { dropped = false }
+            guard await pause(0.22) else { return }
+            onFinished()
             return
         }
         withAnimation(motion.animation(.release)) { dropped = true }
-        after(0.95) {
-            leftRevealed = true
-            withAnimation(motion.animation(.snap)) { open = 1 }
-            after(2.45) {
-                withAnimation(.easeIn(duration: motion.pause(0.32))) { open = 0 }
-                after(0.25) {
-                    withAnimation(.easeIn(duration: motion.pause(0.4)), completionCriteria: .logicallyComplete) {
-                        dropped = false
-                    } completion: {
-                        onFinished()
-                    }
-                }
-            }
-        }
+        guard await pause(0.95) else { return }
+        leftRevealed = true
+        withAnimation(motion.animation(.snap)) { open = 1 }
+        guard await pause(2.45) else { return }
+        withAnimation(.easeIn(duration: motion.pause(0.32))) { open = 0 }
+        guard await pause(0.25) else { return }
+        withAnimation(.easeIn(duration: motion.pause(0.4))) { dropped = false }
+        guard await pause(0.4) else { return }
+        onFinished()
     }
 
-    /// Espera `seconds` (pausa de la interfaz, a la cámara lenta de las grabaciones) y sigue: el final de una animación
-    /// propia de una vista vacía, no `Task.sleep`.
-    private func after(_ seconds: Double, _ next: @escaping () -> Void) {
-        withAnimation(.linear(duration: motion.pause(seconds)), completionCriteria: .removed) {
-            clock = clock < 0.5 ? 1 : 0
-        } completion: {
-            next()
-        }
+    /// Una pausa de la interfaz (a la cámara lenta de las grabaciones); false si la tarea se canceló.
+    private func pause(_ seconds: Double) async -> Bool {
+        try? await Task.sleep(for: .seconds(motion.pause(seconds)))
+        return !Task.isCancelled
     }
 }

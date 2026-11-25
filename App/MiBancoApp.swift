@@ -58,7 +58,11 @@ private struct AppShellView: View {
     /// enseña con su bandera.
     private static func lockSetting(enabled: Bool) -> (applies: Bool, relocks: Bool) {
         #if DEBUG
-        if DemoMode.isActive { return (DemoMode.holdsLock, enabled) }
+        // Con el bloqueo de demo, la app SIEMPRE se re-bloquea al ir a segundo plano: no depende del «Bloquear con Face
+        // ID» guardado en el simulador, que otra prueba (OnboardingUITests toca ese interruptor) puede haber dejado
+        // apagado en el mismo clon — así fallaban, solo en paralelo, las pruebas de volver de segundo plano
+        // (run 45603017151: OnboardingUITests y luego MotionShellTests en el clon 1).
+        if DemoMode.isActive { return (DemoMode.holdsLock, DemoMode.holdsLock || enabled) }
         #endif
         return (enabled, enabled)
     }

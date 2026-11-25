@@ -52,10 +52,13 @@ struct GuideStepView: View {
         // El paso que entra llega desde 70 pt (× la intensidad) del lado hacia el que se avanza; el que sale se va
         // 70 pt hacia el otro, y los dos se funden.
         let travel = motion.distance(70) * (forward ? 1 : -1)
-        // El que sale se va en el 40 % del tiempo (0,14 s): nunca se leen dos títulos uno encima del otro (menor m-6).
-        return .asymmetric(insertion: .offset(x: travel).combined(with: .opacity),
+        // En dos tiempos (menor m-6): el que sale se va en 0,1 s y el que entra empieza justo entonces; nunca se leen dos
+        // títulos uno encima del otro.
+        let leave = motion.seconds(0.10)
+        return .asymmetric(insertion: .offset(x: travel).combined(with: .opacity)
+                               .animation(motion.animation(.enter).delay(leave)),
                            removal: .offset(x: -travel).combined(with: .opacity)
-                               .animation(.easeOut(duration: motion.seconds(0.14))))
+                               .animation(.easeOut(duration: leave)))
     }
 
     var body: some View {

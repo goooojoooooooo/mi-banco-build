@@ -658,7 +658,7 @@ struct BankLinkView: View {
                 if firstFill {
                     SkeletonRows(count: 5)
                         .padding(.top, 14)
-                        .transition(.opacity)
+                        .transition(listSwap)
                 } else {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
@@ -668,7 +668,7 @@ struct BankLinkView: View {
                     }
                     // Cada vez que llegan las filas (también tras el esqueleto) entran una tras otra.
                     .assemblesOnFirstAppear()
-                    .transition(.opacity)
+                    .transition(listSwap)
                 }
             }
 
@@ -744,6 +744,15 @@ struct BankLinkView: View {
         }
         .padding(.bottom, Theme.Space.section)
         .animation(motion.calmAnimation(.row), value: firstFill)
+    }
+
+    /// Filas ↔ esqueleto en dos tiempos (ojo de diseño 14.5): lo que se va se apaga en 0,12 s y solo entonces entra lo
+    /// nuevo; nunca texto con fichas grises cruzándolo. (En la app el esqueleto solo sale con la lista VACÍA: primera
+    /// conexión. La demo lo fuerza sobre una lista con filas para poder grabarlo.)
+    private var listSwap: AnyTransition {
+        let out = motion.seconds(0.12)
+        return .asymmetric(insertion: .opacity.animation(.easeOut(duration: motion.seconds(0.2)).delay(out)),
+                           removal: .opacity.animation(.easeOut(duration: out)))
     }
 
     private var rowDivider: some View {

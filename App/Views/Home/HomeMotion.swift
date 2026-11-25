@@ -16,6 +16,9 @@ final class HomeMotion {
     /// tarjeta levantada abre el abanico: nadie se redibuja por ellos.
     @ObservationIgnored var carouselIdle = true
     @ObservationIgnored var listIdle = true
+    /// El carrusel se está deslizando por programa (segmentado, llegada): las tarjetas por las que solo pasa no
+    /// empiezan a contar su cifra.
+    @ObservationIgnored var carouselAnimating = false
     /// Dónde está en pantalla la tarjeta de delante (de ahí sale el abanico). Se lee al abrirlo, nunca al dibujar.
     @ObservationIgnored var carouselFrame = CGRect.zero
     #if DEBUG

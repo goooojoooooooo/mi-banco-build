@@ -476,6 +476,25 @@ final class MotionHomeTests: XCTestCase {
                       "Falla, pero no por la regla que vigila la regresión: \(problems.joined(separator: " | "))")
     }
 
+    /// Un deslizamiento programado largo («Todo» → Trade Republic) pasa por Revolut e imagin sin que empiecen a contar
+    /// su cifra desde 0 (se veía «0.000,00 €» al pasar): al llegar solo han contado la de salida y la de llegada.
+    func testFarGlideDoesNotRevealPassingCards() throws {
+        launchHome(["-MiBancoDemoCardElements"])
+        let seen = any("card-seen")
+        XCTAssertTrue(seen.waitForExistence(timeout: 8), "Falta la sonda de tarjetas ya contadas")
+        XCTAssertEqual(seen.label, "all", "Al arrancar ya había contado otra tarjeta además de «Todo»")
+        segment("Trade Rep.").tap()
+        XCTAssertTrue(waitUntil(8) { self.frontCardNumber() == 4 }, "El segmento no llevó a Trade Republic: \(carousel().label)")
+        Thread.sleep(forTimeInterval: 2)
+        XCTAssertEqual(seen.label, "all,tr", "Las tarjetas por las que pasó el deslizamiento contaron su cifra: \(seen.label)")
+        assertEverythingAgrees(on: 4, "Tras el deslizamiento largo")
+        // Después, con el dedo, la tarjeta vecina sí cuenta la suya al verse.
+        carousel().swipeRight()
+        XCTAssertTrue(waitUntil(8) { self.frontCardNumber() == 3 }, "El dedo no volvió a imagin: \(carousel().label)")
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(seen.label, "all,ima,tr", "La tarjeta a la que llega el dedo no contó su cifra: \(seen.label)")
+    }
+
     /// Sin cámara lenta: un deslizamiento del dedo pasa a la tarjeta siguiente y otro hacia atrás vuelve (el gesto de
     /// levantar la tarjeta no le quita el deslizamiento al carrusel).
     func testFingerSwipesMoveOneCardEachWay() throws {

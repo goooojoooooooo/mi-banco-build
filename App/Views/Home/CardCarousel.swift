@@ -142,7 +142,7 @@ struct CardCarousel: View {
                         .onScrollVisibilityChange(threshold: 0.5) { visible in
                             // Las tarjetas por las que solo PASA un deslizamiento programado no empiezan a contar su
                             // cifra desde 0 (se veía «0.000,00 €» al pasar): la contarán cuando de verdad se vean.
-                            if visible, scrollTarget == nil || scrollTarget == card { seen.insert(card) }
+                            if visible, !motion.carouselAnimating { seen.insert(card) }
                         }
                         // La tarjeta levantada pasa por encima de sus vecinas.
                         .zIndex(lifted == card ? 1 : 0)
@@ -181,6 +181,7 @@ struct CardCarousel: View {
                 probeFinger(old, new)
                 #endif
                 motion.carouselIdle = new == .idle
+                motion.carouselAnimating = new == .animating
                 if new == .idle, old != .idle { landed() }
             }
             // Dónde está la tarjeta de delante en pantalla: de ahí sale el abanico (se lee al abrirlo).
@@ -213,7 +214,8 @@ struct CardCarousel: View {
             }
             .onChange(of: selection) { _, new in
                 if flipped != nil { flipped = nil }
-                if let new { seen.insert(new) }
+                // La tarjeta de destino cuenta su cifra; las que el carrusel va nombrando al pasar por ellas, no.
+                if let new, !motion.carouselAnimating { seen.insert(new) }
                 // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
                 guard measured, let new, new != scrolledID else { return }
                 glide(to: new)
@@ -240,6 +242,8 @@ struct CardCarousel: View {
                     probe("card-finger-landed-on", "\(fingerLandedOn)", at: 3)
                     // «1» mientras hay un deslizamiento programado en curso.
                     probe("card-glide-active", scrollTarget != nil ? "1" : "0", at: 4)
+                    // Qué tarjetas han empezado ya a contar su cifra.
+                    probe("card-seen", cards.filter { seen.contains($0) }.map(\.rawValue).joined(separator: ","), at: 5)
                 }
             }
         #else
@@ -406,6 +410,8 @@ struct CardCarousel: View {
     /// El carrusel se ha parado (tras el dedo o tras un deslizamiento programado): la red de seguridad de abajo.
     private func landed() {
         guard !cards.isEmpty else { return }
+        // La tarjeta en la que se queda cuenta su cifra (si aún no lo había hecho).
+        seen.insert(current)
         let position = motion.carouselPosition
         let index = min(max(Int(position.rounded()), 0), cards.count - 1)
         // Red de seguridad: quieto y sin deslizamiento programado en curso, la tarjeta elegida es la que se ve. Si el

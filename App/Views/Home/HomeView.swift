@@ -413,7 +413,10 @@ struct HomeView: View {
         #if DEBUG
         HomeProbe.shared.listEntrances += 1
         #endif
-        withAnimation(.easeOut(duration: kit.seconds(0.16))) { listHidden = false }
+        // Con Reducir movimiento las cifras que cambian con la tarjeta se funden por su cuenta: la lista vuelve a
+        // verse cuando ese fundido ha terminado, así nunca se leen dos cifras superpuestas.
+        let wait = kit.reduce ? 0.22 * kit.timeMultiplier : 0
+        withAnimation(.easeOut(duration: kit.seconds(0.16)).delay(wait)) { listHidden = false }
     }
 
     // MARK: - Montaje y llegada

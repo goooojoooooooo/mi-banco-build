@@ -28,7 +28,8 @@ struct SuccessMark: View {
             .scaleEffect(popped || motion.reduce ? 1 : 0.3)
             .opacity(popped ? 1 : 0)
             .onAppear {
-                withAnimation(motion.animation(.release)) { popped = true }
+                // Con Reducir movimiento entra cuando lo anterior ya se ha fundido (nunca dos pantallas superpuestas).
+                withAnimation(motion.animation(.release).delay(motion.reduce ? motion.seconds(0.2) : 0)) { popped = true }
                 if motion.reduce {
                     drawn = true
                 } else {
@@ -54,7 +55,7 @@ private struct SuccessEntrance: ViewModifier {
             .offset(y: landed ? 0 : motion.distance(Self.rises[slot]))
             .opacity(landed ? 1 : 0)
             .onAppear {
-                let delay = motion.reduce ? 0 : motion.seconds(Self.delays[slot])
+                let delay = motion.reduce ? motion.seconds(0.2) : motion.seconds(Self.delays[slot])
                 withAnimation(motion.animation(.enter).delay(delay)) { landed = true }
             }
     }

@@ -85,9 +85,19 @@ public struct SpokenBriefing: Equatable, Sendable {
         /// `BriefingLine.id` de la línea (la frase principal es "headline").
         public let id: String
         public let range: Range<Int>
+
+        public init(id: String, range: Range<Int>) {
+            self.id = id
+            self.range = range
+        }
     }
     public let text: String
     public let lines: [Line]
+
+    public init(text: String, lines: [Line]) {
+        self.text = text
+        self.lines = lines
+    }
 
     /// La línea que suena cuando la voz va por la posición `offset` (UTF-16) del texto; nil entre líneas o fuera.
     public func line(at offset: Int) -> String? {

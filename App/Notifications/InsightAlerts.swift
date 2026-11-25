@@ -61,7 +61,8 @@ enum AlertScheduler {
 
     /// Quita todos los identificadores fijos y añade los planeados. Solo la llama `ScheduleQueue`, de una en una.
     fileprivate static func apply(_ state: LedgerState, now: Date, calendar: Calendar) async {
-        let requests = plannedRequests(for: state, now: now, calendar: calendar)
+        // El ojo de AHORA, al ejecutarse (dos cambios rápidos acaban con el último).
+        let requests = plannedRequests(for: state, now: now, calendar: calendar, hidden: AlertPoster.eyeClosed)
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [legacyWeeklyID] + weeklyIDs + subscriptionIDs)
         for request in requests {
@@ -69,13 +70,15 @@ enum AlertScheduler {
         }
     }
 
-    static func plannedRequests(for state: LedgerState, now: Date, calendar: Calendar) -> [UNNotificationRequest] {
+    /// `hidden`: el ojo al programarlos (M-1: lo pasa quien llama; no se lee aquí de ningún almacén).
+    static func plannedRequests(
+        for state: LedgerState, now: Date, calendar: Calendar, hidden: Bool
+    ) -> [UNNotificationRequest] {
         var out: [UNNotificationRequest] = []
         let settings = state.alertSettings
         // Lo que no es gasto (traspasos, sin confirmar, pareja probable), una vez para el resumen y las suscripciones.
         let notSpending = spendingExclusions(in: state, now: now)
-        // El ojo al programarlos: con el ojo cerrado, sin cifras. Al cambiar el ojo se vuelven a programar.
-        let hidden = AlertPoster.eyeClosed
+        // Con el ojo cerrado al programarlos, sin cifras. Al cambiar el ojo se vuelven a programar.
 
         if settings.weeklyDigest, let first = nextSunday8pm(after: now, calendar: calendar) {
             for week in 0..<weeklyCount {

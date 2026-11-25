@@ -6,7 +6,8 @@ import MiBancoCore
 /// Ajustes son el mismo estado) se guarda en UserDefaults; cambiarlo dentro de `withAnimation` anima cada importe.
 @MainActor @Observable
 final class AppPreferences {
-    nonisolated static let privateModeKey = "privateMode"
+    /// M-4: la misma clave que la carga de los avisos y la suite compartida (una sola fuente).
+    nonisolated static let privateModeKey = SharedPrivacy.key
 
     /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arrancar
     /// con `-MiBancoDemoPrivate`, para que la demo nunca toque el ojo del dueño y, aun así, quien observe lo guardado
@@ -23,7 +24,8 @@ final class AppPreferences {
 
     /// El modo privado guardado (la misma clave y el mismo almacén que lee `init`): para quien no tiene las preferencias
     /// en el entorno y aun así nunca debe enseñar un importe que el dueño tiene oculto.
-    static var storedPrivateMode: Bool { privateModeStore.bool(forKey: privateModeKey) }
+    /// M-4: la única lectura del ojo guardado (la usan también los avisos y la Live Activity).
+    nonisolated static var storedPrivateMode: Bool { SharedPrivacy.appEye(from: privateModeStore) }
 
     nonisolated static let pricesEnabledKey = "investmentPrices"
     nonisolated static let pricesAskedKey = "investmentPricesAsked"
@@ -38,12 +40,30 @@ final class AppPreferences {
     /// I-2: copia el ojo en la suite del grupo de apps (clave `privateMode`) para la extensión de avisos, y lo lleva a
     /// la Live Activity que esté en pantalla. La fuente de verdad sigue siendo la de arriba. Al cambiar y al arrancar.
     static func shareEye(_ hidden: Bool) {
-        let shared = SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)
-        SharedPrivacy.publish(hidden, to: shared)
+        let (shared, copy, reachesLiveActivity) = sharedTarget(hidden)
+        SharedPrivacy.publish(copy, to: shared)
         #if DEBUG
-        LaunchProbe.shared.sharedEye = SharedPrivacy.read(from: shared).map { $0 ? "cerrado" : "abierto" } ?? "-"
+        let word = { (closed: Bool) in closed ? "cerrado" : "abierto" }
+        LaunchProbe.shared.sharedEye = SharedPrivacy.read(from: shared).map(word) ?? "-"
+        // N-3: el ojo con el que se compondría ahora un aviso (y su carga) y la Live Activity.
+        LaunchProbe.shared.alertEye = word(AlertPoster.eyeClosed)
+        LaunchProbe.shared.activityEye = word(LiveActivityController.eyeClosed)
         #endif
-        Task { await LiveActivityController.syncEye() }
+        if reachesLiveActivity { Task { await LiveActivityController.syncEye() } }
+    }
+
+    /// Dónde va la copia del ojo, qué dice y si llega a la Live Activity.
+    private static func sharedTarget(_ hidden: Bool) -> (suite: UserDefaults?, copy: Bool, reachesLiveActivity: Bool) {
+        #if DEBUG
+        if DemoMode.isActive {
+            // N-5: la demo nunca escribe en el grupo de apps de verdad ni toca la Live Activity de verdad: su copia va a
+            // un dominio propio. Con `-MiBancoDemoSharedEyeOpposite` la copia dice lo CONTRARIO del ojo, para probar que
+            // los avisos y la Live Activity leen la fuente de verdad de la app y no esta copia (N-3).
+            let copy = DemoMode.writesOppositeSharedEye ? !hidden : hidden
+            return (UserDefaults(suiteName: "DemoSharedEye"), copy, false)
+        }
+        #endif
+        return (SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary), hidden, true)
     }
 
     static let motionLevelKey = "motionLevel"

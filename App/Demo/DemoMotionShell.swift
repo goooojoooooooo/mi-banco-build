@@ -20,6 +20,10 @@ extension DemoMode {
     /// al azar del barajado o máscara), para las pruebas de privacidad. Sin la bandera no cambia nada.
     static var exposesDrawnText: Bool { isActive && arguments.contains("-MiBancoDrawnText") }
 
+    /// `-MiBancoDemoSharedEyeOpposite`: la copia del ojo en la suite compartida (de la demo) dice lo contrario del ojo
+    /// (N-3: los avisos y la Live Activity no deben leerla).
+    static var writesOppositeSharedEye: Bool { isActive && arguments.contains("-MiBancoDemoSharedEyeOpposite") }
+
     /// `-MiBancoDemoTabSwitch <s>`: a los `s` segundos reales de arrancar, la app cambia sola de Inicio a Gasto (para
     /// grabar la entrada de la pestaña desde ANTES del cambio: un toque de la prueba espera a que la app quede quieta).
     static var tabSwitchSeconds: Double? {
@@ -100,6 +104,9 @@ extension DemoMode {
     var sharedEye = "-"
     /// B2: la línea del resumen que suena ahora («-» si ninguna).
     var spokenLine = "-"
+    /// N-3: el ojo con el que se compondría ahora un aviso (texto y carga) y la Live Activity («cerrado»/«abierto»).
+    var alertEye = "-"
+    var activityEye = "-"
     /// N-2: los botones del aviso dentro de la app reciben toques («1») o no («0»).
     var bannerActions = "0"
     /// Cuándo cambia sola de pestaña la demo (`-MiBancoDemoTabSwitch`), en segundos desde 1970.
@@ -130,6 +137,7 @@ extension DemoMode {
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
             "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "accionesAviso=\(bannerActions)",
+            "ojoAviso=\(alertEye)", "ojoActividad=\(activityEye)",
             "cambioPestana=\(tabSwitchAt.map { String(format: "%.3f", $0) } ?? "-")",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")

@@ -1,7 +1,8 @@
 import SwiftUI
 import MiBancoCore
 
-/// Grupo "Copia de seguridad" de Ajustes. Cada botón de exportar se transforma: icono → indicador → ✓ trazado.
+/// Grupo "Copia de seguridad" de Ajustes. Cada botón de exportar se transforma: icono → indicador → ✓ trazado, que
+/// salta de 0,4 a 1 sobre su ficha blanca (muelle del kit: sigue la intensidad y la cámara lenta).
 /// Con Reducir movimiento, fundidos. Los identificadores son para las pruebas de toque.
 struct BackupSection: View {
     let model: LedgerModel
@@ -18,7 +19,7 @@ struct BackupSection: View {
     @State private var previous: RestorePreview?
     @State private var doneTick = 0
     @State private var errorTick = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.presentationGate) private var gate
 
     static let scrollID = "copia-seguridad"
@@ -70,7 +71,7 @@ struct BackupSection: View {
             SettingsFooter("La copia lleva todos tus movimientos, saldos, notas e inversiones. Guárdala en un sitio tuyo: quien la tenga puede leerla.")
         }
         .task(id: model.restoreCount) { previous = model.previousPreview(portfolioSafetyCopy: portfolio.loadSafetyCopy()) }
-        .animation(reduceMotion ? nil : Theme.Motion.quick, value: failed)
+        .animation(motion.fade, value: failed)
         .sensoryFeedback(.success, trigger: doneTick)
         .sensoryFeedback(.error, trigger: errorTick)
     }
@@ -100,12 +101,12 @@ struct BackupSection: View {
                     case .done:
                         DrawnCheck(lineWidth: 2, color: Theme.onTileSelected)
                             .frame(width: 16, height: 16)
-                            .transition(.opacity)
+                            .transition(motion.reduce ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
                     }
                 }
                 .frame(width: 30, height: 30)
                 .background(state == .done ? Theme.tileSelected : Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
-                .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph, value: state)
+                .animation(motion.animation(.release), value: state)
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).titan(.option).foregroundStyle(Theme.label)
@@ -135,7 +136,7 @@ struct BackupSection: View {
     }
 
     private func set(_ kind: Kind, _ value: Phase) {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph) { phase[key(kind)] = value }
+        withAnimation(motion.animation(.release)) { phase[key(kind)] = value }
     }
 
     private func export(_ kind: Kind) async {
@@ -163,14 +164,15 @@ struct BackupSection: View {
             }
             set(kind, .done)
             doneTick += 1
-            try? await Task.sleep(for: .milliseconds(550))
+            // El ✓ se ve un momento (0,55 s del kit) antes de abrir la hoja de compartir.
+            try? await Task.sleep(for: .seconds(motion.seconds(0.55)))
             if stale() {
                 BackupService.remove(url)
                 set(kind, .idle)
                 return
             }
             present(.share(ShareItem(url: url)))
-            try? await Task.sleep(for: .milliseconds(700))
+            try? await Task.sleep(for: .seconds(motion.seconds(0.7)))
             set(kind, .idle)
         case .failure:
             errorTick += 1

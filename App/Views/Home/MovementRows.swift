@@ -124,25 +124,18 @@ struct MovementRowView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                HStack(spacing: 6) {
-                    // Con el ojo cerrado, la máscara (nunca la cifra bajo un desenfoque).
-                    MaskedAmountText(signedEUR(movement.amountCents), masked: maskedEUR(movement.amountCents, sign: true))
-                        .titan(.row)
-                        .foregroundStyle(amountColor)
-                        .strikethrough(movement.flaggedNotMine, color: Theme.label3)
-                        .lineLimit(1)
-                        .fixedSize()
-                        // Apunta dónde está el importe en pantalla: el del detalle sale volando desde aquí. Solo
-                        // apunta el marco (no cambia el diseño ni los toques) y se lee al tocar la fila, nunca al dibujar.
-                        .detailAmountSource(id: movement.id)
-                    if isFresh && movement.amountCents > 0 {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Theme.income)
-                            .transition(.scale(scale: 0.2).combined(with: .opacity))
-                    }
-                }
-                .padding(.leading, stacked ? tileSize + 14 : 0)
+                // Con el ojo cerrado, la máscara (nunca la cifra bajo un desenfoque).
+                MaskedAmountText(signedEUR(movement.amountCents), masked: maskedEUR(movement.amountCents, sign: true))
+                    .titan(.row)
+                    .foregroundStyle(amountColor)
+                    .strikethrough(movement.flaggedNotMine, color: Theme.label3)
+                    .lineLimit(1)
+                    .fixedSize()
+                    // Apunta dónde está el importe en pantalla: el del detalle sale volando desde aquí. Solo
+                    // apunta el marco (no cambia el diseño ni los toques) y se lee al tocar la fila, nunca al dibujar.
+                    .detailAmountSource(id: movement.id)
+                    .modifier(IncomeArrivalCheck(active: isFresh && movement.amountCents > 0))
+                    .padding(.leading, stacked ? tileSize + 14 : 0)
             }
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.vertical, 10)
@@ -239,6 +232,78 @@ private struct RowNamedActions: ViewModifier {
     }
 }
 
+/// El ✓ verde junto al importe de un ingreso recién llegado. Entra creciendo desde el 20 %. Al terminar el momento se
+/// retira en dos tiempos, sin montarse nunca sobre el «€»: primero el ✓ se apaga en su sitio (0,2 s, al 60 %) y solo
+/// después el importe se desliza a su posición (0,25 s). El deslizamiento es un desplazamiento (`offset`) que compensa
+/// el hueco que deja el ✓ al salir: la maquetación cambia una sola vez, sin animar, cuando el ✓ ya no se ve.
+private struct IncomeArrivalCheck: ViewModifier {
+    let active: Bool
+    @Environment(\.motion) private var motion
+    @State private var inLayout: Bool
+    @State private var shown = false
+    @State private var leaving = false
+    @State private var slide = 0
+    @State private var gap: CGFloat = 23
+
+    init(active: Bool) {
+        self.active = active
+        _inLayout = State(initialValue: active)
+    }
+
+    func body(content: Content) -> some View {
+        let distance = motion.reduce ? 0 : gap
+        let duration = motion.seconds(0.25)
+        HStack(spacing: 6) {
+            content
+                .keyframeAnimator(initialValue: CGFloat(0), trigger: slide) { view, x in
+                    view.offset(x: x)
+                } keyframes: { _ in
+                    KeyframeTrack {
+                        MoveKeyframe(-distance)
+                        CubicKeyframe(0, duration: duration)
+                    }
+                }
+            if inLayout {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Theme.income)
+                    .scaleEffect(shown || motion.reduce ? 1 : (leaving ? 0.6 : 0.2))
+                    .opacity(shown ? 1 : 0)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { gap = $0 + 6 }
+                    .accessibilityHidden(true)
+            }
+        }
+        .onAppear { if active { enter() } }
+        .onChange(of: active) { _, now in now ? enter() : leave() }
+    }
+
+    private func enter() {
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) {
+            inLayout = true
+            leaving = false
+        }
+        withAnimation(motion.animation(.release)) { shown = true }
+    }
+
+    private func leave() {
+        guard inLayout else { return }
+        leaving = true
+        withAnimation(.easeOut(duration: motion.seconds(0.2))) {
+            shown = false
+        } completion: {
+            guard !active else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) {
+                inLayout = false
+                slide += 1
+            }
+        }
+    }
+}
+
 /// La fila recién llegada: cae desde 22 pt más arriba (× el recorrido del nivel) al 96,5 % con el muelle de fila,
 /// aparece en 0,2 s y una luz la barre una vez (0,76 s; sin luz en Bajo consumo). Con Reducir movimiento solo se funde.
 /// Las filas de siempre (`isFresh` falso al montarse) no hacen nada.
@@ -247,12 +312,16 @@ private struct FreshDrop: ViewModifier {
     @Environment(\.motion) private var motion
     @State private var landed: Bool
     @State private var shown: Bool
+    /// Mientras cae, la fila se recorta a su propio hueco: sale de debajo del rótulo del día («Hoy»), nunca pasa por
+    /// encima de él. Al asentarse deja de recortarse (sin animación).
+    @State private var clipped: Bool
     @State private var sweep = 0
 
     init(isFresh: Bool) {
         self.isFresh = isFresh
         _landed = State(initialValue: !isFresh)
         _shown = State(initialValue: !isFresh)
+        _clipped = State(initialValue: isFresh)
     }
 
     func body(content: Content) -> some View {
@@ -265,9 +334,17 @@ private struct FreshDrop: ViewModifier {
             .scaleEffect(landed || motion.reduce ? 1 : 0.965)
             .offset(y: landed ? 0 : -motion.distance(22))
             .opacity(shown ? 1 : 0)
+            // Recortada a su hueco mientras cae; después, sin recorte (un rectángulo mucho mayor que la fila).
+            .clipShape(Rectangle().inset(by: clipped ? 0 : -400))
             .onAppear {
                 guard !landed else { return }
-                withAnimation(motion.animation(.row)) { landed = true }
+                withAnimation(motion.animation(.row)) {
+                    landed = true
+                } completion: {
+                    var still = Transaction()
+                    still.disablesAnimations = true
+                    withTransaction(still) { clipped = false }
+                }
                 withAnimation(.easeOut(duration: motion.seconds(motion.reduce ? 0.26 : 0.2))) { shown = true }
                 sweep += 1
             }

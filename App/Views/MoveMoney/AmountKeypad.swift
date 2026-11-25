@@ -108,10 +108,30 @@ struct AmountKeypad: View {
     }
 }
 
+/// Con el ojo cerrado la máscara no cambia al teclear: cada tecla la hace latir (104 % y vuelta) para que se note que
+/// ha entrado. Sin ojo cerrado, o con Reducir movimiento, no hace nada.
+private struct KeyBeat: ViewModifier {
+    let trigger: String
+    let active: Bool
+    @Environment(\.motion) private var motion
+
+    func body(content: Content) -> some View {
+        let up = active && !motion.reduce ? 1.04 : 1.0
+        content.keyframeAnimator(initialValue: 1.0, trigger: trigger) { view, scale in
+            view.scaleEffect(scale)
+        } keyframes: { _ in
+            KeyframeTrack {
+                CubicKeyframe(up, duration: motion.seconds(0.08))
+                CubicKeyframe(1.0, duration: motion.seconds(0.14))
+            }
+        }
+    }
+}
+
 /// El importe que se teclea, dígito a dígito (maqueta aprobada, `kpRender`): el dígito nuevo entra desde 14 pt más
 /// abajo, al 45 %, apareciendo; los demás le hacen sitio con un muelle; el punto de millar aparece creciendo desde el
 /// 20 %; un dígito borrado se va hacia arriba encogiéndose. El «€» va más pequeño y en gris.
-/// - Con el ojo cerrado cada dígito es un punto («••,• €»): se ve que se teclea, nunca qué.
+/// - Con el ojo cerrado es siempre «••• €» y late con cada tecla: se ve que se teclea, nunca qué ni cuánto.
 /// - Con Reducir movimiento los dígitos se funden en su sitio.
 /// - Para VoiceOver y las pruebas es un solo texto con el importe entero («12,50 €», o «importe oculto»).
 struct KeypadAmountDisplay: View {
@@ -141,6 +161,11 @@ struct KeypadAmountDisplay: View {
     /// Las piezas del importe, cada una con una identidad que no cambia al teclear (el dígito n.º 2 sigue siendo el
     /// n.º 2): así el que entra es nuevo y los demás solo se desplazan.
     private var glyphs: [Glyph] {
+        // Con el ojo cerrado, siempre «••• €»: ni cuántas cifras lleva ni dónde va el punto de millar (eso ya dice el
+        // tamaño del importe). Que se teclea se ve por el latido de cada tecla (`KeyBeat`).
+        if hidden {
+            return (0..<3).map { Glyph(id: "h\($0)", text: "•", kind: .digit) } + [Glyph(id: "e", text: "€", kind: .euro)]
+        }
         var out: [Glyph] = []
         let empty = amount.eurosText.isEmpty
         let euros = Array(empty ? "0" : amount.eurosText)
@@ -173,10 +198,16 @@ struct KeypadAmountDisplay: View {
             cells(size * 0.58)
         }
         .frame(maxWidth: .infinity)
+        .modifier(KeyBeat(trigger: amount.typedText, active: hidden))
         .privacySensitive()
         .accessibilityRepresentation {
             Text(spoken)
                 .accessibilityIdentifier("move-amount-display")
+                #if DEBUG
+                // Solo las pruebas (`-MiBancoDemoDrawnText`): lo que se ha DIBUJADO, para comprobar que con el ojo
+                // cerrado no cambia con el número de cifras.
+                .accessibilityValue(DemoMode.auditsDrawnText ? drawnText : "")
+                #endif
         }
         #if DEBUG
         .onAppear { DrawnTextAudit.shared.record(drawnText, hidden: hidden) }

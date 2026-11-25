@@ -12,7 +12,8 @@ struct RowSwipeAction: Identifiable {
     let perform: () -> Void
 }
 
-/// Una fila que se desliza hacia la izquierda y enseña sus acciones (76 pt cada una), como en la maqueta aprobada.
+/// Una fila que se desliza hacia la izquierda y enseña sus acciones (cápsulas de 64 pt sobre gris titanio), como en la
+/// maqueta aprobada.
 /// - El contenido sigue al dedo 1:1; más allá de las acciones (o hacia la derecha) hay resistencia de goma.
 /// - Al soltar se abre si ha pasado de 70 pt o si el dedo iba rápido hacia la izquierda; si no, se cierra. Abrir lleva
 ///   el muelle `snap`; cerrar, el mismo sin rebote. Con Reducir movimiento no hay viaje al soltar: se coloca.
@@ -40,8 +41,14 @@ struct SwipeActionsRow<Content: View>: View {
     @State private var dragging = false
     @State private var openTick = 0
 
-    private static var actionWidth: CGFloat { 76 }
-    private var span: CGFloat { CGFloat(actions.count) * Self.actionWidth }
+    /// Cada acción es una cápsula de 64 pt, con 6 pt entre ellas y 10 pt de margen al borde: así, abierta, aún se ve
+    /// parte del nombre del movimiento.
+    private static var actionWidth: CGFloat { 64 }
+    private static var actionGap: CGFloat { 6 }
+    private static var edgeMargin: CGFloat { 10 }
+    private var span: CGFloat {
+        CGFloat(actions.count) * Self.actionWidth + CGFloat(max(actions.count - 1, 0)) * Self.actionGap + Self.edgeMargin
+    }
     private var isOpen: Bool { offset <= -span + 8 }
 
     var body: some View {
@@ -57,6 +64,9 @@ struct SwipeActionsRow<Content: View>: View {
                 }
             }
             .offset(x: offset)
+            // Lo que sale por la izquierda se desvanece en 20 pt (nunca letras cortadas a cuchillo). Cerrada, nada.
+            // (Un degradado del negro del fondo por encima, fijo en el borde: sin máscara en cada fila.)
+            .overlay(alignment: .leading) { LeadingEdgeFade(amount: min(max(-offset / 20, 0), 1)) }
             .background(alignment: .trailing) {
                 // Las acciones solo existen mientras la fila está (algo) abierta: cerrada, no hay nada debajo.
                 if offset < -0.5 { buttons }
@@ -77,7 +87,9 @@ struct SwipeActionsRow<Content: View>: View {
     private var buttons: some View {
         let reveal: CGFloat = min(max(-offset / 70, 0), 1)
         let open = isOpen
-        return HStack(spacing: 0) {
+        // Cápsulas redondeadas como el resto de la app, las dos sobre el mismo gris titanio; «No es mío» solo con el
+        // texto en ámbar (sin fondo marrón).
+        return HStack(spacing: Self.actionGap) {
             ForEach(actions) { action in
                 Button {
                     action.perform()
@@ -92,13 +104,15 @@ struct SwipeActionsRow<Content: View>: View {
                         .minimumScaleFactor(0.8)
                         .padding(.horizontal, 4)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(action.warning ? Color(hex: "#2E2210") : Color(hex: "#2C2C2E"))
-                        .contentShape(Rectangle())
+                        .background(Color(hex: "#2C2C2E"), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .accessibilityIdentifier("row-action-\(action.id)")
             }
         }
+        .padding(.vertical, 8)
+        .padding(.trailing, Self.edgeMargin)
         // Si el muelle se pasa un poco, las acciones se estiran con la fila: nunca queda un hueco negro entre las dos.
         .frame(width: max(span, -offset))
         .opacity(reveal)
@@ -158,6 +172,21 @@ struct SwipeActionsRow<Content: View>: View {
 
     private func close() {
         settle(open: false)
+    }
+}
+
+/// El borde izquierdo de la fila deslizada: 20 pt que van del negro del fondo a transparente, tan visibles como diga
+/// `amount` (0 = cerrada, no se ve; 1 = del todo). Lo que sale por la izquierda se desvanece. Solo cambia opacidad y
+/// no recibe toques.
+private struct LeadingEdgeFade: View {
+    let amount: CGFloat
+
+    var body: some View {
+        LinearGradient(colors: [Theme.canvas, Theme.canvas.opacity(0)], startPoint: .leading, endPoint: .trailing)
+            .frame(width: 20)
+            .opacity(amount)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 

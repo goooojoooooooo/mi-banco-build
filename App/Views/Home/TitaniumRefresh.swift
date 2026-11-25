@@ -2,8 +2,8 @@ import SwiftUI
 import Observation
 
 /// «Tirar para actualizar» de Inicio, con el indicador de titanio de la maqueta aprobada: la ola de la marca se dibuja
-/// con el tirón, un toque ligero avisa de que ya basta, al soltar una luz recorre la ola (1,1 s por pasada) mientras se
-/// actualiza y, al terminar, dice «Al día» 0,6 s y se recoge.
+/// con el tirón, un toque ligero avisa de que ya basta, al soltar la ola baja al 45 % y una luz al 100 % la recorre (0,9 s
+/// por pasada) mientras se actualiza y, al terminar, dice «Al día» 0,6 s (si es verdad) y se recoge.
 /// - No hay gesto propio: el tirón es el rebote del sistema de la lista (se lee su desplazamiento), así que no compite
 ///   con el carrusel, con las filas ni con bajar la lista.
 /// - Mientras actualiza, la lista se queda 64 pt más abajo con un desplazamiento (`offset`), no cambiando la maquetación.
@@ -53,7 +53,8 @@ final class TitaniumRefreshState {
             withAnimation(motion.animation(.snap)) { hold = Self.holdDistance }
         }
         Task { outcome = await action() }
-        let pass = motion.seconds(1.1)
+        // Una pasada cada 0,9 s: la ola tiene vida mientras actualiza (no parece un indicador parado).
+        let pass = motion.seconds(0.9)
         var passes = 0
         repeat {
             if motion.richEffects {
@@ -65,7 +66,7 @@ final class TitaniumRefreshState {
         } while outcome == nil && passes < 12
         glinting = false
         if outcome == true {
-            withAnimation(motion.fade) { done = true }
+            withAnimation(motion.reduce ? motion.fade : .easeOut(duration: motion.seconds(0.15))) { done = true }
             doneTick += 1
             #if DEBUG
             HomeProbe.shared.refreshesDone += 1
@@ -110,9 +111,12 @@ struct TitaniumRefreshIndicator: View {
             .frame(height: 0)
             .overlay(alignment: .top) {
                 ZStack {
+                    // Mientras la luz la recorre, la ola baja al 45 % y la luz va al 100 %: se ve que trabaja.
                     WaveShape()
                         .trim(from: 0, to: drawn)
                         .stroke(Color(hex: "#D8DBE0"), style: line)
+                        .opacity(state.glinting ? 0.45 : 1)
+                        .animation(kit.fade, value: state.glinting)
                     if state.glinting {
                         WaveGlint(phase: state.glint)
                             .stroke(Color.white, style: line)
@@ -122,11 +126,12 @@ struct TitaniumRefreshIndicator: View {
                 .scaleEffect(kit.reduce ? 1 : 0.7 + 0.3 * drawn)
                 .overlay(alignment: .bottom) {
                     if state.done {
+                        // Legible en el poco tiempo que está: 13 pt, blanco al 70 %.
                         Text("Al día")
-                            .titan(.caption)
-                            .foregroundStyle(Theme.label3)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.7))
                             .fixedSize()
-                            .offset(y: 12)
+                            .offset(y: 16)
                             .transition(.opacity)
                             .accessibilityIdentifier("home-refresh-done")
                     }
@@ -140,7 +145,8 @@ struct TitaniumRefreshIndicator: View {
             .sensoryFeedback(.impact(weight: .light), trigger: armed) { _, now in now }
             .sensoryFeedback(Haptics.success, trigger: state.doneTick)
             .onChange(of: state.doneTick) { _, _ in
-                AccessibilityNotification.Announcement("Al día").post()
+                // Con Reducir movimiento lo anuncia el aviso breve de Inicio: una sola vez, no dos.
+                if !kit.reduce { AccessibilityNotification.Announcement("Al día").post() }
             }
             .accessibilityHidden(!state.done)
     }

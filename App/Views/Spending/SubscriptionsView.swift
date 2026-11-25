@@ -10,6 +10,15 @@ struct SubscriptionsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var errorTick = 0
 
+    /// Solo en la demo con `-MiBancoDemoBigSubscriptions`: la cabecera enseña importes mil veces mayores (cinco y seis
+    /// cifras), para comprobar que salta de línea en vez de salirse. En la app de verdad, 1.
+    private static var headerScale: Int {
+        #if DEBUG
+        if DemoMode.isActive, DemoMode.bigSubscriptionTotals { return 1_000 }
+        #endif
+        return 1
+    }
+
     var body: some View {
         let snapshot = model.snapshot
         ScrollView {
@@ -24,8 +33,8 @@ struct SubscriptionsView: View {
                         .accessibilityIdentifier("suscripciones.vacio")
                         .motionEntrance(0, rise: 8)
                 } else {
-                    SubscriptionsHeader(monthlyCents: snapshot.subscriptionsMonthlyCents,
-                                        yearlyCents: snapshot.subscriptionsYearlyCents)
+                    SubscriptionsHeader(monthlyCents: snapshot.subscriptionsMonthlyCents * Self.headerScale,
+                                        yearlyCents: snapshot.subscriptionsYearlyCents * Self.headerScale)
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.bottom, 10)
                         .motionEntrance(0, rise: 8)
@@ -146,7 +155,9 @@ struct HiddenSubscriptionsView: View {
 }
 
 /// «24,98 € al mes · 299,76 € al año»: las dos cifras ruedan desde 0 al montar y de la anterior a la nueva si cambian
-/// (`RollingAmount`; con el ojo cerrado, «•••,•• €» y nunca una cifra). Con texto muy grande, una debajo de la otra.
+/// (`RollingAmount`; con el ojo cerrado, «•••,•• €» y nunca una cifra). Las dos partes se colocan como un párrafo
+/// (`ParagraphFlow`): si no caben en una línea (importes largos, letra grande), la segunda baja a la línea siguiente; nunca
+/// se salen del ancho ni se montan dos copias. Con letra de accesibilidad, una debajo de la otra.
 private struct SubscriptionsHeader: View {
     let monthlyCents: Int
     let yearlyCents: Int
@@ -158,7 +169,7 @@ private struct SubscriptionsHeader: View {
         let stacked = typeSize.isAccessibilitySize
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
-            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 0))
+            : AnyLayout(ParagraphFlow())
         layout {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 RollingAmount(cents: monthlyCents)

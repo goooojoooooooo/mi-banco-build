@@ -1,13 +1,17 @@
 import MiBancoCore
 import SwiftUI
 
-/// Paso 1 de la bienvenida: saldos iniciales de los tres bancos.
+/// Paso 1 de la bienvenida: saldos iniciales de los tres bancos. Al aparecer, sus piezas llegan una tras otra (120 ms
+/// entre ellas, subiendo 22 pt) mientras las bandas de titanio cruzan el fondo; el botón llega el último con un bote.
+/// Con el ojo cerrado, un saldo ya escrito (y sin editar) es la máscara del kit: ninguna cifra en pantalla.
 struct OnboardingBalancesStep: View {
     let model: LedgerModel
+    /// La bienvenida ya está a la vista: las piezas empiezan a llegar.
+    var arrived = true
     let onNext: () -> Void
 
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
@@ -24,11 +28,13 @@ struct OnboardingBalancesStep: View {
                             .titan(.homeTitle)
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
+                            .risesIn(when: arrived, after: 0.50, rise: 22)
 
                         Text("Escribe lo que tienes ahora en cada banco. \(AppIdentity.displayName) lo irá actualizando.")
                             .titan(.callout)
                             .foregroundStyle(Theme.label2)
                             .fixedSize(horizontal: false, vertical: true)
+                            .risesIn(when: arrived, after: 0.62, rise: 22)
                     }
 
                     VStack(spacing: 0) {
@@ -42,6 +48,7 @@ struct OnboardingBalancesStep: View {
                         }
                     }
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+                    .risesIn(when: arrived, after: 0.74, rise: 22)
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.top, 8)
@@ -63,6 +70,7 @@ struct OnboardingBalancesStep: View {
             .accessibilityIdentifier("onboarding-next-1")
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, Theme.Space.gutter)
+            .risesIn(when: arrived, after: 0.86, rise: 34, bounce: 0.28)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }
@@ -76,6 +84,7 @@ struct OnboardingBalancesStep: View {
         let stacked = typeSize.isAccessibilitySize
         let isEditing = focused == bank
         let currentText = texts[bank] ?? ""
+        let masked = preferences.privateMode && !isEditing && !currentText.isEmpty
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.small))
             : AnyLayout(HStackLayout(spacing: Theme.Space.row))
@@ -91,7 +100,7 @@ struct OnboardingBalancesStep: View {
                 TextField("0,00 €", text: binding(for: bank))
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .foregroundStyle(Theme.label)
+                    .maskedAmountField(masked, alignment: stacked ? .leading : .trailing)
                     .multilineTextAlignment(stacked ? .leading : .trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -102,9 +111,8 @@ struct OnboardingBalancesStep: View {
                         Theme.fieldFill.opacity(isEditing ? 1 : 0),
                         in: .rect(cornerRadius: Theme.Radius.field)
                     )
-                    .privateField(editing: isEditing)
                     .accessibilityLabel("Saldo de \(bank.displayName)")
-                    .accessibilityValue(preferences.privateMode && !isEditing && !currentText.isEmpty ? "importe oculto" : currentText)
+                    .accessibilityValue(masked ? "importe oculto" : currentText)
             }
             if let error = errors[bank] {
                 Text(error)
@@ -138,7 +146,7 @@ struct OnboardingBalancesStep: View {
             let raw = (texts[bank] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !raw.isEmpty else { continue }
             guard let cents = parseBalanceInput(raw) else {
-                withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                withAnimation(motion.fade) {
                     errors[bank] = "Escribe un importe como 340,20"
                 }
                 hasError = true
@@ -147,7 +155,7 @@ struct OnboardingBalancesStep: View {
             do {
                 try model.setBalance(bank, cents: cents)
             } catch {
-                withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                withAnimation(motion.fade) {
                     errors[bank] = "No se pudo guardar. Inténtalo de nuevo."
                 }
                 hasError = true

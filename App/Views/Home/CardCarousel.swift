@@ -214,8 +214,10 @@ struct CardCarousel: View {
             }
             .onChange(of: selection) { _, new in
                 if flipped != nil { flipped = nil }
-                // La tarjeta de destino cuenta su cifra; las que el carrusel va nombrando al pasar por ellas, no.
-                if let new, !motion.carouselAnimating { seen.insert(new) }
+                // Si el dedo ya la dejó delante, cuenta su cifra ahora. Si el carrusel tiene que deslizarse hasta ella
+                // (segmentado, llegada, VoiceOver), la cuenta empieza al llegar (`releaseTarget` / `landed`): así no
+                // llega con la cuenta a medias, y las que solo cruza no cuentan nunca.
+                if let new, new == scrolledID || !measured, !motion.carouselAnimating { seen.insert(new) }
                 // Segmentado, VoiceOver, toque en un vecino o llegada: el carrusel va hasta allí con su muelle.
                 guard measured, let new, new != scrolledID else { return }
                 glide(to: new)
@@ -354,7 +356,7 @@ struct CardCarousel: View {
                 releaseTarget(token)
             }
         } else {
-            withAnimation(kit.animation(.snap)) {
+            withAnimation(glideSpring) {
                 scrolledID = card
             } completion: {
                 if !holdsOpen { releaseTarget(token) }
@@ -371,6 +373,13 @@ struct CardCarousel: View {
         }
     }
 
+    /// El muelle del deslizamiento programado: el `snap` del nivel, con el rebote acotado (amortiguación ≥ 0,83) para
+    /// que la tarjeta llegue pasándose como mucho unos 4 pt (el asentamiento aprobado) y no 30 pt hasta el borde.
+    private var glideSpring: Animation {
+        let spec = MotionMath.scaled(SpringToken.snap.base, level: kit.level, timeMultiplier: kit.timeMultiplier)
+        return .spring(response: spec.response, dampingFraction: max(spec.dampingFraction, 0.83))
+    }
+
     /// Reducir movimiento: el carrusel (ya invisible) salta a la tarjeta y vuelve a verse con un fundido.
     private func jump(to card: AccountCard) {
         var still = Transaction()
@@ -384,6 +393,8 @@ struct CardCarousel: View {
     private func releaseTarget(_ token: Int) {
         guard scrollTargetToken == token, scrollTarget != nil else { return }
         scrollTarget = nil
+        // Ha llegado: la tarjeta de delante empieza a contar su cifra (si aún no lo había hecho).
+        seen.insert(scrolledID ?? current)
         guard let shown = scrolledID, shown != selection else { return }
         #if DEBUG
         // Solo para probar la prueba (`-MiBancoDemoGlideWins`): la regresión exacta. El dedo interrumpió el
@@ -520,7 +531,7 @@ struct CardCarousel: View {
                 try? await Task.sleep(for: .milliseconds(800))
                 withAnimation(kit.reduce ? nil : kit.animation(.snap)) { selection = target }
             }
-        case .arrival, .arrivalIncome, .fan, .refresh, .rowSwipe, nil:
+        case .arrival, .arrivalIncome, .fan, .refresh, .rowSwipe, .search, nil:
             // Estos los atiende Inicio (`HomeView.runDemoMoment`).
             break
         }

@@ -1006,6 +1006,12 @@ final class MotionHomeTests: XCTestCase {
         let display = any("move-amount-display")
         XCTAssertTrue(display.waitForExistence(timeout: 5), "Falta el importe tecleado")
         XCTAssertEqual(display.label, "importe oculto", "El importe tecleado se lee con el ojo cerrado")
+        // Lo dibujado tampoco dice cuántas cifras lleva: con 3 y con 4 cifras (punto de millar) es la misma máscara.
+        XCTAssertEqual(display.value as? String, "•••€", "La máscara del importe tecleado deja ver su tamaño")
+        app.buttons["0"].tap()
+        XCTAssertTrue(waitUntil(3) { (display.value as? String) == "•••€" },
+                      "Con cuatro cifras la máscara cambió: \(String(describing: display.value))")
+        app.buttons["keypad-backspace"].tap()
         assertNoAmounts("Mover dinero, importe")
         let copied = app.staticTexts["IBAN de Revolut copiado"]
         XCTAssertTrue(slideToPrepare(until: copied), "No apareció «IBAN de Revolut copiado»")
@@ -1050,5 +1056,47 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertLessThanOrEqual(most, 1, "Durante el cambio hubo \(most) resúmenes de 7 días a la vez")
         XCTAssertTrue(waitUntil(5) { summaries.firstMatch.label != before }, "El resumen no cambió con la tarjeta: \(before)")
         XCTAssertEqual(homeProbe()["listas"], "1", "La lista no hizo su cambio (salir, cambiar, entrar): \(homeProbe())")
+        // Con Reducir movimiento la lista vieja sí se funde del todo (las cifras se funden por su cuenta).
+        XCTAssertEqual(homeProbe()["fondoLista"], "0", "Con Reducir movimiento la lista vieja no se fundió: \(homeProbe())")
+    }
+
+    // MARK: Retoques de diseño
+
+    /// Cambiar de tarjeta es un fundido cruzado: la lista vieja se atenúa (al 30 %) y la nueva sale desde ahí. En el
+    /// instante del cambio la lista nunca está al 0 % (antes, ~100 ms de pantalla en negro bajo el selector).
+    func testCardChangeNeverBlanksTheList() throws {
+        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"])
+        let summaries = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Gastado en 7 días:"))
+        XCTAssertTrue(summaries.firstMatch.waitForExistence(timeout: 8), "Falta el resumen de 7 días")
+        let before = summaries.firstMatch.label
+        segment("Revolut").tap()
+        XCTAssertTrue(waitUntil(5) { self.homeProbe()["listas"] == "1" }, "La lista no hizo su cambio: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["fondoLista"], "30", "La lista vieja se apagó del todo antes del cambio: \(homeProbe())")
+        XCTAssertTrue(waitUntil(5) { summaries.firstMatch.label != before }, "El resumen no cambió con la tarjeta: \(before)")
+        // Sigue respondiendo: la fila abre su detalle.
+        let row = firstRow()
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "No hay filas tras el cambio")
+        row.tap()
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8), "Tras el cambio de tarjeta, la fila no abre su detalle")
+        close.tap()
+    }
+
+    /// Con el texto más grande, la cabecera del abanico («Tus tarjetas» y la ayuda) no queda debajo de la primera
+    /// tarjeta: su alto sale de lo que mide (antes, 92 pt fijos).
+    func testWalletFanHeaderFitsAtLargestText() throws {
+        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes",
+                    "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        XCTAssertTrue(carousel().waitForExistence(timeout: 8), "Falta el carrusel")
+        carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).press(forDuration: 1.6)
+        XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "No se abrió el abanico: \(homeProbe())")
+        let help = app.staticTexts["Toca una para abrirla."]
+        let first = app.buttons["wallet-card-all"]
+        XCTAssertTrue(help.waitForExistence(timeout: 5) && first.waitForExistence(timeout: 5), "Falta la cabecera o la primera tarjeta")
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertLessThanOrEqual(help.frame.maxY, first.frame.minY + 1,
+                                 "La primera tarjeta \(first.frame) tapa la ayuda del abanico \(help.frame)")
+        app.buttons["wallet-fan-close"].tap()
+        XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "0" }, "El abanico no se cerró")
     }
 }

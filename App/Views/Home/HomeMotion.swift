@@ -94,8 +94,11 @@ struct HomeEntrance: ViewModifier {
     func body(content: Content) -> some View {
         let plan = plan
         let waiting = plan != nil && landed != entrance.token
+        // En un cambio de tarjeta la lista nueva no parte de invisible: sale de donde se quedó la vieja (atenuada, ver
+        // `HomeView.showList`), así la pantalla nunca se queda en negro entre las dos. Solo sube a su sitio.
+        let hiddenWhileWaiting = entrance.scope == .list && !motion.reduce ? 1.0 : 0.0
         content
-            .opacity(waiting ? 0 : 1)
+            .opacity(waiting ? hiddenWhileWaiting : 1)
             .scaleEffect(waiting && !motion.reduce ? (plan?.scale ?? 1) : 1)
             .offset(y: waiting ? motion.distance(plan?.rise ?? 0) : 0)
             .onAppear(perform: land)
@@ -114,6 +117,31 @@ extension View {
     /// Esta pieza entra por capas con Inicio (ver `HomeEntrance`).
     func homeEntrance(_ piece: HomeEntrance.Piece) -> some View {
         modifier(HomeEntrance(piece: piece))
+    }
+}
+
+/// Un importe de la tarjeta que, al montarse Inicio (arranque o desbloqueo), vuelve a contar desde 0: el kit lo pone a 0
+/// y espera 0,15 s (× intensidad y cámara lenta) antes de rodar. Durante esa espera no se enseña: lo primero que se ve
+/// es la cifra ya rodando, nunca un «0,00 €» quieto. Fuera del montaje (o con Reducir movimiento, que no cuenta) no
+/// hace nada. Solo cambia la opacidad, con una sola secuencia de fotogramas clave por montaje.
+struct RollStartVeil: ViewModifier {
+    @Environment(\.entrance) private var entrance
+    @Environment(\.motion) private var motion
+
+    func body(content: Content) -> some View {
+        let veils = entrance.active && entrance.scope == .assembly && !motion.reduce
+        let start = veils ? 0.0 : 1.0
+        let wait = veils ? motion.seconds(0.15) : 0.001
+        let show = motion.seconds(0.05)
+        content.keyframeAnimator(initialValue: 1.0, trigger: entrance.token) { view, opacity in
+            view.opacity(opacity)
+        } keyframes: { _ in
+            KeyframeTrack {
+                MoveKeyframe(start)
+                LinearKeyframe(start, duration: wait)
+                LinearKeyframe(1.0, duration: show)
+            }
+        }
     }
 }
 
@@ -244,6 +272,9 @@ struct DrawnTextAuditProbe: View {
     var arrivalPulses = 0
     /// Cuántas veces ha entrado la lista escalonada por un cambio de tarjeta.
     var listEntrances = 0
+    /// Opacidad (en %) a la que estaba la lista vieja en el instante del último cambio de lista: nunca 0 con
+    /// movimiento (la pantalla no se queda en negro entre las dos listas). -1 = aún no ha habido cambio.
+    var listSwapFloor = -1
     /// Veces que se ha montado el ✓ del éxito (`SuccessMark`, solo «He visto salir») y el ✓ de «preparado»
     /// (`PreparedMark`, el paso «listo» de «Mover dinero»).
     var successMarks = 0
@@ -253,7 +284,7 @@ struct DrawnTextAuditProbe: View {
         [
             "montajes=\(assemblies)", "inclinacion=\(tiltRunning ? 1 : 0)", "tirones=\(refreshes)", "alDia=\(refreshesDone)",
             "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
-            "insignias=\(arrivalBadges)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)",
+            "insignias=\(arrivalBadges)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)",
             "exitos=\(successMarks)", "preparados=\(preparedMarks)",
         ].joined(separator: ";")
     }

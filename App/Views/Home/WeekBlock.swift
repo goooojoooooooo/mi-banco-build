@@ -48,7 +48,7 @@ struct WeekBlock: View {
     @ViewBuilder
     private var footnote: some View {
         if card == .all, let pace {
-            PaceSentence(pace: pace)
+            PaceLineSwap(pace: pace)
         } else if card != .all {
             Text(balanceFootnote)
         }
@@ -64,6 +64,31 @@ struct WeekBlock: View {
         case .notice, .manual:
             return balance.estimated ? "Saldo estimado: corrígelo en Ajustes" : "Saldo exacto del último aviso"
         }
+    }
+}
+
+/// La frase del mes cuando cambia (llega un movimiento): no cambia de golpe antes que nada se mueva. Espera a que la
+/// fila nueva aterrice (0,2 s), se apaga en 0,1 s, cambia y vuelve en 0,1 s: nunca dos frases a la vez. Con Reducir
+/// movimiento, el mismo fundido sin espera. Solo cambia la opacidad.
+private struct PaceLineSwap: View {
+    let pace: PaceLine
+    @Environment(\.motion) private var motion
+    @State private var shown: PaceLine?
+    @State private var visible = true
+
+    var body: some View {
+        PaceSentence(pace: shown ?? pace)
+            .opacity(visible ? 1 : 0)
+            .onChange(of: pace) { _, new in
+                let wait = motion.reduce ? 0 : motion.seconds(0.2)
+                withAnimation(.easeIn(duration: motion.seconds(0.1)).delay(wait)) {
+                    visible = false
+                } completion: {
+                    shown = new
+                    withAnimation(.easeOut(duration: motion.seconds(0.1))) { visible = true }
+                }
+            }
+            .onAppear { shown = pace }
     }
 }
 

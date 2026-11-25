@@ -27,6 +27,9 @@ extension DemoMode {
         case refresh
         /// La primera fila se desliza y enseña sus acciones.
         case rowSwipe
+        /// La búsqueda se abre 0,8 s después del toque y se cierra 3 s más tarde (XCUITest no devuelve el toque de la
+        /// lupa hasta que la app está quieta: así la ráfaga ve el cambio entero).
+        case search
     }
 
     /// `-MiBancoDemoCardMoment <momento>` (solo con `-MiBancoDemo`): tocar el segmento que YA está elegido dispara

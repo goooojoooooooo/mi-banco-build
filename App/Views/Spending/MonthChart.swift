@@ -39,9 +39,10 @@ struct MonthChart: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Gráfico del gasto de \(title.lowercased()) frente a \(previousTitle.lowercased())")
+        // Lo de este mes va hasta hoy y lo del anterior es el mes ENTERO: se dice, para no comparar cosas distintas.
         .accessibilityValue(hidden
             ? "importe oculto"
-            : "\(spokenAmount(series.totalCents, hidden: false)) frente a \(spokenAmount(series.previousTotalCents, hidden: false))")
+            : "\(spokenAmount(series.totalCents, hidden: false)); \(previousTitle.lowercased()) entero: \(spokenAmount(series.previousTotalCents, hidden: false))")
         .accessibilityIdentifier("gasto.grafico")
         .onAppear { start() }
         // Entrada nueva (se entra en la pestaña): el gráfico, que ya está en blanco (`on`), se dibuja otra vez.

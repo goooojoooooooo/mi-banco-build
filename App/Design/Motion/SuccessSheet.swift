@@ -2,8 +2,7 @@ import SwiftUI
 import MiBancoCore
 
 // El momento de éxito de una hoja (maqueta aprobada, `successNow`): el ✓ salta de 0,3 a 1 con rebote y se traza, y
-// debajo entran el título, los datos y el botón a los 0,16 / 0,23 / 0,30 / 0,38 s; el botón principal empieza apagado y
-// se enciende a los 0,9 s. Solo son piezas de movimiento: los textos los pone quien las usa. Con Reducir movimiento todo
+// debajo entran el título, los datos y el botón a los 0,16 / 0,23 / 0,30 / 0,38 s. Solo son piezas de movimiento: los textos los pone quien las usa. Con Reducir movimiento todo
 // se funde en su sitio. Tiempos, recorridos y rebote salen de `\.motion`; solo cambian escala, desplazamiento, opacidad
 // y color.
 // Regla D9: el ✓ del éxito (`SuccessMark`) y su háptica son SOLO para un traspaso que la app ha VISTO salir («He visto
@@ -78,8 +77,9 @@ struct PreparedMark: View {
                 drawn = true
                 withAnimation(motion.fade.delay(motion.pause(0.22))) { shown = true }
             } else {
-                withAnimation(motion.calmAnimation(.enter)) { shown = true }
-                withAnimation(.easeOut(duration: motion.seconds(0.35)).delay(motion.seconds(0.12))) { drawn = true }
+                // 0,1 s después: el paso del importe ya se ha apagado donde aparece el aro (nada se monta encima).
+                withAnimation(motion.calmAnimation(.enter).delay(motion.seconds(0.1))) { shown = true }
+                withAnimation(.easeOut(duration: motion.seconds(0.35)).delay(motion.seconds(0.22))) { drawn = true }
             }
         }
         .accessibilityHidden(true)
@@ -115,33 +115,5 @@ extension View {
     /// Entra tras el ✓, en su turno (ver `SuccessEntrance`). `calm`: sin rebote y con menos recorrido.
     func successEntrance(_ order: Int, calm: Bool = false) -> some View {
         modifier(SuccessEntrance(order: order, calm: calm))
-    }
-}
-
-/// El botón principal de un éxito: empieza apagado (gris) y se enciende (blanco) a los 0,9 s. Se puede tocar desde el
-/// principio; se hunde como el cristal (0,88) al tocar.
-struct SuccessButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        SuccessButtonFace(label: configuration.label, pressed: configuration.isPressed)
-    }
-}
-
-private struct SuccessButtonFace<Face: View>: View {
-    let label: Face
-    let pressed: Bool
-
-    @Environment(\.motion) private var motion
-    @State private var lit = false
-
-    var body: some View {
-        label
-            .foregroundStyle(lit ? Theme.onTileSelected : Theme.label3)
-            .background(lit ? Theme.tileSelected : Color(hex: "#2C2C2E"), in: Capsule())
-            .scaleEffect(pressed && !motion.reduce ? 0.94 : 1)
-            .opacity(pressed && motion.reduce ? 0.7 : 1)
-            .animation(pressed ? motion.animation(.pressIn) : motion.animation(.release), value: pressed)
-            .onAppear {
-                withAnimation(.easeOut(duration: motion.seconds(0.45)).delay(motion.seconds(0.9))) { lit = true }
-            }
     }
 }

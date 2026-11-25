@@ -2,7 +2,8 @@ import SwiftUI
 import MiBancoCore
 
 /// Un paso de la guía por pantalla: dibujo, título, una sola acción, ayuda y «Siguiente».
-/// Los pasos se deslizan con un muelle (Reducir movimiento: fundido). Se empuja dentro de la navegación de Ajustes.
+/// Los pasos se deslizan 70 pt hacia el lado al que se avanza con el muelle `enter` del kit (sigue la intensidad y la
+/// cámara lenta; con Reducir movimiento, un fundido). Se empuja dentro de la navegación de Ajustes.
 struct GuideStepView: View {
     let track: GuideTrack
     let model: LedgerModel
@@ -23,6 +24,7 @@ struct GuideStepView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
 
     /// `start` es el paso de partida (demo), contando desde 0; `resume`, el paso en que se dejó la guía a medias.
@@ -46,11 +48,12 @@ struct GuideStepView: View {
     private var status: GuideStatus { guideStatus(track, in: model.state, now: Date()) }
 
     private var slide: AnyTransition {
-        if reduceMotion { return .opacity }
-        let edge: Edge = forward ? .trailing : .leading
-        let back: Edge = forward ? .leading : .trailing
-        return .asymmetric(insertion: .move(edge: edge).combined(with: .opacity),
-                           removal: .move(edge: back).combined(with: .opacity))
+        if motion.reduce { return .opacity }
+        // El paso que entra llega desde 70 pt (× la intensidad) del lado hacia el que se avanza; el que sale se va
+        // 70 pt hacia el otro, y los dos se funden.
+        let travel = motion.distance(70) * (forward ? 1 : -1)
+        return .asymmetric(insertion: .offset(x: travel).combined(with: .opacity),
+                           removal: .offset(x: -travel).combined(with: .opacity))
     }
 
     var body: some View {
@@ -114,7 +117,8 @@ struct GuideStepView: View {
                     }
                 }
             }
-            .animation(reduceMotion ? nil : Theme.Motion.morph, value: index)
+            // El punto del paso en curso se estira y corre con el muelle de los indicadores del kit.
+            .animation(motion.animation(.indicator), value: index)
             .accessibilityHidden(true)
         }
         .frame(maxWidth: .infinity)
@@ -343,7 +347,7 @@ struct GuideStepView: View {
 
     private func applyPending(_ target: Int) {
         pendingStep = nil
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.45, bounce: 0.18)) {
+        withAnimation(motion.animation(.enter)) {
             index = target
             helpOpen = false
             drawingHidden = false

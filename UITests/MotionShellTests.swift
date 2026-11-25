@@ -670,17 +670,23 @@ final class MotionShellTests: XCTestCase {
         app.terminate()
 
         // (c)
-        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoDemoPrivate", "-MiBancoMotionScale", "6"])
-        XCTAssertTrue(banner.waitForExistence(timeout: 30), "No apareció el aviso con el ojo cerrado")
-        for pass in 0..<8 {
-            let leaks = banner.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
-                [el.label, el.value as? String ?? ""].filter {
-                    $0.range(of: #"\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
-                }
-            }
-            XCTAssertEqual(leaks, [], "Pasada \(pass): con el ojo cerrado el aviso tiene cifras")
+        // A ×12 el aviso dura ~44 s: las ocho miradas caben con él puesto (a ×6 se recogía a mitad de una mirada y la
+        // lectura elemento a elemento fallaba, run 45623451092). Cada mirada es UNA consulta con predicado.
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoDemoPrivate", "-MiBancoMotionScale", "12"])
+        XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso con el ojo cerrado")
+        let money = NSPredicate(format: "label MATCHES %@ OR value MATCHES %@",
+                                #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros).*"#,
+                                #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros).*"#)
+        XCTAssertGreaterThan(banner.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "importe oculto")).count, 0,
+                             "El aviso no dice «importe oculto»: ¿estaba vacío?")
+        var looked = 0
+        for pass in 0..<8 where banner.exists {
+            let leaks = banner.descendants(matching: .any).matching(money).count
+            XCTAssertEqual(leaks, 0, "Pasada \(pass): con el ojo cerrado el aviso tiene \(leaks) textos con cifras")
+            looked += 1
             Thread.sleep(forTimeInterval: 0.5)
         }
+        XCTAssertGreaterThanOrEqual(looked, 6, "El aviso se fue antes de poder mirarlo: la prueba no dice nada")
     }
 
     /// C4 (D1, decisión del dueño): «Te quedaban» empieza oculto y solo dice su cifra cuando el importe de arriba se ha

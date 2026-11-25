@@ -99,12 +99,19 @@ private struct TabContentEntrance: ViewModifier {
             .opacity(landed(landedOpacity) ? 1 : 0)
             .offset(x: landed(landedOffset) || motion.reduce ? 0 : motion.distance(70) * CGFloat(entrance.direction))
             .onAppear(perform: land)
-            .onChange(of: entrance.token) { _, _ in land() }
+            .onChange(of: entrance) { _, _ in land() }
     }
 
     private func land() {
-        guard !entrance.suppressed, entrance.token > 0 else { return }
         let token = entrance.token
+        // Mientras está apagada (otra pestaña, el bloqueo delante), la pestaña se da por llegada con el número de ahora:
+        // al encenderse sin un cambio de pestaña (p. ej. al quitarse el bloqueo) no se queda escondida esperando uno.
+        guard !entrance.suppressed, token > 0 else {
+            landedOpacity = token
+            landedOffset = token
+            return
+        }
+        guard landedOpacity != token || landedOffset != token else { return }
         withAnimation(.easeOut(duration: motion.seconds(0.17))) { landedOpacity = token }
         withAnimation(motion.animation(.enter)) { landedOffset = token }
     }
@@ -129,12 +136,17 @@ private struct TabGroupEntrance: ViewModifier {
             .opacity(visible ? 1 : 0)
             .offset(y: visible || motion.reduce || index == 0 ? 0 : motion.distance(rise))
             .onAppear(perform: land)
-            .onChange(of: entrance.token) { _, _ in land() }
+            .onChange(of: entrance) { _, _ in land() }
     }
 
     private func land() {
-        guard !entrance.suppressed, entrance.token > 0, index < Theme.Motion.staggerLimit else { return }
         let token = entrance.token
+        // Igual que el contenido: apagada, se da por llegada (no se queda escondida al encenderse sin cambio).
+        guard !entrance.suppressed, token > 0, index < Theme.Motion.staggerLimit else {
+            landed = token
+            return
+        }
+        guard landed != token else { return }
         let delay = motion.reduce ? 0 : motion.seconds(0.03) + motion.stagger(index, firstGap: 0.046, decay: 0.84)
         withAnimation(motion.animation(.enter).delay(delay)) { landed = token }
     }

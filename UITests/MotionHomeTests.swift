@@ -698,10 +698,33 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertLessThan(firstRow().frame.minY, top - 100, "Arrastrar hacia arriba sobre una fila ya no baja la lista")
     }
 
+    /// Como en Mail: con una fila abierta, en cuanto el dedo arrastra la lista (desde OTRA fila), la fila se cierra y
+    /// sus acciones dejan de existir.
+    func testScrollingTheListClosesTheOpenRow() throws {
+        launchHome(["-MiBancoDemoCardElements"])
+        let row = firstRow()
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas")
+        let other = app.buttons.matching(identifier: "movementRow").element(boundBy: 1)
+        XCTAssertTrue(other.waitForExistence(timeout: 5), "Falta una segunda fila")
+        let flag = app.buttons["row-action-flag"]
+        row.swipeLeft()
+        XCTAssertTrue(flag.waitForExistence(timeout: 5), "Deslizar la fila no enseñó sus acciones")
+
+        let top = row.frame.minY
+        let start = other.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.5))
+        start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -220)), withVelocity: 400, thenHoldForDuration: 0.3)
+        XCTAssertLessThan(firstRow().frame.minY, top - 100, "La lista no bajó con el arrastre")
+        // La fila sigue en pantalla (así su acción no ha desaparecido solo por salir de la vista).
+        XCTAssertTrue(firstRow().exists && app.windows.firstMatch.frame.intersects(firstRow().frame), "La fila salió de la pantalla")
+        XCTAssertTrue(waitUntil(5) { !flag.exists }, "La fila abierta siguió abierta al arrastrar la lista")
+    }
+
     /// Tirar de la lista hacia abajo y soltar actualiza y dice «Al día»; un tirón corto no hace nada; después todo
     /// sigue respondiendo.
+    /// Con dos bancos conectados y al día (`-MiBancoDemoBanks`; la demo responde «ya estaba reciente» y pasa por
+    /// `RefreshVerdict`, como la app de verdad).
     func testPullRefreshShowsAlDia() throws {
-        launchHome(["-MiBancoDemoHomeProbes"])
+        launchHome(["-MiBancoDemoHomeProbes", "-MiBancoDemoBanks"])
         let title = app.staticTexts["Tu dinero"]
         let grab = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         XCTAssertEqual(homeProbe()["tirones"], "0")
@@ -726,6 +749,28 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(app.windows.firstMatch.frame.contains(title.frame), "El título quedó fuera de su sitio")
         app.buttons["Ocultar importes"].tap()
         XCTAssertTrue(app.buttons["Mostrar importes"].waitForExistence(timeout: 5), "Inicio no responde tras actualizar")
+    }
+
+    /// «Al día» es una afirmación sobre el dinero: si un banco conectado tiene el consentimiento caducado, tirar de la
+    /// lista actualiza lo que se pueda pero NO dice «Al día» (ni háptica de éxito): el indicador solo se recoge.
+    func testPullRefreshWithExpiredConsentDoesNotSayAlDia() throws {
+        launchHome(["-MiBancoDemoHomeProbes", "-MiBancoDemoBanks", "-MiBancoDemoRefresh", "consentExpired"])
+        let title = app.staticTexts["Tu dinero"]
+        let grab = title.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        XCTAssertTrue(waitUntil(5) { self.homeProbe()["tirones"] == "0" }, "Falta la sonda de Inicio: \(homeProbe())")
+        grab.press(forDuration: 0.1, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 420)), withVelocity: 500, thenHoldForDuration: 0.3)
+        XCTAssertTrue(waitUntil(5) { self.homeProbe()["tirones"] == "1" }, "Tirar de la lista no lanzó la actualización: \(homeProbe())")
+        // La actualización de la demo dura una pasada de la luz (~1,2 s) y se recoge: se mira 6 s.
+        var sawText = false
+        let limit = Date().addingTimeInterval(6)
+        while Date() < limit {
+            if app.staticTexts["Al día"].exists { sawText = true }
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertFalse(sawText, "Dijo «Al día» con un consentimiento caducado")
+        XCTAssertEqual(homeProbe()["alDia"], "0", "El indicador contó un «Al día»: \(homeProbe())")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertTrue(app.windows.firstMatch.frame.contains(title.frame), "El título quedó fuera de su sitio")
     }
 
     // MARK: A6 — abanico de tarjetas
@@ -894,6 +939,29 @@ final class MotionHomeTests: XCTestCase {
         again.tap()
         XCTAssertTrue(ready.buttons["Copiado"].waitForExistence(timeout: 6), "«Copiar IBAN» no pasó a «Copiado»")
         XCTAssertTrue(again.waitForExistence(timeout: 8), "«Copiado» no volvió a «Copiar IBAN»")
+    }
+
+    /// Regla D9: preparar no es enviar. El paso «listo» monta el ✓ neutro de «preparado» y NUNCA el ✓ del éxito
+    /// (`SuccessMark`); ese solo sale cuando la app ha VISTO salir el dinero («He visto salir…»).
+    func testReadyStepShowsPreparedMarkNotSuccessMark() throws {
+        launchHome(["-MiBancoDemoHomeProbes"])
+        XCTAssertEqual(homeProbe()["exitos"], "0", "Ya había un ✓ de éxito en Inicio: \(homeProbe())")
+        openMoveAmountStep()
+        for key in ["2", "0"] { app.buttons[key].tap() }
+        let copied = app.staticTexts["IBAN de Revolut copiado"]
+        XCTAssertTrue(slideToPrepare(until: copied), "No apareció «IBAN de Revolut copiado»")
+        // La entrada entera ya ha pasado.
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(homeProbe()["preparados"], "1", "El paso «listo» no montó el ✓ de preparado: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["exitos"], "0", "El paso «listo» montó el ✓ del éxito (lee «enviado»): \(homeProbe())")
+
+        // El camino de un traspaso detectado sigue usando el ✓ del éxito.
+        launchHome(["-MiBancoDemoHomeProbes", "-MiBancoDemoPending", "done"])
+        let seen = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'He visto salir'")).firstMatch
+        XCTAssertTrue(seen.waitForExistence(timeout: 8), "Falta «He visto salir»")
+        XCTAssertTrue(waitUntil(5) { (Int(self.homeProbe()["exitos"] ?? "") ?? 0) >= 1 },
+                      "«He visto salir» no montó el ✓ del éxito: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["preparados"], "0", "Inicio montó un ✓ de preparado: \(homeProbe())")
     }
 
     // MARK: El ojo en la búsqueda, el abanico y «Mover dinero»

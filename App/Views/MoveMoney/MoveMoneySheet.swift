@@ -46,7 +46,7 @@ struct MoveMoneySheet: View {
     @State private var newPayeeIBAN = ""
     @State private var newPayeePhone = ""
     @State private var newPayeeError: String?
-    @State private var successTick = 0
+    @State private var preparedTick = 0
     @State private var errorTick = 0
     @State private var slideAttempt = 0
     @State private var initialized = false
@@ -102,7 +102,13 @@ struct MoveMoneySheet: View {
             }
             .background(Theme.canvas.ignoresSafeArea())
             #if DEBUG
-            .overlay(alignment: .topLeading) { DrawnTextAuditProbe().allowsHitTesting(false) }
+            .overlay(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    DrawnTextAuditProbe()
+                    HomeProbeElement()
+                }
+                .allowsHitTesting(false)
+            }
             #endif
             .navigationTitle("Mover dinero")
             .navigationBarTitleDisplayMode(.inline)
@@ -149,7 +155,8 @@ struct MoveMoneySheet: View {
         }
         .onChange(of: model.state) { _, _ in refreshUpcoming() }
         .onChange(of: accountBook.book) { _, _ in refreshUpcoming() }
-        .sensoryFeedback(Haptics.success, trigger: successTick)
+        // Preparar no es enviar (regla D9): un toque ligero, nunca la háptica de éxito.
+        .sensoryFeedback(.impact(weight: .light), trigger: preparedTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
 
@@ -586,8 +593,9 @@ struct MoveMoneySheet: View {
 
         return ScrollView {
             VStack(spacing: 20) {
-                // El ✓ salta y se traza; lo demás entra por turnos (ver `SuccessSheet.swift`).
-                SuccessMark(size: 76)
+                // Preparado, no enviado (regla D9): el ✓ neutro en aro de titanio aparece y se traza; lo demás entra por
+                // turnos, sin rebote (ver `SuccessSheet.swift`).
+                PreparedMark(size: 72)
                     .padding(.top, 28)
 
                 VStack(spacing: 8) {
@@ -601,7 +609,7 @@ struct MoveMoneySheet: View {
                         .foregroundStyle(Theme.label2)
                         .multilineTextAlignment(.center)
                 }
-                .successEntrance(0)
+                .successEntrance(0, calm: true)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(shownHint)
@@ -622,21 +630,23 @@ struct MoveMoneySheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
                 .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
-                .successEntrance(1)
+                .successEntrance(1, calm: true)
 
                 if canOpenBank, let url = BankApps.url(for: from) {
-                    // El botón principal empieza apagado y se enciende a los 0,9 s (se puede tocar desde el principio).
+                    // Como siempre: blanco desde el principio (nada «se enciende» para celebrar).
                     Button {
                         openURL(url)
                     } label: {
                         Text("Abrir \(from.displayName)")
                             .titan(.option)
                             .fontWeight(.semibold)
+                            .foregroundStyle(Theme.onTileSelected)
                             .frame(maxWidth: .infinity, minHeight: 52)
+                            .background(Theme.tileSelected, in: Capsule())
                             .contentShape(Capsule())
                     }
-                    .buttonStyle(SuccessButtonStyle())
-                    .successEntrance(2)
+                    .buttonStyle(.pressable)
+                    .successEntrance(2, calm: true)
                 }
 
                 if kind == .iban, let value = clipboardValue(for: target)?.value {
@@ -646,7 +656,7 @@ struct MoveMoneySheet: View {
                         return true
                     }
                     .accessibilityIdentifier("move-copy-again")
-                    .successEntrance(3)
+                    .successEntrance(3, calm: true)
                 }
             }
             .padding(.horizontal, Theme.Space.gutter)
@@ -899,7 +909,7 @@ struct MoveMoneySheet: View {
         }
         Pasteboard.copy(copied.value)
         model.addPendingMove(PendingMove(from: from, target: target, amountCents: cents, createdAt: Date()))
-        successTick += 1
+        preparedTick += 1
         // El paso «listo» sustituye al del importe con un fundido; su contenido hace después su propia entrada.
         withAnimation(motion.fade) {
             step = .ready(from: from, target: target, amountCents: cents, kind: copied.kind)

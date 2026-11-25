@@ -244,12 +244,17 @@ struct DrawnTextAuditProbe: View {
     var arrivalPulses = 0
     /// Cuántas veces ha entrado la lista escalonada por un cambio de tarjeta.
     var listEntrances = 0
+    /// Veces que se ha montado el ✓ del éxito (`SuccessMark`, solo «He visto salir») y el ✓ de «preparado»
+    /// (`PreparedMark`, el paso «listo» de «Mover dinero»).
+    var successMarks = 0
+    var preparedMarks = 0
 
     var summary: String {
         [
             "montajes=\(assemblies)", "inclinacion=\(tiltRunning ? 1 : 0)", "tirones=\(refreshes)", "alDia=\(refreshesDone)",
             "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
             "insignias=\(arrivalBadges)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)",
+            "exitos=\(successMarks)", "preparados=\(preparedMarks)",
         ].joined(separator: ";")
     }
 }

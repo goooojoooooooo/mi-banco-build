@@ -335,16 +335,17 @@ final class MotionTourHomeTests: MotionTourCase {
     }
 
     /// `-MiBancoDemoCardMoment refresh`: la actualización de «tirar para actualizar» sin dedo: la lista baja, la ola
-    /// brilla, dice «Al día» y se recoge. (El tirón con el dedo no se puede fotografiar mientras se arrastra.)
+    /// brilla, dice «Al día» y se recoge. (El tirón con el dedo no se puede fotografiar mientras se arrastra.) Con
+    /// `-MiBancoDemoBanks`: «Al día» solo se dice con bancos conectados y al día (`RefreshVerdict`).
     func testPullRefresh() throws {
-        launch(["-MiBancoDemoCardMoment", "refresh"])
+        launch(["-MiBancoDemoCardMoment", "refresh", "-MiBancoDemoBanks"])
         waitForHome()
         segment("Todo").tap()
         burst("pull-refresh", frames: 28, every: 0.4)
     }
 
     func testPullRefreshReduceMotion() throws {
-        launch(["-MiBancoDemoCardMoment", "refresh", "-MiBancoReduceMotion"])
+        launch(["-MiBancoDemoCardMoment", "refresh", "-MiBancoDemoBanks", "-MiBancoReduceMotion"])
         waitForHome()
         segment("Todo").tap()
         burst("pull-refresh-reduce", frames: 16, every: 0.4)
@@ -449,8 +450,8 @@ final class MotionTourHomeTests: MotionTourCase {
         keypad("-reduce", extra: ["-MiBancoReduceMotion"], frames: 8)
     }
 
-    /// Deslizar «Desliza para preparar»: el paso «listo» (el ✓ salta y se traza; el titular, los datos y los botones
-    /// entran por turnos; el botón principal se enciende a los 0,9 s). Después, «Copiar IBAN» → «Copiado».
+    /// Deslizar «Desliza para preparar»: el paso «listo» (preparado, no enviado: el ✓ neutro en aro de titanio aparece y
+    /// se traza; el titular, los datos y los botones entran por turnos sin rebote). Después, «Copiar IBAN» → «Copiado».
     private func success(_ suffix: String, extra: [String], copies: Bool) {
         launch(extra)
         waitForHome()

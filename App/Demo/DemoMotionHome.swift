@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import MiBancoCore
 
 // Banderas de demo de movimiento de Inicio. Dueño: la línea A «Inicio» (fase B). Nadie más edita este fichero.
 // Cada bandera usa `DemoMode.arguments` o `DemoMode.value(after:)` (`DemoMode.swift` no se toca).
@@ -59,5 +60,17 @@ extension DemoMode {
     /// `-MiBancoDemoHomeProbes` (solo con `-MiBancoDemo`): Inicio publica contadores para las pruebas de toque (montajes
     /// por capas, lecturas de la inclinación, actualizaciones al tirar, estado del abanico).
     static var exposesHomeProbes: Bool { isActive && arguments.contains("-MiBancoDemoHomeProbes") }
+
+    /// `-MiBancoDemoRefresh <fresh|consentExpired|budgetUsed>` (solo con `-MiBancoDemo`): lo que «responde» cada banco
+    /// conectado al tirar para actualizar (la demo no consulta a nadie). Por defecto, que ya estaba reciente. El
+    /// resultado pasa por `RefreshVerdict`, igual que en la app de verdad; sin `-MiBancoDemoBanks` no hay ningún banco
+    /// conectado y por tanto nunca se dice «Al día».
+    static var refreshSkipReason: SkipReason {
+        switch value(after: "-MiBancoDemoRefresh") {
+        case "consentExpired": .consentExpired
+        case "budgetUsed": .budgetUsed(nextAt: Date().addingTimeInterval(3_600))
+        default: .fresh
+        }
+    }
 }
 #endif

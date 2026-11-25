@@ -209,6 +209,8 @@ struct HomeView: View {
         }
         .onScrollPhaseChange { old, new in
             motion.listIdle = new == .idle
+            // Como en Mail: en cuanto el dedo arrastra la lista, la fila que estaba abierta se cierra.
+            if new == .interacting, openRow != nil { openRow = nil }
             // El dedo suelta la lista: si había tirado lo bastante, se actualiza.
             if old == .interacting, new != .interacting { pullReleased() }
         }
@@ -505,14 +507,30 @@ struct HomeView: View {
     }
 
     /// Lo mismo que hace la app al abrirse, pedido a mano: consulta a los bancos conectados (lo que deje la política
-    /// de consultas), vuelve a leer el libro y refresca los precios si toca. `false` si algún banco falló.
+    /// de consultas), vuelve a leer el libro y refresca los precios si toca. Devuelve si se puede decir «Al día»: lo
+    /// decide `RefreshVerdict` (Core) con lo que devolvió cada banco y sus conexiones tal como quedaron.
     private func refreshEverything() async -> Bool {
-        let outcomes = await BankSync.shared.refresh(trigger: .manual)
+        let outcomes = refreshOutcomes(await BankSync.shared.refresh(trigger: .manual))
         model.reload()
         if portfolio.hasPositions { await portfolio.refreshPrices(force: false) }
-        return !outcomes.values.contains { outcome in
-            if case .failed = outcome { return true }
-            return false
+        return RefreshVerdict.isUpToDate(outcomes: outcomes, links: model.state.links, now: Date())
+    }
+
+    private func refreshOutcomes(_ real: [BankID: SyncOutcome]) -> [BankID: BankRefreshOutcome] {
+        #if DEBUG
+        // En la demo no se consulta a nadie: cada banco conectado «responde» lo que diga `-MiBancoDemoRefresh`
+        // (por defecto, que ya estaba reciente) y pasa por el mismo veredicto que la app de verdad.
+        if DemoMode.isActive {
+            let reason = DemoMode.refreshSkipReason
+            return model.state.links.mapValues { _ in .skipped(reason) }
+        }
+        #endif
+        return real.mapValues { outcome -> BankRefreshOutcome in
+            switch outcome {
+            case let .skipped(reason): .skipped(reason)
+            case .updated: .updated
+            case let .failed(problem): .failed(problem)
+            }
         }
     }
 

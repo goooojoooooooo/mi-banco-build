@@ -174,4 +174,30 @@ import Testing
         #expect(a.allSatisfy { (0...9).contains($0) })
         #expect(a != AmountMask.scrambledDigits(count: 6, step: 3, seed: 7))
     }
+
+    /// Revisión del lote 2 (m-1): un fotograma del barajado nunca empieza por un cero suelto («027,44 €»). El primer
+    /// dígito sale de 1–9; los demás, de 0–9 (y todos siguen saliendo en algún momento).
+    @Test func scrambleNeverStartsWithAZero() {
+        var later = Set<Int>()
+        var first = Set<Int>()
+        var zeros: [String] = []
+        let seeds = Array(-500..<1000) + [Int.max, Int.min, 1 << 40, -(1 << 40)]
+        for count in 1...8 {
+            for step in 0..<12 {
+                for seed in seeds {
+                    let digits = AmountMask.scrambledDigits(count: count, step: step, seed: seed)
+                    guard digits.count == count else {
+                        Issue.record("\(digits.count) dígitos en vez de \(count)")
+                        return
+                    }
+                    if digits[0] == 0 { zeros.append("\(digits) (paso \(step), semilla \(seed))") }
+                    first.insert(digits[0])
+                    later.formUnion(digits.dropFirst())
+                }
+            }
+        }
+        #expect(zeros.isEmpty, "\(zeros.count) fotogramas empiezan por 0, p. ej. \(zeros.prefix(3))")
+        #expect(first == Set(1...9))
+        #expect(later == Set(0...9))
+    }
 }

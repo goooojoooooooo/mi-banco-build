@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MiBancoCore
 
@@ -80,6 +81,36 @@ import Testing
         #expect(near(reduced.frame(at: 0.12).mark, 0.5))
         #expect(reduced.frame(at: 0.24).mark == 1)
         #expect(reduced.frame(at: 0.2).black == 1)
+    }
+
+    /// I-1 (revisión del lote 2): con solo fundido nunca hay dos marcas. Inicio (con la marca pequeña de su barra) solo
+    /// se ve donde el negro se aclara, así que la marca grande nunca es más visible que el negro que tiene debajo, y
+    /// mientras quede algo de ella el negro está entero: Inicio y su marca no asoman hasta que la grande se ha ido.
+    /// También tras un toque que salta el fundido, y en Sutil con Reducir movimiento.
+    @Test func aFadeNeverShowsTwoMarks() {
+        let both = LaunchTimeline(level: .subtle, reduceMotion: true)
+        let balancedReduced = LaunchTimeline(level: .balanced, reduceMotion: true)
+        for timeline in [subtle, reduced, both, balancedReduced] {
+            for skippedAt in [nil, 0.0, 0.1, 0.3] as [Double?] {
+                var brighter: [Double] = []
+                var doubled: [String] = []
+                for elapsed in stride(from: 0.0, through: timeline.duration + 0.2, by: 0.001) {
+                    let frame = timeline.frame(
+                        at: timeline.time(elapsed: elapsed, skippedAt: skippedAt), skipped: skippedAt != nil)
+                    if frame.mark > frame.black + 1e-9 { brighter.append(elapsed) }
+                    // Lo que se ve de Inicio (1 − negro) por lo que se ve de la marca grande: cero en todo instante.
+                    if frame.mark * (1 - frame.black) > 1e-9 {
+                        doubled.append(String(format: "%.3f s: grande %.2f, Inicio %.2f", elapsed, frame.mark, 1 - frame.black))
+                    }
+                }
+                let name = "\(timeline.level) reducir=\(timeline.reduceMotion) salto=\(skippedAt.map { "\($0)" } ?? "no")"
+                #expect(brighter.isEmpty, "\(name): la marca se ve más que el negro en \(brighter.count) instantes")
+                #expect(doubled.isEmpty, "\(name): dos marcas a la vez en \(doubled.count) instantes, p. ej. \(doubled.prefix(2))")
+            }
+            // Y el fundido sigue acabando: sin negro ni marca al final.
+            #expect(timeline.frame(at: timeline.duration).black == 0)
+            #expect(timeline.frame(at: timeline.duration).mark == 0)
+        }
     }
 
     // MARK: Saltar con un toque

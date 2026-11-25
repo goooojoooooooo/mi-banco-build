@@ -9,8 +9,6 @@ struct MerchantHistoryGroup: View {
     let current: UUID
 
     @Environment(AppPreferences.self) private var preferences
-    @State private var grown = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let hidden = preferences.privateMode
@@ -33,15 +31,15 @@ struct MerchantHistoryGroup: View {
                     .padding(.top, 2)
                 if recent.count > 1 {
                     VStack(spacing: 7) {
-                        ForEach(recent) { m in
+                        ForEach(Array(recent.enumerated()), id: \.element.id) { index, m in
                             let isCurrent = m.id == current
                             HStack(spacing: 10) {
                                 Text(DateText.day(m.date))
                                     .frame(width: 62, alignment: .leading)
                                 GeometryReader { geo in
-                                    Capsule()
-                                        .fill(isCurrent ? Theme.label : .white.opacity(0.22))
-                                        .frame(width: grown ? geo.size.width * CGFloat(abs(m.amountCents)) / CGFloat(largest) : 0, height: 6)
+                                    HistoryBar(
+                                        index: index, color: isCurrent ? Theme.label : .white.opacity(0.22),
+                                        width: geo.size.width * CGFloat(abs(m.amountCents)) / CGFloat(largest))
                                         .frame(maxHeight: .infinity)
                                 }
                                 .frame(height: 16)
@@ -61,13 +59,6 @@ struct MerchantHistoryGroup: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken(hidden: hidden))
-        .onAppear {
-            if reduceMotion {
-                grown = true
-            } else {
-                withAnimation(.smooth(duration: 0.6).delay(0.55)) { grown = true }
-            }
-        }
     }
 
     private var headline: String {
@@ -88,5 +79,27 @@ struct MerchantHistoryGroup: View {
         var text = headline
         if history.countThisMonth > 0 { text += ", \(spokenAmount(history.totalThisMonthCents, hidden: hidden))" }
         return text + ". " + subline
+    }
+}
+
+/// Una barra del historial: crece desde la izquierda (escala, no ancho: nada de maquetación animada) con un muelle,
+/// 40 ms detrás de la anterior, desde 0,38 s (D1). Con Reducir movimiento ya está entera. Lee `\.motion`.
+private struct HistoryBar: View {
+    let index: Int
+    let color: Color
+    let width: CGFloat
+    @Environment(\.motion) private var motion
+    @State private var grown = false
+
+    var body: some View {
+        Capsule()
+            .fill(color)
+            .frame(width: max(width, 0), height: 6)
+            .scaleEffect(x: grown || motion.reduce ? 1 : 0.001, y: 1, anchor: .leading)
+            .onAppear {
+                guard !motion.reduce else { return }
+                let delay = motion.seconds(0.38) + motion.seconds(0.04) * Double(index)
+                withAnimation(motion.animation(.release).delay(delay)) { grown = true }
+            }
     }
 }

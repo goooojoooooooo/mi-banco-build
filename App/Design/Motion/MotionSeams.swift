@@ -133,11 +133,11 @@ private struct LaunchBrandSlot: ViewModifier {
 
     /// Cuánto de la ranura, desde la izquierda, deja de dibujarse: nada, la marca, o todo.
     private var hiddenLeading: CGFloat {
-        if hiddenByLock { return .infinity }
-        switch anchor?.flying {
+        if hiddenByLock { return CGFloat.infinity }
+        return switch anchor?.flying {
         case nil: 0
         case .mark: markSide + gap / 2
-        case .markAndName: .infinity
+        case .markAndName: CGFloat.infinity
         }
     }
 

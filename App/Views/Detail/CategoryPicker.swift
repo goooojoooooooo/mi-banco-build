@@ -14,7 +14,10 @@ struct CategoryPickerRow: View {
     let model: LedgerModel
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// D2: la ficha blanca de la elegida es UNA sola pieza que se desliza a la nueva al elegir.
+    @Namespace private var selection
     @ScaledMetric(relativeTo: .body) private var tileHeight: CGFloat = 60
     @State private var expanded: Bool
     @State private var applyToMerchant: Bool
@@ -124,7 +127,7 @@ struct CategoryPickerRow: View {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(Array(SpendingCategory.allCases.enumerated()), id: \.element) { index, category in
                     CategoryTile(category: category, selected: category == current, index: index, height: tileHeight,
-                                 fixedHeight: !typeSize.isAccessibilitySize) {
+                                 fixedHeight: !typeSize.isAccessibilitySize, selection: selection) {
                         choose(category)
                     }
                 }
@@ -166,9 +169,13 @@ struct CategoryPickerRow: View {
             return
         }
         do {
-            try model.setCategory(category, for: movement.id, applyToMerchant: applyToMerchant && merchantName != nil)
+            // D2: la ficha blanca se desliza a la elegida (el muelle de los indicadores) y la rejilla se pliega cuando
+            // ya ha llegado, para que se vea. Con Reducir movimiento, fundidos y sin espera.
+            try withAnimation(motion.animation(.indicator)) {
+                try model.setCategory(category, for: movement.id, applyToMerchant: applyToMerchant && merchantName != nil)
+            }
             selectTick += 1
-            withAnimation(fold) {
+            withAnimation(fold.delay(motion.reduce ? 0 : motion.seconds(0.32))) {
                 failed = false
                 expanded = false
             }
@@ -201,9 +208,12 @@ private struct CategoryTile: View {
     let height: CGFloat
     /// false en tamaños de accesibilidad: la ficha crece con su texto en vez de recortarlo.
     let fixedHeight: Bool
+    /// D2: la ficha blanca compartida (una sola, se desliza de la antigua a la nueva).
+    let selection: Namespace.ID
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var shown = false
 
     private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -214,6 +224,8 @@ private struct CategoryTile: View {
                 Image(systemName: category.symbolName)
                     .font(.system(size: 20, weight: .regular))
                     .frame(height: 24)
+                    // D2: el símbolo de la elegida da un bote al elegirla (con Reducir movimiento, no).
+                    .symbolEffect(.bounce, value: selected && !motion.reduce)
                 Text(category.displayName)
                     .titan(.caption)
                     .lineLimit(fixedHeight ? 2 : nil)
@@ -225,7 +237,13 @@ private struct CategoryTile: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: height, maxHeight: fixedHeight ? height : nil)
-            .background(selected ? Theme.tileSelected : Theme.chipFill, in: shape)
+            .background {
+                if selected {
+                    shape.fill(Theme.tileSelected).matchedGeometryEffect(id: "selected-category", in: selection)
+                } else {
+                    shape.fill(Theme.chipFill)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if selected {
                     ZStack {

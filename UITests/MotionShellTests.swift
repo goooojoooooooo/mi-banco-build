@@ -615,8 +615,27 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "No se abrió la hoja de detalle")
         XCTAssertTrue(labelled("label == %@", "Pago de importe oculto").waitForExistence(timeout: 5),
                       "El importe del detalle no dice «importe oculto»")
-        XCTAssertTrue(labelled("label == %@", "Te quedaban importe oculto").exists,
+        // «Te quedaban» solo dice algo de su importe cuando el de arriba se ha posado (C4): se espera a que lo diga.
+        XCTAssertTrue(labelled("label == %@", "Te quedaban importe oculto").waitForExistence(timeout: 10),
                       "«Te quedaban» no dice «importe oculto»")
+    }
+
+    /// C4 (D1, decisión del dueño): «Te quedaban» empieza oculto y solo dice su cifra cuando el importe de arriba se ha
+    /// posado. A ×20 el vuelo del importe dura varios segundos: justo al abrir la hoja, «Te quedaban» no tiene forma de
+    /// importe; después sí (si no llegara nunca, la prueba tampoco pasa).
+    func testTeQuedabanStartsHidden() throws {
+        launch(["-MiBancoMotionScale", "20"])
+        waitForLaunchToEnd(60)
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
+        XCTAssertTrue(waitUntil(60) { row.isHittable }, "La primera fila no se puede tocar")
+        row.tap()
+        let left = labelled("label BEGINSWITH %@", "Te quedaban")
+        XCTAssertTrue(left.waitForExistence(timeout: 8), "La hoja no tiene «Te quedaban»")
+        let early = left.label
+        XCTAssertFalse(moneyShaped(early), "«Te quedaban» dice su cifra antes de que el importe se pose: «\(early)»")
+        XCTAssertTrue(waitUntil(40) { self.moneyShaped(left.label) },
+                      "«Te quedaban» nunca llegó a decir su cifra: «\(left.label)»")
     }
 
     /// Lote 2 (2.5): con el ojo cerrado, abrir el detalle de un movimiento no monta NINGÚN texto con forma de importe:

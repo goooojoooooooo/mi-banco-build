@@ -18,14 +18,17 @@ struct BriefingSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(AppPreferences.self) private var preferences
 
-    @State private var revealedStage = 0
+    /// B1: cada entrada de la hoja estrena número; cada bloque entra solo (120 ms × 0,92ⁿ) y `entranceCompleted` llega
+    /// al final de una animación propia (el reloj de la entrada), o antes con un toque.
+    @State private var entranceToken = 0
+    @State private var entranceClock: Double = 0
     @State private var entranceCompleted = false
     /// true solo si el dueño tocó durante la entrada para terminarla al instante (corta también la cuenta de 0,9 s).
     @State private var userSkippedEntrance = false
-    @State private var entranceTask: Task<Void, Never>?
     @State private var questionDraft = ""
     @State private var askTask: Task<Void, Never>?
     @State private var feedbackTick = 0
@@ -52,7 +55,7 @@ struct BriefingSheet: View {
 
                             if !briefingModel.openingText.isEmpty {
                                 openingBlock
-                                    .modifier(BriefingReveal(visible: isVisible(stage: 1), reduceMotion: reduceMotion))
+                                    .modifier(BriefingReveal(stage: 1, completed: entranceCompleted, token: entranceToken))
                             }
 
                             BriefingLineView(
@@ -60,28 +63,25 @@ struct BriefingSheet: View {
                                 role: .sheetTitle,
                                 color: Theme.label
                             )
-                            .modifier(BriefingReveal(visible: isVisible(stage: 2), reduceMotion: reduceMotion))
+                            .modifier(BriefingReveal(stage: 2, completed: entranceCompleted, token: entranceToken))
 
                             ForEach(Array(briefing.sections.enumerated()), id: \.element.id) { index, section in
                                 sectionCard(section)
-                                    .modifier(BriefingReveal(
-                                        visible: isVisible(stage: 3 + min(index, 5)),
-                                        reduceMotion: reduceMotion
-                                    ))
+                                    .modifier(BriefingReveal(stage: 3 + min(index, 5), completed: entranceCompleted, token: entranceToken))
                             }
 
                             if let tip = briefing.tip {
                                 tipCard(tip)
-                                    .modifier(BriefingReveal(visible: isVisible(stage: 8), reduceMotion: reduceMotion))
+                                    .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
                             }
 
                             if !briefingModel.cards.isEmpty {
                                 interestCardsBlock
-                                    .modifier(BriefingReveal(visible: isVisible(stage: 8), reduceMotion: reduceMotion))
+                                    .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
                             }
 
                             askBlock(scrollProxy: proxy)
-                                .modifier(BriefingReveal(visible: isVisible(stage: 8), reduceMotion: reduceMotion))
+                                .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
                         }
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.top, 20)
@@ -120,6 +120,8 @@ struct BriefingSheet: View {
                     .accessibilityHidden(true)
             }
         }
+        // El reloj de la entrada (B1): una vista vacía cuya opacidad se anima lo que dura la entrada.
+        .background { Color.clear.opacity(entranceClock).accessibilityHidden(true) }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .sensoryFeedback(Haptics.detent, trigger: feedbackTick)
@@ -129,7 +131,6 @@ struct BriefingSheet: View {
             startEntrance()
         }
         .onDisappear {
-            entranceTask?.cancel()
             askTask?.cancel()
             speaker.stop()
             briefingModel.setSheetVisible(false)
@@ -199,7 +200,7 @@ struct BriefingSheet: View {
                 .titan(.largeTitle)
                 .foregroundStyle(Theme.label)
                 .accessibilityAddTraits(.isHeader)
-                .modifier(BriefingReveal(visible: isVisible(stage: 1), reduceMotion: reduceMotion))
+                .modifier(BriefingReveal(stage: 1, completed: entranceCompleted, token: entranceToken))
         }
     }
 
@@ -597,6 +598,17 @@ struct BriefingSheet: View {
             .buttonStyle(.pressable)
             .accessibilityIdentifier("briefing-done")
         }
+        // B2: mientras Onyx lee en voz alta, las 28 barras flotan justo encima de «Vale» (por encima: no cambian el
+        // sitio de nada) y se funden al parar.
+        .overlay(alignment: .top) {
+            if speaker.activeTarget == .briefing {
+                VoiceWave(speaking: true)
+                    .alignmentGuide(.top) { d in d[.bottom] + 6 }
+                    .transition(.opacity)
+                    .accessibilityIdentifier("voice-wave")
+            }
+        }
+        .animation(motion.fade, value: speaker.activeTarget == .briefing)
         .padding(.horizontal, Theme.Space.gutter)
         .padding(.top, 10)
         .padding(.bottom, 12)
@@ -616,42 +628,27 @@ struct BriefingSheet: View {
 
     // MARK: - Interacción y entrada
 
-    private func isVisible(stage: Int) -> Bool {
-        entranceCompleted || revealedStage >= stage
-    }
-
+    /// B1: los bloques entran uno detrás de otro, desde 0,12 s, 120 ms × 0,92ⁿ (prototipo `briefHTML`), subiendo
+    /// 20 pt con el muelle `enter`; lo lee cada bloque (`BriefingReveal`), sin `Task.sleep`. Con Reducir movimiento,
+    /// todos se funden a la vez. La entrada se da por acabada al final de su propio reloj (o con un toque).
     private func startEntrance() {
         userSkippedEntrance = false
-        if reduceMotion {
-            withAnimation(.easeOut(duration: 0.2)) {
-                revealedStage = 8
-                entranceCompleted = true
-            }
-            return
-        }
-        revealedStage = 0
         entranceCompleted = false
-        entranceTask?.cancel()
-        entranceTask = Task {
-            withAnimation(Theme.Motion.assemble) { revealedStage = 1 }
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled, !entranceCompleted else { return }
-            withAnimation(Theme.Motion.assemble) { revealedStage = 2 }
-            for step in 3...8 {
-                try? await Task.sleep(for: .milliseconds(70))
-                guard !Task.isCancelled, !entranceCompleted else { return }
-                withAnimation(Theme.Motion.assemble) { revealedStage = step }
-            }
-            entranceCompleted = true
+        entranceToken += 1
+        let token = entranceToken
+        let total = motion.reduce ? 0.25 : motion.seconds(0.12) + motion.stagger(7, firstGap: 0.12, decay: 0.92)
+            + motion.seconds(0.5)
+        withAnimation(.linear(duration: total), completionCriteria: .removed) {
+            entranceClock = entranceClock == 0 ? 0.001 : 0
+        } completion: {
+            if entranceToken == token { entranceCompleted = true }
         }
     }
 
     private func completeEntrance() {
         guard !entranceCompleted else { return }
-        entranceTask?.cancel()
         userSkippedEntrance = true
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.quick) {
-            revealedStage = 8
+        withAnimation(motion.reduce ? motion.fade : Theme.Motion.quick) {
             entranceCompleted = true
         }
     }
@@ -704,14 +701,29 @@ struct BriefingSheet: View {
     }
 }
 
+/// B1: un bloque del resumen. Entra en su turno (`stage` 1…8: desde 0,12 s, 120 ms × 0,92ⁿ), sube 20 pt con el muelle
+/// `enter` y aparece; con Reducir movimiento solo se funde. Con la entrada acabada (o saltada con un toque), está.
 private struct BriefingReveal: ViewModifier {
-    let visible: Bool
-    let reduceMotion: Bool
+    let stage: Int
+    let completed: Bool
+    let token: Int
+    @Environment(\.motion) private var motion
+    @State private var landed = -1
+
+    private var visible: Bool { completed || token == 0 || landed == token }
 
     func body(content: Content) -> some View {
         content
             .opacity(visible ? 1 : 0)
-            .offset(y: (visible || reduceMotion) ? 0 : 12)
+            .offset(y: visible || motion.reduce ? 0 : motion.distance(20))
+            .onAppear(perform: land)
+            .onChange(of: token) { _, _ in land() }
+    }
+
+    private func land() {
+        let token = token
+        let delay = motion.reduce ? 0 : motion.seconds(0.12) + motion.stagger(max(stage - 1, 0), firstGap: 0.12, decay: 0.92)
+        withAnimation(motion.animation(.enter).delay(delay)) { landed = token }
     }
 }
 

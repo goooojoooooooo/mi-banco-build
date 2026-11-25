@@ -64,6 +64,10 @@ struct RootView: View {
     @State private var cardFlight = CardFlight()
     @State private var tabEntrance = TabEntrance()
     @State private var detailAmountFrames = DetailAmountFrames()
+    /// T1: la pestaña de antes del último cambio, cuántos cambios ha habido y hacia dónde fue el último.
+    @State private var lastTab: AppTab = .home
+    @State private var tabChanges = 0
+    @State private var tabDirection = 1
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -94,15 +98,21 @@ struct RootView: View {
                                  openAccounts: openAccounts,
                                  selectCardRequest: $selectHomeCard)
                             .id(restoreToken)
+                            .tabContentEntrance()
+                            .environment(\.tabEntrance, entrance(for: .home))
                     }
                     Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
                         SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
                                      openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
                                      openBudgetsRequest: $openBudgetsRequest)
+                            .tabContentEntrance()
+                            .environment(\.tabEntrance, entrance(for: .spending))
                     }
                     Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                         AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
                                    onMorningRuleChanged: rescheduleMorningReminder)
+                            .tabContentEntrance()
+                            .environment(\.tabEntrance, entrance(for: .alerts))
                     }
                     .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
                     Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
@@ -115,6 +125,8 @@ struct RootView: View {
                                          importBackup: { startImport(.backup) },
                                          importTradeRepublic: { startImport(.tradeRepublic) })
                         }
+                        .tabContentEntrance()
+                        .environment(\.tabEntrance, entrance(for: .settings))
                     }
                 }
                 .modifier(MinimizesTabBarOnScroll())
@@ -131,7 +143,7 @@ struct RootView: View {
         .sheet(item: $sheet, onDismiss: deletePending) { item in
             switch item {
             case .movement(let route):
-                MovementDetailSheet(model: model, id: route.id) { id in
+                MovementDetailSheet(model: model, id: route.id, amountOrigin: route.amountOrigin) { id in
                     pendingDelete = id
                     detail = nil
                 }
@@ -245,8 +257,13 @@ struct RootView: View {
         }
         .sensoryFeedback(.error, trigger: deleteErrorTick)
         // Entrar en Avisos (o ver avisos nuevos estando en ella) los da por vistos: la insignia se va.
-        .onChange(of: tab) { _, new in
+        .onChange(of: tab) { old, new in
             if new == .alerts && !isLocked { seen.markSeen(warnings) }
+            // T1: la entrada de la pestaña ya empezó en el mismo instante del cambio (`entrance(for:)`); aquí solo se
+            // fija, sin cambiar su valor, para el siguiente cambio.
+            tabDirection = Self.direction(from: old, to: new)
+            tabChanges += 1
+            lastTab = new
         }
         .onChange(of: warnings) { _, new in
             if tab == .alerts && !isLocked { seen.markSeen(new) }
@@ -270,6 +287,25 @@ struct RootView: View {
         .environment(\.cardFlight, cardFlight)
         .environment(\.tabEntrance, tabEntrance)
         .environment(\.detailAmountFrames, detailAmountFrames)
+    }
+
+    /// T1: la entrada de cada pestaña. La elegida lleva un `token` nuevo DESDE el instante en que se elige (se calcula
+    /// aquí, en `body`, con la pestaña de antes: no espera al `onChange`, así que no hay ni un fotograma de la pestaña
+    /// quieta antes de entrar), y su valor no cambia cuando el `onChange` lo apunta. Las demás no se mueven. Al abrir
+    /// la app, `token` 0: nada entra. Mientras vuela una tarjeta (`tabEntrance.suppressed`), tampoco.
+    private func entrance(for candidate: AppTab) -> TabEntrance {
+        let changing = tab != lastTab
+        guard candidate == tab else { return TabEntrance(token: 0, direction: 1, suppressed: true) }
+        return TabEntrance(
+            token: tabChanges + (changing ? 1 : 0),
+            direction: changing ? Self.direction(from: lastTab, to: tab) : tabDirection,
+            suppressed: tabEntrance.suppressed || isLocked)
+    }
+
+    /// 1 si la pestaña nueva está a la derecha de la anterior en la barra; −1 si a la izquierda.
+    private static func direction(from old: AppTab, to new: AppTab) -> Int {
+        let order: [AppTab] = [.home, .spending, .alerts, .settings]
+        return (order.firstIndex(of: new) ?? 0) >= (order.firstIndex(of: old) ?? 0) ? 1 : -1
     }
 
     /// Primer plano a efectos de la hoja de un movimiento. En Release es exactamente `scenePhase == .active`.
@@ -461,7 +497,9 @@ struct RootView: View {
     /// Nunca con el bloqueo delante ni con la app fuera de primer plano.
     private func openDetail(_ id: UUID, zooms: Bool = false) {
         guard gate.canPresent, !isLocked, isForeground, model.movement(id) != nil else { return }
-        detail = DetailRoute(id: id, zooms: zooms)
+        // D1: el marco del importe de la fila tocada se lee AQUI, en el toque (nunca en un `body`). Solo desde las
+        // filas de Inicio (las que lo apuntan y las que abren con zoom).
+        detail = DetailRoute(id: id, zooms: zooms, amountOrigin: zooms ? detailAmountFrames.frame(for: id) : nil)
     }
 
     private func openPosition(_ instrument: String) {

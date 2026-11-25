@@ -190,6 +190,26 @@ final class MotionTourShellTests: MotionTourCase {
         burst("unlock-templado", frames: 24, every: 0.2)
     }
 
+    // MARK: - Pestañas (T1)
+
+    /// Cambiar de pestaña a ×4: el contenido llega desde 70 pt en la dirección del cambio y se funde; luego de vuelta.
+    private func tabChangeBursts(_ name: String, extra: [String] = []) {
+        launch(extra)
+        waitForLaunchToEnd()
+        let gasto = app.tabBars.buttons["Gasto"]
+        XCTAssertTrue(gasto.waitForExistence(timeout: 10), "Falta la pestaña Gasto")
+        gasto.tap()
+        burst(name, frames: 10, every: 0.15)
+        app.tabBars.buttons["Inicio"].tap()
+        burst(name + "-vuelta", frames: 10, every: 0.15)
+    }
+
+    func testTabChange() throws { tabChangeBursts("tab-change") }
+
+    func testTabChangeWithTheEyeClosed() throws { tabChangeBursts("tab-change-ojo", extra: ["-MiBancoDemoPrivate"]) }
+
+    func testTabChangeReduceMotion() throws { tabChangeBursts("tab-change-reducir", extra: ["-MiBancoReduceMotion"]) }
+
     // MARK: - Importes que ruedan en las hojas
 
     /// Fila → detalle a ×4: el importe grande entra y rueda; «Te quedaban» empieza oculto y rueda cuando el importe se posa.
@@ -207,6 +227,47 @@ final class MotionTourShellTests: MotionTourCase {
         flag.tap()
         app.swipeDown()
         burst("detail-flagged", frames: 3, every: 0.5)
+    }
+
+    /// C4 (D1): fila → detalle a ×4, desde el toque: el importe sale de la fila y vuela con un arco a su sitio; las
+    /// líneas entran desde 0,15 s; «Te quedaban» rueda cuando el importe se posa; las barras del historial crecen 40 ms
+    /// una detrás de otra. Luego se cierra (`detail-dismiss`).
+    private func rowDetailBursts(_ name: String, extra: [String] = []) {
+        launch(extra)
+        waitForLaunchToEnd()
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
+        XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
+        row.tap()
+        burst(name, frames: 24, every: 0.12)
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja")
+        close.tap()
+        burst(name == "row-detail" ? "detail-dismiss" : name + "-cerrar", frames: 8, every: 0.15)
+    }
+
+    func testRowDetail() throws { rowDetailBursts("row-detail") }
+
+    func testRowDetailWithTheEyeClosed() throws { rowDetailBursts("row-detail-ojo", extra: ["-MiBancoDemoPrivate"]) }
+
+    func testRowDetailReduceMotion() throws { rowDetailBursts("row-detail-reducir", extra: ["-MiBancoReduceMotion"]) }
+
+    /// C4 (D2): la categoría de un pago: la ficha blanca se desliza a la elegida y su símbolo bota; luego se pliega.
+    func testCategoryPick() throws {
+        launch()
+        waitForLaunchToEnd()
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
+        XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
+        row.tap()
+        let chip = element("category-chip")
+        XCTAssertTrue(chip.waitForExistence(timeout: 8), "La primera fila no es un pago con categoría")
+        chip.tap()
+        let tile = element("category-tile-ocio")
+        XCTAssertTrue(tile.waitForExistence(timeout: 5), "Falta la ficha Ocio")
+        Thread.sleep(forTimeInterval: 2)
+        tile.tap()
+        burst("category-pick", frames: 10, every: 0.12)
     }
 
     /// Lo mismo con el ojo cerrado: ni una cifra en ningún fotograma.
@@ -244,6 +305,38 @@ final class MotionTourShellTests: MotionTourCase {
         launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrivate"])
         XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 30), "La hoja del resumen no se abrió")
         burst("briefing-total-ojo", frames: 8, every: 0.3)
+    }
+
+    /// C5 (B1): el resumen abierto desde la marca de Inicio, desde el toque: los bloques suben uno detrás de otro
+    /// (120 ms × 0,92ⁿ) y sus importes ruedan.
+    private func briefingBursts(_ name: String, extra: [String] = []) {
+        launch(["-MiBancoDemoBriefing", "busy"] + extra)
+        let done = app.buttons["Vale"]
+        XCTAssertTrue(done.waitForExistence(timeout: 30), "La hoja del resumen no se abrió")
+        done.tap()
+        XCTAssertTrue(waitUntil(10) { !done.exists }, "La hoja del resumen no se cerró")
+        let open = app.buttons["Tu resumen"]
+        XCTAssertTrue(open.waitForExistence(timeout: 10), "Falta el botón «Tu resumen» de Inicio")
+        open.tap()
+        burst(name, frames: 16, every: 0.15)
+    }
+
+    func testBriefingEntrance() throws { briefingBursts("briefing") }
+
+    func testBriefingEntranceWithTheEyeClosed() throws { briefingBursts("briefing-ojo", extra: ["-MiBancoDemoPrivate"]) }
+
+    func testBriefingEntranceReduceMotion() throws { briefingBursts("briefing-reducir", extra: ["-MiBancoReduceMotion"]) }
+
+    /// C5 (B2): «Escuchar»: las 28 barras se mueven encima de «Vale» mientras habla; «Parar» las funde.
+    func testBriefingVoice() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        let listen = app.buttons["briefing-listen"]
+        XCTAssertTrue(listen.waitForExistence(timeout: 30), "Falta «Escuchar»")
+        Thread.sleep(forTimeInterval: 3)
+        listen.tap()
+        burst("briefing-voice", frames: 8, every: 0.15)
+        listen.tap()
+        burst("briefing-voice-parar", frames: 4, every: 0.15)
     }
 
     /// El total del resumen rueda dentro de su frase.

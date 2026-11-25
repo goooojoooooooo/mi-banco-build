@@ -261,7 +261,10 @@ private struct FanPlacement: ViewModifier {
         guard now != placed else { return }
         if now {
             // Aparece en un instante (opaca) y se abre con su escalón.
-            withAnimation(motion.reduce ? motion.fade : .linear(duration: motion.seconds(0.05))) { visible = true }
+            // Con Reducir movimiento, cuando el negro ya tapa casi todo Inicio (ver `WalletFan.open`).
+            let appear: Animation = motion.reduce
+                ? motion.fade.delay(motion.pause(0.12)) : .linear(duration: motion.seconds(0.05))
+            withAnimation(appear) { visible = true }
             withAnimation(openSpring.delay(motion.stagger(index, firstGap: 0.06, decay: 1))) { placed = true }
         } else {
             // Al recoger, todas a la vez, apagándose mientras vuelven.

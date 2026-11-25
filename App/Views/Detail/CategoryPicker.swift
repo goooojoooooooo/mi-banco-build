@@ -22,6 +22,8 @@ struct CategoryPickerRow: View {
     @State private var expanded: Bool
     @State private var applyToMerchant: Bool
     @State private var selectTick = 0
+    /// m-1: cuántas veces se ha elegido cada categoría: solo bota el símbolo de la que se elige (no el de la que se deja).
+    @State private var bounces: [SpendingCategory: Int] = [:]
     @State private var errorTick = 0
     @State private var failed = false
 
@@ -127,7 +129,8 @@ struct CategoryPickerRow: View {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(Array(SpendingCategory.allCases.enumerated()), id: \.element) { index, category in
                     CategoryTile(category: category, selected: category == current, index: index, height: tileHeight,
-                                 fixedHeight: !typeSize.isAccessibilitySize, selection: selection) {
+                                 fixedHeight: !typeSize.isAccessibilitySize, selection: selection,
+                                 bounce: bounces[category] ?? 0) {
                         choose(category)
                     }
                 }
@@ -175,6 +178,7 @@ struct CategoryPickerRow: View {
                 try model.setCategory(category, for: movement.id, applyToMerchant: applyToMerchant && merchantName != nil)
             }
             selectTick += 1
+            if !motion.reduce { bounces[category, default: 0] += 1 }
             withAnimation(fold.delay(motion.reduce ? 0 : motion.seconds(0.32))) {
                 failed = false
                 expanded = false
@@ -210,6 +214,8 @@ private struct CategoryTile: View {
     let fixedHeight: Bool
     /// D2: la ficha blanca compartida (una sola, se desliza de la antigua a la nueva).
     let selection: Namespace.ID
+    /// Sube solo cuando se elige ESTA ficha: su símbolo bota.
+    let bounce: Int
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -225,7 +231,7 @@ private struct CategoryTile: View {
                     .font(.system(size: 20, weight: .regular))
                     .frame(height: 24)
                     // D2: el símbolo de la elegida da un bote al elegirla (con Reducir movimiento, no).
-                    .symbolEffect(.bounce, value: selected && !motion.reduce)
+                    .symbolEffect(.bounce, value: bounce)
                 Text(category.displayName)
                     .titan(.caption)
                     .lineLimit(fixedHeight ? 2 : nil)

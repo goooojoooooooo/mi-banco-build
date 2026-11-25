@@ -63,13 +63,20 @@ struct AlertView: View {
                 }
                 .modifier(Rise(landed: landed, reduceMotion: reduceMotion, animation: step(0.12)))
                 Spacer(minLength: 8)
-                RollingFigure(value: landed ? Double(model.amountCents) : 0, style: .signed)
+                Group {
+                    if model.hidden {
+                        // I-2: con el ojo cerrado, la máscara nítida (nunca una cifra, ni contando).
+                        Text(AmountMask.text(negative: model.amountCents < 0, showsPlus: model.amountCents > 0))
+                    } else {
+                        RollingFigure(value: landed ? Double(model.amountCents) : 0, style: .signed)
+                            .animation(number(Theme.Motion.countUp, delay: 0.15), value: landed)
+                    }
+                }
                     .font(Theme.font(size: 20, weight: .semibold))
                     .foregroundStyle(model.isIncome ? Theme.income : Theme.label)
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
-                    .animation(number(Theme.Motion.countUp, delay: 0.15), value: landed)
-                    .accessibilityLabel(model.title)
+                    .accessibilityLabel(model.hidden ? "\(headline), importe oculto" : model.title)
             }
 
             Spacer(minLength: 18)
@@ -80,11 +87,18 @@ struct AlertView: View {
                     .foregroundStyle(Theme.card2)
                     .modifier(Rise(landed: landed, reduceMotion: reduceMotion, animation: step(0.22)))
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    RollingFigure(value: Double(landed ? after : (model.balanceBefore ?? after)), style: .hero)
+                    Group {
+                        if model.hidden {
+                            Text(AmountMask.text(negative: false, showsPlus: false))
+                                .font(.system(size: 40, weight: .semibold))
+                        } else {
+                            RollingFigure(value: Double(landed ? after : (model.balanceBefore ?? after)), style: .hero)
+                                .animation(number(Theme.Motion.roll, delay: 0.35), value: landed)
+                        }
+                    }
                         .foregroundStyle(Theme.label)
                         .lineLimit(1)
                         .minimumScaleFactor(0.5)
-                        .animation(number(Theme.Motion.roll, delay: 0.35), value: landed)
                     if model.estimated {
                         Text("estimado")
                             .font(Theme.font(size: 12))
@@ -94,13 +108,16 @@ struct AlertView: View {
                 }
                 .padding(.top, 2)
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(model.body)
+                .accessibilityLabel(model.hidden
+                    ? "\(model.estimated ? "Te quedan unos" : "Te quedan") importe oculto en \(model.bank?.displayName ?? "")"
+                    : model.body)
                 Text("en \(model.bank?.displayName ?? "")")
                     .font(Theme.font(size: 13))
                     .foregroundStyle(Theme.card2)
                     .modifier(Rise(landed: landed, reduceMotion: reduceMotion, animation: step(0.3)))
             } else {
-                Text(model.body)
+                // Sin saldo: el cuerpo del aviso (con el ojo cerrado, sin cifras).
+                Text(model.hidden ? privateSpokenText(model.body).replacingOccurrences(of: "importe oculto", with: "•••") : model.body)
                     .font(Theme.font(size: 15, weight: .medium))
                     .foregroundStyle(Theme.card2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -178,10 +195,11 @@ struct AlertView: View {
         var out: [(label: String, value: String)] = []
         if let count = model.monthCount, let cents = model.monthCents, let merchant = model.merchant {
             let times = count == 1 ? "1 compra" : "\(count) compras"
-            out.append(("Este mes en \(merchant)", "\(times) · \(formatEUR(cents))"))
+            let amount = model.hidden ? AmountMask.text(negative: false, showsPlus: false) : formatEUR(cents)
+            out.append(("Este mes en \(merchant)", "\(times) · \(amount)"))
         }
         if let today = model.todaySpent, today > 0 {
-            out.append(("Hoy has gastado", formatEUR(today)))
+            out.append(("Hoy has gastado", model.hidden ? AmountMask.text(negative: false, showsPlus: false) : formatEUR(today)))
         }
         return out
     }

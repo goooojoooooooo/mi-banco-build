@@ -62,6 +62,7 @@ struct BriefingSheet: View {
                                 role: .sheetTitle,
                                 color: Theme.label
                             )
+                            .modifier(SpokenHighlight(id: "headline", current: speaker.currentLine))
                             .modifier(BriefingReveal(stage: 2, completed: entranceCompleted, token: entranceToken))
 
                             ForEach(Array(briefing.sections.enumerated()), id: \.element.id) { index, section in
@@ -71,6 +72,7 @@ struct BriefingSheet: View {
 
                             if let tip = briefing.tip {
                                 tipCard(tip)
+                                    .modifier(SpokenHighlight(id: tip.id, current: speaker.currentLine))
                                     .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
                             }
 
@@ -140,6 +142,10 @@ struct BriefingSheet: View {
                 speaker.stop()
             }
         }
+        #if DEBUG
+        // Para las pruebas (B2): qué línea suena.
+        .onChange(of: speaker.currentLine, initial: true) { _, line in LaunchProbe.shared.spokenLine = line ?? "-" }
+        #endif
     }
 
     // MARK: - Cabecera
@@ -178,6 +184,10 @@ struct BriefingSheet: View {
                 .buttonStyle(.pressable)
                 .accessibilityLabel(speakingBriefing ? "Parar" : "Escuchar")
                 .accessibilityIdentifier("briefing-listen")
+                #if DEBUG
+                // Solo DEBUG, para las pruebas (B2): qué línea suena (el fondo de la hoja no se ve con ella delante).
+                .accessibilityValue(DemoMode.isActive ? (speaker.currentLine ?? "-") : "")
+                #endif
 
                 Button {
                     speaker.stop()
@@ -239,14 +249,18 @@ struct BriefingSheet: View {
     @ViewBuilder
     private func briefingRow(_ line: BriefingLine, idPrefix: String) -> some View {
         let isHeroTotal = idPrefix == "briefing-line" && line.id == "money-total"
+        // B2: la línea que suena ahora (solo en el resumen, no en las respuestas): se resalta y su importe rueda otra vez
+        // desde 0 mientras se lee (con el ojo cerrado no hay cifra que rodar: `BriefingLineView` dibuja la máscara).
+        let spokenNow = idPrefix == "briefing-line" && speaker.currentLine == line.id
         let content = HStack(alignment: .center, spacing: 10) {
             BriefingLineView(
                 parts: line.parts,
                 role: .row,
                 color: Theme.label,
-                countsFirstAmount: isHeroTotal,
-                snapCountImmediately: userSkippedEntrance
+                countsFirstAmount: isHeroTotal || spokenNow,
+                snapCountImmediately: userSkippedEntrance && !spokenNow
             )
+            .id(spokenNow ? "leyendo-\(line.id)" : line.id)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if line.action != nil {
@@ -260,6 +274,7 @@ struct BriefingSheet: View {
         .padding(.vertical, 13)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
+        .modifier(SpokenHighlight(id: line.id, current: idPrefix == "briefing-line" ? speaker.currentLine : nil))
 
         if let action = line.action {
             Button {
@@ -582,6 +597,15 @@ struct BriefingSheet: View {
 
     private var bottomDoneBar: some View {
         VStack(spacing: 0) {
+            // B2: mientras Onyx lee en voz alta, las 28 barras van encima de «Vale», DENTRO de la barra de abajo: la
+            // lista reserva su alto (m-7: antes flotaban encima de «Lo que viene» y del borde de la fila siguiente).
+            if speaker.activeTarget == .briefing {
+                VoiceWave(speaking: true)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 10)
+                    // Solo las barras se funden; el alto de la barra de abajo cambia de golpe (nada de maquetación animada).
+                    .transition(.opacity.animation(motion.fade))
+            }
             Button {
                 speaker.stop()
                 dismiss()
@@ -597,23 +621,6 @@ struct BriefingSheet: View {
             .buttonStyle(.pressable)
             .accessibilityIdentifier("briefing-done")
         }
-        // B2: mientras Onyx lee en voz alta, las 28 barras flotan justo encima de «Vale» (por encima: no cambian el
-        // sitio de nada) y se funden al parar.
-        .overlay(alignment: .top) {
-            if speaker.activeTarget == .briefing {
-                VoiceWave(speaking: true)
-                    .padding(.vertical, 4)
-                    .frame(maxWidth: .infinity)
-                    // Sobre el negro de la hoja: el texto que pasa por debajo no se cruza con las barras.
-                    .background(Theme.canvas)
-                    // Encima de «Vale», no sobre él (hoja `briefing-voice`, run8: con la guía de alineación quedaba
-                    // encima del botón).
-                    .offset(y: -(52 + 8))
-                    .transition(.opacity)
-                    .accessibilityIdentifier("voice-wave")
-            }
-        }
-        .animation(motion.fade, value: speaker.activeTarget == .briefing)
         .padding(.horizontal, Theme.Space.gutter)
         .padding(.top, 10)
         .padding(.bottom, 12)
@@ -656,20 +663,21 @@ struct BriefingSheet: View {
     private func completeEntrance() {
         guard !entranceCompleted else { return }
         userSkippedEntrance = true
-        withAnimation(motion.reduce ? motion.fade : Theme.Motion.quick) {
+        withAnimation(motion.animation(.snap)) {
             entranceCompleted = true
         }
     }
 
     private func toggleBriefingSpeech(_ briefing: Briefing) {
         guard let input = briefingModel.input else { return }
-        let text = spokenBriefing(
+        // El mismo texto de siempre, con dónde está cada línea dentro de él (B2: resaltar la que suena).
+        let spoken = spokenBriefingLines(
             briefing,
             input: input,
             privateMode: preferences.privateMode,
             calendar: DateText.madridCalendar
         )
-        speaker.toggle(text, target: .briefing)
+        speaker.toggle(spoken, target: .briefing)
     }
 
     private func submitQuestion(scrollProxy: ScrollViewProxy) {
@@ -756,5 +764,26 @@ extension AssistantTopic {
         case .spendingPace: "Cómo vas este mes frente al mes anterior"
         case .portfolioMover: "Qué ha subido o bajado más en tu cartera (sin consejos)"
         }
+    }
+}
+
+/// B2: mientras Onyx lee en voz alta, la línea que suena va resaltada (un fondo suave) y las demás del resumen se
+/// apagan un poco; al callar, todas vuelven. Solo opacidad y color de fondo, con el fundido de `\.motion`. Con el ojo
+/// cerrado el resalte no añade nada que leer: la línea ya es su máscara.
+private struct SpokenHighlight: ViewModifier {
+    let id: String
+    let current: String?
+    @Environment(\.motion) private var motion
+
+    func body(content: Content) -> some View {
+        let isCurrent = current == id
+        content
+            .opacity(current == nil || isCurrent ? 1 : 0.45)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.raised.opacity(isCurrent ? 1 : 0))
+                    .padding(-6))
+            .animation(motion.fade, value: current)
+            .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }

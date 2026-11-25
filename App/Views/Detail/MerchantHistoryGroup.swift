@@ -43,6 +43,8 @@ struct MerchantHistoryGroup: View {
                                         .frame(maxHeight: .infinity)
                                 }
                                 .frame(height: 16)
+                                // I-1: la barra nunca sale de su hueco (no pisa el importe de al lado).
+                                .clipped()
                                 MaskedText(cents: abs(m.amountCents), hidden: hidden)
                                     .frame(minWidth: 66, alignment: .trailing)
                             }
@@ -97,9 +99,15 @@ private struct HistoryBar: View {
             .frame(width: max(width, 0), height: 6)
             .scaleEffect(x: grown || motion.reduce ? 1 : 0.001, y: 1, anchor: .leading)
             .onAppear {
-                guard !motion.reduce else { return }
+                // m-3: con Reducir movimiento ya está entera, y se queda así aunque Reducir se apague con la hoja abierta.
+                guard !motion.reduce else {
+                    grown = true
+                    return
+                }
                 let delay = motion.seconds(0.38) + motion.seconds(0.04) * Double(index)
-                withAnimation(motion.animation(.release).delay(delay)) { grown = true }
+                // I-1: crece sin pasarse (un muelle sin rebote): con rebote, la más larga atravesaba su importe y
+                // parecía tachado como «No es mío» (run10 `row-detail` 11–15).
+                withAnimation(motion.calmAnimation(.release).delay(delay)) { grown = true }
             }
     }
 }

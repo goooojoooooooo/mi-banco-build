@@ -119,6 +119,8 @@ private struct DetailContent: View {
                         .font(.system(size: amountSize, weight: .semibold))
                         .tracking(-amountSize * 0.03)
                         .foregroundStyle(movement.amountCents > 0 && !movement.flaggedNotMine ? Theme.income : Theme.label)
+                        // m-12: los dígitos que ruedan no salen de su línea (no pisan «Hoy, 16:43 · Revolut» de encima).
+                        .clipped()
                         // «No es mío»: la raya se dibuja encima (las cifras que ruedan no son texto que se pueda tachar).
                         .overlay {
                             if movement.flaggedNotMine {

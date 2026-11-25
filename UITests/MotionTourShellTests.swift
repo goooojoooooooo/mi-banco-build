@@ -209,6 +209,27 @@ final class MotionTourShellTests: MotionTourCase {
         burst(name + "-vuelta", frames: 12, every: 0.4)
     }
 
+    /// Ronda 1 del lote 3: el FUNDIDO de la entrada de pestaña, grabado desde ANTES del cambio. La app cambia sola de
+    /// Inicio a Gasto (`-MiBancoDemoTabSwitch`) y la ráfaga empieza 0,3 s antes; a ×16 el fundido dura ~3 s (a ×16, con
+    /// Reducir movimiento, solo el fundido).
+    private func tabFadeBursts(_ name: String, extra: [String] = []) throws {
+        launch(["-MiBancoDemoTabSwitch", "40"] + extra, scale: 16)
+        waitForLaunchToEnd()
+        var at: Double?
+        XCTAssertTrue(waitUntil(20) {
+            at = Double(self.probe()["cambioPestana"] ?? "")
+            return at != nil
+        }, "La app no publicó cuándo cambia de pestaña")
+        let wait = try XCTUnwrap(at) - 0.3 - Date().timeIntervalSince1970
+        XCTAssertGreaterThan(wait, 0, "El cambio de pestaña ya había pasado (\(wait) s)")
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst(name, frames: 16, every: 0.25)
+    }
+
+    func testTabFade() throws { try tabFadeBursts("tab-change-fundido") }
+
+    func testTabFadeReduceMotion() throws { try tabFadeBursts("tab-change-fundido-reducir", extra: ["-MiBancoReduceMotion"]) }
+
     func testTabChange() throws { tabChangeBursts("tab-change") }
 
     func testTabChangeWithTheEyeClosed() throws { tabChangeBursts("tab-change-ojo", extra: ["-MiBancoDemoPrivate"]) }
@@ -223,7 +244,7 @@ final class MotionTourShellTests: MotionTourCase {
         launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"] + extra)
         let banner = element("in-app-banner")
         XCTAssertTrue(banner.waitForExistence(timeout: 30), "No apareció el aviso dentro de la app")
-        burst(name, frames: 24, every: 0.6)
+        burst(name, frames: 30, every: 0.6)
     }
 
     func testInAppBanner() throws { bannerBursts("in-app-banner") }

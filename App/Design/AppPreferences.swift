@@ -29,7 +29,21 @@ final class AppPreferences {
     nonisolated static let pricesAskedKey = "investmentPricesAsked"
 
     var privateMode: Bool {
-        didSet { Self.privateModeStore.set(privateMode, forKey: Self.privateModeKey) }
+        didSet {
+            Self.privateModeStore.set(privateMode, forKey: Self.privateModeKey)
+            Self.shareEye(privateMode)
+        }
+    }
+
+    /// I-2: copia el ojo en la suite del grupo de apps (clave `privateMode`) para la extensión de avisos, y lo lleva a
+    /// la Live Activity que esté en pantalla. La fuente de verdad sigue siendo la de arriba. Al cambiar y al arrancar.
+    static func shareEye(_ hidden: Bool) {
+        let shared = SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)
+        SharedPrivacy.publish(hidden, to: shared)
+        #if DEBUG
+        LaunchProbe.shared.sharedEye = SharedPrivacy.read(from: shared).map { $0 ? "cerrado" : "abierto" } ?? "-"
+        #endif
+        Task { await LiveActivityController.setHidden(hidden) }
     }
 
     static let motionLevelKey = "motionLevel"
@@ -69,6 +83,7 @@ final class AppPreferences {
     init() {
         let stored = UserDefaults.standard.string(forKey: Self.motionLevelKey).flatMap(MotionLevel.init(rawValue:))
         privateMode = Self.storedPrivateMode
+        Self.shareEye(privateMode)
         #if DEBUG
         if DemoMode.isActive {
             motionLevel = DemoMode.motionLevelOverride ?? Self.defaultMotionLevel

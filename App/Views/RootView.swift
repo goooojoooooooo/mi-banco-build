@@ -324,6 +324,14 @@ struct RootView: View {
         .onAppear(perform: applyRoute)
         #if DEBUG
         .onAppear(perform: applyDemoTab)
+        .task {
+            // Solo demo de grabación: cambia sola a Gasto para grabar la entrada de la pestaña desde antes del cambio.
+            guard let seconds = DemoMode.tabSwitchSeconds else { return }
+            LaunchProbe.shared.tabSwitchAt = Date().timeIntervalSince1970 + seconds
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            tab = .spending
+        }
         #endif
         // Costuras de movimiento (F1): por fuera de todo, para que también las vean la hoja única y las capas.
         .environment(\.cardFlight, cardFlight)

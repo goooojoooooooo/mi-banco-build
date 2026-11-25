@@ -36,6 +36,8 @@ struct InAppBanner: View {
             if let left {
                 details(left: left)
                     .opacity(Double(min(1, open * 1.4)))
+                    // m-1: sus botones solo se tocan desplegado del todo (al recogerse, nada que no se ve recibe toques).
+                    .allowsHitTesting(open > 0.99)
             }
         }
         .padding(14)
@@ -47,6 +49,8 @@ struct InAppBanner: View {
         .mask(alignment: .top) {
             shape.offset(y: -hiddenBottom)
         }
+        // m-1: lo que la máscara esconde tampoco recibe toques (al caer, la parte de abajo se tragaba los de debajo).
+        .contentShape(VisibleTop(hiddenBottom: hiddenBottom))
         .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
         .padding(.horizontal, 10)
         .offset(y: dropped || motion.reduce ? 0 : -160)
@@ -149,5 +153,14 @@ struct InAppBanner: View {
     private func pause(_ seconds: Double) async -> Bool {
         try? await Task.sleep(for: .seconds(motion.pause(seconds)))
         return !Task.isCancelled
+    }
+}
+
+/// La parte del aviso que se ve: todo menos lo que la máscara esconde por abajo.
+private struct VisibleTop: Shape {
+    var hiddenBottom: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: max(0, rect.height - hiddenBottom)))
     }
 }

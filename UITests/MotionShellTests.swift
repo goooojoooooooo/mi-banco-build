@@ -624,6 +624,57 @@ final class MotionShellTests: XCTestCase {
                       "«Te quedaban» no dice «importe oculto»")
     }
 
+    /// B2 (ronda 1 del lote 3): al escuchar el resumen, la línea que suena se resalta y va cambiando con la voz (en la
+    /// demo la voz es simulada: 1,6 s por línea; en el iPhone manda el progreso real). Con el ojo cerrado la voz no lee
+    /// ninguna línea, así que no se resalta ninguna y la hoja no enseña ninguna cifra mientras «habla».
+    func testSpokenLineIsHighlighted() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        let listen = app.buttons["briefing-listen"]
+        XCTAssertTrue(listen.waitForExistence(timeout: 30), "Falta «Escuchar»")
+        XCTAssertEqual(listen.value as? String, "-", "Antes de escuchar ya hay una línea resaltada")
+        listen.tap()
+        XCTAssertTrue(waitUntil(8) { (listen.value as? String) == "headline" },
+                      "La primera línea leída no es la frase principal: «\(listen.value as? String ?? "nil")»")
+        XCTAssertTrue(waitUntil(8) { let v = listen.value as? String ?? "-"; return v != "headline" && v != "-" },
+                      "La línea resaltada no avanza con la voz: «\(listen.value as? String ?? "nil")»")
+        listen.tap()
+        XCTAssertTrue(waitUntil(5) { (listen.value as? String) == "-" }, "Al parar sigue resaltada una línea")
+        app.terminate()
+
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrivate"])
+        let privateListen = app.buttons["briefing-listen"]
+        XCTAssertTrue(privateListen.waitForExistence(timeout: 30), "Falta «Escuchar» con el ojo cerrado")
+        privateListen.tap()
+        let sheet = app.scrollViews["briefing-scroll"]
+        for pass in 0..<6 {
+            XCTAssertEqual(privateListen.value as? String, "-", "Pasada \(pass): con el ojo cerrado se resalta una línea")
+            let leaks = sheet.descendants(matching: .any)
+                .matching(NSPredicate(format: "label MATCHES %@", #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|\d\s*euros).*"#)).count
+            XCTAssertEqual(leaks, 0, "Pasada \(pass): con el ojo cerrado la hoja enseña cifras mientras habla")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    /// I-2 (ronda 1 del lote 3): el ojo de la app se copia en la suite compartida del grupo de apps al arrancar y al
+    /// cambiar (para la extensión de avisos y la Live Activity), y el estado de la Live Activity se sigue leyendo sin la
+    /// clave nueva. Que la extensión y la Live Activity dibujen máscaras solo lo confirma el iPhone.
+    func testTheEyeIsSharedWithTheExtensions() throws {
+        launch(["-MiBancoDemoPrivate"])
+        waitForLaunchToEnd(30)
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "cerrado" },
+                      "Al arrancar con el ojo cerrado la suite compartida no lo dice: \(probe())")
+        XCTAssertEqual(probe()["estadoViejo"], "ok", "El estado de la Live Activity no se lee sin la clave nueva: \(probe())")
+        let show = app.buttons["Mostrar importes"]
+        XCTAssertTrue(show.waitForExistence(timeout: 8), "Falta el ojo cerrado de Inicio")
+        XCTAssertTrue(waitUntil(8) { show.isHittable }, "El ojo no se puede tocar")
+        show.tap()
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "abierto" },
+                      "Al abrir el ojo la suite compartida no cambia: \(probe())")
+        app.buttons["Ocultar importes"].tap()
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "cerrado" },
+                      "Al cerrar el ojo la suite compartida no cambia: \(probe())")
+    }
+
     /// C6: el aviso dentro de la app. (a) Con el bloqueo delante llega un pago (la demo lo mete a los ~4 s): no aparece
     /// ningún aviso mientras dura el bloqueo, ni después (no se guarda). (b) Sin bloqueo, en Gasto: el aviso cae, se
     /// puede tocar y abre la hoja del movimiento (la única hoja), y nunca es una hoja él mismo. (c) Con el ojo cerrado,

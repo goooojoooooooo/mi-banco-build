@@ -20,6 +20,14 @@ extension DemoMode {
     /// al azar del barajado o máscara), para las pruebas de privacidad. Sin la bandera no cambia nada.
     static var exposesDrawnText: Bool { isActive && arguments.contains("-MiBancoDrawnText") }
 
+    /// `-MiBancoDemoTabSwitch <s>`: a los `s` segundos reales de arrancar, la app cambia sola de Inicio a Gasto (para
+    /// grabar la entrada de la pestaña desde ANTES del cambio: un toque de la prueba espera a que la app quede quieta).
+    static var tabSwitchSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoTabSwitch").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
+
     /// `-MiBancoDemoUnlockInactive <s>`: tras el desbloqueo en frío de la demo, la carcasa hace como que la escena sigue
     /// inactiva estos segundos reales y luego vuelve a activa. Es el orden de Face ID en el iPhone (el éxito llega con la
     /// escena aún inactiva), que el simulador no reproduce. nil = sin simular.
@@ -88,6 +96,24 @@ extension DemoMode {
     var lockVoiceOver = "-"
     /// La ranura de la marca de Inicio está escondida porque el bloqueo se funde con la suya (solo fundidos).
     var slotHiddenByLock = false
+    /// I-2: lo que dice la suite compartida del ojo tras la última escritura de la app («cerrado», «abierto», «-»).
+    var sharedEye = "-"
+    /// B2: la línea del resumen que suena ahora («-» si ninguna).
+    var spokenLine = "-"
+    /// Cuándo cambia sola de pestaña la demo (`-MiBancoDemoTabSwitch`), en segundos desde 1970.
+    var tabSwitchAt: Double?
+
+    /// I-2: el estado de la Live Activity se lee igual con y sin la clave nueva `hidden` (un estado viejo, de antes,
+    /// no la lleva): «ok» si los dos se decodifican y el viejo queda con `hidden` nil (ojo abierto, como siempre).
+    static let legacyActivityStateDecodes: String = {
+        let old = #"{"bank":"rev","estimated":false,"lastAmountCents":-1250,"kind":"payment","title":"Mercadona"}"#
+        let new = #"{"bank":"rev","estimated":false,"lastAmountCents":-1250,"kind":"payment","title":"Mercadona","hidden":true}"#
+        let decoder = JSONDecoder()
+        typealias State = MovementActivityAttributes.ContentState
+        guard let a = try? decoder.decode(State.self, from: Data(old.utf8)),
+              let b = try? decoder.decode(State.self, from: Data(new.utf8)) else { return "falla" }
+        return a.hidden == nil && b.hidden == true ? "ok" : "mal"
+    }()
 
     /// «arranques=1;estilo=piezas;saltos=0;libre=963;fin=1344;bloqueoPiezas=0;bloqueoQuieto=0;salidas=0;empieza=1764000000.123»
     var summary: String {
@@ -101,6 +127,8 @@ extension DemoMode {
             "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
+            "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)",
+            "cambioPestana=\(tabSwitchAt.map { String(format: "%.3f", $0) } ?? "-")",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")
     }

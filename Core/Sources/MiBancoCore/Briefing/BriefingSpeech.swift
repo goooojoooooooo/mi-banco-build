@@ -73,15 +73,50 @@ public func spokenBriefing(_ briefing: Briefing, input: BriefingInput, privateMo
         }
         return sentences.joined(separator: " ")
     }
+    return spokenBriefingLines(briefing, input: input, privateMode: false, calendar: calendar).text
+}
+
+/// Lo que lee la voz (el MISMO texto que `spokenBriefing`, palabra por palabra) y, para cada línea del resumen que se
+/// lee, dónde está dentro de ese texto: `range` en unidades UTF-16 (las que da el motor de voz al ir leyendo). Así se
+/// puede resaltar la línea que suena con el progreso real de la voz. Con el modo privado no hay líneas: la voz no lee
+/// ninguna línea del resumen (solo cuenta cosas), así que no se resalta nada.
+public struct SpokenBriefing: Equatable, Sendable {
+    public struct Line: Equatable, Sendable {
+        /// `BriefingLine.id` de la línea (la frase principal es "headline").
+        public let id: String
+        public let range: Range<Int>
+    }
+    public let text: String
+    public let lines: [Line]
+
+    /// La línea que suena cuando la voz va por la posición `offset` (UTF-16) del texto; nil entre líneas o fuera.
+    public func line(at offset: Int) -> String? {
+        lines.first { $0.range.contains(offset) }?.id
+    }
+}
+
+public func spokenBriefingLines(_ briefing: Briefing, input: BriefingInput, privateMode: Bool, calendar: Calendar) -> SpokenBriefing {
+    if privateMode {
+        return SpokenBriefing(text: spokenBriefing(briefing, input: input, privateMode: true, calendar: calendar), lines: [])
+    }
     var names = (input.income + input.payments).map(\.name) + input.upcoming.map(\.name) + input.shortfalls.map(\.charge.name)
     if let expected = input.expected { names.append(expected.name) }
     names += (input.investments?.positions ?? []).map(\.position.name)
-    sentences.append(render(briefing.headline, .plain))
+    var pieces: [(id: String?, text: String)] = [(nil, briefing.greeting + ".")]
+    pieces.append(("headline", render(briefing.headline, .plain)))
     for section in briefing.sections {
-        for line in section.lines { sentences.append(sentence(spoken(render(line.parts, .plain), keeping: names))) }
+        for line in section.lines { pieces.append((line.id, sentence(spoken(render(line.parts, .plain), keeping: names)))) }
     }
-    if let tip = briefing.tip { sentences.append(sentence(spoken(render(tip.parts, .plain), keeping: names))) }
-    return sentences.joined(separator: " ")
+    if let tip = briefing.tip { pieces.append((tip.id, sentence(spoken(render(tip.parts, .plain), keeping: names)))) }
+    var text = ""
+    var lines: [SpokenBriefing.Line] = []
+    for (index, piece) in pieces.enumerated() {
+        if index > 0 { text += " " }
+        let start = text.utf16.count
+        text += piece.text
+        if let id = piece.id { lines.append(.init(id: id, range: start..<text.utf16.count)) }
+    }
+    return SpokenBriefing(text: text, lines: lines)
 }
 
 /// Texto hablado en modo privado (U36): sustituye importes, porcentajes y «•••» por «importe oculto».

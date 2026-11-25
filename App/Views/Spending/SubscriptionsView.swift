@@ -7,7 +7,7 @@ import MiBancoCore
 struct SubscriptionsView: View {
     let model: LedgerModel
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var errorTick = 0
 
     /// Solo en la demo con `-MiBancoDemoBigSubscriptions`: la cabecera enseña importes mil veces mayores (cinco y seis
@@ -91,12 +91,12 @@ struct SubscriptionsView: View {
 
     /// La fila se va con un muelle sin rebote hacia el lado; con Reducir movimiento, solo se funde.
     private var rowTransition: AnyTransition {
-        reduceMotion ? .opacity : .asymmetric(insertion: .opacity, removal: .opacity.combined(with: .move(edge: .leading)))
+        motion.reduce ? .opacity : .asymmetric(insertion: .opacity, removal: .opacity.combined(with: .move(edge: .leading)))
     }
 
     private func hide(_ row: LedgerSnapshot.SubscriptionRow) {
         do {
-            try withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
+            try withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
                 try model.setSubscriptionDismissed(true, id: row.id)
             }
         } catch {
@@ -109,7 +109,7 @@ struct SubscriptionsView: View {
 struct HiddenSubscriptionsView: View {
     let model: LedgerModel
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dismiss) private var dismiss
     @State private var errorTick = 0
 
@@ -127,7 +127,7 @@ struct HiddenSubscriptionsView: View {
                 ForEach(Array(hidden.enumerated()), id: \.element.id) { i, row in
                     SubscriptionRowView(row: row, isLast: i == hidden.count - 1, restoreAction: { restore(row) })
                         .motionEntrance(1 + i)
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .trailing)))
+                        .transition(motion.reduce ? .opacity : .opacity.combined(with: .move(edge: .trailing)))
                 }
             }
             .padding(.bottom, Theme.Space.section)
@@ -145,7 +145,7 @@ struct HiddenSubscriptionsView: View {
 
     private func restore(_ row: LedgerSnapshot.SubscriptionRow) {
         do {
-            try withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
+            try withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
                 try model.setSubscriptionDismissed(false, id: row.id)
             }
         } catch {

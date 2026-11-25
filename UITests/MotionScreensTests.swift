@@ -876,11 +876,46 @@ final class MotionScreensTests: XCTestCase {
         let third = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Paso 3: Importar")).firstMatch
         XCTAssertEqual(third.value as? String, "hecho", "Con 100 el tercer paso no está hecho")
         XCTAssertFalse(title.exists, "«Conectado» salió sin la pausa del remate")
+        // Dónde empieza la hoja de movimientos con «Todo listo» a la vista (lote 3, I-1).
+        let sheetTitle = element("bank-movements-title")
+        XCTAssertTrue(sheetTitle.exists, "Falta el título de la hoja de movimientos")
+        let sheetTop = sheetTitle.frame.minY
 
         // Tras la pausa, «conectado», ya sin pasos ni «Todo listo».
         XCTAssertTrue(title.waitForExistence(timeout: 20), "Tras el remate no salió «conectado»")
         XCTAssertFalse(percent.exists, "Los pasos siguen a la vista con «conectado»")
         XCTAssertFalse(allDone.exists, "«Todo listo» sigue a la vista con «conectado»")
+        // El relevo no mueve la hoja de golpe: al salir «conectado» sigue donde estaba y después, si sube, lo hace poco a
+        // poco (a ×10, nunca más de 8 pt entre dos lecturas seguidas).
+        XCTAssertEqual(sheetTitle.frame.minY, sheetTop, accuracy: 2,
+                       "Al salir «conectado» la hoja saltó \(sheetTitle.frame.minY - sheetTop) pt")
+        var last = sheetTitle.frame.minY
+        // Unos 15 s: el relevo y, a los 10 s (1 s del kit ×10), el hueco sobrante que se suelta con el muelle de la hoja.
+        for _ in 0..<60 {
+            Thread.sleep(forTimeInterval: 0.2)
+            let now = sheetTitle.frame.minY
+            XCTAssertLessThanOrEqual(abs(now - last), 8, "La hoja saltó \(now - last) pt de una lectura a otra")
+            last = now
+        }
+    }
+
+    /// Variante de 13.1 dentro de la pantalla del banco (lote 3, m-5): con la hoja abajo la barra de pestañas está (y se
+    /// toca); al subir la hoja se esconde (no queda el botón redondo flotando sobre la lista); al bajarla vuelve.
+    func testBankTabBarHidesOnlyWithTheSheetUp() throws {
+        openBank("rev")
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
+        let settingsTab = app.tabBars.buttons["Ajustes"]
+        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 5), "Con la hoja abajo falta la barra de pestañas")
+        drag(from: 0.70, to: 0.30)
+        XCTAssertTrue(element("bank-mini-title").waitForExistence(timeout: 8), "La hoja no subió")
+        XCTAssertTrue(waitFor(NSPredicate(format: "hittable == false"), settingsTab, timeout: 5),
+                      "Con la hoja subida sigue la barra de pestañas")
+        drag(from: 0.30, to: 0.80)
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "La hoja no volvió abajo")
+        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 8), "Con la hoja abajo no volvió la barra de pestañas")
+        goBack()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes")
+        XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "La barra de pestañas no cambia de pestaña al volver")
     }
 
     /// «Ver movimientos» cierra «conectado» y sube la hoja (el título pequeño queda acoplado).

@@ -4,9 +4,9 @@ import SwiftUI
 // En qué punto del trámite está ESTE banco y su porcentaje: `BankConnectStage` y `BankConnectProgress` (Core).
 
 /// «Banco conectado» (momento 4 de los vídeos del dueño, final). Llega tras el remate de los pasos y cuando lo anterior
-/// ya se ha apagado (0,15 s, `BankConnectProgress.clearBeforeSuccess`): por eso sus tiempos empiezan casi en el acto (la
-/// maqueta: 180 ms después de empezar a apagar los pasos). El ✓ blanco salta de 0,4 a 1 con un destello de luz,
-/// el título, el estado y el saldo llegan con 70 ms entre ellos, el saldo cuenta desde 0 mientras su fila llega (nunca
+/// ya se ha apagado (0,15 s, `BankConnectProgress.clearBeforeSuccess`): por eso el ✓ salta casi en el acto (la
+/// maqueta: 180 ms después de empezar a apagar los pasos). El ✓ blanco salta de 0,4 a 1 con un destello de luz;
+/// cuando el destello se apaga (0,45 s), el título, el estado y el saldo llegan con 70 ms entre ellos, el saldo cuenta desde 0 mientras su fila llega (nunca
 /// asoma la cifra final antes de contar) y los botones suben 44 pt al final. El ✓ es blanco, nunca verde. Con Reducir movimiento todo se
 /// funde; el ✓ y la vibración de éxito siguen. Con el ojo cerrado el saldo es la máscara del kit.
 struct BankConnectedFlash: View {
@@ -30,7 +30,11 @@ struct BankConnectedFlash: View {
                     DrawnCheck(lineWidth: 3, color: .black)
                         .frame(width: 24, height: 24)
                 }
+                // A media escala: el aro del kit (hasta 100 pt de radio) cruzaba el nombre del banco y el título y se
+                // salía por el borde izquierdo; así se queda alrededor del ✓ (lote 3, m-2). El título entra cuando el aro
+                // ya está casi apagado (0,45 s).
                 SuccessBurst(trigger: burst)
+                    .scaleEffect(0.5)
             }
             .frame(width: 52, height: 52)
             .scaleEffect(popped || motion.reduce ? 1 : 0.4)
@@ -44,14 +48,14 @@ struct BankConnectedFlash: View {
                 .padding(.top, 14)
                 .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("bank-connected-title")
-                .risesIn(after: 0.15)
+                .risesIn(after: 0.45)
 
             Text(status)
                 .titan(.subtitle)
                 .foregroundStyle(Theme.label2)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
-                .risesIn(after: 0.22)
+                .risesIn(after: 0.52)
 
             if let balanceCents {
                 HStack(spacing: Theme.Space.row) {
@@ -71,11 +75,11 @@ struct BankConnectedFlash: View {
                 .accessibilityLabel("Saldo: \(spokenAmount(balanceCents, hidden: preferences.privateMode))")
                 .accessibilityIdentifier("bank-connected-balance")
                 .padding(.top, 16)
-                .risesIn(after: 0.29)
+                .risesIn(after: 0.59)
                 // El saldo empieza a contar (desde 0) justo cuando su fila empieza a verse: rueda mientras llega y nunca
                 // se queda parado en ceros ni enseña la cifra final antes de contar.
                 .task {
-                    try? await Task.sleep(for: .seconds(motion.seconds(0.29)))
+                    try? await Task.sleep(for: .seconds(motion.seconds(0.59)))
                     counts = true
                 }
             }
@@ -104,7 +108,7 @@ struct BankConnectedFlash: View {
                 .accessibilityIdentifier("bank-connected-done")
             }
             .padding(.top, 18)
-            .risesIn(after: 0.65, rise: 44, bounce: 0.3)
+            .risesIn(after: 0.90, rise: 44, bounce: 0.3)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onAppear {

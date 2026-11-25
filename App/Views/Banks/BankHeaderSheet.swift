@@ -30,13 +30,22 @@ enum BankHeaderMath {
     /// ven a la vez el saldo grande y el del título pequeño.
     static let miniStart: CGFloat = 0.70
 
-    /// La cabecera se apaga mientras la hoja sube y ha desaparecido en p = 0,62.
-    static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - unit(p) / headerGone) }
-    /// Las acciones rápidas siguen enteras hasta el 25 % del recorrido (con un toque de desplazamiento no parecen
-    /// desactivadas, ojo de diseño 13.3) y se han ido en p = 0,55, antes que el resto de la cabecera.
-    static func actionsOpacity(_ p: CGFloat) -> CGFloat { unit(1 - (unit(p) - 0.25) / 0.30) }
+    /// Hasta aquí la cabecera (y con ella «Actualizar ahora») sigue entera: con un toque de desplazamiento nada parece
+    /// desactivado (ojo de diseño 13.3). Las acciones van DENTRO de la capa de la cabecera, así que su opacidad dibujada
+    /// es el producto de las dos curvas: por eso las dos esperan al 25 % (lote 3, I-2).
+    static let holdUntil: CGFloat = 0.25
+
+    /// Con la hoja subida más de un 5 % la barra de pestañas se esconde (13.1, variante del lote 3 m-5).
+    static func hidesTabBar(_ p: CGFloat) -> Bool { unit(p) > 0.05 }
+
+    /// La cabecera sigue entera hasta p = 0,25, se apaga mientras la hoja sube y ha desaparecido en p = 0,62.
+    static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - (unit(p) - holdUntil) / (headerGone - holdUntil)) }
+    /// Las acciones rápidas, enteras hasta el 25 % del recorrido y fuera en p = 0,55, antes que el resto de la cabecera.
+    static func actionsOpacity(_ p: CGFloat) -> CGFloat { unit(1 - (unit(p) - holdUntil) / 0.30) }
+    /// Lo que se ve de verdad de las acciones (la capa de la cabecera por su propio apagado).
+    static func actionsDrawn(_ p: CGFloat) -> CGFloat { headerOpacity(p) * actionsOpacity(p) }
     /// Las acciones solo se tocan mientras se ven de verdad (menor m-11).
-    static func actionsTouchable(_ p: CGFloat) -> Bool { actionsOpacity(p) > 0.3 }
+    static func actionsTouchable(_ p: CGFloat) -> Bool { actionsDrawn(p) > 0.3 }
     /// El asa de la hoja se apaga en el último 10 % del recorrido: acoplada no sirve de nada (13.4).
     static func handleOpacity(_ p: CGFloat) -> CGFloat { unit((1 - unit(p)) / 0.1) }
     /// Esquinas de la hoja: 30 pt hasta p = 0,82 y de ahí a 0.
@@ -86,6 +95,8 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
     @State private var position = ScrollPosition(edge: .top)
     /// El desplazamiento está quieto (ni dedo ni inercia).
     @State private var scrollIdle = true
+    /// La hoja ha subido: la barra de pestañas se esconde.
+    @State private var tabBarHidden = false
 
     private static var sheetID: String { "bank-sheet" }
 
@@ -103,6 +114,9 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
         .scrollPosition($position)
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, new in
             scroll.offset = new
+            // Solo cambia al cruzar el umbral: no se redibuja la pantalla en cada paso del dedo.
+            let hide = BankHeaderMath.hidesTabBar(scroll.progress)
+            if hide != tabBarHidden { tabBarHidden = hide }
         }
         .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height - $0.contentInsets.top - $0.contentInsets.bottom } action: { _, new in
             scroll.viewport = max(0, new)
@@ -138,6 +152,10 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
             }
         }
         .toolbarBackground(.hidden, for: .navigationBar)
+        // Con la hoja subida, sin barra de pestañas: encogida al desplazar quedaba un botón redondo con el engranaje
+        // flotando sobre la lista (ojo de diseño 13.1). Con la hoja abajo la barra sigue ahí (y se puede cambiar de
+        // pestaña como siempre).
+        .toolbarVisibility(tabBarHidden ? .hidden : .automatic, for: .tabBar)
         .environment(scroll)
         .onChange(of: scroll.dockRequests) { _, _ in
             // Hasta el borde de arriba de la hoja, mida lo que mida la cabecera en ese momento.

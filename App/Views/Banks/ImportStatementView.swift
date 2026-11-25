@@ -310,11 +310,13 @@ struct ImportStatementView: View {
             errorTick += 1
             return false
         }
-        // Guardado de verdad: en la misma transacción el porcentaje corre de lo que se veía a 100 (0,25 s), el tercer
-        // nodo se rellena con su ✓ y el botón pasa de la rueda a su ✓; nunca un 100 con el nodo aún vacío (menor m-5).
+        // Guardado de verdad: el porcentaje corre de lo que se veía a 100 (0,25 s, la rueda sigue en el botón) y, justo
+        // cuando llega a 100, en la misma transacción el tercer nodo se rellena con su ✓ y el botón pasa a su ✓: los tres
+        // a la vez (menor m-5 del lote 2 y m-13 del lote 3; antes el ✓ llegaba con 99).
+        steps.succeed(shown: drawn)
+        stepStarted = Date()
+        try? await Task.sleep(for: .seconds(motion.reduce ? 0 : motion.seconds(StepPercent.finishSeconds)))
         withAnimation(motion.calmAnimation(.row)) {
-            steps.succeed(shown: drawn)
-            stepStarted = Date()
             importing = false
             applied = true
         }

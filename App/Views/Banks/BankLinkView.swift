@@ -38,6 +38,10 @@ struct BankLinkView: View {
     @State private var finishRun = 0
     /// Tras el remate, lo de la cabecera se está apagando antes de «conectado».
     @State private var clearing = false
+    /// Alto de la cabecera (sin márgenes) mientras enseña los pasos: lo que reserva «conectado» al relevarlos.
+    @State private var contentHeight: CGFloat = 0
+    /// Alto mínimo reservado para la cabecera en el relevo a «conectado» (0 = nada reservado).
+    @State private var reservedHeight: CGFloat = 0
     /// Se ha conectado desde esta pantalla: la lista puede estar llenándose por primera vez.
     @State private var connectedHere = false
     /// Se abrió con una tarjeta volando hacia aquí.
@@ -132,6 +136,7 @@ struct BankLinkView: View {
             stepStarted = Date()
             finishRun += 1
             clearing = false
+            reservedHeight = 0
         case .succeeded:
             connectedHere = true
             // El remate empieza ahora: la cifra corre desde la que se veía hasta 100.
@@ -156,8 +161,17 @@ struct BankLinkView: View {
             withAnimation(.easeOut(duration: clear)) { clearing = true }
             try? await Task.sleep(for: .seconds(clear))
             guard run == finishRun, progress.finishing else { return }
+            // El relevo no cambia el alto (lote 3, I-1): «conectado» se monta dentro del hueco que dejaban los pasos y la
+            // hoja de debajo no se mueve.
+            reservedHeight = contentHeight
             progress.revealSuccess()
             clearing = false
+            // Cuando «conectado» ya ha llegado entero (botones incluidos), el hueco sobrante se suelta con el muelle de la
+            // hoja. Con Reducir movimiento no hay recorrido: el hueco se queda hasta «Listo» o «Ver movimientos».
+            guard !motion.reduce else { return }
+            try? await Task.sleep(for: .seconds(motion.seconds(1.0)))
+            guard run == finishRun, progress.showsSuccess else { return }
+            withAnimation(motion.animation(.sheet)) { reservedHeight = 0 }
         }
     }
 
@@ -208,6 +222,7 @@ struct BankLinkView: View {
     private func dismissSuccess() {
         finishRun += 1
         clearing = false
+        reservedHeight = 0
         progress.dismissSuccess()
     }
 
@@ -361,7 +376,9 @@ struct BankLinkView: View {
                                            scroll.dockRequests += 1
                                        }, onDone: dismissSuccess)
                         .padding(.top, 18)
-                        .transition(.opacity)
+                        // Entra sin fundido de conjunto: el ✓, el título y el saldo llegan cada uno con su tiempo (un
+                        // fundido de todo dejaba la cabecera vacía un par de fotogramas, lote 3 m-2).
+                        .transition(.asymmetric(insertion: .identity, removal: .opacity))
                 } else {
                     Group {
                     if let balance {
@@ -403,6 +420,7 @@ struct BankLinkView: View {
                     }
                     // Tras el remate se apaga del todo antes de que salte el ✓ (nunca el ✓ sobre el saldo a medias).
                     .opacity(clearing ? 0 : 1)
+                    .allowsHitTesting(!clearing)
                 }
             }
             // Donde aterriza la tarjeta que vuela desde Inicio.
@@ -421,10 +439,17 @@ struct BankLinkView: View {
                 }
                 .padding(.top, 18)
                 .opacity(clearing ? 0 : 1)
+                // Mientras se apaga ya no se toca nada (lote 3, m-12).
+                .allowsHitTesting(!clearing)
                 .motionEntrance(4)
                 .fadesWithBankHeader()
             }
         }
+        // El alto con los pasos a la vista; «conectado» lo reserva al relevarlos (lote 3, I-1).
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+            if !progress.showsSuccess { contentHeight = height }
+        }
+        .frame(minHeight: reservedHeight, alignment: .top)
         .padding(.horizontal, 24)
         .padding(.top, 8)
         .padding(.bottom, 26)

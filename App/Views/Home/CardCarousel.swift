@@ -531,7 +531,7 @@ struct CardCarousel: View {
                 try? await Task.sleep(for: .milliseconds(800))
                 withAnimation(kit.reduce ? nil : kit.animation(.snap)) { selection = target }
             }
-        case .arrival, .arrivalIncome, .fan, .refresh, .rowSwipe, .search, nil:
+        case .arrival, .arrivalIncome, .fan, .refresh, .rowSwipe, .search, .staleArrival, nil:
             // Estos los atiende Inicio (`HomeView.runDemoMoment`).
             break
         }

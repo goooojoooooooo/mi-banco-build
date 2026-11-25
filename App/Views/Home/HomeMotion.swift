@@ -96,17 +96,34 @@ struct HomeEntrance: ViewModifier {
         let waiting = plan != nil && landed != entrance.token
         // En un cambio de tarjeta la lista nueva no parte de invisible: sale de donde se quedó la vieja (atenuada, ver
         // `HomeView.showList`), así la pantalla nunca se queda en negro entre las dos. Solo sube a su sitio.
-        let hiddenWhileWaiting = entrance.scope == .list && !motion.reduce ? 1.0 : 0.0
+        let waitingOpacity = opacityWhileWaiting
         content
-            .opacity(waiting ? hiddenWhileWaiting : 1)
+            .opacity(waiting ? waitingOpacity : 1)
             .scaleEffect(waiting && !motion.reduce ? (plan?.scale ?? 1) : 1)
             .offset(y: waiting ? motion.distance(plan?.rise ?? 0) : 0)
             .onAppear(perform: land)
             .onChange(of: entrance.token) { _, _ in land() }
     }
 
+    /// La opacidad de la pieza mientras espera su turno: 0 en el montaje (y con Reducir movimiento), 1 en un cambio de
+    /// lista (la lista nueva solo sube a su sitio).
+    private var opacityWhileWaiting: Double {
+        var visible = entrance.scope == .list && !motion.reduce
+        #if DEBUG
+        // Solo para probar la prueba (`-MiBancoDemoListBlanks`): la regresión exacta, la lista nueva parte de invisible.
+        if DemoMode.listSwapBlanks { visible = false }
+        #endif
+        return visible ? 1 : 0
+    }
+
     private func land() {
         guard let plan else { return }
+        #if DEBUG
+        if entrance.scope == .list {
+            let drawn = Int((HomeProbe.shared.listAlphaAtSwap * opacityWhileWaiting * 100).rounded())
+            HomeProbe.shared.listSwapFloor = min(HomeProbe.shared.listSwapFloor, drawn)
+        }
+        #endif
         let token = entrance.token
         // Con Reducir movimiento todas las piezas se funden a la vez, sin escalonado.
         withAnimation(motion.animation(plan.spring).delay(motion.reduce ? 0 : plan.delay)) { landed = token }
@@ -272,9 +289,16 @@ struct DrawnTextAuditProbe: View {
     var arrivalPulses = 0
     /// Cuántas veces ha entrado la lista escalonada por un cambio de tarjeta.
     var listEntrances = 0
-    /// Opacidad (en %) a la que estaba la lista vieja en el instante del último cambio de lista: nunca 0 con
-    /// movimiento (la pantalla no se queda en negro entre las dos listas). -1 = aún no ha habido cambio.
+    /// Opacidad efectiva (en %) más baja con la que se dibujó una pieza de la lista nueva en el último cambio de lista
+    /// (opacidad de la lista × la de su entrada): nunca 0 con movimiento (la pantalla no se queda en negro entre las
+    /// dos listas). -1 = aún no ha habido cambio.
     var listSwapFloor = -1
+    /// Opacidad de la lista en el instante del cambio (la usa `HomeEntrance` para calcular lo de arriba).
+    @ObservationIgnored var listAlphaAtSwap = 1.0
+    /// 1 mientras alguna fila está marcada como recién llegada (fondo y, si es un ingreso, ✓ verde).
+    var freshRows = 0
+    /// Llegadas anunciadas (aterricen o no).
+    var arrivalsAnnounced = 0
     /// Veces que se ha montado el ✓ del éxito (`SuccessMark`, solo «He visto salir») y el ✓ de «preparado»
     /// (`PreparedMark`, el paso «listo» de «Mover dinero»).
     var successMarks = 0
@@ -284,7 +308,7 @@ struct DrawnTextAuditProbe: View {
         [
             "montajes=\(assemblies)", "inclinacion=\(tiltRunning ? 1 : 0)", "tirones=\(refreshes)", "alDia=\(refreshesDone)",
             "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
-            "insignias=\(arrivalBadges)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)",
+            "insignias=\(arrivalBadges)", "nueva=\(freshRows)", "anunciadas=\(arrivalsAnnounced)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)",
             "exitos=\(successMarks)", "preparados=\(preparedMarks)",
         ].joined(separator: ";")
     }

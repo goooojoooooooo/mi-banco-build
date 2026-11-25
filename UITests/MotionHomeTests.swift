@@ -1082,6 +1082,34 @@ final class MotionHomeTests: XCTestCase {
         close.tap()
     }
 
+    /// Prueba de la prueba de arriba: con la regresión exacta (`-MiBancoDemoListBlanks`: la lista nueva parte de
+    /// invisible, la pantalla se queda en negro bajo el selector) la sonda tiene que dar 0, que es lo que la prueba
+    /// anterior rechaza. Así se sabe que esa prueba puede fallar por el defecto que vigila.
+    func testListBlankGuardGoesRedWhenTheListBlanks() throws {
+        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoDemoListBlanks"])
+        let summaries = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Gastado en 7 días:"))
+        XCTAssertTrue(summaries.firstMatch.waitForExistence(timeout: 8), "Falta el resumen de 7 días")
+        segment("Revolut").tap()
+        XCTAssertTrue(waitUntil(5) { self.homeProbe()["listas"] == "1" }, "La lista no hizo su cambio: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["fondoLista"], "0", "Con la lista nueva invisible la sonda no lo vio: \(homeProbe())")
+    }
+
+    /// Una llegada anunciada cuyo movimiento no se publica nunca (como un aviso que sustituye a otro sin cambiar el
+    /// número de movimientos) caduca: ni insignia ni fila marcada como nueva (fondo y ✓ fijos horas después).
+    func testStaleArrivalNeverLeavesAFreshRow() throws {
+        launchHome(["-MiBancoDemoCardMoment", "staleArrival", "-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"])
+        let todo = segment("Todo")
+        XCTAssertTrue(todo.waitForExistence(timeout: 8), "Falta el segmento «Todo»")
+        XCTAssertEqual(homeProbe()["nueva"], "0", "Ya había una fila marcada como nueva: \(homeProbe())")
+        todo.tap()
+        XCTAssertTrue(waitUntil(3) { self.homeProbe()["anunciadas"] == "1" }, "La llegada no se anunció: \(homeProbe())")
+        // Pasado el plazo (2 s) sin que el movimiento aparezca, la fila ya no está marcada.
+        XCTAssertTrue(waitUntil(4) { self.homeProbe()["nueva"] == "0" }, "La llegada caducada dejó la fila marcada como nueva: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["insignias"], "0", "Una llegada sin movimiento enseñó su ✓: \(homeProbe())")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(homeProbe()["nueva"], "0", "La fila volvió a marcarse: \(homeProbe())")
+    }
+
     /// Con el texto más grande, la cabecera del abanico («Tus tarjetas» y la ayuda) no queda debajo de la primera
     /// tarjeta: su alto sale de lo que mide (antes, 92 pt fijos).
     func testWalletFanHeaderFitsAtLargestText() throws {

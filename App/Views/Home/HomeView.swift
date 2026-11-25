@@ -364,6 +364,7 @@ struct HomeView: View {
             #if DEBUG
             .onAppear(perform: applyDemoLaunchState)
             .onChange(of: motion.demoMomentTick) { _, _ in runDemoMoment() }
+            .onChange(of: freshID, initial: true) { _, id in HomeProbe.shared.freshRows = id == nil ? 0 : 1 }
             #endif
     }
 
@@ -427,11 +428,16 @@ struct HomeView: View {
         // El cambio de lista va sin animación (la vieja ya es invisible): nada se queda ocupando sitio.
         var swap = Transaction()
         swap.disablesAnimations = true
+        #if DEBUG
+        // Lo que se DIBUJA en el cambio: cada pieza de la lista nueva anota su opacidad efectiva en su primer pase
+        // (esta opacidad de la lista × la de su entrada, `HomeEntrance`) y la sonda guarda la menor.
+        HomeProbe.shared.listAlphaAtSwap = listAlpha
+        HomeProbe.shared.listSwapFloor = 100
+        #endif
         withTransaction(swap) { listCard = selection ?? .all }
         beginEntrance(.list)
         #if DEBUG
         HomeProbe.shared.listEntrances += 1
-        HomeProbe.shared.listSwapFloor = Int((listAlpha * 100).rounded())
         #endif
         // Con Reducir movimiento las cifras que cambian con la tarjeta se funden por su cuenta: la lista vuelve a
         // verse cuando ese fundido ha terminado, así nunca se leen dos cifras superpuestas.
@@ -471,8 +477,19 @@ struct HomeView: View {
     private func choreograph(_ arrival: Arrival) {
         freshID = arrival.id
         awaitedArrival = arrival
-        awaitedAt = Date()
+        awaitedAt = AppClock.now
+        #if DEBUG
+        HomeProbe.shared.arrivalsAnnounced += 1
+        #endif
         defer { landArrival() }
+        // La caducidad no depende de que el libro vuelva a cambiar: pasado el plazo sin aterrizar, la fila deja de
+        // estar marcada como nueva (nunca un fondo y un ✓ fijos horas después).
+        let id = arrival.id
+        let window = kit.pause(ArrivalWindow.lifetime)
+        Task {
+            try? await Task.sleep(for: .seconds(window))
+            if awaitedArrival?.id == id { expireArrival(id) }
+        }
         guard isVisible, scenePhase == .active else { return }
         if UIAccessibility.isVoiceOverRunning {
             let what = arrival.amountCents < 0 ? "pago de" : "ingreso de"
@@ -503,8 +520,8 @@ struct HomeView: View {
     /// minutos después con otro cambio del libro.
     private func landArrival() {
         guard let arrival = awaitedArrival else { return }
-        guard ArrivalWindow.isOpen(announcedAt: awaitedAt, now: Date(), timeMultiplier: kit.timeMultiplier) else {
-            awaitedArrival = nil
+        guard ArrivalWindow.isOpen(announcedAt: awaitedAt, now: AppClock.now, timeMultiplier: kit.timeMultiplier) else {
+            expireArrival(arrival.id)
             return
         }
         guard model.movement(arrival.id) != nil else { return }
@@ -523,6 +540,14 @@ struct HomeView: View {
         let front = selection ?? .all
         guard front == target || front == .all else { return }
         pulse = ArrivalPulse(token: pulse.token + 1, card: front, amountCents: arrival.amountCents)
+    }
+
+    /// La llegada caduca sin aterrizar: ni insignia ni fila nueva; si la fila ya estaba marcada, se apaga en 0,3 s.
+    private func expireArrival(_ id: UUID) {
+        awaitedArrival = nil
+        if freshID == id {
+            withAnimation(.easeOut(duration: kit.seconds(0.3))) { freshID = nil }
+        }
     }
 
     // MARK: - Tirar para actualizar
@@ -653,6 +678,8 @@ struct HomeView: View {
                 return false
             }
             if case .row(let row, _)? = first?.kind { openRow = openRow == row.id ? nil : row.id }
+        case .staleArrival:
+            model.demoAnnounceUnpublishedArrival()
         case .search:
             Task {
                 try? await Task.sleep(for: .seconds(0.8))

@@ -23,6 +23,9 @@ struct WeekBlock: View {
                     // Rueda al cambiar de tarjeta o al llegar un movimiento; con el ojo cerrado dibuja «•••,•• €».
                     RollingAmount(cents: week.totalCents)
                         .titan(.week)
+                        // Un importe por tarjeta: al cambiar de tarjeta se monta de nuevo y cuenta el suyo (nunca enseña
+                        // un instante la cifra de la otra tarjeta ni rueda de una a otra). Dentro de la misma tarjeta, rueda.
+                        .id(card)
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Gastado en 7 días: \(spokenAmount(week.totalCents, hidden: hidden)). \(hidden ? "" : week.summary)")

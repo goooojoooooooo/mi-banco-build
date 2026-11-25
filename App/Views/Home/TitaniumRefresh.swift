@@ -126,9 +126,9 @@ struct TitaniumRefreshIndicator: View {
                 .scaleEffect(kit.reduce ? 1 : 0.7 + 0.3 * drawn)
                 .overlay(alignment: .bottom) {
                     if state.done {
-                        // Legible en el poco tiempo que está: 13 pt, blanco al 70 %.
+                        // Legible en el poco tiempo que está: 13 pt (crece con el tamaño de texto), blanco al 70 %.
                         Text("Al día")
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.footnote.weight(.medium))
                             .foregroundStyle(.white.opacity(0.7))
                             .fixedSize()
                             .offset(y: 16)

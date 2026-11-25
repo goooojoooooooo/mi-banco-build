@@ -12,9 +12,12 @@ struct OnboardingView: View {
 
     @Environment(\.motion) private var motion
     @Environment(\.presentationGate) private var gate
+    @Environment(\.scenePhase) private var scenePhase
     /// La bienvenida ya está a la vista (el bloqueo se ha abierto o el arranque ha dejado ver lo de debajo): entonces
     /// cruzan las bandas y llegan las piezas. Si se jugara al montarse, pasaría entera detrás del bloqueo o del arranque.
     @State private var welcomed = false
+    /// La marca propia ya se dibuja (la del arranque o la del bloqueo se ha ido).
+    @State private var markShown = false
 
     @State private var step: Int = {
         #if DEBUG
@@ -34,7 +37,11 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 topBar
 
+                // La marca propia no se dibuja mientras la del arranque (o la del bloqueo) sigue en pantalla volando:
+                // nunca dos marcas a la vez (ojo de diseño 18.1). Aparece con un fundido corto cuando la otra se ha ido.
                 AppMark(size: 58, drawn: drawn)
+                    .opacity(markShown ? 1 : 0)
+                    .animation(motion.reduce ? motion.fade : .easeOut(duration: motion.seconds(0.12)), value: markShown)
                     .padding(.top, 12)
                     .padding(.bottom, 16)
 
@@ -77,12 +84,39 @@ struct OnboardingView: View {
             // Sin bloqueo delante, lo que tapa la bienvenida al abrir la app es el arranque: se espera a que empiece a
             // dejar ver lo de debajo (el mismo instante en que Inicio empezaría a montarse). Con el bloqueo delante, la
             // bienvenida empieza al abrirse (ver `onChange`).
-            let wait = LaunchTimeline(motion).assembleAt * max(motion.timeMultiplier, 0.01)
+            let launch = LaunchTimeline(motion)
+            let stretch = max(motion.timeMultiplier, 0.01)
+            let wait = launch.assembleAt * stretch
             try? await Task.sleep(for: .seconds(max(0.05, wait)))
-            if gate?.isLocked != true { welcomed = true }
+            if gate?.isLocked == true || scenePhase != .active {
+                // Con el bloqueo delante la bienvenida empieza al abrirse (`onChange`). Respaldo (menor m-13): si ese
+                // aviso no llegara, se mira cada medio segundo (como mucho 10 min) y empieza en cuanto la escena esté
+                // activa y sin bloqueo; nunca se queda sin jugar ni con la marca escondida.
+                for _ in 0..<1_200 {
+                    try? await Task.sleep(for: .seconds(0.5))
+                    if Task.isCancelled || welcomed { return }
+                    if gate?.isLocked != true && scenePhase == .active { break }
+                }
+                guard !welcomed, gate?.isLocked != true else { return }
+                welcomed = true
+                markShown = true
+                return
+            }
+            welcomed = true
+            // La marca propia, cuando la del arranque ya ha terminado su vuelo y se ha ido.
+            try? await Task.sleep(for: .seconds(max(0, launch.duration - launch.assembleAt) * stretch))
+            if gate?.isLocked != true { markShown = true }
         }
         .onChange(of: gate?.isLocked) { old, locked in
-            if old == true, locked != true { welcomed = true }
+            guard old == true, locked != true, !welcomed else { return }
+            welcomed = true
+            // Al abrirse el bloqueo, su marca vuela a su sitio: la propia aparece cuando ese vuelo ha terminado.
+            let launch = LaunchTimeline(motion)
+            let flight = max(0, launch.duration - (launch.flightAt ?? launch.duration)) * max(motion.timeMultiplier, 0.01)
+            Task {
+                try? await Task.sleep(for: .seconds(flight))
+                markShown = true
+            }
         }
     }
 

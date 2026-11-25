@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import MiBancoCore
 
@@ -80,6 +81,36 @@ import Testing
         #expect(near(reduced.frame(at: 0.12).mark, 0.5))
         #expect(reduced.frame(at: 0.24).mark == 1)
         #expect(reduced.frame(at: 0.2).black == 1)
+    }
+
+    /// I-1 (revisión del lote 2): con solo fundido nunca hay dos marcas. Inicio (con la marca pequeña de su barra) solo
+    /// se ve donde el negro se aclara, así que la marca grande nunca es más visible que el negro que tiene debajo, y
+    /// mientras quede algo de ella el negro está entero: Inicio y su marca no asoman hasta que la grande se ha ido.
+    /// También tras un toque que salta el fundido, y en Sutil con Reducir movimiento.
+    @Test func aFadeNeverShowsTwoMarks() {
+        let both = LaunchTimeline(level: .subtle, reduceMotion: true)
+        let balancedReduced = LaunchTimeline(level: .balanced, reduceMotion: true)
+        for timeline in [subtle, reduced, both, balancedReduced] {
+            for skippedAt in [nil, 0.0, 0.1, 0.3] as [Double?] {
+                var brighter: [Double] = []
+                var doubled: [String] = []
+                for elapsed in stride(from: 0.0, through: timeline.duration + 0.2, by: 0.001) {
+                    let frame = timeline.frame(
+                        at: timeline.time(elapsed: elapsed, skippedAt: skippedAt), skipped: skippedAt != nil)
+                    if frame.mark > frame.black + 1e-9 { brighter.append(elapsed) }
+                    // Lo que se ve de Inicio (1 − negro) por lo que se ve de la marca grande: cero en todo instante.
+                    if frame.mark * (1 - frame.black) > 1e-9 {
+                        doubled.append(String(format: "%.3f s: grande %.2f, Inicio %.2f", elapsed, frame.mark, 1 - frame.black))
+                    }
+                }
+                let name = "\(timeline.level) reducir=\(timeline.reduceMotion) salto=\(skippedAt.map { "\($0)" } ?? "no")"
+                #expect(brighter.isEmpty, "\(name): la marca se ve más que el negro en \(brighter.count) instantes")
+                #expect(doubled.isEmpty, "\(name): dos marcas a la vez en \(doubled.count) instantes, p. ej. \(doubled.prefix(2))")
+            }
+            // Y el fundido sigue acabando: sin negro ni marca al final.
+            #expect(timeline.frame(at: timeline.duration).black == 0)
+            #expect(timeline.frame(at: timeline.duration).mark == 0)
+        }
     }
 
     // MARK: Saltar con un toque
@@ -232,13 +263,44 @@ import Testing
             #expect(mid.flight > 0.3 && mid.flight < 1.05)
             #expect(mid.mark == 1)
             let end = timeline.frame(at: timeline.duration)
-            // Al final la marca está en su ranura (como mucho un 6 % de rebote) y la capa ya no pinta nada.
-            #expect(abs(end.flight - 1) < 0.06)
+            // Al final la marca está EXACTAMENTE en su ranura y la capa ya no pinta nada.
+            #expect(end.flight == 1)
             #expect(end.black == 0)
             #expect(end.mark == 0)
             let after = timeline.frame(at: timeline.duration + 5)
             #expect(after.black == 0)
             #expect(after.mark == 0)
+            #expect(after.flight == 1)
+        }
+    }
+
+    /// La marca que vuela aterriza en la ranura de la barra de Inicio, que aparece en ese mismo instante: el último
+    /// fotograma del vuelo es exactamente 1 (ni un punto antes ni después), llega sin salto y sin pasarse más de un 6 %.
+    @Test func theFlightEndsExactlyOnTheSlot() throws {
+        for timeline in [expressive, balanced] {
+            let flight = try #require(timeline.flightAt)
+            var previous = 0.0
+            var highest = 0.0
+            for t in stride(from: flight, through: timeline.duration, by: 0.001) {
+                let now = timeline.frame(at: t).flight
+                #expect(abs(now - previous) < 0.02, "el vuelo salta en \(t)")
+                previous = now
+                highest = max(highest, now)
+            }
+            #expect(highest < 1.06)
+            #expect(abs(previous - 1) < 0.02)
+            #expect(timeline.frame(at: timeline.duration).flight == 1)
+            // Lo mismo tras un toque que lo salta, y en la salida del bloqueo.
+            #expect(timeline.frame(at: timeline.duration, skipped: true).flight == 1)
+            let exit = try #require(timeline.exitDuration)
+            #expect(timeline.exitFrame(at: exit, bands: true).flight == 1)
+            #expect(timeline.exitFrame(at: exit + 3, bands: false).flight == 1)
+            var before = 0.0
+            for t in stride(from: 0.0, through: exit, by: 0.001) {
+                let now = timeline.exitFrame(at: t, bands: false).flight
+                #expect(abs(now - before) < 0.02, "la salida salta en \(t)")
+                before = now
+            }
         }
     }
 
@@ -303,7 +365,7 @@ import Testing
             #expect(start.sheen == nil)
             #expect(start.lines == nil)
             let end = timeline.exitFrame(at: duration, bands: true)
-            #expect(abs(end.flight - 1) < 0.06)
+            #expect(end.flight == 1)
             #expect(end.mark == 0)
             #expect(end.black == 0)
             // Sin bandas (desbloqueo que no es el arranque en frío): solo vuela la marca.

@@ -12,6 +12,15 @@ final class HomeMotion {
     var carouselOverscrolled = false
     /// Puntos desplazados hacia arriba desde el reposo (0 arriba del todo).
     var listOffset: CGFloat = 0
+    /// El carrusel y la lista están quietos (ni dedo ni inercia). Solo se leen en el momento de decidir si soltar una
+    /// tarjeta levantada abre el abanico: nadie se redibuja por ellos.
+    @ObservationIgnored var carouselIdle = true
+    @ObservationIgnored var listIdle = true
+    /// El carrusel se está deslizando por programa (segmentado, llegada): las tarjetas por las que solo pasa no
+    /// empiezan a contar su cifra.
+    @ObservationIgnored var carouselAnimating = false
+    /// Dónde está en pantalla la tarjeta de delante (de ahí sale el abanico). Se lee al abrirlo, nunca al dibujar.
+    @ObservationIgnored var carouselFrame = CGRect.zero
     #if DEBUG
     /// Solo demo (`-MiBancoDemoCardMoment`): sube al tocar el segmento que ya está elegido.
     var demoMomentTick = 0
@@ -129,12 +138,138 @@ struct CarouselParallax: ViewModifier {
 /// Degradado negro bajo la barra superior: solo aparece cuando hay contenido pasando por debajo.
 struct TopEdgeFade: View {
     let motion: HomeMotion
+    @Environment(\.motion) private var kit
 
     var body: some View {
         LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.55), .init(color: .black.opacity(0), location: 1)],
                        startPoint: .top, endPoint: .bottom)
             .opacity(motion.listOffset > 8 ? 1 : 0)
-            .animation(.easeOut(duration: 0.2), value: motion.listOffset > 8)
+            .animation(kit.fade, value: motion.listOffset > 8)
             .allowsHitTesting(false)
     }
 }
+
+/// Un importe escrito como texto que el ojo tapa. Con el ojo cerrado se dibuja la máscara (`masked`, nunca una cifra) y
+/// no la cifra bajo un desenfoque: un texto difuminado sigue estando ahí para cualquier lector de pantalla o prueba de
+/// toques. El cambio es instantáneo (sin fundido entre cifra y máscara) y la etiqueta dice «importe oculto».
+/// `masked` no lleva nunca un dígito: en DEBUG se comprueba (ver `DrawnTextAudit`).
+struct MaskedAmountText: View {
+    let shown: String
+    let masked: String
+
+    init(_ shown: String, masked: String) {
+        self.shown = shown
+        self.masked = masked
+    }
+
+    @Environment(AppPreferences.self) private var preferences
+
+    var body: some View {
+        let hidden = preferences.privateMode
+        let drawn = hidden ? masked : shown
+        let text = Text(drawn)
+            .contentTransition(.identity)
+            .privacySensitive()
+            .accessibilityLabel(hidden ? "importe oculto" : shown)
+        #if DEBUG
+        text.modifier(DrawnTextRecorder(text: drawn, hidden: hidden))
+        #else
+        text
+        #endif
+    }
+}
+
+#if DEBUG
+/// Solo DEBUG (`-MiBancoDemoDrawnText`): cuenta los importes en texto que se han DIBUJADO con el ojo cerrado y cuántos
+/// llevaban una cifra. Es lo que las etiquetas de accesibilidad no pueden probar: qué cadena se le dio a `Text` para
+/// pintar. Solo cuenta; no decide nada.
+@MainActor @Observable final class DrawnTextAudit {
+    static let shared = DrawnTextAudit()
+
+    private(set) var hiddenTexts = 0
+    private(set) var withDigits = 0
+
+    func record(_ text: String, hidden: Bool) {
+        guard hidden, DemoMode.auditsDrawnText else { return }
+        hiddenTexts += 1
+        if text.contains(where: { $0.isNumber }) { withDigits += 1 }
+    }
+
+    var summary: String { "ocultos=\(hiddenTexts);conCifras=\(withDigits)" }
+}
+
+private struct DrawnTextRecorder: ViewModifier {
+    let text: String
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { DrawnTextAudit.shared.record(text, hidden: hidden) }
+            .onChange(of: text) { _, new in DrawnTextAudit.shared.record(new, hidden: hidden) }
+    }
+}
+
+/// El elemento invisible que publica `DrawnTextAudit.summary` (identificador `drawn-text-audit`).
+struct DrawnTextAuditProbe: View {
+    var body: some View {
+        if DemoMode.auditsDrawnText {
+            Color.clear
+                .frame(width: 2, height: 2)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(DrawnTextAudit.shared.summary)
+                .accessibilityIdentifier("drawn-text-audit")
+        }
+    }
+}
+
+/// Solo DEBUG (`-MiBancoDemoHomeProbes`): contadores de Inicio para las pruebas de toque. Solo cuenta.
+@MainActor @Observable final class HomeProbe {
+    static let shared = HomeProbe()
+
+    /// Veces que Inicio se ha montado por capas (arranque o desbloqueo).
+    var assemblies = 0
+    /// Si los sensores de inclinación están leyendo ahora.
+    var tiltRunning = false
+    /// Veces que tirar de la lista ha lanzado una actualización, y veces que ha acabado diciendo «Al día».
+    var refreshes = 0
+    var refreshesDone = 0
+    /// Si el abanico de tarjetas está abierto y cuántas veces se ha abierto.
+    var fanOpen = false
+    var fanOpenings = 0
+    /// La última tarjeta del abanico tocada y si se pidió su vuelo (`CardFlight.request`).
+    var fanPicked = "-"
+    var flightRequests = 0
+    /// Llegadas que han enseñado su ✓ en la tarjeta y llegadas que solo han latido (ojo cerrado).
+    var arrivalBadges = 0
+    var arrivalPulses = 0
+    /// Cuántas veces ha entrado la lista escalonada por un cambio de tarjeta.
+    var listEntrances = 0
+    /// Veces que se ha montado el ✓ del éxito (`SuccessMark`, solo «He visto salir») y el ✓ de «preparado»
+    /// (`PreparedMark`, el paso «listo» de «Mover dinero»).
+    var successMarks = 0
+    var preparedMarks = 0
+
+    var summary: String {
+        [
+            "montajes=\(assemblies)", "inclinacion=\(tiltRunning ? 1 : 0)", "tirones=\(refreshes)", "alDia=\(refreshesDone)",
+            "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
+            "insignias=\(arrivalBadges)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)",
+            "exitos=\(successMarks)", "preparados=\(preparedMarks)",
+        ].joined(separator: ";")
+    }
+}
+
+/// El elemento invisible que publica `HomeProbe.summary` en su valor (identificador `home-probe`).
+struct HomeProbeElement: View {
+    var body: some View {
+        if DemoMode.exposesHomeProbes {
+            Color.clear
+                .frame(width: 2, height: 2)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Sonda de Inicio")
+                .accessibilityValue(HomeProbe.shared.summary)
+                .accessibilityIdentifier("home-probe")
+        }
+    }
+}
+#endif

@@ -10,6 +10,10 @@ struct ListEntryView: View {
     let zoom: Namespace.ID
     let onOpen: (UUID) -> Void
     let onDeleteUnread: (UUID) -> Void
+    /// La fila abierta por deslizamiento (solo una a la vez); `nil` = estas filas no se deslizan (búsqueda).
+    var openRow: Binding<UUID?>? = nil
+    /// «No es mío» / «Sí es mío» desde las acciones de la fila: (movimiento, marcado).
+    var onFlag: ((UUID, Bool) -> Void)? = nil
 
     var body: some View {
         switch entry.kind {
@@ -26,7 +30,7 @@ struct ListEntryView: View {
             switch row.item {
             case .movement(let m):
                 MovementRowView(movement: m, row: row, logoDomain: logoDomain, isLast: isLast, isFresh: isFresh,
-                                zoom: zoom) { onOpen(m.id) }
+                                zoom: zoom, openRow: openRow, onFlag: onFlag) { onOpen(m.id) }
             case .unread(let n):
                 UnreadRowView(notice: n, isLast: isLast) { onDeleteUnread(n.id) }
             }
@@ -36,6 +40,9 @@ struct ListEntryView: View {
 
 /// Fila de 64 pt: logo (o monograma), comercio y subtítulo, importe a la derecha (verde con "+" si entra).
 /// Al tocar (no al soltar): fondo #141416 y escala 0,985; abre el detalle con el logo como elemento compartido.
+/// - Con el ojo cerrado el importe es su máscara («−•••,•• €»): la cifra no se monta bajo un desenfoque.
+/// - Una fila recién llegada (`isFresh`) cae desde 22 pt más arriba al 96,5 % y una luz la barre una vez.
+/// - En la lista de Inicio se desliza hacia la izquierda para «Nota» y «No es mío» (`SwipeActionsRow`).
 struct MovementRowView: View {
     let movement: Movement
     let row: ListRow
@@ -43,14 +50,37 @@ struct MovementRowView: View {
     var isLast = false
     var isFresh = false
     let zoom: Namespace.ID
+    var openRow: Binding<UUID?>? = nil
+    var onFlag: ((UUID, Bool) -> Void)? = nil
     let onOpen: () -> Void
 
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.motion) private var motion
     @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 40
 
+    private var flagTitle: String { movement.flaggedNotMine ? "Sí es mío" : "No es mío" }
+
     var body: some View {
+        Group {
+            if let openRow, let onFlag {
+                let id = movement.id
+                let flagged = movement.flaggedNotMine
+                SwipeActionsRow(rowID: id, openRow: openRow, actions: [
+                    RowSwipeAction(id: "note", title: "Nota", perform: onOpen),
+                    RowSwipeAction(id: "flag", title: flagTitle, warning: true) { onFlag(id, !flagged) },
+                ]) {
+                    rowButton
+                }
+            } else {
+                rowButton
+            }
+        }
+        .modifier(FreshDrop(isFresh: isFresh))
+    }
+
+    @ViewBuilder private var rowButton: some View {
         let logo = logos.image(merchant: movement.merchant, domain: logoDomain, isShop: movement.isShop)
         let stacked = typeSize.isAccessibilitySize
         let layout = stacked
@@ -95,13 +125,13 @@ struct MovementRowView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 6) {
-                    Text(signedEUR(movement.amountCents))
+                    // Con el ojo cerrado, la máscara (nunca la cifra bajo un desenfoque).
+                    MaskedAmountText(signedEUR(movement.amountCents), masked: maskedEUR(movement.amountCents, sign: true))
                         .titan(.row)
                         .foregroundStyle(amountColor)
                         .strikethrough(movement.flaggedNotMine, color: Theme.label3)
                         .lineLimit(1)
                         .fixedSize()
-                        .privateAmount()
                         // Apunta dónde está el importe en pantalla: el del detalle sale volando desde aquí. Solo
                         // apunta el marco (no cambia el diseño ni los toques) y se lee al tocar la fila, nunca al dibujar.
                         .detailAmountSource(id: movement.id)
@@ -128,8 +158,7 @@ struct MovementRowView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.row)
-        .animation(Theme.Motion.morph, value: isFresh)
-        .animation(Theme.Motion.quick, value: movement.flaggedNotMine)
+        .animation(motion.calmAnimation(.snap), value: movement.flaggedNotMine)
         .gatedContextMenu(privateTitle: movement.displayMerchant ?? "Movimiento") {
             if logo != nil, let merchant = movement.merchant {
                 Button("No usar este logo", systemImage: "eye.slash") { logos.block(merchant: merchant) }
@@ -148,13 +177,12 @@ struct MovementRowView: View {
                         .lineLimit(1)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                Text(signedEUR(movement.amountCents))
+                MaskedAmountText(signedEUR(movement.amountCents), masked: maskedEUR(movement.amountCents, sign: true))
                     .titan(.row)
                     .foregroundStyle(amountColor)
                     .strikethrough(movement.flaggedNotMine, color: Theme.label3)
                     .lineLimit(1)
                     .fixedSize()
-                    .privateAmount()
             }
         }
         // Con el ajuste en la clave: al volver a activarlo, las filas visibles buscan su logo.
@@ -166,6 +194,15 @@ struct MovementRowView: View {
         .accessibilityHint("Abre el detalle")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("movementRow")
+        .modifier(RowNamedActions(flagTitle: flagTitle, onNote: onFlag == nil ? nil : onOpen, onFlag: flagAction))
+    }
+
+    /// «No es mío» / «Sí es mío» sobre este movimiento; `nil` donde las filas no llevan acciones (búsqueda).
+    private var flagAction: (() -> Void)? {
+        guard let onFlag else { return nil }
+        let id = movement.id
+        let flagged = movement.flaggedNotMine
+        return { onFlag(id, !flagged) }
     }
 
     private var amountColor: Color {
@@ -185,6 +222,98 @@ struct MovementRowView: View {
     }
 }
 
+/// Las acciones de deslizar, también para VoiceOver (que no desliza): «Nota» y «No es mío».
+private struct RowNamedActions: ViewModifier {
+    let flagTitle: String
+    let onNote: (() -> Void)?
+    let onFlag: (() -> Void)?
+
+    func body(content: Content) -> some View {
+        if let onNote, let onFlag {
+            content
+                .accessibilityAction(named: "Nota", onNote)
+                .accessibilityAction(named: flagTitle, onFlag)
+        } else {
+            content
+        }
+    }
+}
+
+/// La fila recién llegada: cae desde 22 pt más arriba (× el recorrido del nivel) al 96,5 % con el muelle de fila,
+/// aparece en 0,2 s y una luz la barre una vez (0,76 s; sin luz en Bajo consumo). Con Reducir movimiento solo se funde.
+/// Las filas de siempre (`isFresh` falso al montarse) no hacen nada.
+private struct FreshDrop: ViewModifier {
+    let isFresh: Bool
+    @Environment(\.motion) private var motion
+    @State private var landed: Bool
+    @State private var shown: Bool
+    @State private var sweep = 0
+
+    init(isFresh: Bool) {
+        self.isFresh = isFresh
+        _landed = State(initialValue: !isFresh)
+        _shown = State(initialValue: !isFresh)
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if isFresh, motion.richEffects {
+                    RowSweep(trigger: sweep)
+                }
+            }
+            .scaleEffect(landed || motion.reduce ? 1 : 0.965)
+            .offset(y: landed ? 0 : -motion.distance(22))
+            .opacity(shown ? 1 : 0)
+            .onAppear {
+                guard !landed else { return }
+                withAnimation(motion.animation(.row)) { landed = true }
+                withAnimation(.easeOut(duration: motion.seconds(motion.reduce ? 0.26 : 0.2))) { shown = true }
+                sweep += 1
+            }
+    }
+}
+
+/// La luz que barre la fila nueva: una franja blanca al 11 % que cruza de lado a lado en 0,76 s, tras 0,14 s; su
+/// opacidad sube y baja. Solo se mueve con `offset` y cambia de opacidad.
+private struct RowSweep: View {
+    let trigger: Int
+    @Environment(\.motion) private var motion
+
+    private struct Values {
+        var x = -1.0
+        var opacity = 0.0
+    }
+
+    var body: some View {
+        let wait = motion.seconds(0.14)
+        let half = motion.seconds(0.38)
+        LinearGradient(
+            stops: [.init(color: .white.opacity(0), location: 0.3),
+                    .init(color: .white.opacity(0.11), location: 0.5),
+                    .init(color: .white.opacity(0), location: 0.7)],
+            startPoint: UnitPoint(x: 0, y: 0.4), endPoint: UnitPoint(x: 1, y: 0.6))
+            .keyframeAnimator(initialValue: Values(), trigger: trigger) { view, value in
+                view
+                    .offset(x: value.x * 440)
+                    .opacity(value.opacity)
+            } keyframes: { _ in
+                KeyframeTrack(\.x) {
+                    LinearKeyframe(-1.0, duration: wait)
+                    CubicKeyframe(1.0, duration: half * 2)
+                }
+                KeyframeTrack(\.opacity) {
+                    LinearKeyframe(0.0, duration: wait)
+                    CubicKeyframe(1.0, duration: half)
+                    CubicKeyframe(0.0, duration: half)
+                }
+            }
+            .clipped()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
 private struct LogoTaskID: Equatable {
     let merchant: String?
     let downloads: Bool
@@ -198,7 +327,7 @@ struct UnreadRowView: View {
     let onDelete: () -> Void
 
     @State private var expanded = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(AppPreferences.self) private var preferences
     @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 40
 
@@ -284,7 +413,7 @@ struct UnreadRowView: View {
     }
 
     private func toggle() {
-        withAnimation(reduceMotion ? nil : Theme.Motion.quick) { expanded.toggle() }
+        withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) { expanded.toggle() }
     }
 }
 

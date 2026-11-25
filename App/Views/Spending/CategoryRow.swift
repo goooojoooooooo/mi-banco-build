@@ -84,7 +84,7 @@ private struct SpendBar: View {
 
     var body: some View {
         FillBar(fraction: fraction, warnAt: nil, label: name,
-                delay: 0.2 + MotionMath.staggerDelays(count: index + 1, firstGap: 0.048, decay: 0.86)[index])
+                delay: 0.4 + MotionMath.staggerDelays(count: index + 1, firstGap: 0.048, decay: 0.86)[index])
             .overlay {
                 if let previous {
                     GeometryReader { geo in

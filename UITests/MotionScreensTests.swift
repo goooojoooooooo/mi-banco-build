@@ -436,6 +436,30 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertEqual(value(bar), "avisos 0, ámbar", "La barra avisó después de salir de su pestaña")
     }
 
+    /// Menor m-9: el caso que el arreglo de la espera del ámbar cubre de verdad es la app en segundo plano (cambiar de
+    /// pestaña ya quitaba la barra con `onDisappear`). Cruza el 90 % y, sin esperar, la app se va al fondo: al volver la
+    /// barra está en ámbar pero no ha avisado (ni pulso ni vibración con la app fuera).
+    func testBudgetDoesNotWarnWhileInTheBackground() throws {
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoBudgets", "-MiBancoDemoBudgetWarnings", "-MiBancoMotionScale", "20"])
+        let field = app.textFields["presupuestos.mes"]
+        XCTAssertTrue(field.waitForExistence(timeout: 20), "No se ve Presupuestos")
+        let bar = element("presupuestos.mes.barra")
+        XCTAssertTrue(bar.waitForExistence(timeout: 5), "El presupuesto del mes no tiene barra")
+        let spent = try XCTUnwrap(spentCents(in: bar.label), "No se lee lo gastado en «\(bar.label)»")
+        setLimit(field, cents: spent * 2)
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 0, blanca"), bar, timeout: 15),
+                      "Al 50 % la barra no va en blanco: \(value(bar))")
+        setLimit(field, cents: spent * 100 / 95)
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval: 10)
+        app.activate()
+        XCTAssertTrue(bar.waitForExistence(timeout: 15), "Al volver no se ve Presupuestos")
+        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", ", 95 por ciento"), bar, timeout: 10),
+                      "La barra no lleva el límite nuevo: \(bar.label)")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 0, ámbar"), bar, timeout: 10),
+                      "La barra avisó con la app en segundo plano: \(value(bar))")
+    }
+
     // MARK: - Suscripciones (B1, B2)
 
     /// Las dos cifras de la cabecera siguen diciendo lo suyo y la fila que se cobra hoy lo dice.
@@ -766,9 +790,13 @@ final class MotionScreensTests: XCTestCase {
         var seen: Set<Int> = []
         var last = (step: 0, percent: -1)
         let deadline = Date().addingTimeInterval(40)
+        // El remate («Todo listo»): el tercer paso ya terminó de verdad y la cifra corre a 100. Desde ese instante el tope
+        // de un paso EN MARCHA ya no aplica (el paso está hecho); antes, sí, en cada lectura.
+        let allDone = app.staticTexts["Todo listo"]
         while !title.exists, Date() < deadline {
             guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
             guard now.percent < 100 else { break }
+            if now.percent >= (caps[now.step] ?? 0), allDone.exists { break }
             XCTAssertGreaterThanOrEqual(now.percent, floors[now.step] ?? 0, "El porcentaje va por debajo de su paso: \(now)")
             XCTAssertLessThan(now.percent, caps[now.step] ?? 0, "El porcentaje alcanzó el tope de un paso sin terminar: \(now)")
             XCTAssertGreaterThanOrEqual(now.step, last.step, "Los pasos fueron hacia atrás: \(last) -> \(now)")
@@ -799,6 +827,68 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), title, timeout: 5), "«Listo» no cerró «conectado»")
         XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 5), "No volvió la cabecera de siempre")
         XCTAssertTrue(waitFor(hittable, app.buttons["bank-import-statement"], timeout: 5), "No volvieron las acciones")
+    }
+
+    /// El remate (ojo de diseño 14.1–14.3), a cámara lenta ×10 para poder mirarlo: al conectar de verdad, la línea dice
+    /// «Todo listo», el porcentaje llega a 100 con los tres nodos hechos y SOLO entonces (tras la pausa) sale
+    /// «imagin, conectado», ya sin los pasos. Mientras tanto «Cancelar» se apaga sin que nada de lo de debajo se mueva.
+    func testConnectFinishShowsAllDoneBeforeConnected() throws {
+        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "3", "-MiBancoDemoConnectFill", "2",
+                         "-MiBancoMotionScale", "10"])
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 40), "Falta «Renovar conexión»")
+        renew.tap()
+        let percent = element("bank-steps-percent")
+        XCTAssertTrue(percent.waitForExistence(timeout: 10), "Renovar no enseñó los pasos con su porcentaje")
+
+        // Esperando al banco, «Cancelar» se puede tocar; «Importar extracto» está en su sitio.
+        let importButton = app.buttons["bank-import-statement"]
+        XCTAssertTrue(waitFor(NSPredicate(format: "label BEGINSWITH %@", "Paso 2 de 3"), percent, timeout: 15),
+                      "No llegó al segundo paso: \(percent.label)")
+        XCTAssertTrue(app.buttons["bank-cancel-wait"].exists, "Esperando al banco falta «Cancelar»")
+        XCTAssertTrue(importButton.exists, "Falta «Importar extracto»")
+        let before = importButton.frame.minY
+
+        // Tercer paso: «Cancelar» ya no se puede tocar, pero su hueco se queda: nada sube de golpe (14.3).
+        XCTAssertTrue(waitFor(NSPredicate(format: "label BEGINSWITH %@", "Paso 3 de 3"), percent, timeout: 15),
+                      "No llegó al tercer paso: \(percent.label)")
+        XCTAssertFalse(app.buttons["bank-cancel-wait"].exists, "En el tercer paso aún se puede cancelar")
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(importButton.frame.minY, before, accuracy: 1,
+                       "Al quitar «Cancelar» lo de debajo se movió \(importButton.frame.minY - before) pt")
+
+        // El remate: «Todo listo», 100 y los tres pasos hechos, sin «conectado» todavía.
+        let allDone = app.staticTexts["Todo listo"]
+        let title = element("bank-connected-title")
+        XCTAssertTrue(allDone.waitForExistence(timeout: 20), "Al conectar no salió «Todo listo»")
+        XCTAssertFalse(title.exists, "«Conectado» salió a la vez que «Todo listo» (sin remate)")
+        XCTAssertTrue(waitFor(NSPredicate(format: "label ENDSWITH %@", ", 100 por ciento"), percent, timeout: 8),
+                      "El remate no llegó a 100: \(percent.label)")
+        let third = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Paso 3: Importar")).firstMatch
+        XCTAssertEqual(third.value as? String, "hecho", "Con 100 el tercer paso no está hecho")
+        XCTAssertFalse(title.exists, "«Conectado» salió sin la pausa del remate")
+
+        // Tras la pausa, «conectado», ya sin pasos ni «Todo listo».
+        XCTAssertTrue(title.waitForExistence(timeout: 20), "Tras el remate no salió «conectado»")
+        XCTAssertFalse(percent.exists, "Los pasos siguen a la vista con «conectado»")
+        XCTAssertFalse(allDone.exists, "«Todo listo» sigue a la vista con «conectado»")
+    }
+
+    /// La pantalla del banco es de detalle: sin barra de pestañas (ni su botón redondo encima de la lista). Al volver a
+    /// Ajustes, la barra vuelve y sigue funcionando.
+    func testBankScreenHidesTheTabBar() throws {
+        openBank("rev")
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
+        let settingsTab = app.tabBars.buttons["Ajustes"]
+        XCTAssertTrue(waitFor(NSPredicate(format: "hittable == false"), settingsTab, timeout: 5),
+                      "En la pantalla del banco la barra de pestañas sigue a la vista")
+        // Desplazar no la hace volver (antes se encogía en un botón redondo flotando sobre la lista).
+        drag(from: 0.7, to: 0.4)
+        XCTAssertFalse(settingsTab.exists && settingsTab.isHittable, "Al desplazar volvió la barra de pestañas")
+        goBack()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes")
+        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 5), "La barra de pestañas no volvió en Ajustes")
+        XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "La barra de pestañas no cambia de pestaña al volver")
     }
 
     /// «Ver movimientos» cierra «conectado» y sube la hoja (el título pequeño queda acoplado).

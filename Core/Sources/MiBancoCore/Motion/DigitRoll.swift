@@ -90,6 +90,25 @@ public enum DigitRoll {
         return abs(position(column, at: hi, overshoot: overshoot) - position(column, at: lo, overshoot: overshoot)) / (hi - lo)
     }
 
+    /// Cuánto se ve cada columna (0…1) mientras rueda, para que un grupo de millares nunca aparezca como un cero a la
+    /// izquierda («0.145,19 €» al abrir el ojo, «0.000,00 €» al empezar a contar): una columna a la izquierda de las
+    /// `alwaysShown` últimas (unidades y céntimos: 3; euros enteros: 1) no se dibuja mientras ella y todas las de su
+    /// izquierda están en el cero o saliendo de él, y aparece cuando su tira ya enseña sobre todo la cifra siguiente
+    /// (de 0,5 a 0,9 dígitos de distancia del cero): así tampoco asoma un «0» tenue al empezar a rodar, ni los ceros de
+    /// las columnas de su derecha que aún no han salido. El punto de millar que la sigue lleva su misma opacidad.
+    /// Asentado en una cifra de verdad (que no empieza por cero) todo vale 1.
+    public static func leadingVisibility(positions: [Double], alwaysShown: Int) -> [Double] {
+        let free = max(0, positions.count - max(0, alwaysShown))
+        var shown = 0.0
+        return positions.enumerated().map { index, position in
+            guard index < free else { return 1 }
+            let place = mod10(position)
+            let away = min(place, 10 - place)
+            shown = max(shown, min(1, max(0, (away - 0.5) / 0.4)))
+            return shown
+        }
+    }
+
     private static func power10(_ n: Int) -> Int {
         var v = 1
         for _ in 0..<n { v *= 10 }
@@ -110,7 +129,13 @@ public enum AmountMask {
         (negative ? "−" : (showsPlus ? "+" : "")) + "•••,••\u{00A0}€"
     }
 
+    /// La máscara de un importe en euros enteros: «••• €» (sin decimales, como la cifra a la que sustituye).
+    public static func wholeText(negative: Bool, showsPlus: Bool) -> String {
+        (negative ? "−" : (showsPlus ? "+" : "")) + "•••\u{00A0}€"
+    }
+
     /// Dígitos al azar (deterministas por semilla y paso) para barajar mientras el ojo cambia. Nunca salen del importe.
+    /// El primero es de 1 a 9: un fotograma barajado nunca empieza por un cero suelto («027,44 €»).
     public static func scrambledDigits(count: Int, step: Int, seed: Int) -> [Int] {
         (0..<max(0, count)).map { i in
             var x = UInt64(truncatingIfNeeded: seed) &* 0x9E37_79B9_7F4A_7C15
@@ -118,7 +143,7 @@ public enum AmountMask {
             x ^= x >> 31
             x = x &* 0x94D0_49BB_1331_11EB
             x ^= x >> 29
-            return Int(x % 10)
+            return i == 0 ? 1 + Int(x % 9) : Int(x % 10)
         }
     }
 }

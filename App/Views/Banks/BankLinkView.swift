@@ -32,8 +32,12 @@ struct BankLinkView: View {
     @State private var scroll = BankHeaderScroll()
     /// El porcentaje del trámite visto en esta pantalla y «Banco, conectado» (lo mueve solo la fase real; Core).
     @State private var progress = BankConnectProgress()
-    /// Cuándo empezó el paso en curso.
+    /// Cuándo empezó el paso en curso (y, acabado bien, cuándo acabó: desde ahí corre el remate).
     @State private var stepStarted = Date()
+    /// Cada remate; uno viejo que despierta tras esperar se retira.
+    @State private var finishRun = 0
+    /// Tras el remate, lo de la cabecera se está apagando antes de «conectado».
+    @State private var clearing = false
     /// Se ha conectado desde esta pantalla: la lista puede estar llenándose por primera vez.
     @State private var connectedHere = false
     /// Se abrió con una tarjeta volando hacia aquí.
@@ -122,10 +126,38 @@ struct BankLinkView: View {
 
     private func stageChanged(to new: BankConnectStage) {
         let stretch = max(0.05, motion.level.timeScale * motion.timeMultiplier)
-        switch progress.apply(new, elapsed: Date().timeIntervalSince(stepStarted) / stretch) {
-        case .stepStarted: stepStarted = Date()
-        case .succeeded: connectedHere = true
-        case .failed, .none: break
+        let effect = progress.apply(new, elapsed: Date().timeIntervalSince(stepStarted) / stretch, reduce: motion.reduce)
+        switch effect {
+        case .stepStarted:
+            stepStarted = Date()
+            finishRun += 1
+            clearing = false
+        case .succeeded:
+            connectedHere = true
+            // El remate empieza ahora: la cifra corre desde la que se veía hasta 100.
+            stepStarted = Date()
+            playFinish()
+        case .failed, .none:
+            break
+        }
+    }
+
+    /// El remate de un éxito REAL (ojo de diseño 14.1 y 14.2): 100, el tercer ✓ y «Todo listo» durante
+    /// `finishHold`; después pasos, saldo y estado se apagan del todo (`clearBeforeSuccess`) y solo entonces salta el ✓
+    /// de «conectado». No es un paso más: el trabajo ya terminó y solo se enseña. Un trámite nuevo lo retira.
+    private func playFinish() {
+        finishRun += 1
+        let run = finishRun
+        let hold = motion.seconds(BankConnectProgress.finishHold)
+        let clear = motion.seconds(BankConnectProgress.clearBeforeSuccess)
+        Task {
+            try? await Task.sleep(for: .seconds(hold))
+            guard run == finishRun, progress.finishing else { return }
+            withAnimation(.easeOut(duration: clear)) { clearing = true }
+            try? await Task.sleep(for: .seconds(clear))
+            guard run == finishRun, progress.finishing else { return }
+            progress.revealSuccess()
+            clearing = false
         }
     }
 
@@ -174,6 +206,8 @@ struct BankLinkView: View {
     }
 
     private func dismissSuccess() {
+        finishRun += 1
+        clearing = false
         progress.dismissSuccess()
     }
 
@@ -266,6 +300,9 @@ struct BankLinkView: View {
         }
         .navigationTitle(bank.displayName)
         .navigationBarTitleDisplayMode(.inline)
+        // Pantalla de detalle con su flecha de volver: sin barra de pestañas (ni el botón redondo de la barra encogida
+        // flotando sobre la lista); la hoja gana toda la altura (ojo de diseño 13.1). Al volver, la barra regresa.
+        .toolbarVisibility(.hidden, for: .tabBar)
         .navigationDestination(item: $importPreview) { preview in
             ImportStatementView(model: model, portfolio: portfolio, bank: bank, preview: preview) {
                 importPreview = nil
@@ -297,6 +334,9 @@ struct BankLinkView: View {
                 Task {
                     try? await Task.sleep(for: .seconds(deadline))
                     withAnimation(motion.fade) { flightTimedOut = true }
+                    // Una petición que nadie aterrizó ni limpió no debe hacer esperar la próxima apertura (menor m-8):
+                    // si sigue siendo la misma y sin aterrizar, se retira.
+                    if flight?.request == request, flight?.landed != true { flight?.request = nil }
                 }
             }
             // La pantalla se abre con el trámite ya en marcha (se volvió a ella a mitad): se apunta su paso.
@@ -317,7 +357,7 @@ struct BankLinkView: View {
                 }
                 .motionEntrance(0)
 
-                if progress.success {
+                if progress.showsSuccess {
                     BankConnectedFlash(bank: bank, status: lines.primary, balanceCents: balance?.cents,
                                        onShowMovements: {
                                            dismissSuccess()
@@ -326,6 +366,7 @@ struct BankLinkView: View {
                         .padding(.top, 18)
                         .transition(.opacity)
                 } else {
+                    Group {
                     if let balance {
                         RollingAmount(cents: balance.cents, style: .hero(euros: 46, cents: 24, centsColor: Theme.label2))
                             .foregroundStyle(Theme.label)
@@ -362,12 +403,15 @@ struct BankLinkView: View {
                             .padding(.top, 8)
                             .motionEntrance(3)
                     }
+                    }
+                    // Tras el remate se apaga del todo antes de que salte el ✓ (nunca el ✓ sobre el saldo a medias).
+                    .opacity(clearing ? 0 : 1)
                 }
             }
             // Donde aterriza la tarjeta que vuela desde Inicio.
             .cardFlightDestination()
 
-            if !progress.success {
+            if !progress.showsSuccess {
                 VStack(alignment: .leading, spacing: 10) {
                     phaseRows
                     actionRows(lines: lines)
@@ -379,6 +423,7 @@ struct BankLinkView: View {
                     }
                 }
                 .padding(.top, 18)
+                .opacity(clearing ? 0 : 1)
                 .motionEntrance(4)
                 .fadesWithBankHeader()
             }
@@ -386,7 +431,7 @@ struct BankLinkView: View {
         .padding(.horizontal, 24)
         .padding(.top, 8)
         .padding(.bottom, 26)
-        .animation(motion.calmAnimation(.enter), value: progress.success)
+        .animation(motion.calmAnimation(.enter), value: progress.showsSuccess)
         .assemblesOnFirstAppear()
     }
 
@@ -394,8 +439,11 @@ struct BankLinkView: View {
     private var phaseRows: some View {
         if let shown = shownProgress, !needsResumeForThisBank {
             VStack(alignment: .leading, spacing: 14) {
-                StepperProgress(steps: BankConnectStage.steps, current: shown.step, finished: false,
-                                caption: stage.caption(bankName: bank.displayName), percent: shown, since: stepStarted,
+                // Durante el remate (solo tras el éxito real) los tres pasos están hechos y la línea dice «Todo listo».
+                StepperProgress(steps: BankConnectStage.steps, current: shown.step, finished: progress.finishing,
+                                caption: progress.caption(for: stage, bankName: bank.displayName), percent: shown,
+                                // El primer instante de un paso, antes de apuntarlo, cuenta desde ahora (menor m-4).
+                                since: progress.percent == nil ? Date() : stepStarted,
                                 spins: true, identifier: "bank-steps")
                     // Los títulos de los extremos sobresalen de su nodo.
                     .padding(.horizontal, 30)
@@ -403,7 +451,10 @@ struct BankLinkView: View {
 
                 if let failed = failedMessageForThisBank {
                     failedRows(failed)
-                } else if stage.canCancel {
+                } else {
+                    // «Cancelar» solo se puede tocar abriendo o esperando al banco. Después se apaga en 0,12 s pero su
+                    // hueco se queda hasta el final de los pasos: nada de lo de debajo sube de golpe (ojo de diseño 14.3).
+                    let cancellable = stage.canCancel
                     Button {
                         cancelWaiting()
                     } label: {
@@ -415,7 +466,12 @@ struct BankLinkView: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.pressable)
-                    .accessibilityIdentifier("bank-cancel-wait")
+                    .disabled(!cancellable)
+                    .opacity(cancellable ? 1 : 0)
+                    .allowsHitTesting(cancellable)
+                    .accessibilityHidden(!cancellable)
+                    .accessibilityIdentifier(cancellable ? "bank-cancel-wait" : "")
+                    .animation(.easeOut(duration: motion.seconds(0.12)), value: cancellable)
                 }
             }
         } else if needsResumeForThisBank {
@@ -585,6 +641,7 @@ struct BankLinkView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
                 .padding(.bottom, 4)
+                .fadesNearDock()
                 .accessibilityHidden(true)
 
             if firstFill || !entries.isEmpty {

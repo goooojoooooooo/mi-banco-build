@@ -172,13 +172,13 @@ private struct SubscriptionsHeader: View {
             : AnyLayout(ParagraphFlow())
         layout {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                RollingAmount(cents: monthlyCents)
+                RollingAmount(cents: monthlyCents, inline: true)
                 Text(stacked ? " al mes" : " al mes · ")
                     .lineLimit(1)
                     .fixedSize()
             }
             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                RollingAmount(cents: yearlyCents)
+                RollingAmount(cents: yearlyCents, inline: true)
                 Text(" al año")
                     .lineLimit(1)
                     .fixedSize()

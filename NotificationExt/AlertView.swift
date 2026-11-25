@@ -47,7 +47,9 @@ struct AlertView: View {
                     .scaleEffect(landed || reduceMotion ? 1 : 0.5)
                     .offset(y: landed || reduceMotion ? 0 : -10)
                     .opacity(landed ? 1 : 0)
-                    .animation(step(0.08, spring: true, bounce: 0.25), value: landed)
+                    // N1: el logo se posa con el muelle `snap` del kit, a Expresivo fijo (la extensión no tiene ajustes).
+                    .animation(landed ? (reduceMotion ? .easeOut(duration: 0.25) : Theme.Motion.expressive(Theme.Motion.snapSpec).delay(0.08)) : nil,
+                               value: landed)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(headline)
                         .font(Theme.font(size: 17, weight: .semibold))
@@ -163,7 +165,9 @@ struct AlertView: View {
                         Rectangle().fill(Theme.separator).frame(height: 0.5).opacity(index == lines.count - 1 ? 0 : 1)
                     }
                     .accessibilityElement(children: .combine)
-                    .modifier(Rise(landed: landed, reduceMotion: reduceMotion, animation: step(0.45 + Double(index) * 0.06)))
+                    // N1: las filas entran 55 ms × 0,8ⁿ (como el kit, a Expresivo).
+                    .modifier(Rise(landed: landed, reduceMotion: reduceMotion,
+                                   animation: step(0.45 + Theme.Motion.expressiveStagger(index))))
                 }
             }
             .padding(.horizontal, 4)

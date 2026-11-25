@@ -35,6 +35,10 @@ private extension MovementActivityAttributes.ContentState {
     var material: CardMaterial { bankID?.material ?? .all }
 }
 
+/// N2: las cifras de la Live Activity cambian con el muelle `snap` del kit (0,46 / 0,74), sobre `numericText`.
+private let liveSpring = Animation.spring(response: Theme.Motion.snapSpec.response,
+                                          dampingFraction: Theme.Motion.snapSpec.dampingFraction)
+
 /// Logo del comercio (si va en la app) o, si no, el del banco; sin ninguno, una ficha con el símbolo del pago.
 private struct ActivityLogo: View {
     let state: MovementActivityAttributes.ContentState
@@ -100,6 +104,7 @@ struct MovementLiveActivity: Widget {
                         .font(Theme.font(size: 17, weight: .semibold))
                         .foregroundStyle(stale ? Theme.label2 : state.amountColor)
                         .contentTransition(.numericText(value: Double(state.lastAmountCents)))
+                    .animation(liveSpring, value: state.lastAmountCents)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .padding(.trailing, 4)
@@ -125,6 +130,7 @@ struct MovementLiveActivity: Widget {
                             .tracking(state.balanceCents == nil ? 0 : -0.5)
                             .foregroundStyle(stale || state.balanceCents == nil ? Theme.label2 : Theme.label)
                             .contentTransition(state.balanceTransition)
+                            .animation(liveSpring, value: state.balanceCents)
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                         Spacer(minLength: 4)
@@ -138,7 +144,10 @@ struct MovementLiveActivity: Widget {
                     .accessibilityLabel(state.spokenBalance)
                 }
             } compactLeading: {
+                // N2: si cambia el comercio, su logo entra creciendo desde 0,7.
                 ActivityLogo(state: state, size: 22)
+                    .id(state.logoDomain ?? state.bank)
+                    .transition(.scale(scale: 0.7).combined(with: .opacity))
                     .opacity(stale ? 0.5 : 1)
                     .accessibilityLabel(state.headline)
             } compactTrailing: {
@@ -146,6 +155,7 @@ struct MovementLiveActivity: Widget {
                     .font(Theme.font(size: 14, weight: .semibold))
                     .foregroundStyle(state.amountColor)
                     .contentTransition(.numericText(value: Double(state.lastAmountCents)))
+                    .animation(liveSpring, value: state.lastAmountCents)
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
                     .opacity(stale ? 0.5 : 1)
@@ -186,6 +196,7 @@ private struct LockScreenView: View {
                     .font(Theme.font(size: 20, weight: .semibold))
                     .foregroundStyle(stale ? Theme.label2 : state.amountColor)
                     .contentTransition(.numericText(value: Double(state.lastAmountCents)))
+                    .animation(liveSpring, value: state.lastAmountCents)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -200,6 +211,7 @@ private struct LockScreenView: View {
                     .tracking(state.balanceCents == nil ? 0 : -0.6)
                     .foregroundStyle(stale || state.balanceCents == nil ? Theme.label2 : Theme.label)
                     .contentTransition(state.balanceTransition)
+                            .animation(liveSpring, value: state.balanceCents)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                 if state.balanceCents != nil {

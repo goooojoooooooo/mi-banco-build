@@ -43,6 +43,12 @@ public struct ShellState: Equatable, Hashable, Sendable {
         /// El fundido `id` (`fadeCount` cuando empezó) con el que se iba el bloqueo, ya desbloqueado, ha terminado: ya
         /// no queda nada suyo en pantalla. El aviso de un fundido anterior no da por acabado uno posterior.
         case lockFadeFinished(id: Int)
+        /// El estilo de movimiento de ahora: `true` = solo fundidos (Sutil o Reducir movimiento), sin marca que vuele.
+        case motionStyle(fadesOnly: Bool)
+        /// C6: ha llegado un movimiento con la app delante (en otra pestaña): se pide el aviso dentro de la app.
+        case bannerRequested
+        /// C6: el aviso `id` se ha ido (se recogió solo, se tocó o se cerró).
+        case bannerDismissed(id: Int)
     }
 
     /// Cómo deja la pantalla el bloqueo al desbloquear.
@@ -87,6 +93,11 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public internal(set) var lockFading = false
     /// Cuántos fundidos del bloqueo han empezado: el número del último es el que acepta `lockFadeFinished(id:)`.
     public internal(set) var fadeCount = 0
+    /// El movimiento es solo de fundidos (Sutil o Reducir movimiento): al desbloquear, la marca no vuela.
+    public internal(set) var fadesOnly = false
+    /// C6: el aviso dentro de la app que está puesto (su número) y cuántos se han pedido.
+    public internal(set) var banner: Int?
+    public internal(set) var bannerCount = 0
     /// Un cambio del ajuste que llegó con el bloqueo delante: se aplica al desbloquear (nunca quita el bloqueo).
     var settingAfterUnlock: Setting?
 
@@ -153,6 +164,20 @@ public struct ShellState: Equatable, Hashable, Sendable {
     /// (un toque tardío sobre «Desbloquear» caería en la barra de pestañas que hay justo debajo).
     public var homeTakesTouches: Bool { !showsLock && !lockFading }
 
+    /// La ranura de la marca de la barra de Inicio no se dibuja (ni su nombre) porque el bloqueo se está fundiendo con
+    /// la suya: con solo fundidos nada vuela, y si la ranura apareciera a la vez que el bloqueo se va se verían dos
+    /// marcas a medias. Aparece, de una vez, cuando del bloqueo ya no queda nada (`lockFadeFinished`). Con piezas la
+    /// ranura la esconde la marca que vuela (`LaunchAnchor.flying`), no esto.
+    public var hidesBrandSlot: Bool { fadesOnly && lockFading && !showsLock }
+
+    /// C6: el aviso dentro de la app que se dibuja ahora. Nunca con el bloqueo delante ni mientras se funde, nunca fuera
+    /// de primer plano (se cierra al salir y al bloquear), y nunca es una hoja: va dentro de Inicio (capa `.home`), por
+    /// debajo del bloqueo y de la tapa.
+    public var shownBanner: Int? {
+        guard !showsLock, !lockFading, scene == .active else { return nil }
+        return banner
+    }
+
     /// Las capas que hay ahora, de abajo arriba. La última es la que se ve encima.
     public var layers: [Layer] { layers(liveScene: scene) }
 
@@ -197,13 +222,18 @@ public struct ShellState: Equatable, Hashable, Sendable {
             let lockWasShowing = showsLock
             let cold = coldStart
             locked = false
-            launching = false
+            if lockWasShowing { launching = false }
             if let setting = settingAfterUnlock {
                 lockApplies = setting.lockApplies
                 relocksOnBackground = setting.relocksOnBackground
                 settingAfterUnlock = nil
             }
-            guard lockWasShowing else { return }
+            guard lockWasShowing else {
+                // m-8: sin bloqueo delante, un desbloqueo durante el arranque lo termina como su final (Inicio se
+                // monta una vez), nunca dejándolo a medias sin nada que vaya a montar Inicio.
+                if showsLaunch { finishLaunch() } else { launching = false }
+                return
+            }
             coldStart = false
             // Inicio se monta YA, esté o no la escena en primer plano (si no lo está, debajo de la tapa).
             revealToken += 1
@@ -257,7 +287,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
             relocksOnBackground = relocks
             // Cambiar el ajuste solo es posible con la app ya desbloqueada: no se vuelve a pedir Face ID.
             locked = false
-            launching = false
+            // m-8: si el arranque sin bloqueo seguía, se termina como su final (Inicio se monta una vez).
+            if showsLaunch { finishLaunch() } else { launching = false }
             // Salvo en segundo plano (no se puede provocar desde la interfaz): ahí manda la regla de siempre, y con el
             // bloqueo activado la app queda bloqueada.
             if scene == .background, relocksOnBackground {
@@ -267,12 +298,28 @@ public struct ShellState: Equatable, Hashable, Sendable {
 
         case .lockFadeFinished(let id):
             if id == fadeCount { lockFading = false }
+
+        case .motionStyle(let fades):
+            fadesOnly = fades
+
+        case .bannerRequested:
+            // Solo con la app delante, desbloqueada y sin el bloqueo fundiéndose; si no, no se pone (no se guarda).
+            guard !showsLock, !lockFading, scene == .active else { return }
+            bannerCount += 1
+            banner = bannerCount
+
+        case .bannerDismissed(let id):
+            if banner == id { banner = nil }
         }
+        // Con el bloqueo delante no queda ningún aviso puesto (ni para cuando se quite).
+        if showsLock { banner = nil }
     }
 
     /// Fuera de primer plano no sigue ni la marca volando ni el arranque sin bloqueo.
     private mutating func leaveForeground() {
         exit = nil
+        // El aviso dentro de la app se cierra al salir de primer plano (no vuelve al volver).
+        banner = nil
         if showsLaunch { finishLaunch() }
     }
 

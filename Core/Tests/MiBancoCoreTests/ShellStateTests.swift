@@ -17,6 +17,8 @@ import Testing
             .launchAssembled, .launchFinished, .safetyFired,
             .exitFinished(id: state.exitCount), .exitFinished(id: state.exitCount - 1),
             .lockFadeFinished(id: state.fadeCount), .lockFadeFinished(id: state.fadeCount - 1),
+            .motionStyle(fadesOnly: true), .motionStyle(fadesOnly: false),
+            .bannerRequested, .bannerDismissed(id: state.banner ?? 0), .bannerDismissed(id: state.bannerCount - 1),
         ]
         for setting in settings {
             events.append(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
@@ -31,6 +33,8 @@ import Testing
         copy.exitCount = 0
         copy.fadeCount = 0
         if let exit = copy.exit { copy.exit = ShellState.Exit(id: 0, cold: exit.cold) }
+        copy.bannerCount = 0
+        if copy.banner != nil { copy.banner = 0 }
         return copy
     }
 
@@ -198,8 +202,11 @@ import Testing
             #expect(step.before.showsLock || step.before.showsLaunch, "Inicio se volvió a montar estando a la vista: \(step.event)")
             switch step.event {
             case .unlockSucceeded:
-                #expect(step.before.showsLock)
-            case .launchAssembled, .launchFinished, .safetyFired, .scene(.inactive), .scene(.background):
+                // Con el bloqueo delante; o (m-8) sin bloqueo delante y con el arranque aún puesto: lo termina.
+                #expect(step.before.showsLock || (step.before.showsLaunch && step.before.coldStart))
+            case .launchAssembled, .launchFinished, .safetyFired, .scene(.inactive), .scene(.background),
+                 .lockSettingChanged:
+                // (m-8: un cambio del ajuste durante el arranque sin bloqueo también lo termina montando Inicio.)
                 #expect(step.before.showsLaunch && step.before.coldStart)
             default:
                 Issue.record("Inicio se montó con \(step.event)")
@@ -405,6 +412,125 @@ import Testing
                 #expect(step.after.lockFading)
             }
         }
+    }
+
+    // MARK: Lote 3 (0) · Con solo fundidos, desbloquear no enseña dos marcas
+
+    /// En Sutil o con Reducir movimiento nada vuela: el bloqueo se funde con su marca grande sobre Inicio. Mientras se
+    /// funde, la ranura de la marca de la barra de Inicio no se dibuja (si no, se verían dos marcas a medias); aparece
+    /// en cuanto el fundido termina, y nunca se queda escondida.
+    @Test func aFadingUnlockNeverShowsTwoMarks() {
+        #expect(Self.states.contains { $0.hidesBrandSlot }, "el recorrido no llega a un desbloqueo con solo fundidos")
+        for state in Self.states {
+            // Con solo fundidos y el bloqueo fundiéndose (ya quitado), la ranura no se dibuja.
+            if state.fadesOnly, state.lockFading, !state.showsLock {
+                #expect(state.hidesBrandSlot, "dos marcas: el bloqueo se funde con la suya y la ranura dibuja otra: \(state)")
+            }
+            // Y solo entonces: ni con piezas (ahí la esconde la marca que vuela), ni sin fundido (se quedaría sin marca).
+            if state.hidesBrandSlot {
+                #expect(state.fadesOnly && state.lockFading && !state.showsLock, "\(state)")
+                #expect(!state.homeTakesTouches, "la ranura escondida con Inicio ya tocable: \(state)")
+            }
+        }
+        for step in Self.steps where step.event == .unlockSucceeded && step.before.showsLock && step.before.fadesOnly {
+            if step.after.lockFading { #expect(step.after.hidesBrandSlot, "\(step.before)") }
+        }
+        // Nunca se queda escondida: el aviso de fin del fundido en curso la devuelve, y también ir a segundo plano.
+        for step in Self.steps where step.before.hidesBrandSlot {
+            if step.event == .lockFadeFinished(id: step.before.fadeCount) { #expect(!step.after.hidesBrandSlot) }
+            if step.event == .scene(.background) { #expect(!step.after.hidesBrandSlot || !step.after.showsLock) }
+        }
+        // La secuencia: Sutil, desbloqueo en primer plano, fundido, fin.
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        state.apply(.motionStyle(fadesOnly: true))
+        #expect(!state.hidesBrandSlot)
+        state.apply(.unlockSucceeded)
+        #expect(state.lockFading && state.hidesBrandSlot)
+        state.apply(.lockFadeFinished(id: state.fadeCount))
+        #expect(!state.hidesBrandSlot)
+        // Con piezas, esto no esconde nada (la ranura la esconde la marca que vuela).
+        var pieces = ShellState(lockApplies: true, relocksOnBackground: true)
+        pieces.apply(.unlockSucceeded)
+        #expect(pieces.lockFading && !pieces.hidesBrandSlot)
+        // El estilo no toca el bloqueo: ni lo quita ni lo pone.
+        for step in Self.steps {
+            if case .motionStyle = step.event {
+                #expect(step.after.locked == step.before.locked && step.after.lockFading == step.before.lockFading)
+            }
+        }
+    }
+
+    // MARK: m-8 · Vivacidad: Inicio a la vista siempre se ha montado
+
+    /// En ningún estado alcanzable se ve Inicio (sin bloqueo, sin arranque y sin tapa) sin haber recibido nunca la
+    /// orden de montarse: si no, se quedaría sin montar para siempre (nada más lo montaría).
+    @Test func homeOnScreenHasAlwaysBeenAssembled() {
+        for state in Self.states where !state.showsLock && !state.showsLaunch && !state.showsCover {
+            #expect(state.revealToken >= 1, "Inicio a la vista sin montarse nunca: \(state)")
+            #expect(!state.coldStart, "Inicio a la vista y la app sigue «sin enseñar Inicio»: \(state)")
+        }
+        // El caso de la revisión: un cambio del ajuste durante el arranque sin bloqueo lo termina montando Inicio.
+        var state = ShellState(lockApplies: false, relocksOnBackground: false)
+        #expect(state.showsLaunch)
+        state.apply(.lockSettingChanged(lockApplies: false, relocksOnBackground: false))
+        #expect(!state.showsLaunch && state.revealToken == 1 && !state.coldStart)
+    }
+
+    // MARK: C6 · El aviso dentro de la app
+
+    /// Nunca encima del bloqueo (ni con él delante ni mientras se funde), nunca fuera de primer plano, se cierra al
+    /// bloquear y al salir de primer plano y no vuelve solo; va siempre en la capa de Inicio, debajo del bloqueo y de
+    /// la tapa. Un aviso pedido con el bloqueo delante no se guarda para después.
+    @Test func theInAppBannerNeverSitsAboveTheLock() {
+        #expect(Self.states.contains { $0.shownBanner != nil }, "el recorrido no llega a enseñar un aviso")
+        for state in Self.states {
+            if state.showsLock || state.lockFading || state.scene != .active {
+                #expect(state.shownBanner == nil, "aviso a la vista con bloqueo, fundido o fuera de primer plano: \(state)")
+            }
+            if state.showsLock { #expect(state.banner == nil, "aviso guardado bajo el bloqueo: \(state)") }
+            // Nada de la carcasa va por debajo de Inicio: el aviso (en Inicio) queda siempre bajo bloqueo y tapa.
+            #expect(ShellState.zIndex(of: .home) < ShellState.zIndex(of: .lock))
+            #expect(ShellState.zIndex(of: .home) < ShellState.zIndex(of: .cover))
+        }
+        for step in Self.steps {
+            switch step.event {
+            case .scene(.inactive), .scene(.background):
+                #expect(step.after.banner == nil, "el aviso sigue puesto al salir de primer plano: \(step.before)")
+            case .bannerRequested:
+                if step.before.showsLock || step.before.lockFading || step.before.scene != .active {
+                    #expect(step.after.banner == step.before.banner, "se puso un aviso que no se podía ver: \(step.before)")
+                } else {
+                    #expect(step.after.shownBanner != nil)
+                }
+            case .bannerDismissed(let id):
+                if step.before.banner == id { #expect(step.after.banner == nil) }
+                else { #expect(step.after.banner == step.before.banner, "un cierre viejo cerró el aviso nuevo") }
+            default:
+                break
+            }
+            // El aviso no toca el bloqueo ni los toques de Inicio.
+            if step.event == .bannerRequested || { if case .bannerDismissed = step.event { true } else { false } }() {
+                #expect(step.after.locked == step.before.locked && step.after.homeTakesTouches == step.before.homeTakesTouches)
+                #expect(step.after.layers(liveScene: step.after.scene) == step.before.layers(liveScene: step.before.scene))
+            }
+        }
+        // La secuencia: llega con la app delante, se va a segundo plano, vuelve bloqueada: ni rastro del aviso.
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        state.apply(.bannerRequested)
+        #expect(state.banner == nil, "con el bloqueo delante no se pide")
+        state.apply(.unlockSucceeded)
+        state.apply(.lockFadeFinished(id: state.fadeCount))
+        state.apply(.bannerRequested)
+        let id = state.banner
+        #expect(state.shownBanner != nil && id != nil)
+        state.apply(.scene(.inactive))
+        #expect(state.shownBanner == nil && state.banner == nil)
+        state.apply(.scene(.active))
+        #expect(state.shownBanner == nil, "el aviso volvió solo")
+        state.apply(.bannerRequested)
+        state.apply(.scene(.background))
+        state.apply(.scene(.active))
+        #expect(state.showsLock && state.banner == nil)
     }
 
     // MARK: D-10 · Con el bloqueo activado, la app nunca está desbloqueada en segundo plano

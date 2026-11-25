@@ -96,7 +96,11 @@ final class MotionShellTests: XCTestCase {
             }
             Thread.sleep(forTimeInterval: 1.5)
             app.activate()
-            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+            // Un intento que no vuelve a primer plano no es aún un fallo (re-revisión, nota 5): lo dirá el último.
+            guard app.wait(for: .runningForeground, timeout: 15) else {
+                tries.append("intento \(attempt): no volvió a primer plano (estado \(app.state.rawValue))")
+                continue
+            }
             if waitUntil(10, { self.probe()["escena"] == "activa" && backgrounds() > before }) { return }
             tries.append("intento \(attempt): estado \(app.state.rawValue), \(probe())")
         }
@@ -161,6 +165,8 @@ final class MotionShellTests: XCTestCase {
         let mark = element("lock-mark")
         XCTAssertTrue(mark.waitForExistence(timeout: 5), "Falta la marca del bloqueo")
         XCTAssertEqual(mark.value as? String, "piezas", "En el arranque en frío el bloqueo debe montar las piezas")
+        // D-9: el bloqueo puesto SÍ está a la vista de VoiceOver (lo apunta el mismo modificador que lo esconde al irse).
+        XCTAssertEqual(probe()["vozBloqueo"], "visible", "El bloqueo puesto no está a la vista de VoiceOver: \(probe())")
         // (XCUITest ve los elementos de Inicio aunque estén ocultos a VoiceOver y tapados por el bloqueo; lo que se
         // comprueba es que no se pueden tocar y que ninguna capa del arranque existe.)
         let eye = app.buttons["Ocultar importes"]
@@ -404,6 +410,30 @@ final class MotionShellTests: XCTestCase {
         assertHomeResponds("Tras desbloquear a mitad de las piezas, Inicio no responde")
     }
 
+    /// Lote 3 (0): en Sutil y con Reducir movimiento nada vuela al desbloquear; el bloqueo se funde con su marca grande.
+    /// Mientras se funde, la ranura de la marca de la barra de Inicio no se dibuja (`ranuraBloqueo=1`) y la app no
+    /// apunta ninguna vez «dos marcas»; al acabar el fundido la ranura vuelve. A ×20 el fundido dura 4–6 s.
+    func testFadingUnlockShowsOneMark() throws {
+        for arguments in [["-MiBancoMotionLevel", "subtle"], ["-MiBancoReduceMotion"]] {
+            launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "3", "-MiBancoMotionScale", "20"] + arguments)
+            let unlock = app.buttons["Desbloquear"]
+            XCTAssertTrue(unlock.waitForExistence(timeout: 15), "\(arguments): falta el bloqueo")
+            XCTAssertTrue(waitUntil(20) { self.probe()["fundido"] == "1" }, "\(arguments): el bloqueo no empezó a fundirse")
+            let fading = probe()
+            XCTAssertEqual(fading["salidas"], "0", "\(arguments): con solo fundidos la marca no debe volar: \(fading)")
+            XCTAssertEqual(fading["ranuraBloqueo"], "1",
+                           "\(arguments): la ranura de Inicio dibuja su marca mientras el bloqueo se funde con la suya: \(fading)")
+            XCTAssertEqual(fading["marcasDobles"], "0", "\(arguments): dos marcas durante el fundido: \(fading)")
+            XCTAssertTrue(waitUntil(20) { self.probe()["fundido"] == "0" }, "\(arguments): el fundido no terminó")
+            let done = probe()
+            XCTAssertEqual(done["ranuraBloqueo"], "0", "\(arguments): la ranura se quedó escondida: \(done)")
+            XCTAssertEqual(done["ranura"], "-", "\(arguments): \(done)")
+            XCTAssertEqual(done["marcasDobles"], "0", "\(arguments): \(done)")
+            XCTAssertFalse(unlock.exists, "\(arguments): el bloqueo sigue ahí")
+            app.terminate()
+        }
+    }
+
     /// I-1: el orden de Face ID en el iPhone — el éxito llega con la escena aún inactiva y solo después vuelve a activa
     /// (aquí lo simula la bandera de demo durante 10 s). Mientras está inactiva: la tapa del selector de apps está
     /// puesta (no antes, encima del bloqueo), Inicio YA ha recibido la orden de montarse (una vez, debajo de la tapa),
@@ -589,8 +619,142 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "No se abrió la hoja de detalle")
         XCTAssertTrue(labelled("label == %@", "Pago de importe oculto").waitForExistence(timeout: 5),
                       "El importe del detalle no dice «importe oculto»")
-        XCTAssertTrue(labelled("label == %@", "Te quedaban importe oculto").exists,
+        // «Te quedaban» solo dice algo de su importe cuando el de arriba se ha posado (C4): se espera a que lo diga.
+        XCTAssertTrue(labelled("label == %@", "Te quedaban importe oculto").waitForExistence(timeout: 10),
                       "«Te quedaban» no dice «importe oculto»")
+    }
+
+    /// B2 (ronda 1 del lote 3): al escuchar el resumen, la línea que suena se resalta y va cambiando con la voz (en la
+    /// demo la voz es simulada: 1,6 s por línea; en el iPhone manda el progreso real). Con el ojo cerrado la voz no lee
+    /// ninguna línea, así que no se resalta ninguna y la hoja no enseña ninguna cifra mientras «habla».
+    func testSpokenLineIsHighlighted() throws {
+        launch(["-MiBancoDemoBriefing", "busy"])
+        let listen = app.buttons["briefing-listen"]
+        XCTAssertTrue(listen.waitForExistence(timeout: 30), "Falta «Escuchar»")
+        XCTAssertEqual(listen.value as? String, "-", "Antes de escuchar ya hay una línea resaltada")
+        listen.tap()
+        XCTAssertTrue(waitUntil(8) { (listen.value as? String) == "headline" },
+                      "La primera línea leída no es la frase principal: «\(listen.value as? String ?? "nil")»")
+        XCTAssertTrue(waitUntil(8) { let v = listen.value as? String ?? "-"; return v != "headline" && v != "-" },
+                      "La línea resaltada no avanza con la voz: «\(listen.value as? String ?? "nil")»")
+        listen.tap()
+        XCTAssertTrue(waitUntil(5) { (listen.value as? String) == "-" }, "Al parar sigue resaltada una línea")
+        app.terminate()
+
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrivate"])
+        let privateListen = app.buttons["briefing-listen"]
+        XCTAssertTrue(privateListen.waitForExistence(timeout: 30), "Falta «Escuchar» con el ojo cerrado")
+        privateListen.tap()
+        let sheet = app.scrollViews["briefing-scroll"]
+        for pass in 0..<6 {
+            XCTAssertEqual(privateListen.value as? String, "-", "Pasada \(pass): con el ojo cerrado se resalta una línea")
+            let leaks = sheet.descendants(matching: .any)
+                .matching(NSPredicate(format: "label MATCHES %@", #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|\d\s*euros).*"#)).count
+            XCTAssertEqual(leaks, 0, "Pasada \(pass): con el ojo cerrado la hoja enseña cifras mientras habla")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
+    /// I-2 (ronda 1 del lote 3): el ojo de la app se copia en la suite compartida del grupo de apps al arrancar y al
+    /// cambiar (para la extensión de avisos y la Live Activity), y el estado de la Live Activity se sigue leyendo sin la
+    /// clave nueva. Que la extensión y la Live Activity dibujen máscaras solo lo confirma el iPhone.
+    func testTheEyeIsSharedWithTheExtensions() throws {
+        launch(["-MiBancoDemoPrivate"])
+        waitForLaunchToEnd(30)
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "cerrado" },
+                      "Al arrancar con el ojo cerrado la suite compartida no lo dice: \(probe())")
+        XCTAssertEqual(probe()["estadoViejo"], "ok", "El estado de la Live Activity no se lee sin la clave nueva: \(probe())")
+        let show = app.buttons["Mostrar importes"]
+        XCTAssertTrue(show.waitForExistence(timeout: 8), "Falta el ojo cerrado de Inicio")
+        XCTAssertTrue(waitUntil(8) { show.isHittable }, "El ojo no se puede tocar")
+        show.tap()
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "abierto" },
+                      "Al abrir el ojo la suite compartida no cambia: \(probe())")
+        app.buttons["Ocultar importes"].tap()
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "cerrado" },
+                      "Al cerrar el ojo la suite compartida no cambia: \(probe())")
+    }
+
+    /// C6: el aviso dentro de la app. (a) Con el bloqueo delante llega un pago (la demo lo mete a los ~4 s): no aparece
+    /// ningún aviso mientras dura el bloqueo, ni después (no se guarda). (b) Sin bloqueo, en Gasto: el aviso cae, se
+    /// puede tocar y abre la hoja del movimiento (la única hoja), y nunca es una hoja él mismo. (c) Con el ojo cerrado,
+    /// el aviso no tiene ningún texto con forma de importe. (d) Ir a segundo plano lo quita y no vuelve.
+    func testInAppBannerNeverAboveLock() throws {
+        let banner = element("in-app-banner")
+        // (a)
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "18", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"])
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta el bloqueo")
+        var looks = 0
+        while unlock.exists && looks < 120 {
+            XCTAssertFalse(banner.exists, "Mirada \(looks): el aviso dentro de la app está con el bloqueo delante")
+            looks += 1
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        // El pago llega a los ~4 s del arranque; el bloqueo dura 18 s: se mira bastante rato con el bloqueo puesto.
+        XCTAssertGreaterThan(looks, 25, "El bloqueo se quitó antes de que llegara el pago: la prueba no dice nada")
+        XCTAssertTrue(waitUntil(30) { !unlock.exists }, "El bloqueo de demo no se quitó")
+        for look in 0..<15 {
+            XCTAssertFalse(banner.exists, "Mirada \(look): el aviso pedido con el bloqueo apareció al desbloquear")
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        app.terminate()
+
+        // (b) y (d)
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"])
+        XCTAssertTrue(banner.waitForExistence(timeout: 20), "No apareció el aviso dentro de la app en Gasto")
+        XCTAssertFalse(app.buttons["Cerrar"].exists, "El aviso no debe ser una hoja")
+        let open = element("in-app-banner-open")
+        XCTAssertTrue(open.waitForExistence(timeout: 3), "El aviso no se puede tocar")
+        open.tap()
+        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "Tocar el aviso no abrió la hoja del movimiento")
+        XCTAssertTrue(waitUntil(5) { !banner.exists }, "El aviso sigue puesto con la hoja abierta")
+        app.terminate()
+
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "6"])
+        XCTAssertTrue(banner.waitForExistence(timeout: 30), "No apareció el aviso dentro de la app (×6)")
+        sendToBackgroundAndReturn()
+        for look in 0..<10 {
+            XCTAssertFalse(banner.exists, "Mirada \(look): el aviso sigue (o vuelve) tras pasar por segundo plano")
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        app.terminate()
+
+        // (c)
+        // A ×12 el aviso dura ~44 s: las ocho miradas caben con él puesto (a ×6 se recogía a mitad de una mirada y la
+        // lectura elemento a elemento fallaba, run 45623451092). Cada mirada es UNA consulta con predicado.
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoDemoPrivate", "-MiBancoMotionScale", "12"])
+        XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso con el ojo cerrado")
+        let money = #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros).*"#
+        XCTAssertGreaterThan(banner.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "importe oculto")).count, 0,
+                             "El aviso no dice «importe oculto»: ¿estaba vacío?")
+        var looked = 0
+        for pass in 0..<8 where banner.exists {
+            let leaks = banner.descendants(matching: .any)
+                .matching(NSPredicate(format: "label MATCHES %@ OR value MATCHES %@", money, money)).count
+            XCTAssertEqual(leaks, 0, "Pasada \(pass): con el ojo cerrado el aviso tiene \(leaks) textos con cifras")
+            looked += 1
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        XCTAssertGreaterThanOrEqual(looked, 6, "El aviso se fue antes de poder mirarlo: la prueba no dice nada")
+    }
+
+    /// C4 (D1, decisión del dueño): «Te quedaban» empieza oculto y solo dice su cifra cuando el importe de arriba se ha
+    /// posado. A ×20 el vuelo del importe dura varios segundos: justo al abrir la hoja, «Te quedaban» no tiene forma de
+    /// importe; después sí (si no llegara nunca, la prueba tampoco pasa).
+    func testTeQuedabanStartsHidden() throws {
+        launch(["-MiBancoMotionScale", "20"])
+        waitForLaunchToEnd(60)
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
+        XCTAssertTrue(waitUntil(60) { row.isHittable }, "La primera fila no se puede tocar")
+        row.tap()
+        let left = labelled("label BEGINSWITH %@", "Te quedaban")
+        XCTAssertTrue(left.waitForExistence(timeout: 8), "La hoja no tiene «Te quedaban»")
+        let early = left.label
+        XCTAssertFalse(moneyShaped(early), "«Te quedaban» dice su cifra antes de que el importe se pose: «\(early)»")
+        XCTAssertTrue(waitUntil(40) { self.moneyShaped(left.label) },
+                      "«Te quedaban» nunca llegó a decir su cifra: «\(left.label)»")
     }
 
     /// Lote 2 (2.5): con el ojo cerrado, abrir el detalle de un movimiento no monta NINGÚN texto con forma de importe:
@@ -615,7 +779,7 @@ final class MotionShellTests: XCTestCase {
         func leaks() -> [String] {
             sheet.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
                 [el.label, el.value as? String ?? ""].filter {
-                    $0.range(of: #"\d[.,]\d|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
+                    $0.range(of: #"\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
                 }
             }
         }

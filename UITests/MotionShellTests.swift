@@ -739,6 +739,26 @@ final class MotionShellTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(looked, 6, "El aviso se fue antes de poder mirarlo: la prueba no dice nada")
     }
 
+    /// Lote 3, menores tras la re-revisión (N-1, N-2): lo que se ve del aviso dentro de la app para los toques (un toque en
+    /// «Te quedan» no abre nada de debajo) y sus botones de abajo no reciben toques hasta que el despliegue termina.
+    /// A ×12 el aviso dura ~44 s: cae ~11 s, se despliega en ~6 s. Tocar la cabecera abre la hoja (en la otra prueba).
+    func testInAppBannerTakesOnlyVisibleTouches() throws {
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "12"])
+        let banner = element("in-app-banner")
+        XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso dentro de la app")
+        XCTAssertEqual(probe()["accionesAviso"], "0", "Los botones del aviso reciben toques antes de desplegarse: \(probe())")
+        let left = banner.staticTexts["Te quedan"]
+        XCTAssertTrue(left.waitForExistence(timeout: 30), "El aviso no llegó a desplegarse")
+        // Mientras se despliega (la máscara aún tapa los botones), siguen sin recibir toques.
+        XCTAssertEqual(probe()["accionesAviso"], "0", "Los botones reciben toques mientras se despliegan: \(probe())")
+        XCTAssertTrue(waitUntil(20) { self.probe()["accionesAviso"] == "1" }, "Desplegado, los botones no reciben toques")
+        // Un toque en «Te quedan» (parte visible, sin botón): no abre nada de lo que hay debajo.
+        left.tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertFalse(app.buttons["Cerrar"].exists, "Un toque en el aviso atravesó hasta la pantalla de debajo y abrió una hoja")
+        XCTAssertTrue(banner.exists, "El toque en el aviso lo quitó")
+    }
+
     /// C4 (D1, decisión del dueño): «Te quedaban» empieza oculto y solo dice su cifra cuando el importe de arriba se ha
     /// posado. A ×20 el vuelo del importe dura varios segundos: justo al abrir la hoja, «Te quedaban» no tiene forma de
     /// importe; después sí (si no llegara nunca, la prueba tampoco pasa).

@@ -43,7 +43,7 @@ final class AppPreferences {
         #if DEBUG
         LaunchProbe.shared.sharedEye = SharedPrivacy.read(from: shared).map { $0 ? "cerrado" : "abierto" } ?? "-"
         #endif
-        Task { await LiveActivityController.setHidden(hidden) }
+        Task { await LiveActivityController.syncEye() }
     }
 
     static let motionLevelKey = "motionLevel"

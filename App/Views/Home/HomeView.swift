@@ -54,6 +54,8 @@ struct HomeView: View {
     @State private var freshID: UUID?
     /// La llegada anunciada cuyo movimiento aún no ha publicado el modelo (lo hace un instante después).
     @State private var awaitedArrival: Arrival?
+    /// Cuándo se anunció: pasado `ArrivalWindow.lifetime` sin que el movimiento aparezca, la llegada caduca.
+    @State private var awaitedAt = Date.distantPast
     /// Lo que la última llegada enseña sobre la cifra de la tarjeta.
     @State private var pulse = ArrivalPulse()
     @State private var detentTick = 0
@@ -80,7 +82,7 @@ struct HomeView: View {
         Section {
             if card == .investments, let summary = portfolio.summary {
                 PositionRows(summary: summary, onOpen: openPosition)
-                    .opacity(listHidden ? 0 : 1)
+                    .opacity(listAlpha)
             } else {
                 QuickActions(
                     card: card,
@@ -91,8 +93,7 @@ struct HomeView: View {
                     onShareIBAN: shareText,
                     onOpenAccounts: openAccounts
                 )
-                .opacity(listHidden ? 0 : 1)
-                .homeEntrance(.row(0))
+                .homeEntrance(.row(0), listOpacity: listAlpha)
 
                 PendingMoveBanner(
                     moves: visiblePendingMoves(for: card),
@@ -104,16 +105,14 @@ struct HomeView: View {
                         }
                     }
                 )
-                .opacity(listHidden ? 0 : 1)
+                .opacity(listAlpha)
 
                 WeekBlock(card: card, week: snapshot.weeks[card] ?? WeekSpend(), pace: snapshot.pace,
                           balance: card.bank.flatMap { snapshot.balances[$0] })
-                    .opacity(listHidden ? 0 : 1)
-                    .homeEntrance(.row(1))
+                    .homeEntrance(.row(1), listOpacity: listAlpha)
                 ForEach(entries) { entry in
                     row(entry, snapshot: snapshot, swipes: true)
-                        .opacity(listHidden ? 0 : 1)
-                        .homeEntrance(.row(2 + entry.order))
+                        .homeEntrance(.row(2 + entry.order), listOpacity: listAlpha)
                 }
                 if entries.isEmpty {
                     Text("Aún no hay movimientos en esta cuenta.")
@@ -188,7 +187,8 @@ struct HomeView: View {
         .transaction(value: searching) { $0.animation = nil }
         .modifier(SearchSwapFade(searching: searching))
         .modifier(TitaniumRefreshHold(state: refresh))
-        .padding(.bottom, Theme.Space.section)
+        // La última fila puede subir por encima del degradado de la barra de pestañas (`TabBarFade`).
+        .padding(.bottom, Theme.Space.section + TabBarFade.height)
     }
 
     /// La lista con su desplazamiento medido (paralaje, degradado de la barra, tirar para actualizar).
@@ -226,6 +226,9 @@ struct HomeView: View {
         scroller(snapshot)
             // Con el abanico abierto, lo de debajo no se lee ni se recorre con VoiceOver.
             .accessibilityHidden(fan != nil)
+            // Bajo la barra de pestañas de cristal, negro: los últimos 90 pt de la lista se funden a negro, así el
+            // cristal no tiene filas que deformar (antes salía «sucio» con trozos de la fila de debajo).
+            .overlay(alignment: .bottom) { TabBarFade() }
             .overlay(alignment: .top) {
                 if let toastText {
                     Text(toastText)
@@ -358,6 +361,7 @@ struct HomeView: View {
             #if DEBUG
             .onAppear(perform: applyDemoLaunchState)
             .onChange(of: motion.demoMomentTick) { _, _ in runDemoMoment() }
+            .onChange(of: freshID, initial: true) { _, id in HomeProbe.shared.freshRows = id == nil ? 0 : 1 }
             #endif
     }
 
@@ -385,15 +389,26 @@ struct HomeView: View {
 
     // MARK: - Lista que sigue a la tarjeta
 
-    /// La lista sale con un fundido de 110 ms, cambia, y la nueva entra escalonada (34 ms × 0,8ⁿ entre filas).
+    /// Hasta dónde se atenúa la lista vieja antes del cambio (con movimiento). La nueva sale desde ahí: la pantalla
+    /// nunca se queda en negro entre las dos (antes, unos 100 ms vacíos en cada cambio de tarjeta).
+    private static let listFloor = 0.3
+
+    /// Opacidad de la lista: atenuada mientras cambia (con Reducir movimiento, invisible: ahí las cifras se funden por
+    /// su cuenta y no se pueden leer dos a la vez).
+    private var listAlpha: Double {
+        listHidden ? (kit.reduce ? 0 : Self.listFloor) : 1
+    }
+
+    /// La lista vieja se atenúa hasta `listFloor` en 0,12 s (solo baja, nunca vuelve a subir), cambia en ese punto y la
+    /// nueva sube escalonada (34 ms × 0,8ⁿ entre filas) mientras vuelve al 100 %: un fundido cruzado sin hueco negro.
     /// Un cambio rápido de tarjeta deja sin efecto el anterior (`listSwap`), y si la animación de salida no termina
     /// (p. ej. otra transacción la interrumpe), un respaldo vuelve a enseñar la lista: nunca se queda oculta.
-    /// Con Reducir movimiento la lista nueva sale en su sitio con un fundido, sin escalonado.
+    /// Con Reducir movimiento la vieja se funde del todo y la nueva sale en su sitio con un fundido, sin escalonado.
     private func showList(for card: AccountCard) {
         guard card != listCard || listHidden else { return }
         listSwap += 1
         let swapID = listSwap
-        let out = kit.seconds(0.11)
+        let out = kit.seconds(0.12)
         withAnimation(.easeOut(duration: out)) {
             listHidden = true
         } completion: {
@@ -410,6 +425,11 @@ struct HomeView: View {
         // El cambio de lista va sin animación (la vieja ya es invisible): nada se queda ocupando sitio.
         var swap = Transaction()
         swap.disablesAnimations = true
+        #if DEBUG
+        // Lo que se DIBUJA en el cambio: cada pieza de la lista nueva anota la opacidad que de verdad recibe mientras
+        // espera su turno (`HomeEntrance` → `DrawnOpacity`) y la sonda guarda la menor.
+        HomeProbe.shared.listSwapFloor = 100
+        #endif
         withTransaction(swap) { listCard = selection ?? .all }
         beginEntrance(.list)
         #if DEBUG
@@ -453,7 +473,19 @@ struct HomeView: View {
     private func choreograph(_ arrival: Arrival) {
         freshID = arrival.id
         awaitedArrival = arrival
+        awaitedAt = AppClock.now
+        #if DEBUG
+        HomeProbe.shared.arrivalsAnnounced += 1
+        #endif
         defer { landArrival() }
+        // La caducidad no depende de que el libro vuelva a cambiar: pasado el plazo sin aterrizar, la fila deja de
+        // estar marcada como nueva (nunca un fondo y un ✓ fijos horas después).
+        let id = arrival.id
+        let window = kit.pause(ArrivalWindow.lifetime)
+        Task {
+            try? await Task.sleep(for: .seconds(window))
+            if awaitedArrival?.id == id { expireArrival(id) }
+        }
         guard isVisible, scenePhase == .active else { return }
         if UIAccessibility.isVoiceOverRunning {
             let what = arrival.amountCents < 0 ? "pago de" : "ingreso de"
@@ -478,14 +510,21 @@ struct HomeView: View {
     }
 
     /// El movimiento anunciado ya está en el libro: su fila cae (lo hace la propia fila, con `isFresh`) con un fondo
-    /// que se queda 1 s y se apaga en 1,6 s, y la tarjeta de delante responde sobre su cifra (✓ con el importe; con el
-    /// ojo cerrado, solo un latido): ver `ArrivalHeroEffect`.
+    /// que se apaga a la vez que el ✓ de la tarjeta (quieto 1,6 s y fundido de 0,3 s: el momento termina junto), y la
+    /// tarjeta de delante responde sobre su cifra (✓ con el importe; con el ojo cerrado, solo un latido): ver
+    /// `ArrivalHeroEffect`. Una llegada cuyo movimiento no aparece a tiempo caduca (`ArrivalWindow`): nunca aterriza
+    /// minutos después con otro cambio del libro.
     private func landArrival() {
-        guard let arrival = awaitedArrival, model.movement(arrival.id) != nil else { return }
+        guard let arrival = awaitedArrival else { return }
+        guard ArrivalWindow.isOpen(announcedAt: awaitedAt, now: AppClock.now, timeMultiplier: kit.timeMultiplier) else {
+            expireArrival(arrival.id)
+            return
+        }
+        guard model.movement(arrival.id) != nil else { return }
         awaitedArrival = nil
         let id = arrival.id
-        let hold = kit.seconds(1.0)
-        let fade = kit.seconds(1.6)
+        let hold = kit.seconds(1.6)
+        let fade = kit.seconds(0.3)
         Task {
             try? await Task.sleep(for: .seconds(hold))
             guard freshID == id else { return }
@@ -497,6 +536,14 @@ struct HomeView: View {
         let front = selection ?? .all
         guard front == target || front == .all else { return }
         pulse = ArrivalPulse(token: pulse.token + 1, card: front, amountCents: arrival.amountCents)
+    }
+
+    /// La llegada caduca sin aterrizar: ni insignia ni fila nueva; si la fila ya estaba marcada, se apaga en 0,3 s.
+    private func expireArrival(_ id: UUID) {
+        awaitedArrival = nil
+        if freshID == id {
+            withAnimation(.easeOut(duration: kit.seconds(0.3))) { freshID = nil }
+        }
     }
 
     // MARK: - Tirar para actualizar
@@ -513,7 +560,7 @@ struct HomeView: View {
         let outcomes = refreshOutcomes(await BankSync.shared.refresh(trigger: .manual))
         model.reload()
         if portfolio.hasPositions { await portfolio.refreshPrices(force: false) }
-        return RefreshVerdict.isUpToDate(outcomes: outcomes, links: model.state.links, now: Date())
+        return RefreshVerdict.isUpToDate(outcomes: outcomes, links: model.state.links, now: AppClock.now)
     }
 
     private func refreshOutcomes(_ real: [BankID: SyncOutcome]) -> [BankID: BankRefreshOutcome] {
@@ -627,6 +674,15 @@ struct HomeView: View {
                 return false
             }
             if case .row(let row, _)? = first?.kind { openRow = openRow == row.id ? nil : row.id }
+        case .staleArrival:
+            model.demoAnnounceUnpublishedArrival()
+        case .search:
+            Task {
+                try? await Task.sleep(for: .seconds(0.8))
+                searching = true
+                try? await Task.sleep(for: .seconds(3))
+                closeSearch()
+            }
         case .lift, .tilt, .peek, .glide, .glideFar, nil:
             break
         }
@@ -684,6 +740,26 @@ struct HomeView: View {
         }
     }
     #endif
+}
+
+/// Negro bajo la barra de pestañas y un degradado de `height` pt por encima: el cristal de la barra solo tiene negro
+/// detrás. Fijo (no se anima), no se toca y no existe para VoiceOver.
+struct TabBarFade: View {
+    static let height: CGFloat = 90
+
+    var body: some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .top, endPoint: .bottom)
+                    .frame(height: Self.height)
+                Theme.canvas.frame(height: geo.safeAreaInsets.bottom)
+            }
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
 }
 
 /// Al abrir o cerrar la búsqueda, lo que entra (resultados, o el título y el carrusel de vuelta) se funde en su sitio:

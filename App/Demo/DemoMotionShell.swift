@@ -100,6 +100,8 @@ extension DemoMode {
     var sharedEye = "-"
     /// B2: la línea del resumen que suena ahora («-» si ninguna).
     var spokenLine = "-"
+    /// N-2: los botones del aviso dentro de la app reciben toques («1») o no («0»).
+    var bannerActions = "0"
     /// Cuándo cambia sola de pestaña la demo (`-MiBancoDemoTabSwitch`), en segundos desde 1970.
     var tabSwitchAt: Double?
 
@@ -127,7 +129,7 @@ extension DemoMode {
             "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
-            "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)",
+            "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "accionesAviso=\(bannerActions)",
             "cambioPestana=\(tabSwitchAt.map { String(format: "%.3f", $0) } ?? "-")",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")

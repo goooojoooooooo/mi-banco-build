@@ -23,6 +23,18 @@ public enum SharedPrivacy {
         return defaults.bool(forKey: key)
     }
 
+    /// N-3: el ojo tal cual lo guarda la APP (su fuente de verdad, no la copia de la suite). Es lo que va en la carga
+    /// del aviso y en la Live Activity: así carga y suite son dos señales independientes.
+    public static func appEye(from truth: UserDefaults) -> Bool {
+        truth.bool(forKey: key)
+    }
+
+    /// N-4: el valor nuevo de `hidden` para un estado que lleva `current`, si no coincide con el ojo de ahora; nil si
+    /// ya coincide (un estado viejo sin el campo cuenta como abierto).
+    public static func reconciled(current: Bool?, eyeNow: Bool) -> Bool? {
+        (current ?? false) == eyeNow ? nil : eyeNow
+    }
+
     /// Se dibujan máscaras si la carga del aviso trae el ojo cerrado O la suite compartida lo dice. Si la suite no se
     /// puede leer, manda la carga; si ninguna dice nada, cifras (como siempre).
     public static func masks(payload: Any?, shared: Bool?) -> Bool {

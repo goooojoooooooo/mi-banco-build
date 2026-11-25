@@ -18,7 +18,10 @@ struct ArcFlight: GeometryEffect {
     func effectValue(size: CGSize) -> ProjectionTransform {
         let p = min(max(progress, 0), 1.2)
         let rest = 1 - p
-        let lift = arc * sin(.pi * min(max(p, 0), 1))
+        // El arco sube pronto y se acaba antes de posarse (m-12): con un arco simétrico, cerca del final el importe
+        // aún iba unos 17 pt por encima de su sitio y pisaba la línea de la fecha. Máximo ≈ `arc` hacia p ≈ 0,37.
+        let k = min(max(p, 0), 1)
+        let lift = arc * 2.5 * sin(.pi * k) * (1 - k)
         let scale = 1 + (startScale - 1) * max(rest, 0)
         // Escala alrededor del centro del importe y luego el desplazamiento.
         var t = CGAffineTransform(translationX: size.width / 2, y: size.height / 2)

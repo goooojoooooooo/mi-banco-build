@@ -489,6 +489,35 @@ final class MotionTourHomeTests: MotionTourCase {
 
     // MARK: Lote 2 — menores: la búsqueda cambia el contenido sin mover la maquetación
 
+    /// La búsqueda abierta y cerrada por la demo (0,8 s después del toque): la ráfaga ve el fundido del cambio entero.
+    func testSearchSwapDelayed() throws {
+        launch(["-MiBancoDemoCardMoment", "search"])
+        waitForHome()
+        segment("Todo").tap()
+        // Una sola ráfaga: se abre a los 0,8 s y se cierra a los 3,8 s.
+        burst("search-swap", frames: 32, every: 0.15)
+    }
+
+    // MARK: Retoques de diseño
+
+    /// Tirar para actualizar con un banco que no está al día (consentimiento caducado): la ola trabaja y se recoge
+    /// SIN decir «Al día».
+    func testPullRefreshNotFresh() throws {
+        launch(["-MiBancoDemoCardMoment", "refresh", "-MiBancoDemoBanks", "-MiBancoDemoRefresh", "consentExpired"])
+        waitForHome()
+        segment("Todo").tap()
+        burst("pull-refresh-stale", frames: 20, every: 0.4)
+    }
+
+    /// El montaje tras el desbloqueo en Expresivo: la cifra grande no se queda quieta en «0,00 €» y se asienta antes.
+    func testHomeBuildExpressive() throws {
+        unlockAndBurst("home-build-expressive", extra: ["-MiBancoMotionLevel", "expressive"])
+    }
+
+    func testHomeBuildExpressiveEyeClosed() throws {
+        unlockAndBurst("home-build-expressive-eye", extra: ["-MiBancoMotionLevel", "expressive", "-MiBancoDemoPrivate"])
+    }
+
     func testSearchSwap() throws {
         launch()
         waitForHome()

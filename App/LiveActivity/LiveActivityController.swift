@@ -34,9 +34,14 @@ enum LiveActivityController {
                 sound: .default)
             await first.update(content, alertConfiguration: alert)
             for extra in current.dropFirst() { await extra.end(nil, dismissalPolicy: .immediate) }
+            // N-4: si el ojo cambió mientras se actualizaba, queda con el de ahora.
+            await syncEye()
             return true
         } else {
-            return (try? Live.request(attributes: MovementActivityAttributes(), content: content, pushType: nil)) != nil
+            let created = (try? Live.request(attributes: MovementActivityAttributes(), content: content, pushType: nil)) != nil
+            // N-4: si el ojo se cerró mientras se creaba (y el aviso del cambio ya pasó por las actividades), se corrige.
+            if created { await syncEye() }
+            return created
         }
     }
 
@@ -70,11 +75,12 @@ enum LiveActivityController {
     private static var eyeClosed: Bool { AlertPoster.eyeClosed }
 
     /// I-2: el ojo ha cambiado: la Live Activity que esté en pantalla pasa a máscaras (o vuelve a cifras) en silencio,
-    /// sin alerta ni sonido y sin alargar su caducidad.
-    static func setHidden(_ hidden: Bool) async {
+    /// sin alerta ni sonido y sin alargar su caducidad. N-4: siempre con el ojo de AHORA (leído aquí, no el del momento
+    /// en que se pidió): dos cambios rápidos, o un `show` a medias, acaban con el ojo vigente.
+    static func syncEye() async {
         for activity in live {
             var state = activity.content.state
-            guard state.hidden != hidden else { continue }
+            guard let hidden = SharedPrivacy.reconciled(current: state.hidden, eyeNow: eyeClosed) else { continue }
             state.hidden = hidden
             await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
         }

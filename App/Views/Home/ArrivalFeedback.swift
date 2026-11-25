@@ -83,7 +83,10 @@ struct ArrivalHeroEffect: ViewModifier {
         let badgeFor = motion.seconds(motion.reduce ? 2.2 : 2.1)
         Task {
             try? await Task.sleep(for: .seconds(greenFor))
-            if displayed?.token == token { glowing = false }
+            // El verde vuelve a blanco con un fundido de 0,3 s, nunca de golpe.
+            if displayed?.token == token {
+                withAnimation(.easeInOut(duration: motion.seconds(0.3))) { glowing = false }
+            }
             try? await Task.sleep(for: .seconds(max(0.01, badgeFor - greenFor)))
             // La insignia ya es invisible: se desmonta (no queda un importe suelto en la pantalla).
             if displayed?.token == token { displayed = nil }
@@ -177,7 +180,8 @@ private struct ArrivalBadge: View {
             ring(income: income, tint: tint)
                 .frame(width: 26, height: 26)
             Text(signedEUR(pulse.amountCents))
-                .font(.system(size: 14, weight: .semibold))
+                // Un punto más que «3 cuentas»: se lee en el 1,7 s que está a la vista.
+                .font(.system(size: 15, weight: .medium))
                 .monospacedDigit()
                 .foregroundStyle(income ? Theme.income : Theme.card2)
                 .lineLimit(1)

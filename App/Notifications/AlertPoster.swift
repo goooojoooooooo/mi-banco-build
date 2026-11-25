@@ -54,7 +54,8 @@ enum AlertPoster {
 
     /// El ojo de la app ahora mismo (la fuente de verdad: el almacén de `AppPreferences`), para componer avisos.
     static var eyeClosed: Bool {
-        AppPreferences.privateModeStore.bool(forKey: AppPreferences.privateModeKey)
+        // N-3: la fuente de verdad de la app (no la copia de la suite).
+        SharedPrivacy.appEye(from: AppPreferences.privateModeStore)
     }
 
     /// Sin importes ni texto del aviso.

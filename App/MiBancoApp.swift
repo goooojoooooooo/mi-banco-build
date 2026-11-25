@@ -235,6 +235,15 @@ private struct AppShellView: View {
                 // El bloqueo al ir a segundo plano, el corte del arranque fuera de primer plano y el vuelo de la marca
                 // que esperaba a primer plano: lo decide `ShellState`.
                 if let scene = shellScene(phase) { shell.apply(.scene(scene)) }
+                #if DEBUG
+                switch phase {
+                case .active: LaunchProbe.shared.scene = "activa"
+                case .background:
+                    LaunchProbe.shared.scene = "fondo"
+                    LaunchProbe.shared.backgrounds += 1
+                default: LaunchProbe.shared.scene = "inactiva"
+                }
+                #endif
                 switch phase {
                 case .active:
                     model.reload()

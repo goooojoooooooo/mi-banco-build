@@ -70,24 +70,37 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout) { !self.element("launch-layer").exists }, "El arranque no terminó")
     }
 
-    /// Manda la app a segundo plano y la trae de vuelta. Primero con el gesto de Inicio; si a los 4 s el sistema no dice
-    /// que la app está en segundo plano (pasó dos veces con dos simuladores en paralelo: la app seguía delante y, claro,
-    /// no se bloqueaba), se abre Ajustes, que la manda atrás seguro. Luego espera 1,5 s y la trae de vuelta.
+    /// Manda la app a segundo plano y la trae de vuelta, y comprueba CON LA PROPIA APP que el viaje ocurrió: su escena
+    /// pasó por segundo plano (`fondos` sube) y ha vuelto a activa (`escena=activa`). Solo entonces sigue la prueba.
+    ///
+    /// Por qué así (runs 45429333172 y 45502319593, dos simuladores en paralelo): el gesto de Inicio
+    /// (`XCUIDevice.press(.home)`) no mandó la app atrás en 4 s ninguna de las dos veces; se abrió Ajustes como plan B,
+    /// la app volvió… y no había bloqueo. Un gesto de Inicio que llega tarde (después de traer la app de vuelta) la manda
+    /// otra vez atrás, y desde fuera nada lo distinguía. Ahora el camino es Ajustes (sin gesto de Inicio que pueda llegar
+    /// tarde) y, si aun así la app dice que no pasó por segundo plano o no está activa, el viaje se repite (hasta tres).
     private func sendToBackgroundAndReturn() {
         func inBackground() -> Bool {
             app.state == .runningBackground || app.state == .runningBackgroundSuspended
         }
-        XCUIDevice.shared.press(.home)
-        if !waitUntil(4, inBackground) {
+        func backgrounds() -> Int { Int(probe()["fondos"] ?? "") ?? 0 }
+        let before = backgrounds()
+        var tries: [String] = []
+        for attempt in 1...3 {
             let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
             settings.activate()
             _ = settings.wait(for: .runningForeground, timeout: 20)
-            XCTAssertTrue(waitUntil(10, inBackground),
-                          "La app no llegó a segundo plano ni con el gesto de Inicio ni abriendo Ajustes (estado \(app.state.rawValue))")
+            if !waitUntil(10, inBackground) {
+                // Último recurso: el gesto de Inicio (y se espera a que surta efecto antes de volver).
+                XCUIDevice.shared.press(.home)
+                _ = waitUntil(10, inBackground)
+            }
+            Thread.sleep(forTimeInterval: 1.5)
+            app.activate()
+            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+            if waitUntil(10, { self.probe()["escena"] == "activa" && backgrounds() > before }) { return }
+            tries.append("intento \(attempt): estado \(app.state.rawValue), \(probe())")
         }
-        Thread.sleep(forTimeInterval: 1.5)
-        app.activate()
-        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+        XCTFail("La app no pasó por segundo plano y de vuelta a activa en tres intentos: \(tries)")
     }
 
     /// El carrusel es un único elemento de accesibilidad cuya etiqueta acaba en «N de 4».
@@ -216,8 +229,9 @@ final class MotionShellTests: XCTestCase {
         assertHomeResponds("Al volver de segundo plano, Inicio no responde")
         app.terminate()
 
-        // Con bloqueo (demo, 10 s): arranque en frío con piezas; al volver de segundo plano, marca quieta.
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "10"])
+        // Con bloqueo (demo, 15 s: margen para que el re-bloqueo siga ahí aunque el viaje a segundo plano tenga que
+        // repetirse): arranque en frío con piezas; al volver de segundo plano, marca quieta.
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "15"])
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta la pantalla de bloqueo del arranque en frío")
         XCTAssertTrue(waitUntil(25) { !unlock.exists }, "El bloqueo de demo no se quitó")
@@ -370,7 +384,10 @@ final class MotionShellTests: XCTestCase {
         }
         XCTAssertEqual(result["fundido"], "1", "El bloqueo no se está fundiendo: \(result)")
         XCTAssertEqual(result["ranura"], "marca", "La barra de Inicio dibuja su marca mientras la otra vuela: \(result)")
-        // Mientras se funde, VoiceOver ya no puede activar «Desbloquear»: el botón no acepta toques.
+        // D-9: mientras se funde, VoiceOver ya no ve el bloqueo ni puede activar «Desbloquear». XCUITest no ve una vista
+        // que se está quitando (así que mirar el botón no puede fallar): la app apunta el valor que el bloqueo da a su
+        // `accessibilityHidden` en el instante del desbloqueo, y antes de desbloquear decía «visible».
+        XCTAssertEqual(result["vozBloqueo"], "oculto", "VoiceOver aún ve el bloqueo que se funde: \(result)")
         let fadingButton = app.buttons["Desbloquear"]
         XCTAssertFalse(fadingButton.exists && fadingButton.isHittable, "El botón del bloqueo que se funde aún se puede tocar")
         XCTAssertFalse(element("launch-layer").exists, "Se montó la capa del arranque sin bloqueo")
@@ -578,32 +595,37 @@ final class MotionShellTests: XCTestCase {
 
     /// Lote 2 (2.5): con el ojo cerrado, abrir el detalle de un movimiento no monta NINGÚN texto con forma de importe:
     /// ni el importe grande, ni «Te quedaban», ni el historial del comercio (que antes solo iba difuminado y las pruebas
-    /// lo leían). Inicio, debajo, aún tiene filas difuminadas de otra línea: por eso se cuenta cada cadena con forma de
-    /// importe antes y después de abrir la hoja, y ninguna puede aparecer ni repetirse más veces.
+    /// lo leían). Se mira solo DENTRO de la hoja (`movement-detail-scroll`), arriba y, tras deslizar, abajo: lo de
+    /// Inicio, debajo, no cuenta ni puede tapar una fuga (antes se comparaban recuentos de toda la app, y una fuga con la
+    /// misma cifra que una fila de Inicio que dejara de verse se anulaba).
     func testMovementDetailMountsNoAmountWithTheEyeClosed() throws {
         launch(["-MiBancoDemoPrivate"])
         waitForLaunchToEnd(30)
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
         XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
-        func counts() -> [String: Int] {
-            var out: [String: Int] = [:]
-            for text in moneyStrings() { out[text, default: 0] += 1 }
-            return out
-        }
-        let before = counts()
         row.tap()
         XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "No se abrió la hoja de detalle")
-        XCTAssertTrue(labelled("label == %@", "Te quedaban importe oculto").waitForExistence(timeout: 8),
-                      "«Te quedaban» no dice «importe oculto»")
-        // La hoja entera, también lo de más abajo (el historial del comercio).
-        app.swipeUp()
-        for pass in 0..<2 {
-            let after = counts()
-            for (text, times) in after where times > before[text, default: 0] {
-                XCTFail("Pasada \(pass): con el ojo cerrado el detalle monta «\(text)» (\(times) veces; antes de abrirlo, \(before[text, default: 0]))")
+        let sheet = app.scrollViews["movement-detail-scroll"]
+        XCTAssertTrue(sheet.waitForExistence(timeout: 8), "Falta la hoja de detalle")
+        XCTAssertTrue(sheet.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Te quedaban importe oculto"))
+            .firstMatch.waitForExistence(timeout: 8), "«Te quedaban» no dice «importe oculto» dentro de la hoja")
+        // Una cifra de dinero de verdad: dígitos con su coma o su punto, o pegados al «€» (la máscara «•••,•• €» no
+        // lleva dígitos; «4 compras este mes» tampoco es un importe).
+        func leaks() -> [String] {
+            sheet.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
+                [el.label, el.value as? String ?? ""].filter {
+                    $0.range(of: #"\d[.,]\d|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
+                }
             }
         }
+        XCTAssertGreaterThan(sheet.descendants(matching: .any).count, 3, "La hoja de detalle está vacía")
+        XCTAssertEqual(leaks(), [], "Con el ojo cerrado el detalle monta importes (arriba)")
+        // Lo de más abajo (el historial del comercio).
+        sheet.swipeUp()
+        XCTAssertEqual(leaks(), [], "Con el ojo cerrado el detalle monta importes (abajo, tras deslizar)")
+        sheet.swipeUp()
+        XCTAssertEqual(leaks(), [], "Con el ojo cerrado el detalle monta importes (al final)")
     }
 
     /// Lote 2 (2.5): la hoja de una posición con el ojo cerrado no monta ningún importe, precio ni número de acciones:

@@ -135,6 +135,7 @@ public enum AmountMask {
     }
 
     /// Dígitos al azar (deterministas por semilla y paso) para barajar mientras el ojo cambia. Nunca salen del importe.
+    /// El primero es de 1 a 9: un fotograma barajado nunca empieza por un cero suelto («027,44 €»).
     public static func scrambledDigits(count: Int, step: Int, seed: Int) -> [Int] {
         (0..<max(0, count)).map { i in
             var x = UInt64(truncatingIfNeeded: seed) &* 0x9E37_79B9_7F4A_7C15
@@ -142,7 +143,7 @@ public enum AmountMask {
             x ^= x >> 31
             x = x &* 0x94D0_49BB_1331_11EB
             x ^= x >> 29
-            return Int(x % 10)
+            return i == 0 ? 1 + Int(x % 9) : Int(x % 10)
         }
     }
 }

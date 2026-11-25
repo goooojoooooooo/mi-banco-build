@@ -40,6 +40,15 @@ struct LockView: View {
     /// la carcasa no se los da hasta que este fundido termina (`ShellState.homeTakesTouches`).
     @State private var leaving = false
 
+    /// Lo que recibe `accessibilityHidden`: VoiceOver deja de ver el bloqueo (y su «Desbloquear») en cuanto se va.
+    private var hiddenFromVoiceOver: Bool { leaving }
+
+    #if DEBUG
+    private func noteVoiceOverForTests() {
+        LaunchProbe.shared.lockVoiceOver = hiddenFromVoiceOver ? "oculto" : "visible"
+    }
+    #endif
+
     private static let markSize: CGFloat = 76
 
     /// La marca ya no se mueve: no es un arranque en frío, o ya se montó.
@@ -92,7 +101,11 @@ struct LockView: View {
         .simultaneousGesture(TapGesture().onEnded { launchFinished = true })
         .allowsHitTesting(!leaving)
         // Mientras se funde, VoiceOver tampoco lo ve: «Desbloquear» no se puede activar con la app ya desbloqueada.
-        .accessibilityHidden(leaving)
+        .accessibilityHidden(hiddenFromVoiceOver)
+        #if DEBUG
+        // Para las pruebas (D-9): el mismo valor que recibe `accessibilityHidden` (también se apunta al desbloquear).
+        .onAppear { noteVoiceOverForTests() }
+        #endif
         .launchProbe("lock-mark", value: launchFinished ? "completa" : (playsLaunch ? "piezas" : "fija"))
         .sensoryFeedback(Haptics.lock, trigger: clicks)
         .task { await assembleMark(timeline) }
@@ -214,6 +227,7 @@ struct LockView: View {
         if takesTheMark { markHandedOff = true }
         leaving = true
         #if DEBUG
+        noteVoiceOverForTests()
         // Para las pruebas: cómo DEJA este bloqueo su marca al irse (después de forzarla a terminada: si esa línea
         // faltara, diría «piezas»), y si se queda fundiéndose con su marca dibujada (si entonces echara a volar otra,
         // se verían dos).

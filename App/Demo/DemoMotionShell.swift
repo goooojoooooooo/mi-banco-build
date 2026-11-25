@@ -74,6 +74,14 @@ extension DemoMode {
     /// lo que el arranque tarda en EMPEZAR, que la propia capa no puede medir.
     var appInitAt: Double?
     var mountedAfterMs: Int?
+    /// Veces que la app ha visto su escena pasar a segundo plano, y la fase de ahora («activa», «inactiva», «fondo»):
+    /// una prueba que manda la app atrás sabe así si de verdad llegó (la vista desde fuera no basta: con dos simuladores
+    /// en paralelo el gesto de Inicio puede llegar tarde o no llegar).
+    var backgrounds = 0
+    var scene = "-"
+    /// Si el bloqueo que se está quitando sigue a la vista de VoiceOver: «oculto» desde el instante del desbloqueo
+    /// (es el mismo valor que recibe su `accessibilityHidden`), «visible» mientras está puesto, «-» sin bloqueo aún.
+    var lockVoiceOver = "-"
 
     /// «arranques=1;estilo=piezas;saltos=0;libre=963;fin=1344;bloqueoPiezas=0;bloqueoQuieto=0;salidas=0;empieza=1764000000.123»
     var summary: String {
@@ -85,6 +93,7 @@ extension DemoMode {
             "fundido=\(lockFading ? 1 : 0)", "marcasDobles=\(doubleMarks)",
             "ranura=\(brandFlying)", "aterrizajes=\(landings)", "rechazados=\(refusedUnlocks)",
             "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
+            "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")
     }

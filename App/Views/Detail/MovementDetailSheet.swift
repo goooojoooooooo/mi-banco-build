@@ -200,6 +200,8 @@ private struct DetailContent: View {
             .animation(reduceMotion ? nil : Theme.Motion.morph, value: editingNote)
         }
         .scrollIndicators(.hidden)
+        // Para las pruebas de toque: lo que hay DENTRO de la hoja (no lo de Inicio, debajo).
+        .accessibilityIdentifier("movement-detail-scroll")
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
                 Spacer()

@@ -94,7 +94,9 @@ struct LaunchSequence: View {
             LaunchMark(frame: frame, size: Self.markSize)
                 .scaleEffect(1 + (target.side / Self.markSize - 1) * flight)
                 .position(LaunchGeometry.lerp(center, target.center, flight))
-                .opacity(lands ? 1 : frame.mark * dissolve)
+                // Con solo fundido (Sutil, Reducir movimiento) la marca grande nunca se ve más que el negro que tiene
+                // debajo: el guion la apaga ENTERA antes de que el negro deje ver Inicio y la marca de su barra (nunca dos).
+                .opacity(lands ? 1 : (pieces ? frame.mark * dissolve : min(frame.mark, frame.black)))
             Text(AppIdentity.displayName.uppercased())
                 .font(.system(size: Self.nameSize, weight: .semibold))
                 .tracking(tracking)

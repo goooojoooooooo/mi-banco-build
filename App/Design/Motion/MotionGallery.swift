@@ -104,6 +104,8 @@ struct MotionGallery: View {
                     Color.clear.frame(height: 1).id("pasos")
                     stepperSection
                     censusSection
+                    Color.clear.frame(height: 1).id("frases")
+                    sentenceSection
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.bottom, 48)
@@ -232,6 +234,39 @@ struct MotionGallery: View {
                 .titan(.subtitle)
                 .foregroundStyle(Theme.label2)
                 .accessibilityIdentifier("gallery.motion.scale")
+        }
+    }
+
+    /// Importes dentro de una frase (`inline`: ocultos no dejan un blanco delante) y en euros enteros (`.whole`), y una
+    /// cifra con millares para ver el ojo abrirse (nunca «0.145,19 €»). Al final de la galería.
+    private var sentenceSection: some View {
+        section("Frases y euros enteros") {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Vas").accessibilityIdentifier("gallery.sentence.before")
+                RollingAmount(cents: 128_455, countsUp: false, style: .plain(sign: false), inline: true)
+                    .accessibilityIdentifier("gallery.sentence.amount")
+                Text("de gasto").accessibilityIdentifier("gallery.sentence.after")
+                Spacer(minLength: 0)
+            }
+            .titan(.subtitle)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Previsto").accessibilityIdentifier("gallery.whole.before")
+                RollingAmount(cents: 128_960, countsUp: false, style: .whole(sign: false), inline: true)
+                    .accessibilityIdentifier("gallery.whole.amount")
+                Spacer(minLength: 0)
+            }
+            .titan(.subtitle)
+            RollingAmount(cents: 314_519, countsUp: false, style: .plain(sign: false))
+                .titan(.row)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("gallery.thousands.amount")
+            HStack(spacing: 10) {
+                if let preferences {
+                    chip("Ojo (frases)", id: "gallery.sentence.eye") {
+                        withAnimation(motion.fade) { preferences.privateMode.toggle() }
+                    }
+                }
+            }
         }
     }
 

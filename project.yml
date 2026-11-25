@@ -59,7 +59,10 @@ targets:
         LSApplicationQueriesSchemes: [revolut, imagin, traderepublic, shortcuts]
         ALTAppGroups: [group.com.mibanco.shared]
         UIUserInterfaceStyle: Dark
-        UILaunchScreen: {}
+        # Pantalla de lanzamiento del sistema: negro liso (color `LaunchBlack` del catálogo), también con el iPhone en
+        # modo claro; así no hay un destello blanco antes del arranque negro de la app.
+        UILaunchScreen:
+          UIColorName: LaunchBlack
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

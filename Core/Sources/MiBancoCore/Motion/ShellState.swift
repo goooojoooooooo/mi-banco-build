@@ -15,7 +15,9 @@ import Foundation
 /// - el bloqueo solo lo quita `unlockSucceeded`;
 /// - al desbloquear, el bloqueo solo se funde si la escena está activa; si no, lo releva la tapa de golpe, de modo que
 ///   la marca que espera a primer plano para volar nunca arranca sobre un bloqueo a medio fundir;
-/// - mientras el bloqueo se funde, Inicio no recibe toques.
+/// - mientras el bloqueo se funde, Inicio no recibe toques;
+/// - con el bloqueo activado, la app nunca está desbloqueada en segundo plano: un éxito de la autenticación que llegue
+///   con la escena ya en segundo plano se ignora (la app sigue bloqueada y vuelve a pedirlo al volver).
 public struct ShellState: Equatable, Hashable, Sendable {
     /// La fase de la escena, como la da el sistema.
     public enum Scene: Hashable, Sendable, CaseIterable {
@@ -38,8 +40,9 @@ public struct ShellState: Equatable, Hashable, Sendable {
         case exitFinished(id: Int)
         /// Cambia el ajuste del bloqueo: si el bloqueo se enseña cuando toca y si la app se bloquea al ir a segundo plano.
         case lockSettingChanged(lockApplies: Bool, relocksOnBackground: Bool)
-        /// El fundido con el que se iba el bloqueo, ya desbloqueado, ha terminado: ya no queda nada suyo en pantalla.
-        case lockFadeFinished
+        /// El fundido `id` (`fadeCount` cuando empezó) con el que se iba el bloqueo, ya desbloqueado, ha terminado: ya
+        /// no queda nada suyo en pantalla. El aviso de un fundido anterior no da por acabado uno posterior.
+        case lockFadeFinished(id: Int)
     }
 
     /// Cómo deja la pantalla el bloqueo al desbloquear.
@@ -82,6 +85,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public internal(set) var exitCount = 0
     /// El bloqueo, ya desbloqueado, se está fundiendo sobre Inicio. Dura lo que el fundido (`lockFadeFinished`).
     public internal(set) var lockFading = false
+    /// Cuántos fundidos del bloqueo han empezado: el número del último es el que acepta `lockFadeFinished(id:)`.
+    public internal(set) var fadeCount = 0
     /// Un cambio del ajuste que llegó con el bloqueo delante: se aplica al desbloquear (nunca quita el bloqueo).
     var settingAfterUnlock: Setting?
 
@@ -122,16 +127,25 @@ public struct ShellState: Equatable, Hashable, Sendable {
     /// Inicio no se toca ni se lee con el bloqueo delante.
     public var hidesHome: Bool { showsLock }
 
+    /// VoiceOver no lee Inicio con el bloqueo delante ni mientras el arranque sin bloqueo sigue en negro (Inicio aún no
+    /// se ha montado: la pantalla no enseña lo que leería).
+    public var hidesHomeFromVoiceOver: Bool { showsLock || (showsLaunch && coldStart) }
+
+    /// Un éxito de la autenticación se acepta ahora mismo: en segundo plano no (la app seguiría desbloqueada sin
+    /// ningún paso posterior por segundo plano que la volviera a bloquear). El bloqueo lo pregunta antes de irse.
+    public var acceptsUnlock: Bool { scene != .background }
+
     /// Si se desbloqueara ahora mismo, la marca echaría a volar en ese instante (la escena está activa). Es lo mismo
     /// que `lockExitOnUnlock == .fades`, que es lo que pregunta el bloqueo.
     public var fliesOnUnlock: Bool { showsLock && scene == .active }
 
-    /// Si se desbloqueara ahora mismo, cómo se iría el bloqueo (nil: no hay bloqueo delante). En primer plano se funde
+    /// Si se desbloqueara ahora mismo, cómo se iría el bloqueo (nil: no hay bloqueo delante, o está en segundo plano y
+    /// no se iría: ver `acceptsUnlock`). En primer plano se funde
     /// sobre Inicio. Fuera de primer plano (Face ID aún tiene la escena inactiva) se quita de golpe: la tapa se pone
     /// encima en esa misma actualización, y así no queda debajo un bloqueo a medio fundir que asome —con su marca, su
     /// lema y su botón— si la escena vuelve a activa antes de que el fundido hubiera acabado.
     public var lockExitOnUnlock: LockExit? {
-        guard showsLock else { return nil }
+        guard showsLock, acceptsUnlock else { return nil }
         return scene == .active ? .fades : .covered
     }
 
@@ -140,12 +154,27 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public var homeTakesTouches: Bool { !showsLock && !lockFading }
 
     /// Las capas que hay ahora, de abajo arriba. La última es la que se ve encima.
-    public var layers: [Layer] {
+    public var layers: [Layer] { layers(liveScene: scene) }
+
+    /// Las mismas capas para quien dibuja: la tapa se decide con la fase de escena de este mismo instante (la vista la
+    /// lee del entorno). La vista pinta exactamente esta lista, a la altura que dice `zIndex(of:)`.
+    public func layers(liveScene: Scene) -> [Layer] {
         var layers: [Layer] = [.home]
         if showsLock { layers.append(.lock) } else if showsLaunch { layers.append(.launch) }
         if shownExit != nil { layers.append(.exit) }
-        if showsCover { layers.append(.cover) }
+        if Self.showsCover(scene: liveScene, showsLock: showsLock) { layers.append(.cover) }
         return layers
+    }
+
+    /// La altura de cada capa: la vista la usa tal cual. El bloqueo y el arranque nunca coinciden; la marca que vuela
+    /// va por encima del bloqueo solo mientras este, ya desbloqueado, se funde; la tapa, encima de todo.
+    public static func zIndex(of layer: Layer) -> Double {
+        switch layer {
+        case .home: 0
+        case .launch, .lock: 1
+        case .exit: 2
+        case .cover: 3
+        }
     }
 
     /// La capa de arriba del todo es opaca (bloqueo o tapa): debajo no se ve nada.
@@ -163,6 +192,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public mutating func apply(_ event: Event) {
         switch event {
         case .unlockSucceeded:
+            // En segundo plano no se desbloquea: ya no habría otro paso por segundo plano que volviera a bloquear.
+            guard acceptsUnlock else { return }
             let lockWasShowing = showsLock
             let cold = coldStart
             locked = false
@@ -179,6 +210,7 @@ public struct ShellState: Equatable, Hashable, Sendable {
             if scene == .active {
                 // El bloqueo se funde sobre Inicio y la marca echa a volar en este instante.
                 lockFading = true
+                fadeCount += 1
                 startExit(cold: cold)
             } else {
                 // La tapa releva al bloqueo de golpe (no hay fundido); la marca volará al volver a primer plano.
@@ -226,9 +258,15 @@ public struct ShellState: Equatable, Hashable, Sendable {
             // Cambiar el ajuste solo es posible con la app ya desbloqueada: no se vuelve a pedir Face ID.
             locked = false
             launching = false
+            // Salvo en segundo plano (no se puede provocar desde la interfaz): ahí manda la regla de siempre, y con el
+            // bloqueo activado la app queda bloqueada.
+            if scene == .background, relocksOnBackground {
+                locked = true
+                if showsLock { lockFading = false }
+            }
 
-        case .lockFadeFinished:
-            lockFading = false
+        case .lockFadeFinished(let id):
+            if id == fadeCount { lockFading = false }
         }
     }
 

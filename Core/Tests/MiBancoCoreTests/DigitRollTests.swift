@@ -89,7 +89,72 @@ import Testing
     }
 }
 
+@Suite struct LeadingZeroTests {
+    /// Al abrir el ojo, «3.145,19 €» rueda desde cinco dígitos al azar: la columna nueva de la izquierda empieza en 0.
+    /// Mientras sigue en el cero no se dibuja (ni su punto de millar): nunca «0.145,19 €».
+    @Test func aNewThousandsColumnIsNotDrawnWhileItIsZero() {
+        #expect(DigitRoll.leadingVisibility(positions: [0, 4.2, 1, 7, 3, 9], alwaysShown: 3) == [0, 1, 1, 1, 1, 1])
+        // Saliendo del cero aún no se ve (la tira todavía enseña sobre todo el «0»): ni un cero tenue. Aparece de 0,5 a
+        // 0,9 dígitos de distancia, sin saltos por el camino.
+        #expect(DigitRoll.leadingVisibility(positions: [0.25, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 0)
+        #expect(DigitRoll.leadingVisibility(positions: [0.5, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 0)
+        #expect(abs(DigitRoll.leadingVisibility(positions: [0.7, 4, 1, 7, 3, 9], alwaysShown: 3)[0] - 0.5) < 1e-9)
+        #expect(DigitRoll.leadingVisibility(positions: [0.9, 4, 1, 7, 3, 9], alwaysShown: 3)[0] == 1)
+        // Mientras la primera columna no se ve, tampoco los ceros de las siguientes que aún no han salido.
+        #expect(DigitRoll.leadingVisibility(positions: [0.3, 0, 0, 0, 0, 0], alwaysShown: 3) == [0, 0, 0, 1, 1, 1])
+        var previous = 0.0
+        for step in 0...300 {
+            let now = DigitRoll.leadingVisibility(positions: [Double(step) / 100, 0, 0, 0], alwaysShown: 3)[0]
+            #expect(now >= previous && now - previous < 0.03)
+            previous = now
+        }
+        // También si llega al cero dando la vuelta a la tira (9,9 está a una décima del 0).
+        #expect(DigitRoll.leadingVisibility(positions: [9.9, 1, 2, 3], alwaysShown: 3)[0] == 0)
+        #expect(abs(DigitRoll.leadingVisibility(positions: [9.3, 1, 2, 3], alwaysShown: 3)[0] - 0.5) < 1e-9)
+    }
+
+    /// Al empezar a contar desde cero no se ve «0.000,00 €»: solo «0,00 €»; los millares aparecen al rodar.
+    @Test func countingUpNeverShowsZeroThousands() {
+        #expect(DigitRoll.leadingVisibility(positions: [0, 0, 0, 0, 0, 0, 0], alwaysShown: 3) == [0, 0, 0, 0, 1, 1, 1])
+        // Recorrido entero de una cuenta de 0 a 3.774,75 €: en ningún instante hay una columna a la vista en el cero
+        // con todas las de su izquierda en el cero (un cero a la izquierda).
+        let plan = DigitRoll.columns(from: 0, to: 377_475, digitCount: 6)
+        for step in 0...400 {
+            let time = Double(step) / 400 * 1.2
+            let positions = plan.map { DigitRoll.position($0, at: time, overshoot: 0.17) }
+            let visibility = DigitRoll.leadingVisibility(positions: positions, alwaysShown: 3)
+            for index in 0..<3 where visibility[index] > 0.99 {
+                let anyAway = positions[0...index].contains { p in
+                    let place = p.truncatingRemainder(dividingBy: 10)
+                    return min(place, 10 - place) >= 0.89
+                }
+                #expect(anyAway, "cero a la izquierda a la vista en t = \(time): \(positions)")
+            }
+            // Las unidades y los céntimos se ven siempre.
+            #expect(visibility.suffix(3).allSatisfy { $0 == 1 })
+        }
+    }
+
+    /// Asentada en una cifra de verdad, todo se ve entero (también un cero interior: 1.005,00 €).
+    @Test func aSettledAmountIsFullyVisible() {
+        #expect(DigitRoll.leadingVisibility(positions: [3, 1, 4, 5, 1, 9], alwaysShown: 3).allSatisfy { $0 == 1 })
+        #expect(DigitRoll.leadingVisibility(positions: [1, 0, 0, 5, 0, 0], alwaysShown: 3).allSatisfy { $0 == 1 })
+        #expect(DigitRoll.leadingVisibility(positions: [0, 0, 5], alwaysShown: 3) == [1, 1, 1])
+        // Euros enteros: solo las unidades se ven siempre («0 €»).
+        #expect(DigitRoll.leadingVisibility(positions: [0, 0, 0, 0], alwaysShown: 1) == [0, 0, 0, 1])
+        #expect(DigitRoll.leadingVisibility(positions: [1, 2, 9, 0], alwaysShown: 1).allSatisfy { $0 == 1 })
+        #expect(DigitRoll.leadingVisibility(positions: [], alwaysShown: 3).isEmpty)
+    }
+}
+
 @Suite struct AmountMaskTests {
+    @Test func wholeMaskHasNoDecimalsNorDigits() {
+        #expect(AmountMask.wholeText(negative: false, showsPlus: false) == "•••\u{00A0}€")
+        #expect(AmountMask.wholeText(negative: true, showsPlus: false) == "−•••\u{00A0}€")
+        #expect(AmountMask.wholeText(negative: false, showsPlus: true) == "+•••\u{00A0}€")
+        #expect(AmountMask.wholeText(negative: true, showsPlus: true).allSatisfy { !$0.isNumber && $0 != "," })
+    }
+
     @Test func maskNeverContainsDigitsNorDependsOnTheAmount() {
         for negative in [true, false] {
             let text = AmountMask.text(negative: negative, showsPlus: false)
@@ -108,5 +173,31 @@ import Testing
         #expect(a.count == 6)
         #expect(a.allSatisfy { (0...9).contains($0) })
         #expect(a != AmountMask.scrambledDigits(count: 6, step: 3, seed: 7))
+    }
+
+    /// Revisión del lote 2 (m-1): un fotograma del barajado nunca empieza por un cero suelto («027,44 €»). El primer
+    /// dígito sale de 1–9; los demás, de 0–9 (y todos siguen saliendo en algún momento).
+    @Test func scrambleNeverStartsWithAZero() {
+        var later = Set<Int>()
+        var first = Set<Int>()
+        var zeros: [String] = []
+        let seeds = Array(-500..<1000) + [Int.max, Int.min, 1 << 40, -(1 << 40)]
+        for count in 1...8 {
+            for step in 0..<12 {
+                for seed in seeds {
+                    let digits = AmountMask.scrambledDigits(count: count, step: step, seed: seed)
+                    guard digits.count == count else {
+                        Issue.record("\(digits.count) dígitos en vez de \(count)")
+                        return
+                    }
+                    if digits[0] == 0 { zeros.append("\(digits) (paso \(step), semilla \(seed))") }
+                    first.insert(digits[0])
+                    later.formUnion(digits.dropFirst())
+                }
+            }
+        }
+        #expect(zeros.isEmpty, "\(zeros.count) fotogramas empiezan por 0, p. ej. \(zeros.prefix(3))")
+        #expect(first == Set(1...9))
+        #expect(later == Set(0...9))
     }
 }

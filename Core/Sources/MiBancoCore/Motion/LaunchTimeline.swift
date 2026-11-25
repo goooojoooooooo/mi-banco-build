@@ -89,6 +89,8 @@ public struct LaunchTimeline: Equatable, Sendable {
     /// Fundidos de Sutil y de Reducir movimiento.
     static let fadeOut = 0.28
     static let reduceFadeIn = 0.24
+    /// Dentro del fundido de salida, lo que tarda la marca grande en apagarse antes de que el negro empiece a aclararse.
+    static let fadeMarkOut = 0.12
     /// Tras un toque, lo que queda corre a esta fracción de su tiempo.
     public static let skipRate = 0.3
     /// Margen para que un instante que cae justo en una frontera no quede a un lado u otro por un redondeo.
@@ -153,21 +155,21 @@ public struct LaunchTimeline: Equatable, Sendable {
         }
     }
 
+    /// El fundido (Sutil y Reducir movimiento), en dos tiempos para que nunca se vean dos marcas: primero se apaga la
+    /// marca grande sobre el negro entero y, solo cuando ya no queda nada de ella, el negro se aclara y deja ver Inicio
+    /// con la marca pequeña de su barra. Dura lo mismo que antes (0,28 s; con Reducir movimiento, 0,24 + 0,28 s).
     private func fadeFrame(at t: Double) -> LaunchFrame {
         var frame = LaunchFrame.assembled
-        if reduceMotion {
-            if t < Self.reduceFadeIn {
-                frame.mark = Self.window(t, 0, Self.reduceFadeIn)
-            } else {
-                let gone = Self.window(t, Self.reduceFadeIn, Self.reduceFadeIn + Self.fadeOut)
-                frame.mark = 1 - gone
-                frame.black = 1 - gone
-            }
-        } else {
-            let gone = Self.easeOut(Self.window(t, 0, Self.fadeOut))
-            frame.mark = 1 - gone
-            frame.black = 1 - gone
+        let outFrom = reduceMotion ? Self.reduceFadeIn : 0
+        if reduceMotion, t < Self.reduceFadeIn {
+            frame.mark = Self.window(t, 0, Self.reduceFadeIn)
+            return frame
         }
+        let revealFrom = outFrom + Self.fadeMarkOut
+        let markGone = Self.window(t, outFrom, revealFrom)
+        let blackGone = Self.window(t, revealFrom, outFrom + Self.fadeOut)
+        frame.mark = 1 - (reduceMotion ? markGone : Self.easeOut(markGone))
+        frame.black = 1 - (reduceMotion ? blackGone : Self.easeOut(blackGone))
         return frame
     }
 
@@ -214,7 +216,14 @@ public struct LaunchTimeline: Equatable, Sendable {
         }
         if n > Self.flightStart {
             let damping = MotionMath.scaled(fly, level: level).dampingFraction
-            frame.flight = Self.spring(n - Self.flightStart, response: fly.response, dampingFraction: damping)
+            let raw = Self.spring(n - Self.flightStart, response: fly.response, dampingFraction: damping)
+            // Al final del guion el muelle no está exactamente en 1 (se queda un 1 % corto o se pasa un 3 %, según la
+            // intensidad): lo que falta se reparte suave, para que la marca termine EXACTAMENTE en su ranura, que es
+            // donde en ese instante aparece la de la barra de Inicio.
+            let span = Self.end - Self.flightStart
+            let rest = 1 - Self.spring(span, response: fly.response, dampingFraction: damping)
+            let x = min(1, (n - Self.flightStart) / span)
+            frame.flight = n >= Self.end - Self.epsilon ? 1 : raw + rest * x * x * (3 - 2 * x)
         }
         frame.black = 1 - Self.easeOut(Self.window(n, Self.flightStart, Self.blackGone))
         frame.mark = 1 - Self.window(n, Self.markFadeStart, Self.end)

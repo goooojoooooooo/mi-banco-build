@@ -21,7 +21,8 @@ struct MerchantHistoryGroup: View {
                     Text(headline)
                     if history.countThisMonth > 0 {
                         Text(", ")
-                        Text(formatEUR(history.totalThisMonthCents)).privateAmount()
+                        // Con el ojo cerrado no se monta la cifra: se dibuja su máscara.
+                        MaskedText(cents: history.totalThisMonthCents, hidden: hidden)
                     }
                 }
                 .titan(.option)
@@ -44,9 +45,8 @@ struct MerchantHistoryGroup: View {
                                         .frame(maxHeight: .infinity)
                                 }
                                 .frame(height: 16)
-                                Text(formatEUR(abs(m.amountCents)))
+                                MaskedText(cents: abs(m.amountCents), hidden: hidden)
                                     .frame(minWidth: 66, alignment: .trailing)
-                                    .privateAmount()
                             }
                             .titan(.subtitle)
                             .foregroundStyle(isCurrent ? Theme.label : Theme.label2)

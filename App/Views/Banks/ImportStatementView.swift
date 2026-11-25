@@ -257,8 +257,6 @@ struct ImportStatementView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Importar extracto de \(bank.displayName)")
         .navigationBarTitleDisplayMode(.inline)
-        // Viene de la pantalla del banco, que va sin barra de pestañas: tampoco aquí (no reaparece a medio camino).
-        .toolbarVisibility(.hidden, for: .tabBar)
         .task {
             guard !started else { return }
             started = true

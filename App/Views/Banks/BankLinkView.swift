@@ -300,9 +300,6 @@ struct BankLinkView: View {
         }
         .navigationTitle(bank.displayName)
         .navigationBarTitleDisplayMode(.inline)
-        // Pantalla de detalle con su flecha de volver: sin barra de pestañas (ni el botón redondo de la barra encogida
-        // flotando sobre la lista); la hoja gana toda la altura (ojo de diseño 13.1). Al volver, la barra regresa.
-        .toolbarVisibility(.hidden, for: .tabBar)
         .navigationDestination(item: $importPreview) { preview in
             ImportStatementView(model: model, portfolio: portfolio, bank: bank, preview: preview) {
                 importPreview = nil

@@ -883,23 +883,6 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertFalse(allDone.exists, "«Todo listo» sigue a la vista con «conectado»")
     }
 
-    /// La pantalla del banco es de detalle: sin barra de pestañas (ni su botón redondo encima de la lista). Al volver a
-    /// Ajustes, la barra vuelve y sigue funcionando.
-    func testBankScreenHidesTheTabBar() throws {
-        openBank("rev")
-        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
-        let settingsTab = app.tabBars.buttons["Ajustes"]
-        XCTAssertTrue(waitFor(NSPredicate(format: "hittable == false"), settingsTab, timeout: 5),
-                      "En la pantalla del banco la barra de pestañas sigue a la vista")
-        // Desplazar no la hace volver (antes se encogía en un botón redondo flotando sobre la lista).
-        drag(from: 0.7, to: 0.4)
-        XCTAssertFalse(settingsTab.exists && settingsTab.isHittable, "Al desplazar volvió la barra de pestañas")
-        goBack()
-        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes")
-        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 5), "La barra de pestañas no volvió en Ajustes")
-        XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "La barra de pestañas no cambia de pestaña al volver")
-    }
-
     /// «Ver movimientos» cierra «conectado» y sube la hoja (el título pequeño queda acoplado).
     func testConnectedShowMovementsDocksTheSheet() throws {
         openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "0.4", "-MiBancoDemoConnectFill", "0.5"])

@@ -25,6 +25,9 @@ final class AlertModel {
     var logoDomain: String?
     /// Sube en cada aviso recibido para relanzar el montaje.
     var revision = 0
+    /// I-2: el ojo de la app estaba cerrado (la carga del aviso lo dice O la suite compartida lo dice): se dibujan
+    /// máscaras, nunca cifras.
+    var hidden = false
 
     var isIncome: Bool { amountCents > 0 }
 
@@ -47,6 +50,9 @@ final class AlertModel {
         // y los alias ambiguos no casan: mejor sin logo que con la marca equivocada.
         let isShop = (info["isShop"] as? Bool) ?? false
         logoDomain = MiBancoCore.logoDomain(merchant: merchant, isShop: isShop, isIncome: amountCents > 0)
+        hidden = SharedPrivacy.masks(
+            payload: info[SharedPrivacy.key],
+            shared: SharedPrivacy.read(from: SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)))
         revision += 1
     }
 }

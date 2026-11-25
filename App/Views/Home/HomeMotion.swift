@@ -19,6 +19,8 @@ final class HomeMotion {
     /// El carrusel se está deslizando por programa (segmentado, llegada): las tarjetas por las que solo pasa no
     /// empiezan a contar su cifra.
     @ObservationIgnored var carouselAnimating = false
+    /// Con Reducir movimiento, el carrusel está fundido a 0 en mitad de un cambio de tarjeta (lo pone `CardCarousel`).
+    @ObservationIgnored var carouselFadedOut = false
     /// Dónde está en pantalla la tarjeta de delante (de ahí sale el abanico). Se lee al abrirlo, nunca al dibujar.
     @ObservationIgnored var carouselFrame = CGRect.zero
     #if DEBUG
@@ -101,7 +103,8 @@ struct HomeEntrance: ViewModifier {
         // Una sola cifra: la que recibe `.opacity` es la misma que apunta la sonda de las pruebas (`DrawnOpacity`).
         let drawn = listOpacity * (waiting ? opacityWhileWaiting : 1)
         content
-            .modifier(DrawnOpacity(value: drawn, measured: entrance.scope == .list && waiting))
+            // Se mide mientras la lista cambia: la lista atenuada, o una pieza de la lista nueva esperando su turno.
+            .modifier(DrawnOpacity(value: drawn, measured: listOpacity < 1 || (entrance.scope == .list && waiting)))
             .scaleEffect(waiting && !motion.reduce ? (plan?.scale ?? 1) : 1)
             .offset(y: waiting ? motion.distance(plan?.rise ?? 0) : 0)
             .onAppear(perform: land)
@@ -131,6 +134,14 @@ extension View {
     /// Esta pieza entra por capas con Inicio (ver `HomeEntrance`). `listOpacity`: la opacidad de su lista.
     func homeEntrance(_ piece: HomeEntrance.Piece, listOpacity: Double = 1) -> some View {
         modifier(HomeEntrance(piece: piece, listOpacity: listOpacity))
+    }
+}
+
+extension View {
+    /// Una pieza de la lista de Inicio que no entra escalonada (traspasos pendientes, posiciones): su opacidad pasa por
+    /// el mismo valor único que se dibuja y se mide (`DrawnOpacity`).
+    func listOpacity(_ value: Double) -> some View {
+        modifier(DrawnOpacity(value: value, measured: value < 1))
     }
 }
 
@@ -319,6 +330,8 @@ struct DrawnTextAuditProbe: View {
     /// (opacidad de la lista × la de su entrada): nunca 0 con movimiento (la pantalla no se queda en negro entre las
     /// dos listas). -1 = aún no ha habido cambio.
     var listSwapFloor = -1
+    /// Cambios de lista hechos con la tarjeta también fundida a 0 (Reducir movimiento): nada bajo el selector.
+    var blankSwaps = 0
     /// 1 mientras alguna fila está marcada como recién llegada (fondo y, si es un ingreso, ✓ verde).
     var freshRows = 0
     /// Llegadas anunciadas (aterricen o no).
@@ -332,7 +345,7 @@ struct DrawnTextAuditProbe: View {
         [
             "montajes=\(assemblies)", "inclinacion=\(tiltRunning ? 1 : 0)", "tirones=\(refreshes)", "alDia=\(refreshesDone)",
             "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
-            "insignias=\(arrivalBadges)", "nueva=\(freshRows)", "anunciadas=\(arrivalsAnnounced)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)",
+            "insignias=\(arrivalBadges)", "nueva=\(freshRows)", "anunciadas=\(arrivalsAnnounced)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)", "vacios=\(blankSwaps)",
             "exitos=\(successMarks)", "preparados=\(preparedMarks)",
         ].joined(separator: ";")
     }

@@ -96,6 +96,21 @@ extension EnvironmentValues {
     @Entry var cardFlight: CardFlight? = nil
     @Entry var tabEntrance = TabEntrance()
     @Entry var detailAmountFrames: DetailAmountFrames? = nil
+    /// El bloqueo se está fundiendo con su marca y nada vuela (Sutil, Reducir movimiento): la ranura de la marca de la
+    /// barra de Inicio no se dibuja hasta que el bloqueo se haya ido (`ShellState.hidesBrandSlot`).
+    @Entry var brandSlotHiddenByLock = false
+    /// La hoja única de `RootView` está abierta (tapa la pestaña de debajo): p. ej. una barra de presupuesto tapada por
+    /// la hoja de un movimiento no avisa (Gasto lo lee).
+    @Entry var singleSheetOpen = false
+    /// Bloqueo y montaje por capas de ahora, tal cual los da la carcasa a `RootView`: para quien antes los deducía de
+    /// `presentationGate` (la bienvenida).
+    @Entry var shellReveal = ShellReveal()
+}
+
+/// Lo que la carcasa cuenta a las pantallas: si el bloqueo está delante y el número del último montaje por capas.
+struct ShellReveal: Equatable {
+    var locked = false
+    var token = 0
 }
 
 extension View {
@@ -126,13 +141,15 @@ private struct LaunchBrandSlot: ViewModifier {
     let markSide: CGFloat
     let gap: CGFloat
     @Environment(\.launchAnchor) private var anchor
+    @Environment(\.brandSlotHiddenByLock) private var hiddenByLock
 
     /// Cuánto de la ranura, desde la izquierda, deja de dibujarse: nada, la marca, o todo.
     private var hiddenLeading: CGFloat {
-        switch anchor?.flying {
+        if hiddenByLock { return CGFloat.infinity }
+        return switch anchor?.flying {
         case nil: 0
         case .mark: markSide + gap / 2
-        case .markAndName: .infinity
+        case .markAndName: CGFloat.infinity
         }
     }
 

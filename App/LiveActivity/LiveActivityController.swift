@@ -21,7 +21,8 @@ enum LiveActivityController {
         let state = MovementActivityAttributes.ContentState(
             bank: movement.bank.rawValue, balanceCents: balance, estimated: estimated,
             lastAmountCents: movement.amountCents, merchant: movement.merchant, kind: movement.kind.rawValue,
-            totalCents: total, title: text.title, logoDomain: movement.logoDomain)
+            totalCents: total, title: text.title, logoDomain: movement.logoDomain,
+            hidden: Self.eyeClosed)
         let content = ActivityContent(state: state, staleDate: Date.now.addingTimeInterval(staleAfter))
 
         let current = live
@@ -48,6 +49,7 @@ enum LiveActivityController {
                 state.estimated = estimated
             }
             state.totalCents = total
+            state.hidden = Self.eyeClosed
             guard state != activity.content.state else { continue }
             await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
         }
@@ -60,6 +62,22 @@ enum LiveActivityController {
             if state.merchant == merchant && state.lastAmountCents == amountCents {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
+        }
+    }
+
+    /// I-2: el ojo de la app, tal cual lo copia en la suite compartida (`SharedPrivacy`). Sin suite, abierto.
+    private static var eyeClosed: Bool {
+        SharedPrivacy.read(from: SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)) ?? false
+    }
+
+    /// I-2: el ojo ha cambiado: la Live Activity que esté en pantalla pasa a máscaras (o vuelve a cifras) en silencio,
+    /// sin alerta ni sonido y sin alargar su caducidad.
+    static func setHidden(_ hidden: Bool) async {
+        for activity in live {
+            var state = activity.content.state
+            guard state.hidden != hidden else { continue }
+            state.hidden = hidden
+            await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
         }
     }
 

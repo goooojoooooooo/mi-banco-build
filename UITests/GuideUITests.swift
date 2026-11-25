@@ -212,9 +212,17 @@ final class GuideUITests: XCTestCase {
         app.launch()
     }
 
-    /// Arriba de lo visible del paso: el final de la cabecera (la línea de la parte, 8 pt, los puntos de 6 pt y 12 pt).
+    /// Arriba de lo visible del paso: el final de la cabecera fija. Lo que protege es que la ayuda y la instrucción
+    /// empiecen por DEBAJO de la cabecera (no escondidas bajo ella). Antes se sumaba el alto exacto de los puntos de
+    /// avance (8 + 6 pt bajo «guide-step-part»): un detalle de dibujo que impedía cambiar los puntos por los nodos de la
+    /// línea B. Ahora: el final del elemento más bajo de la cabecera que se ve, más el margen de debajo (12 pt).
     private func visibleTop() -> CGFloat {
-        app.staticTexts["guide-step-part"].frame.maxY + 8 + 6 + 12
+        let ids = ["guide-step-part", "guide-step-counter", "guide-stepper", "guide-progress", "guide-header"]
+        let bottom = ids.map { app.descendants(matching: .any).matching(identifier: $0).firstMatch }
+            .filter { $0.exists }
+            .map { $0.frame.maxY }
+            .max() ?? 0
+        return bottom + 12
     }
 
     /// Abre «¿No te sale esto?» sin deslizar nada y comprueba que se ve (G28): si es más baja que lo visible, entera por

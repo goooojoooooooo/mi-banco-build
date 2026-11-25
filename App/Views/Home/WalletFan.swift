@@ -1,6 +1,11 @@
 import SwiftUI
 import MiBancoCore
 
+/// Con Reducir movimiento, cuánto espera el abanico al negro (s, a velocidad real): a los 0,15 s el fundido de 0,22 s
+/// (`easeOut`) ya tapa ~90 % de Inicio, y cuando el abanico llega al 20 % (~0,17 s) Inicio queda por debajo del 5 %: el
+/// título viejo se ha ido antes de que el nuevo se lea, y el abanico empieza antes de que el negro acabe (sin negro).
+private let fanReduceDelay = 0.15
+
 /// De dónde sale el abanico: el marco en pantalla de la tarjeta levantada (o `nil` si no se conoce).
 struct WalletFanRequest: Equatable {
     var origin: CGRect?
@@ -100,7 +105,7 @@ struct WalletFan: View {
         // parte de Inicio (nunca dos cabeceras legibles a la vez) y antes de que acabe (nunca un fotograma en negro).
         if motion.reduce {
             withAnimation(motion.fade) { dark = true }
-            withAnimation(motion.fade.delay(motion.pause(0.12))) {
+            withAnimation(motion.fade.delay(motion.pause(fanReduceDelay))) {
                 fanned = true
                 headerIn = true
             }
@@ -263,7 +268,7 @@ private struct FanPlacement: ViewModifier {
             // Aparece en un instante (opaca) y se abre con su escalón.
             // Con Reducir movimiento, cuando el negro ya tapa casi todo Inicio (ver `WalletFan.open`).
             let appear: Animation = motion.reduce
-                ? motion.fade.delay(motion.pause(0.12)) : .linear(duration: motion.seconds(0.05))
+                ? motion.fade.delay(motion.pause(fanReduceDelay)) : .linear(duration: motion.seconds(0.05))
             withAnimation(appear) { visible = true }
             withAnimation(openSpring.delay(motion.stagger(index, firstGap: 0.06, decay: 1))) { placed = true }
         } else {

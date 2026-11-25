@@ -12,8 +12,8 @@ struct RowSwipeAction: Identifiable {
     let perform: () -> Void
 }
 
-/// Una fila que se desliza hacia la izquierda y enseña sus acciones (cápsulas de 64 pt sobre gris titanio), como en la
-/// maqueta aprobada.
+/// Una fila que se desliza hacia la izquierda y enseña sus acciones (cápsulas de 64 pt sobre gris titanio), que entran
+/// por la derecha sobre el importe; el contenido solo se aparta un 40 %, así el nombre sigue a la vista.
 /// - El contenido sigue al dedo 1:1; más allá de las acciones (o hacia la derecha) hay resistencia de goma.
 /// - Al soltar se abre si ha pasado de 70 pt o si el dedo iba rápido hacia la izquierda; si no, se cierra. Abrir lleva
 ///   el muelle `snap`; cerrar, el mismo sin rebote. Con Reducir movimiento no hay viaje al soltar: se coloca.
@@ -50,6 +50,8 @@ struct SwipeActionsRow<Content: View>: View {
         CGFloat(actions.count) * Self.actionWidth + CGFloat(max(actions.count - 1, 0)) * Self.actionGap + Self.edgeMargin
     }
     private var isOpen: Bool { offset <= -span + 8 }
+    /// Cuánto se aparta el contenido respecto a lo que entran las acciones.
+    private static var contentShare: CGFloat { 0.4 }
 
     var body: some View {
         content
@@ -63,13 +65,27 @@ struct SwipeActionsRow<Content: View>: View {
                         .accessibilityHidden(true)
                 }
             }
-            .offset(x: offset)
+            // El contenido solo se aparta un 40 % de lo que se abre (el nombre sigue a la vista); las acciones entran por
+            // la derecha, sobre el importe, al ritmo del dedo (1:1).
+            .offset(x: offset * Self.contentShare)
             // Lo que sale por la izquierda se desvanece en 20 pt (nunca letras cortadas a cuchillo). Cerrada, nada.
             // (Un degradado del negro del fondo por encima, fijo en el borde: sin máscara en cada fila.)
-            .overlay(alignment: .leading) { LeadingEdgeFade(amount: min(max(-offset / 20, 0), 1)) }
-            .background(alignment: .trailing) {
-                // Las acciones solo existen mientras la fila está (algo) abierta: cerrada, no hay nada debajo.
-                if offset < -0.5 { buttons }
+            .overlay(alignment: .leading) { LeadingEdgeFade(amount: min(max(-offset * Self.contentShare / 12, 0), 1)) }
+            .overlay(alignment: .trailing) {
+                // Las acciones solo existen mientras la fila está (algo) abierta: cerrada, no hay nada encima.
+                if offset < -0.5 {
+                    buttons
+                        // Sobre el importe: fondo negro, con 16 pt fundidos a la izquierda (sin corte a cuchillo).
+                        .background(Theme.canvas)
+                        .background(alignment: .leading) {
+                            LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .leading,
+                                           endPoint: .trailing)
+                                .frame(width: 16)
+                                .offset(x: -16)
+                                .allowsHitTesting(false)
+                        }
+                        .offset(x: max(0, span + offset))
+                }
             }
             .clipped()
             .gesture(HorizontalPan(began: panBegan, moved: panMoved, ended: panEnded))

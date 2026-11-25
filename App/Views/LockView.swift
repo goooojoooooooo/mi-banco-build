@@ -101,11 +101,9 @@ struct LockView: View {
         .simultaneousGesture(TapGesture().onEnded { launchFinished = true })
         .allowsHitTesting(!leaving)
         // Mientras se funde, VoiceOver tampoco lo ve: «Desbloquear» no se puede activar con la app ya desbloqueada.
-        .accessibilityHidden(hiddenFromVoiceOver)
-        #if DEBUG
-        // Para las pruebas (D-9): el mismo valor que recibe `accessibilityHidden` (también se apunta al desbloquear).
-        .onAppear { noteVoiceOverForTests() }
-        #endif
+        // (Un modificador propio: el que esconde a VoiceOver es el mismo que lo apunta para las pruebas al aparecer; si
+        // se quitara, la sonda se quedaría sin «visible» y `testLaunchSkippableAndNeverAboveLock` fallaría.)
+        .modifier(LockVoiceOverHidden(hidden: hiddenFromVoiceOver))
         .launchProbe("lock-mark", value: launchFinished ? "completa" : (playsLaunch ? "piezas" : "fija"))
         .sensoryFeedback(Haptics.lock, trigger: clicks)
         .task { await assembleMark(timeline) }
@@ -341,5 +339,19 @@ private struct NameSpread: ViewModifier {
         } else {
             content
         }
+    }
+}
+
+/// D-9: mientras el bloqueo se funde, VoiceOver no lo ve (ni su «Desbloquear»). En DEBUG, este mismo modificador
+/// apunta en la sonda lo que acaba de recibir al aparecer: quitarlo deja la sonda sin «visible», y la prueba lo nota.
+private struct LockVoiceOverHidden: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(hidden)
+            #if DEBUG
+            .onAppear { LaunchProbe.shared.lockVoiceOver = hidden ? "oculto" : "visible" }
+            #endif
     }
 }

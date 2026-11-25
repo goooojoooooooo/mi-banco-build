@@ -34,6 +34,11 @@ struct MoveMoneySheet: View {
     @State private var chosenTarget: MoveTarget?
     @State private var chosenFrom: BankID?
     @State private var amount = KeypadAmount()
+    /// El importe con el que se dibujan las fichas de «Desde» («te quedarían…»): va un paso por detrás del tecleado, así
+    /// la ficha no cambia antes de que entre el dígito (12.1). nil = el tecleado.
+    @State private var chipCents: Int?
+    /// Las líneas de las fichas, apagándose para cambiar de cifra.
+    @State private var chipsDimmed = false
     /// Cobros próximos (7 días) cacheados para no recalcular en cada toque del teclado.
     @State private var cachedUpcoming: [UpcomingCharge] = []
     /// Destino propio elegido al que aún le falta el IBAN (se pide en línea antes de seguir).
@@ -418,6 +423,8 @@ struct MoveMoneySheet: View {
     private var amountStep: some View {
         let hidden = preferences.privateMode
         let choices = sourceChoices(for: amount.cents)
+        // Lo que DIBUJA cada ficha sale del importe de `chipCents`; lo que hacen (y lo que dice VoiceOver), del tecleado.
+        let shownChoices = sourceChoices(for: chipCents ?? amount.cents)
         let activeFrom = resolvedFrom(among: choices)
         let isPayeeTarget: Bool = if case .payee = chosenTarget { true } else { false }
         let unsupportedFromTR = activeFrom == .tr && isPayeeTarget
@@ -435,6 +442,17 @@ struct MoveMoneySheet: View {
                 // El importe, dígito a dígito; con el ojo cerrado, un punto por dígito (nunca la cifra bajo un desenfoque).
                 KeypadAmountDisplay(amount: amount, hidden: hidden, size: amountSize)
                     .frame(minHeight: amountSize * 1.25)
+                    // Las fichas de «Desde» no cambian antes que el importe: se apagan mientras entra el dígito
+                    // (0,1 s) y vuelven con la cifra nueva (0,15 s). Solo opacidad; la secuencia la marca la propia
+                    // animación (sin esperas).
+                    .onChange(of: amount.cents) { _, _ in
+                        withAnimation(.easeIn(duration: motion.seconds(0.1))) {
+                            chipsDimmed = true
+                        } completion: {
+                            chipCents = amount.cents
+                            withAnimation(.easeOut(duration: motion.seconds(0.15))) { chipsDimmed = false }
+                        }
+                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Desde")
@@ -446,7 +464,9 @@ struct MoveMoneySheet: View {
                     ScrollView(.horizontal) {
                         HStack(spacing: 10) {
                             ForEach(choices, id: \.option.bank) { choice in
-                                sourceChip(choice: choice, selected: activeFrom == choice.option.bank, hidden: hidden)
+                                sourceChip(choice: choice,
+                                           shown: shownChoices.first { $0.option.bank == choice.option.bank } ?? choice,
+                                           selected: activeFrom == choice.option.bank, hidden: hidden)
                             }
                         }
                         .padding(.trailing, 24)
@@ -517,11 +537,13 @@ struct MoveMoneySheet: View {
             : "Escribe un importe para preparar el traspaso."
     }
 
-    private func sourceChip(choice: SourceChoice, selected: Bool, hidden: Bool) -> some View {
+    private func sourceChip(choice: SourceChoice, shown: SourceChoice, selected: Bool, hidden: Bool) -> some View {
         let option = choice.option
-        let detail = payOptionDetail(option, hasKnownBalance: choice.hasKnownBalance)
+        // La línea dibujada («te quedarían…») sale de `shown`, que cambia cuando el dígito ya ha entrado.
+        let shownOption = shown.option
+        let detail = payOptionDetail(shownOption, hasKnownBalance: shown.hasKnownBalance)
         let spokenDetail = payOptionSpokenDetail(option, hasKnownBalance: choice.hasKnownBalance, hidden: hidden)
-        let hasSensitiveAmount = choice.hasKnownBalance && option.balanceAfterCents >= 0
+        let hasSensitiveAmount = shown.hasKnownBalance && shownOption.balanceAfterCents >= 0
 
         return Button {
             withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
@@ -536,10 +558,10 @@ struct MoveMoneySheet: View {
                         .fontWeight(.semibold)
                         .foregroundStyle(selected ? Theme.onTileSelected : Theme.label)
                     Group {
-                        if !choice.hasKnownBalance {
+                        if !shown.hasKnownBalance {
                             Text(detail)
                                 .foregroundStyle(selected ? Theme.onTileSelected.opacity(0.65) : Theme.label3)
-                        } else if option.fits {
+                        } else if shownOption.fits {
                             // «te quedarían 1.084,55 €»; con el ojo cerrado, «te quedarían ••• €» (la cifra no se monta).
                             MaskedAmountText(detail, masked: maskingAmounts(detail))
                                 .foregroundStyle(selected ? Theme.onTileSelected.opacity(0.7) : Theme.label2)
@@ -562,6 +584,7 @@ struct MoveMoneySheet: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    .opacity(chipsDimmed ? 0.3 : 1)
                 }
             }
             .padding(.horizontal, 14)

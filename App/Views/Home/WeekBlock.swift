@@ -13,8 +13,12 @@ struct WeekBlock: View {
     @Environment(\.entrance) private var entrance
     @ScaledMetric(relativeTo: .caption) private var barArea: CGFloat = 40
 
-    /// Cuenta desde 0 solo dentro del montaje de Inicio; en un cambio de tarjeta (o fuera de una entrada) sale con su cifra.
-    private var countsOnAssembly: Bool { entrance.active && entrance.scope == .assembly }
+    /// Cuenta desde 0 solo dentro del montaje de Inicio y con el ojo abierto; en un cambio de tarjeta, fuera de una
+    /// entrada o con el ojo cerrado sale con su cifra (la máscara). Así, si el ojo se abre a mitad del montaje, la cifra
+    /// aparece en el acto (barajado → cifra) y no se queda invisible esperando a una cuenta que no empezó.
+    private var countsOnAssembly: Bool {
+        entrance.active && entrance.scope == .assembly && !preferences.privateMode
+    }
 
     var body: some View {
         let hidden = preferences.privateMode

@@ -348,6 +348,7 @@ struct CardCarousel: View {
         // empieza hasta que la app está quieta— deslice de verdad con él en curso. En Release siempre es falso.
         let holdsOpen = glideWins && !forcedBack
         if kit.reduce {
+            motion.carouselFadedOut = true
             withAnimation(kit.fade) {
                 crossFaded = true
             } completion: {
@@ -385,6 +386,8 @@ struct CardCarousel: View {
         var still = Transaction()
         still.disablesAnimations = true
         withTransaction(still) { scrolledID = card }
+        // Desde aquí la tarjeta nueva vuelve a verse (se funde de 0 a 1).
+        motion.carouselFadedOut = false
         withAnimation(kit.fade) { crossFaded = false }
     }
 

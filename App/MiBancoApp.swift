@@ -58,7 +58,11 @@ private struct AppShellView: View {
     /// enseña con su bandera.
     private static func lockSetting(enabled: Bool) -> (applies: Bool, relocks: Bool) {
         #if DEBUG
-        if DemoMode.isActive { return (DemoMode.holdsLock, enabled) }
+        // Con el bloqueo de demo, la app SIEMPRE se re-bloquea al ir a segundo plano: no depende del «Bloquear con Face
+        // ID» guardado en el simulador, que otra prueba (OnboardingUITests toca ese interruptor) puede haber dejado
+        // apagado en el mismo clon — así fallaban, solo en paralelo, las pruebas de volver de segundo plano
+        // (run 45603017151: OnboardingUITests y luego MotionShellTests en el clon 1).
+        if DemoMode.isActive { return (DemoMode.holdsLock, DemoMode.holdsLock || enabled) }
         #endif
         return (enabled, enabled)
     }
@@ -133,12 +137,23 @@ private struct AppShellView: View {
                 #endif
                 RootView(model: model, portfolio: portfolio, accountBook: accountBook,
                          briefing: briefing, speaker: speaker,
-                         isLocked: shell.showsLock, revealToken: homeRevealToken)
+                         isLocked: shell.showsLock, revealToken: homeRevealToken,
+                         // C6: el aviso dentro de la app lo decide `ShellState` (nunca con el bloqueo ni fuera de
+                         // primer plano); se calcula con la fase de escena de este instante, como la tapa.
+                         bannerID: coverScene == .active ? shell.shownBanner : nil,
+                         requestBanner: { shell.apply(.bannerRequested) },
+                         dismissBanner: { shell.apply(.bannerDismissed(id: $0)) })
                     // VoiceOver no lee Inicio con el bloqueo delante, ni bajo el negro del arranque, ni bajo la tapa.
                     .accessibilityHidden(shell.hidesHomeFromVoiceOver || layers.contains(.cover))
                     // Ni con el bloqueo delante ni mientras el bloqueo, ya desbloqueado, se funde: un toque tardío sobre
                     // «Desbloquear» caería en la barra de pestañas que hay justo debajo.
                     .allowsHitTesting(shell.homeTakesTouches)
+                    // Con solo fundidos, mientras el bloqueo se funde con su marca, la ranura de la barra no dibuja la
+                    // suya (nunca dos marcas): lo decide `ShellState.hidesBrandSlot`, en esta misma actualización.
+                    .environment(\.brandSlotHiddenByLock, shell.hidesBrandSlot)
+                // El estilo de movimiento de ahora (solo fundidos o piezas) se lo cuenta a la carcasa una vista que ya
+                // vive dentro de `motionEnvironment()`: lee lo mismo que leen el bloqueo y el arranque.
+                MotionStyleReporter { fadesOnly in shell.apply(.motionStyle(fadesOnly: fadesOnly)) }
                 // ORDEN (no cambiar sin revisar el bloqueo; es el de `ShellState.layers`): Inicio; el bloqueo o el arranque;
                 // la marca que vuela; y, encima de todo, la tapa del selector de apps. Qué capa hay la decide `ShellState`:
                 // el arranque y la marca que vuela nunca existen con el bloqueo puesto, y la tapa nunca va encima de él.
@@ -157,7 +172,8 @@ private struct AppShellView: View {
                         .zIndex(ShellState.zIndex(of: .lock))
                 } else if layers.contains(.launch) {
                     // Sin bloqueo: el arranque. Se quita cuando ya es transparente (sin transición).
-                    LaunchSequence(onAssemble: { shell.apply(.launchAssembled) }, onFinish: { shell.apply(.launchFinished) })
+                    LaunchSequence(onAssemble: { shell.apply(.launchAssembled) }, onFinish: { shell.apply(.launchFinished) },
+                                   noSlot: model.needsOnboarding)
                         .transition(transition(of: .launch))
                         .zIndex(ShellState.zIndex(of: .launch))
                 }
@@ -331,6 +347,8 @@ private struct AppShellView: View {
     /// De dónde saldría volando la marca: el sitio de la marca del bloqueo, si se conoce y hay a dónde ir (en frío, a
     /// donde estará la ranura de Inicio; después, solo si Inicio la tiene a la vista).
     private func flightOrigin(cold: Bool) -> CGRect? {
+        // En la bienvenida (primera vez) no hay Inicio ni ranura: la marca no vuela a ninguna parte.
+        guard !model.needsOnboarding else { return nil }
         guard let from = launchAnchor.lockMarkFrame, from.width > 0, cold || launchAnchor.brandFrame != nil else { return nil }
         return from
     }
@@ -360,6 +378,13 @@ private struct AppShellView: View {
     private func lockFadeStarted(_ seconds: Double) {
         #if DEBUG
         LaunchProbe.shared.lockFading = shell.lockFading
+        // Para las pruebas: el bloqueo se funde dibujando su marca, nada la esconde en la ranura de Inicio (ni la marca
+        // que vuela ni `hidesBrandSlot`) y la ranura está a la vista: dos marcas a medias durante el fundido.
+        if shell.lockFading, LaunchProbe.shared.lockFadesWithItsMark, launchAnchor.flying == nil, !shell.hidesBrandSlot,
+           launchAnchor.brandFrame != nil {
+            LaunchProbe.shared.doubleMarks += 1
+        }
+        LaunchProbe.shared.slotHiddenByLock = shell.hidesBrandSlot
         #endif
         // El número de ESTE fundido: si entre medias hay un re-bloqueo y otro desbloqueo, este aviso ya no acaba el
         // fundido nuevo (lo acabará el suyo, que también se manda siempre).
@@ -369,6 +394,7 @@ private struct AppShellView: View {
             shell.apply(.lockFadeFinished(id: fade))
             #if DEBUG
             LaunchProbe.shared.lockFading = shell.lockFading
+            LaunchProbe.shared.slotHiddenByLock = shell.hidesBrandSlot
             if !shell.lockFading { LaunchProbe.shared.lockFadesWithItsMark = false }
             #endif
         }
@@ -421,4 +447,19 @@ private struct AppShellView: View {
 private struct ExitGeometry {
     let id: Int
     let from: CGRect
+}
+
+/// No dibuja nada: cuenta a la carcasa si el movimiento de ahora es solo de fundidos (Sutil o Reducir movimiento, el
+/// mismo `LaunchTimeline` que usan el bloqueo y el arranque), al aparecer y cada vez que cambia.
+private struct MotionStyleReporter: View {
+    let report: (Bool) -> Void
+    @Environment(\.motion) private var motion
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onChange(of: LaunchTimeline(motion).style == .fade, initial: true) { _, fadesOnly in report(fadesOnly) }
+    }
 }

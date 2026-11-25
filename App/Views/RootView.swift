@@ -14,6 +14,11 @@ struct RootView: View {
     var isLocked = false
     /// Sube al arrancar y al desbloquear: Inicio se monta por capas y la barra llega la última.
     var revealToken = 0
+    /// C6: el aviso dentro de la app que deja enseñar la carcasa ahora (`ShellState.shownBanner`; nil con el bloqueo,
+    /// fundiéndose o fuera de primer plano), y cómo pedirlo y darlo por ido.
+    var bannerID: Int? = nil
+    var requestBanner: () -> Void = {}
+    var dismissBanner: (Int) -> Void = { _ in }
     @State private var tab: AppTab = .home
     @State private var settingsFocus: BankID?
     @State private var settingsScroll: String?
@@ -64,6 +69,13 @@ struct RootView: View {
     @State private var cardFlight = CardFlight()
     @State private var tabEntrance = TabEntrance()
     @State private var detailAmountFrames = DetailAmountFrames()
+    /// T1: la pestaña de antes del último cambio, cuántos cambios ha habido y hacia dónde fue el último.
+    @State private var lastTab: AppTab = .home
+    @State private var tabChanges = 0
+    @State private var tabDirection = 1
+    /// C6: la llegada que enseña el aviso dentro de la app, y el número de aviso que le dio la carcasa.
+    @State private var bannerArrival: Arrival?
+    @State private var bannerFor: Int?
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -94,15 +106,21 @@ struct RootView: View {
                                  openAccounts: openAccounts,
                                  selectCardRequest: $selectHomeCard)
                             .id(restoreToken)
+                            .tabContentEntrance()
+                            .environment(\.tabEntrance, entrance(for: .home))
                     }
                     Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
                         SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
                                      openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
                                      openBudgetsRequest: $openBudgetsRequest)
+                            .tabContentEntrance()
+                            .environment(\.tabEntrance, entrance(for: .spending))
                     }
                     Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                         AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
                                    onMorningRuleChanged: rescheduleMorningReminder)
+                            .tabContentEntrance()
+                            .environment(\.tabEntrance, entrance(for: .alerts))
                     }
                     .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
                     Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
@@ -115,6 +133,8 @@ struct RootView: View {
                                          importBackup: { startImport(.backup) },
                                          importTradeRepublic: { startImport(.tradeRepublic) })
                         }
+                        .tabContentEntrance()
+                        .environment(\.tabEntrance, entrance(for: .settings))
                     }
                 }
                 .modifier(MinimizesTabBarOnScroll())
@@ -124,14 +144,37 @@ struct RootView: View {
                 .transition(.opacity)
             }
         }
+        // Para las pantallas: la hoja única abierta y el estado de la carcasa (bloqueo, montaje por capas).
+        .environment(\.singleSheetOpen, sheet != nil)
+        .environment(\.shellReveal, ShellReveal(locked: isLocked, token: activeRevealToken))
         .tint(Theme.label)
+        // C6: el aviso dentro de la app, arriba, por encima de las pestañas y por debajo de la hoja única (que es una
+        // presentación aparte) y del bloqueo (otra capa de la carcasa, más alta). Solo si la carcasa lo deja.
+        .overlay(alignment: .top) {
+            if let id = bannerID, let arrival = bannerArrival, bannerFor == id {
+                InAppBanner(
+                    arrival: arrival,
+                    left: model.snapshot.balanceAfter[arrival.id],
+                    onOpen: {
+                        dismissBanner(id)
+                        openDetail(arrival.id)
+                    },
+                    onNotMine: {
+                        try? model.setFlaggedNotMine(true, for: arrival.id)
+                        dismissBanner(id)
+                    },
+                    onFinished: { dismissBanner(id) })
+                    .id(id)
+                    .transition(.identity)
+            }
+        }
         .environment(\.presentationGate, gate)
         // La única hoja de la app. Se cierra al bloquear y en cuanto la app deja de estar activa (selector de apps,
         // segundo plano): nunca queda encima del bloqueo ni en la captura del selector, y no se vuelve a abrir sola.
         .sheet(item: $sheet, onDismiss: deletePending) { item in
             switch item {
             case .movement(let route):
-                MovementDetailSheet(model: model, id: route.id) { id in
+                MovementDetailSheet(model: model, id: route.id, amountOrigin: route.amountOrigin) { id in
                     pendingDelete = id
                     detail = nil
                 }
@@ -245,14 +288,30 @@ struct RootView: View {
         }
         .sensoryFeedback(.error, trigger: deleteErrorTick)
         // Entrar en Avisos (o ver avisos nuevos estando en ella) los da por vistos: la insignia se va.
-        .onChange(of: tab) { _, new in
+        .onChange(of: tab) { old, new in
             if new == .alerts && !isLocked { seen.markSeen(warnings) }
+            // T1: la entrada de la pestaña ya empezó en el mismo instante del cambio (`entrance(for:)`); aquí solo se
+            // fija, sin cambiar su valor, para el siguiente cambio.
+            tabDirection = Self.direction(from: old, to: new)
+            tabChanges += 1
+            lastTab = new
         }
         .onChange(of: warnings) { _, new in
             if tab == .alerts && !isLocked { seen.markSeen(new) }
         }
         // Un aviso tocado: se aplica en cuanto no hay bloqueo delante (nunca se abre una hoja encima del bloqueo).
         .onChange(of: router.pending) { _, _ in applyRoute() }
+        // C6: un movimiento que llega con la app delante y en OTRA pestaña (en Inicio ya lo cuenta Inicio), sin la hoja
+        // abierta: se pide el aviso. La carcasa decide si se puede enseñar (nunca con el bloqueo ni fuera de primer plano).
+        .onChange(of: model.arrival) { _, arrival in
+            guard let arrival, tab != .home, sheet == nil, !isLocked, scenePhase == .active else { return }
+            bannerArrival = arrival
+            requestBanner()
+        }
+        .onChange(of: bannerID) { old, new in
+            // El número del aviso que acaba de pedirse es el de esta llegada.
+            if let new, new != old, bannerArrival != nil { bannerFor = new }
+        }
         .onChange(of: isLocked) { _, locked in
             gate.isLocked = locked
             if locked {
@@ -265,11 +324,38 @@ struct RootView: View {
         .onAppear(perform: applyRoute)
         #if DEBUG
         .onAppear(perform: applyDemoTab)
+        .task {
+            // Solo demo de grabación: cambia sola a Gasto para grabar la entrada de la pestaña desde antes del cambio.
+            guard let seconds = DemoMode.tabSwitchSeconds else { return }
+            LaunchProbe.shared.tabSwitchAt = Date().timeIntervalSince1970 + seconds
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled else { return }
+            tab = .spending
+        }
         #endif
         // Costuras de movimiento (F1): por fuera de todo, para que también las vean la hoja única y las capas.
         .environment(\.cardFlight, cardFlight)
         .environment(\.tabEntrance, tabEntrance)
         .environment(\.detailAmountFrames, detailAmountFrames)
+    }
+
+    /// T1: la entrada de cada pestaña. La elegida lleva un `token` nuevo DESDE el instante en que se elige (se calcula
+    /// aquí, en `body`, con la pestaña de antes: no espera al `onChange`, así que no hay ni un fotograma de la pestaña
+    /// quieta antes de entrar), y su valor no cambia cuando el `onChange` lo apunta. Las demás no se mueven. Al abrir
+    /// la app, `token` 0: nada entra. Mientras vuela una tarjeta (`tabEntrance.suppressed`), tampoco.
+    private func entrance(for candidate: AppTab) -> TabEntrance {
+        let changing = tab != lastTab
+        guard candidate == tab else { return TabEntrance(token: 0, direction: 1, suppressed: true) }
+        return TabEntrance(
+            token: tabChanges + (changing ? 1 : 0),
+            direction: changing ? Self.direction(from: lastTab, to: tab) : tabDirection,
+            suppressed: tabEntrance.suppressed || isLocked)
+    }
+
+    /// 1 si la pestaña nueva está a la derecha de la anterior en la barra; −1 si a la izquierda.
+    private static func direction(from old: AppTab, to new: AppTab) -> Int {
+        let order: [AppTab] = [.home, .spending, .alerts, .settings]
+        return (order.firstIndex(of: new) ?? 0) >= (order.firstIndex(of: old) ?? 0) ? 1 : -1
     }
 
     /// Primer plano a efectos de la hoja de un movimiento. En Release es exactamente `scenePhase == .active`.
@@ -461,7 +547,9 @@ struct RootView: View {
     /// Nunca con el bloqueo delante ni con la app fuera de primer plano.
     private func openDetail(_ id: UUID, zooms: Bool = false) {
         guard gate.canPresent, !isLocked, isForeground, model.movement(id) != nil else { return }
-        detail = DetailRoute(id: id, zooms: zooms)
+        // D1: el marco del importe de la fila tocada se lee AQUI, en el toque (nunca en un `body`). Solo desde las
+        // filas de Inicio (las que lo apuntan y las que abren con zoom).
+        detail = DetailRoute(id: id, zooms: zooms, amountOrigin: zooms ? detailAmountFrames.frame(for: id) : nil)
     }
 
     private func openPosition(_ instrument: String) {

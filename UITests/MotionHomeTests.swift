@@ -62,13 +62,33 @@ final class MotionHomeTests: XCTestCase {
 
     /// Vuelve a la pestaña «Inicio» (en iOS 26 un toque normal en una pestaña a veces no se registra: una pulsación
     /// de 0,25 s sí).
+    /// Si hay una pantalla empujada encima (la del banco abierta desde el abanico), primero vuelve atrás con su botón de
+    /// volver: no depende de que la barra de pestañas se vea mientras esa pantalla está abierta (la línea B la oculta ahí).
     private func backToHomeTab() {
         let tab = app.tabBars.buttons["Inicio"]
-        for _ in 0..<3 {
+        for _ in 0..<4 {
             if app.staticTexts["Tu dinero"].exists { return }
+            if let back = pushedScreenBackButton() {
+                back.tap()
+                _ = app.staticTexts["Tu dinero"].waitForExistence(timeout: 2)
+                continue
+            }
             if tab.exists { tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25) }
             if app.staticTexts["Tu dinero"].waitForExistence(timeout: 4) { return }
         }
+    }
+
+    /// El botón de volver de una pantalla empujada en una pila de navegación, si la hay.
+    private func pushedScreenBackButton() -> XCUIElement? {
+        let system = app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch
+        if system.exists && system.isHittable { return system }
+        for label in ["Ajustes", "Atrás", "Volver"] {
+            let button = app.navigationBars.buttons[label]
+            if button.exists && button.isHittable { return button }
+        }
+        let custom = app.buttons.matching(NSPredicate(format: "label IN %@", ["Atrás", "Volver"])).firstMatch
+        if custom.exists && custom.isHittable { return custom }
+        return nil
     }
 
     /// Un texto con forma de importe: una cifra pegada a «€», «12,50» o «… euros».
@@ -653,6 +673,8 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(note.exists, "Falta la acción «Nota»")
         XCTAssertEqual(flag.label, "No es mío")
         XCTAssertGreaterThanOrEqual(flag.frame.width, 44, "La acción no llega a 44 pt: \(flag.frame)")
+        // Abierta, el nombre sigue a la vista: la fila solo se aparta un poco (antes, entera: 140 pt fuera de pantalla).
+        XCTAssertGreaterThan(row.frame.minX, -70, "Con la fila abierta el nombre se sale de la pantalla: \(row.frame)")
         XCTAssertEqual(frontCardNumber(), 1, "Deslizar una fila movió el carrusel")
         flag.tap()
         XCTAssertTrue(waitUntil(5) { self.firstRow().label.contains("Marcado como no es mío") },
@@ -1002,9 +1024,11 @@ final class MotionHomeTests: XCTestCase {
 
         // «Mover dinero».
         openMoveAmountStep()
-        for key in ["1", "2", "5"] { app.buttons[key].tap() }
         let display = any("move-amount-display")
         XCTAssertTrue(display.waitForExistence(timeout: 5), "Falta el importe tecleado")
+        // Sin nada tecleado, la máscara es la atenuada de «vacío» (se distingue de un importe tecleado).
+        XCTAssertEqual(display.value as? String, "•••€ (vacío)", "Con el ojo cerrado, «vacío» y «tecleado» se ven igual")
+        for key in ["1", "2", "5"] { app.buttons[key].tap() }
         XCTAssertEqual(display.label, "importe oculto", "El importe tecleado se lee con el ojo cerrado")
         // Lo dibujado tampoco dice cuántas cifras lleva: con 3 y con 4 cifras (punto de millar) es la misma máscara.
         XCTAssertEqual(display.value as? String, "•••€", "La máscara del importe tecleado deja ver su tamaño")
@@ -1058,6 +1082,8 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertEqual(homeProbe()["listas"], "1", "La lista no hizo su cambio (salir, cambiar, entrar): \(homeProbe())")
         // Con Reducir movimiento la lista vieja sí se funde del todo (las cifras se funden por su cuenta).
         XCTAssertEqual(homeProbe()["fondoLista"], "0", "Con Reducir movimiento la lista vieja no se fundió: \(homeProbe())")
+        // Y nunca a la vez la tarjeta y la lista a 0: la lista cambia cuando la tarjeta nueva ya vuelve a verse (m-11).
+        XCTAssertEqual(homeProbe()["vacios"], "0", "Con Reducir movimiento hubo un instante sin tarjeta ni lista: \(homeProbe())")
     }
 
     // MARK: Retoques de diseño

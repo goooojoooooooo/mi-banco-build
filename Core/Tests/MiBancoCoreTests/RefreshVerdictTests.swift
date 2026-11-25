@@ -68,6 +68,20 @@ private func verdict(_ outcomes: [BankID: BankRefreshOutcome], _ links: [BankID:
         #expect(!verdict([.rev: .skipped(.notConnected), .ima: .skipped(.notConnected)], [:]))
     }
 
+    /// Justo en el límite: una lectura de hace exactamente 3 h ya no es reciente (como `SyncPolicy.decide`, que con
+    /// 3 h exactas vuelve a consultar); un segundo antes, sí.
+    @Test func exactlyThreeHoursIsNotFresh() {
+        let spacing = SyncPolicy.autoSpacing
+        #expect(!verdict([.rev: .skipped(.fresh)], [.rev: link(succeeded: spacing)]))
+        #expect(verdict([.rev: .skipped(.fresh)], [.rev: link(succeeded: spacing - 1)]))
+    }
+
+    /// Un reloj que va hacia atrás (última lectura «en el futuro») cuenta como reciente, igual que en `SyncPolicy`:
+    /// la app no consulta y tampoco puede decir que los datos sean viejos.
+    @Test func lastReadInTheFutureCountsAsFresh() {
+        #expect(verdict([.rev: .skipped(.fresh)], [.rev: link(succeeded: -600)]))
+    }
+
     @Test func mixOfUpdatedAndFreshIsUpToDate() {
         #expect(verdict(
             [.rev: .updated, .ima: .skipped(.fresh), .tr: .skipped(.notConnected)],

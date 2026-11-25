@@ -192,6 +192,8 @@ private struct CardFront: View {
                 if let cents = heroCents {
                     HeroBalance(cents: cents, revealed: revealed, centsColor: glowing ? Theme.income : secondary)
                         .foregroundStyle(glowing ? Theme.income : Theme.label)
+                        // Al montarse Inicio la cifra vuelve a contar desde 0: no se enseña quieta en «0,00 €».
+                        .modifier(RollStartVeil())
                         .accessibilityIdentifier("card-hero-\(card.rawValue)")
                 } else {
                     // Sin saldo o sin precios: una raya, nunca "0,00 €".
@@ -217,8 +219,10 @@ private struct CardFront: View {
                         .titan(.meta)
                         .foregroundStyle(secondary)
                     if let total {
-                        // Rueda como la cifra grande; con el ojo cerrado dibuja «•••,•• €» (nunca la cifra).
-                        RollingAmount(cents: total, revealed: revealed)
+                        // Es la misma cifra en todas las tarjetas de banco: aparece quieta con su tarjeta (no vuelve a
+                        // contar en cada cambio de tarjeta ni al montarse Inicio) y solo rueda si su valor cambia de
+                        // verdad. Con el ojo cerrado dibuja «•••,•• €» (nunca la cifra).
+                        RollingAmount(cents: total, countsUp: false, revealed: revealed)
                             .titan(.cardTitle)
                             .accessibilityIdentifier("card-total-\(card.rawValue)")
                     } else {
@@ -401,6 +405,7 @@ private struct CardFront: View {
                         // Si no cabe en su columna se encoge entero (lo hace el propio importe).
                         RollingAmount(cents: info.cents, revealed: revealed)
                             .titan(.cardBalance)
+                            .modifier(RollStartVeil())
                             .accessibilityIdentifier("card-bank-\(bank.rawValue)")
                             .padding(.top, 5)
                         Text(DateText.balanceStatus(info))

@@ -335,6 +335,14 @@ final class LedgerModel {
     }
     #endif
 
+    #if DEBUG
+    /// Demo (`-MiBancoDemoCardMoment staleArrival`): se anuncia la llegada de un ingreso cuyo movimiento no se publica
+    /// nunca (como un aviso que sustituye a otro sin cambiar el número de movimientos). Inicio debe dejarla caducar.
+    func demoAnnounceUnpublishedArrival() {
+        arrival = Arrival(id: UUID(), bank: .rev, isIncome: true, title: "Carlos", amountCents: 12_000)
+    }
+    #endif
+
     // MARK: - Cambios (todos pasan por las mutaciones de Core y reconstruyen el snapshot)
 
     func setBalance(_ bank: BankID, cents: Int) throws {

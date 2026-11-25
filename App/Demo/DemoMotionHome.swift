@@ -27,6 +27,12 @@ extension DemoMode {
         case refresh
         /// La primera fila se desliza y enseña sus acciones.
         case rowSwipe
+        /// Se anuncia una llegada cuyo movimiento nunca se publica (como un aviso que sustituye a otro): tiene que
+        /// caducar sin dejar la fila marcada como nueva.
+        case staleArrival
+        /// La búsqueda se abre 0,8 s después del toque y se cierra 3 s más tarde (XCUITest no devuelve el toque de la
+        /// lupa hasta que la app está quieta: así la ráfaga ve el cambio entero).
+        case search
     }
 
     /// `-MiBancoDemoCardMoment <momento>` (solo con `-MiBancoDemo`): tocar el segmento que YA está elegido dispara
@@ -49,6 +55,10 @@ extension DemoMode {
               seconds > 0 else { return nil }
         return min(seconds, 5)
     }
+
+    /// `-MiBancoDemoListBlanks` (solo con `-MiBancoDemo`): la regresión exacta que vigila la prueba del cambio de
+    /// lista: la lista nueva parte de invisible (pantalla en negro bajo el selector). La sonda tiene que dar 0.
+    static var listSwapBlanks: Bool { isActive && arguments.contains("-MiBancoDemoListBlanks") }
 
     /// `-MiBancoDemoArrivalIncome` (con `-MiBancoDemoArrival`): lo que llega es dinero que entra, no un pago.
     static var arrivalIsIncome: Bool { arguments.contains("-MiBancoDemoArrivalIncome") }

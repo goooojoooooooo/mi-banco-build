@@ -1006,6 +1006,12 @@ final class MotionHomeTests: XCTestCase {
         let display = any("move-amount-display")
         XCTAssertTrue(display.waitForExistence(timeout: 5), "Falta el importe tecleado")
         XCTAssertEqual(display.label, "importe oculto", "El importe tecleado se lee con el ojo cerrado")
+        // Lo dibujado tampoco dice cuántas cifras lleva: con 3 y con 4 cifras (punto de millar) es la misma máscara.
+        XCTAssertEqual(display.value as? String, "•••€", "La máscara del importe tecleado deja ver su tamaño")
+        app.buttons["0"].tap()
+        XCTAssertTrue(waitUntil(3) { (display.value as? String) == "•••€" },
+                      "Con cuatro cifras la máscara cambió: \(String(describing: display.value))")
+        app.buttons["keypad-backspace"].tap()
         assertNoAmounts("Mover dinero, importe")
         let copied = app.staticTexts["IBAN de Revolut copiado"]
         XCTAssertTrue(slideToPrepare(until: copied), "No apareció «IBAN de Revolut copiado»")
@@ -1050,5 +1056,85 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertLessThanOrEqual(most, 1, "Durante el cambio hubo \(most) resúmenes de 7 días a la vez")
         XCTAssertTrue(waitUntil(5) { summaries.firstMatch.label != before }, "El resumen no cambió con la tarjeta: \(before)")
         XCTAssertEqual(homeProbe()["listas"], "1", "La lista no hizo su cambio (salir, cambiar, entrar): \(homeProbe())")
+        // Con Reducir movimiento la lista vieja sí se funde del todo (las cifras se funden por su cuenta).
+        XCTAssertEqual(homeProbe()["fondoLista"], "0", "Con Reducir movimiento la lista vieja no se fundió: \(homeProbe())")
+    }
+
+    // MARK: Retoques de diseño
+
+    /// Cambiar de tarjeta es un fundido cruzado: la lista vieja se atenúa (al 30 %) y la nueva sale desde ahí. En el
+    /// instante del cambio la lista nunca está al 0 % (antes, ~100 ms de pantalla en negro bajo el selector).
+    func testCardChangeNeverBlanksTheList() throws {
+        assertCardChangeNeverBlanks([])
+    }
+
+    /// El cuerpo de la prueba de arriba. `fondoLista` es la opacidad que de verdad recibe cada pieza de la lista nueva
+    /// mientras espera su turno (la misma cifra que se pasa a `.opacity`, ver `DrawnOpacity`); la menor de todas.
+    private func assertCardChangeNeverBlanks(_ extra: [String]) {
+        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"] + extra)
+        let summaries = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Gastado en 7 días:"))
+        XCTAssertTrue(summaries.firstMatch.waitForExistence(timeout: 8), "Falta el resumen de 7 días")
+        let before = summaries.firstMatch.label
+        segment("Revolut").tap()
+        XCTAssertTrue(waitUntil(5) { self.homeProbe()["listas"] == "1" }, "La lista no hizo su cambio: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["fondoLista"], "30", "La lista se quedó en negro en el cambio de tarjeta: \(homeProbe())")
+        XCTAssertTrue(waitUntil(5) { summaries.firstMatch.label != before }, "El resumen no cambió con la tarjeta: \(before)")
+        // Sigue respondiendo: la fila abre su detalle.
+        let row = firstRow()
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "No hay filas tras el cambio")
+        row.tap()
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8), "Tras el cambio de tarjeta, la fila no abre su detalle")
+        close.tap()
+    }
+
+    /// La prueba de arriba, vista en ROJO: el MISMO cuerpo de aserciones lanzado con la regresión exacta
+    /// (`-MiBancoDemoListBlanks`: la lista nueva parte de invisible, actúa antes del valor único que se dibuja y se
+    /// mide). Tiene que fallar justo en «se quedó en negro»: `XCTExpectFailure` estricto (si no falla, esta prueba sale
+    /// roja; si falla por otra cosa, también).
+    func testListBlankGuardGoesRedWhenTheListBlanks() throws {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        options.issueMatcher = { $0.compactDescription.contains("se quedó en negro") }
+        XCTExpectFailure("Con la lista nueva invisible, la prueba vigilante tiene que fallar", options: options) {
+            assertCardChangeNeverBlanks(["-MiBancoDemoListBlanks"])
+        }
+    }
+
+    /// Una llegada anunciada cuyo movimiento no se publica nunca (como un aviso que sustituye a otro sin cambiar el
+    /// número de movimientos) caduca: ni insignia ni fila marcada como nueva (fondo y ✓ fijos horas después).
+    func testStaleArrivalNeverLeavesAFreshRow() throws {
+        launchHome(["-MiBancoDemoCardMoment", "staleArrival", "-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"])
+        let todo = segment("Todo")
+        XCTAssertTrue(todo.waitForExistence(timeout: 8), "Falta el segmento «Todo»")
+        XCTAssertEqual(homeProbe()["nueva"], "0", "Ya había una fila marcada como nueva: \(homeProbe())")
+        todo.tap()
+        XCTAssertTrue(waitUntil(3) { self.homeProbe()["anunciadas"] == "1" }, "La llegada no se anunció: \(homeProbe())")
+        // Pasado el plazo (2 s) sin que el movimiento aparezca, la fila ya no está marcada.
+        XCTAssertTrue(waitUntil(4) { self.homeProbe()["nueva"] == "0" }, "La llegada caducada dejó la fila marcada como nueva: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["insignias"], "0", "Una llegada sin movimiento enseñó su ✓: \(homeProbe())")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(homeProbe()["nueva"], "0", "La fila volvió a marcarse: \(homeProbe())")
+    }
+
+    /// Con el texto más grande, la cabecera del abanico («Tus tarjetas» y la ayuda) no queda debajo de la primera
+    /// tarjeta: su alto sale de lo que mide (antes, 92 pt fijos).
+    func testWalletFanHeaderFitsAtLargestText() throws {
+        // Con este tamaño de texto la tarjeta no siempre queda bajo el dedo de la prueba: el abanico se abre por el mismo
+        // camino (`openFan`) con el momento de demo (tocar el segmento ya elegido).
+        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoDemoCardMoment", "fan",
+                    "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let todo = segment("Todo")
+        XCTAssertTrue(todo.waitForExistence(timeout: 8), "Falta el segmento «Todo»")
+        todo.tap()
+        XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "No se abrió el abanico: \(homeProbe())")
+        let help = app.staticTexts["Toca una para abrirla."]
+        let first = app.buttons["wallet-card-all"]
+        XCTAssertTrue(help.waitForExistence(timeout: 5) && first.waitForExistence(timeout: 5), "Falta la cabecera o la primera tarjeta")
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertLessThanOrEqual(help.frame.maxY, first.frame.minY + 1,
+                                 "La primera tarjeta \(first.frame) tapa la ayuda del abanico \(help.frame)")
+        app.buttons["wallet-fan-close"].tap()
+        XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "0" }, "El abanico no se cerró")
     }
 }

@@ -631,17 +631,18 @@ final class MotionShellTests: XCTestCase {
     func testInAppBannerNeverAboveLock() throws {
         let banner = element("in-app-banner")
         // (a)
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "9", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"])
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "18", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"])
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta el bloqueo")
         var looks = 0
-        while unlock.exists && looks < 60 {
+        while unlock.exists && looks < 120 {
             XCTAssertFalse(banner.exists, "Mirada \(looks): el aviso dentro de la app está con el bloqueo delante")
             looks += 1
             Thread.sleep(forTimeInterval: 0.2)
         }
-        XCTAssertGreaterThan(looks, 20, "El bloqueo se quitó antes de que llegara el pago: la prueba no dice nada")
-        XCTAssertTrue(waitUntil(20) { !unlock.exists }, "El bloqueo de demo no se quitó")
+        // El pago llega a los ~4 s del arranque; el bloqueo dura 18 s: se mira bastante rato con el bloqueo puesto.
+        XCTAssertGreaterThan(looks, 25, "El bloqueo se quitó antes de que llegara el pago: la prueba no dice nada")
+        XCTAssertTrue(waitUntil(30) { !unlock.exists }, "El bloqueo de demo no se quitó")
         for look in 0..<15 {
             XCTAssertFalse(banner.exists, "Mirada \(look): el aviso pedido con el bloqueo apareció al desbloquear")
             Thread.sleep(forTimeInterval: 0.2)

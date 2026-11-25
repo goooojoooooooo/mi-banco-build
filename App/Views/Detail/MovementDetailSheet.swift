@@ -75,7 +75,9 @@ private struct DetailContent: View {
     @State private var amountLanded = false
     /// D1: el vuelo del importe desde la fila (0 = donde estaba en la fila, 1 = en su sitio), desde dónde sale y a qué
     /// escala, y dónde está su sitio en la pantalla (se mide; solo se lee al empezar el vuelo).
-    @State private var flight: CGFloat = 1
+    // Empieza en 0: sin origen (y con el desplazamiento a cero) es la identidad; con origen, el vuelo es un cambio de 0 a 1
+    // (si empezara en 1 y se pusiera a 0 y a 1 en la misma actualización, no habría nada que animar).
+    @State private var flight: CGFloat = 0
     @State private var flyDelta = CGSize.zero
     @State private var flyScale: CGFloat = 1
     @State private var slotFrame: CGRect?
@@ -264,7 +266,6 @@ private struct DetailContent: View {
             // Desde la fila: en su sitio de salida, sin animar, y desde ahí vuela (el sitio ya está medido).
             flyDelta = start.delta
             flyScale = start.scale
-            flight = 0
             amountShown = true
             withAnimation(motion.animation(.fly).delay(motion.seconds(0.05)), completionCriteria: .logicallyComplete) {
                 flight = 1
@@ -290,7 +291,7 @@ private struct DetailContent: View {
             guard !amountLanded else { return }
             withAnimation(motion.fade) {
                 amountShown = true
-                flight = 1
+                if flyDelta != .zero { flight = 1 }
             }
             amountLanded = true
         }

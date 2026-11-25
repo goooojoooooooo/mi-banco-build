@@ -27,6 +27,10 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// El movimiento tal como lo ve el kit: la fila «Animaciones» dice el nivel que de verdad está en uso.
     @Environment(\.motion) private var motion
+    /// El cambio de pestaña que anuncia RootView (cuando lo haga): repite la entrada de las filas de Bancos.
+    @Environment(\.tabEntrance) private var tabEntrance
+    /// Al entrar en Ajustes, las filas de Bancos llegan una tras otra.
+    @State private var entrance = Entrance()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
     /// Bancos recién guardados: un ✓ que se traza junto al campo.
@@ -91,7 +95,7 @@ struct SettingsView: View {
                     }
 
                     Section {
-                        ForEach(BankID.allCases, id: \.self) { bank in
+                        ForEach(Array(BankID.allCases.enumerated()), id: \.element) { index, bank in
                             Button {
                                 pushedBank = bank
                             } label: {
@@ -101,9 +105,12 @@ struct SettingsView: View {
                                         Text(bank.displayName)
                                             .titan(.option)
                                             .foregroundStyle(Theme.label)
+                                        // El estado cambia con un fundido cruzado (conectando, actualizando, al día).
                                         Text(bankPrimaryStatus(for: bank, now: now))
                                             .titan(.meta)
                                             .foregroundStyle(Theme.label3)
+                                            .contentTransition(.opacity)
+                                            .animation(motion.calmAnimation(.row), value: bankPrimaryStatus(for: bank, now: now))
                                     }
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                     Image(systemName: "chevron.right")
@@ -114,6 +121,8 @@ struct SettingsView: View {
                                 .padding(.vertical, 4)
                                 .frame(minHeight: 52)
                                 .contentShape(Rectangle())
+                                .motionEntrance(index)
+                                .environment(\.entrance, entrance)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("settings-bank-\(bank.rawValue)")
@@ -133,6 +142,8 @@ struct SettingsView: View {
                                         .accessibilityHidden(true)
                                 }
                                 .contentShape(Rectangle())
+                                .motionEntrance(BankID.allCases.count)
+                                .environment(\.entrance, entrance)
                             }
                             .buttonStyle(.plain)
                             .accessibilityIdentifier("settings-prepare-connection")
@@ -252,7 +263,11 @@ struct SettingsView: View {
             .task { if DemoMode.guideStart != nil || DemoMode.guideSeed != nil { demoOpensGuide = true } }
             #endif
         }
+        .onChange(of: tabEntrance.token) { _, _ in
+            if !tabEntrance.suppressed { playEntrance() }
+        }
         .onAppear {
+            playEntrance()
             refreshUntouched()
             applyFocusRequest()
             applyAccountsRequest()
@@ -288,6 +303,18 @@ struct SettingsView: View {
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
         .sensoryFeedback(.success, trigger: saveCount)
         .sensoryFeedback(.error, trigger: errorCount)
+    }
+
+    /// La entrada de Ajustes: las filas de Bancos llegan una tras otra durante 1,2 s del kit. Con Reducir movimiento, nada.
+    private func playEntrance() {
+        guard !motion.reduce else { return }
+        let token = entrance.token + 1
+        entrance = Entrance(token: token, active: true, scope: .assembly)
+        let window = motion.seconds(MotionEntranceWindow.seconds)
+        Task {
+            try? await Task.sleep(for: .seconds(window))
+            if entrance.token == token { entrance.active = false }
+        }
     }
 
     /// Los tres niveles, del más tranquilo al que aprobó el dueño.
@@ -409,13 +436,14 @@ struct SettingsView: View {
         }
     }
 
-    /// ✓ trazado 1,4 s junto al campo.
+    /// ✓ trazado junto al campo: da un pequeño bote (1 → 1,12 → 1), se queda 1,4 s del kit y se va con un fundido.
     private func flashSaved(_ bank: BankID) {
-        withAnimation(Theme.Motion.quick) { _ = savedFlash.insert(bank) }
+        withAnimation(motion.fade) { _ = savedFlash.insert(bank) }
         saveCount += 1
+        let hold = motion.seconds(1.4)
         Task {
-            try? await Task.sleep(for: .seconds(1.4))
-            withAnimation(.easeOut(duration: 0.3)) { _ = savedFlash.remove(bank) }
+            try? await Task.sleep(for: .seconds(hold))
+            withAnimation(motion.fade) { _ = savedFlash.remove(bank) }
         }
     }
 }
@@ -458,29 +486,29 @@ private struct BalanceRow: View {
                 if isConnected {
                     let formatted = info.map { formatEUR($0.cents).replacingOccurrences(of: "-", with: "\u{2212}") } ?? "—"
                     let spoken = info.map { spokenAmount($0.cents, hidden: hidden) } ?? "sin saldo"
-                    Text(formatted)
+                    // Con el ojo cerrado, la máscara del kit: ninguna cifra montada.
+                    Text(hidden ? (info.map { maskedEUR($0.cents, sign: false) } ?? "—") : formatted)
                         .titan(.option)
                         .fontWeight(.semibold)
                         .foregroundStyle(Theme.label)
                         .padding(.horizontal, 10)
                         .frame(minHeight: 40)
-                        .blur(radius: hidden && info != nil ? 9 : 0, opaque: false)
-                        .opacity(hidden && info != nil ? 0.75 : 1)
+                        .contentTransition(.identity)
                         .privacySensitive()
                         .accessibilityLabel("Saldo de \(bank.displayName): \(spoken)")
                 } else {
                     let isEditing = focused.wrappedValue == bank
+                    // Con el ojo cerrado (y sin editar) el saldo no se dibuja: en su sitio va la máscara del kit.
+                    let masked = hidden && !isEditing && !text.isEmpty
                     HStack(spacing: 8) {
                         if saved {
-                            DrawnCheck(lineWidth: 2, color: Theme.label)
-                                .frame(width: 16, height: 16)
+                            SavedCheck()
                                 .transition(.opacity)
-                                .accessibilityLabel("Guardado")
                         }
                         TextField("0,00 €", text: $text)
                             .titan(.option)
                             .fontWeight(.semibold)
-                            .foregroundStyle(Theme.label)
+                            .maskedAmountField(masked, alignment: stacked ? .leading : .trailing)
                             .multilineTextAlignment(stacked ? .leading : .trailing)
                             .keyboardType(.numbersAndPunctuation)
                             .submitLabel(.done)
@@ -490,9 +518,8 @@ private struct BalanceRow: View {
                             .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
                             .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                             .animation(Theme.Motion.quick, value: isEditing)
-                            .privateField(editing: isEditing)
                             .accessibilityLabel("Saldo de \(bank.displayName)")
-                            .accessibilityValue(hidden && !isEditing && !text.isEmpty ? "importe oculto" : text)
+                            .accessibilityValue(masked ? "importe oculto" : text)
                     }
                 }
             }
@@ -543,6 +570,61 @@ private struct BalanceRow: View {
             }
             return "Estimado · corregido \(whenCorrected)"
         }
+    }
+}
+
+/// El ✓ de «guardado» junto a un campo: se traza y da un pequeño bote (1 → 1,12 → 1) con los tiempos del kit. Con
+/// Reducir movimiento, sin bote.
+struct SavedCheck: View {
+    @Environment(\.motion) private var motion
+    @State private var landed = 0
+
+    var body: some View {
+        DrawnCheck(lineWidth: 2, color: Theme.label)
+            .frame(width: 16, height: 16)
+            .keyframeAnimator(initialValue: 1.0, trigger: motion.reduce ? 0 : landed) { content, scale in
+                content.scaleEffect(scale)
+            } keyframes: { _ in
+                KeyframeTrack {
+                    CubicKeyframe(1.12, duration: motion.seconds(0.16))
+                    CubicKeyframe(1.0, duration: motion.seconds(0.22))
+                }
+            }
+            .onAppear { landed += 1 }
+            .accessibilityLabel("Guardado")
+    }
+}
+
+/// Un campo de importe con el ojo cerrado: el texto del campo no se dibuja (transparente) y encima va la máscara del
+/// kit, así que no hay ninguna cifra en pantalla, ni tapada. Al editar (o con el ojo abierto) es el campo de siempre.
+private struct MaskedAmountField: ViewModifier {
+    let masked: Bool
+    let alignment: Alignment
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(masked ? Color.clear : Theme.label)
+            .overlay(alignment: alignment) {
+                if masked {
+                    Text(maskedEUR(0, sign: false))
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .allowsHitTesting(false)
+                        .accessibilityLabel("importe oculto")
+                        .accessibilityHidden(true)
+                }
+            }
+            .privacySensitive()
+    }
+}
+
+extension View {
+    /// Ver MaskedAmountField. Va justo después del estilo de letra del campo (hereda su letra).
+    func maskedAmountField(_ masked: Bool, alignment: Alignment) -> some View {
+        modifier(MaskedAmountField(masked: masked, alignment: alignment))
     }
 }
 

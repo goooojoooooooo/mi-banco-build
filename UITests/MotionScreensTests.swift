@@ -676,7 +676,7 @@ final class MotionScreensTests: XCTestCase {
         let curves = try XCTUnwrap(dockProbe(probe)["curvas"], "La sonda no dice el solape de las curvas: \(value(probe))")
         XCTAssertLessThanOrEqual(curves, 0.02, "En algún punto del recorrido se ven a la vez el saldo grande y el título pequeño")
         // Despacio y soltando en parado: a 500 pt/s el arrastre sintético sigue solo al soltar (inercia) y se pasa.
-        let drag = { (from: CGFloat, to: CGFloat) in
+        let slowDrag = { (from: CGFloat, to: CGFloat) in
             let start = self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
             let end = self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
             start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 70, thenHoldForDuration: 0.7)
@@ -689,17 +689,17 @@ final class MotionScreensTests: XCTestCase {
         }
 
         // Un arrastre corto hacia arriba (menos de media cabecera) y soltar: vuelve abajo.
-        drag(from: 0.60, to: 0.54)
+        slowDrag(0.60, 0.54)
         XCTAssertLessThanOrEqual(settled("Arrastre corto hacia arriba"), 0.01, "Un arrastre corto no devolvió la hoja abajo")
         // Uno más largo (más de media cabecera): se acopla, con el título pequeño en la barra.
-        drag(from: 0.70, to: 0.45)
+        slowDrag(0.70, 0.45)
         XCTAssertGreaterThanOrEqual(settled("Arrastre largo hacia arriba"), 0.99, "Un arrastre largo no acopló la hoja")
         XCTAssertTrue(element("bank-mini-title").exists, "Acoplada la hoja, falta el título pequeño")
         // Un tirón corto hacia abajo desde acoplada: se queda acoplada.
-        drag(from: 0.40, to: 0.47)
+        slowDrag(0.40, 0.47)
         XCTAssertGreaterThanOrEqual(settled("Arrastre corto hacia abajo"), 0.99, "Un arrastre corto desacopló la hoja")
         // Uno largo hacia abajo: vuelve abajo y vuelve el saldo grande.
-        drag(from: 0.30, to: 0.75)
+        slowDrag(0.30, 0.75)
         XCTAssertLessThanOrEqual(settled("Arrastre largo hacia abajo"), 0.01, "Un arrastre largo no devolvió la hoja abajo")
         XCTAssertTrue(waitFor(hittable, balance, timeout: 5), "Con la hoja abajo no vuelve el saldo grande")
 

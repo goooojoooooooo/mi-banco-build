@@ -96,11 +96,11 @@ struct WalletFan: View {
     /// En dos tiempos, sin doble exposición: primero el negro tapa Inicio (cabecera, título, ojo y la tarjeta grande con
     /// su total) en 0,10 s; solo entonces las tarjetas salen de debajo y «Tus tarjetas» entra (0,15 s, subiendo 6 pt).
     private func open() {
-        // Con Reducir movimiento todo es fundido (no hay doble exposición que evitar): un solo tiempo, sin pasar por
-        // un fotograma en negro.
+        // Con Reducir movimiento, dos fundidos que se solapan: el abanico empieza cuando el negro ya tapa la mayor
+        // parte de Inicio (nunca dos cabeceras legibles a la vez) y antes de que acabe (nunca un fotograma en negro).
         if motion.reduce {
-            withAnimation(motion.fade) {
-                dark = true
+            withAnimation(motion.fade) { dark = true }
+            withAnimation(motion.fade.delay(motion.pause(0.12))) {
                 fanned = true
                 headerIn = true
             }

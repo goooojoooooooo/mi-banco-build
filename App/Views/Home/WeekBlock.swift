@@ -21,10 +21,11 @@ struct WeekBlock: View {
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
                     // Rueda al cambiar de tarjeta o al llegar un movimiento; con el ojo cerrado dibuja «•••,•• €».
-                    RollingAmount(cents: week.totalCents)
+                    RollingAmount(cents: week.totalCents, countsUp: false)
                         .titan(.week)
-                        // Un importe por tarjeta: al cambiar de tarjeta se monta de nuevo y cuenta el suyo (nunca enseña
-                        // un instante la cifra de la otra tarjeta ni rueda de una a otra). Dentro de la misma tarjeta, rueda.
+                        // Un importe por tarjeta: al cambiar de tarjeta se monta de nuevo y sale ya con el suyo, con la lista
+                        // (nunca enseña un instante la cifra de la otra tarjeta, ni rueda de una a otra, ni un «0,00 €»).
+                        // Dentro de la misma tarjeta (llega un movimiento), rueda.
                         .id(card)
                 }
                 .accessibilityElement(children: .ignore)

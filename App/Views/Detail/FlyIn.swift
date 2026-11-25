@@ -43,3 +43,14 @@ enum FlyInGeometry {
         return (delta, scale)
     }
 }
+
+/// Un rectángulo al que se le quita una parte de arriba (`fraction` de su alto): recorta el aire de encima de una línea
+/// de cifras grandes, para que los dígitos que ruedan no suban hasta la línea de encima.
+struct TopTrimmed: Shape {
+    var fraction: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let cut = rect.height * min(max(fraction, 0), 0.5)
+        return Path(CGRect(x: rect.minX - 4, y: rect.minY + cut, width: rect.width + 8, height: rect.height - cut + 4))
+    }
+}

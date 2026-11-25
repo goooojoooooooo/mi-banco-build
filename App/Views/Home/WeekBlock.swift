@@ -67,7 +67,8 @@ struct WeekBlock: View {
     }
 }
 
-/// "Este mes 412,30 €, 85,70 € menos que en octubre": la diferencia en blanco, los importes ocultables.
+/// "Este mes 412,30 €, 85,70 € menos que en octubre": la diferencia en blanco. Con el ojo cerrado los dos importes son
+/// su máscara («•••,•• €»): la cifra no se monta bajo un desenfoque.
 private struct PaceSentence: View {
     let pace: PaceLine
     @Environment(AppPreferences.self) private var preferences
@@ -76,13 +77,14 @@ private struct PaceSentence: View {
         let hidden = preferences.privateMode
         HStack(spacing: 0) {
             Text("Este mes ")
-            Text(formatEUR(pace.thisMonthCents)).privateAmount()
+            MaskedAmountText(formatEUR(pace.thisMonthCents), masked: maskedEUR(pace.thisMonthCents, sign: false))
             if let diff = pace.differenceCents {
                 if diff == 0 {
                     Text(", igual que en \(pace.previousMonthName)")
                 } else {
                     Text(", ")
-                    Text(formatEUR(abs(diff))).foregroundStyle(Theme.label).privateAmount()
+                    MaskedAmountText(formatEUR(abs(diff)), masked: maskedEUR(abs(diff), sign: false))
+                        .foregroundStyle(Theme.label)
                     Text(diff < 0 ? " menos que en \(pace.previousMonthName)" : " más que en \(pace.previousMonthName)")
                 }
             }
@@ -102,10 +104,12 @@ private struct PaceSentence: View {
     }
 }
 
-/// Siete barras de 10 pt (máx. 40 pt) con su inicial; hoy en blanco y el día que más, con su cifra encima.
+/// Siete barras de 10 pt (máx. 40 pt) con su inicial; hoy en blanco y el día que más, con su cifra encima (con el ojo
+/// cerrado, «•••»: la cifra no se monta).
 private struct WeekBars: View {
     let week: WeekSpend
     let barArea: CGFloat
+    @Environment(\.motion) private var motion
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 9) {
@@ -119,12 +123,11 @@ private struct WeekBars: View {
                             .frame(width: 10, height: height(day))
                             .overlay(alignment: .top) {
                                 if day.id == week.peakID {
-                                    Text(roundedEUR(day.cents))
+                                    MaskedAmountText(roundedEUR(day.cents), masked: "•••")
                                         .titan(.captionStrong)
                                         .foregroundStyle(Theme.label2)
                                         .fixedSize()
                                         .offset(y: -18)
-                                        .privateAmount()
                                 }
                             }
                     }
@@ -134,7 +137,8 @@ private struct WeekBars: View {
                 }
             }
         }
-        .animation(Theme.Motion.rowSettle, value: week)
+        // Las barras cambian de alto con el muelle de fila, sin rebote (con Reducir movimiento, un fundido).
+        .animation(motion.calmAnimation(.row), value: week)
     }
 
     private func height(_ day: WeekSpend.Day) -> CGFloat {

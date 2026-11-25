@@ -192,9 +192,10 @@ final class MotionTourShellTests: MotionTourCase {
 
     // MARK: - Pestañas (T1)
 
-    /// Cambiar de pestaña a ×4: el contenido llega desde 70 pt en la dirección del cambio y se funde; luego de vuelta.
+    /// Cambiar de pestaña a ×16 (a ×4 la entrada ya había acabado cuando la prueba hacía la primera captura, run9): el
+    /// contenido llega desde 70 pt en la dirección del cambio y se funde; luego de vuelta.
     private func tabChangeBursts(_ name: String, extra: [String] = []) {
-        launch(extra)
+        launch(extra, scale: 16)
         waitForLaunchToEnd()
         let gasto = app.tabBars.buttons["Gasto"]
         XCTAssertTrue(gasto.waitForExistence(timeout: 10), "Falta la pestaña Gasto")
@@ -202,10 +203,10 @@ final class MotionTourShellTests: MotionTourCase {
         // una pulsación corta en su centro sí.
         Thread.sleep(forTimeInterval: 1)
         gasto.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.12)
-        burst(name, frames: 10, every: 0.15)
+        burst(name, frames: 12, every: 0.4)
         XCTAssertTrue(gasto.isSelected, "No se cambió a Gasto: la ráfaga no enseña el cambio")
         app.tabBars.buttons["Inicio"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.12)
-        burst(name + "-vuelta", frames: 10, every: 0.15)
+        burst(name + "-vuelta", frames: 12, every: 0.4)
     }
 
     func testTabChange() throws { tabChangeBursts("tab-change") }

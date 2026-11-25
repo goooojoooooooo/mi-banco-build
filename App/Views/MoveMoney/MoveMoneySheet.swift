@@ -4,6 +4,9 @@ import MiBancoCore
 /// Hoja de «Mover dinero» (Plan 4b, tarea 8): solo lectura, nunca inicia pagos.
 /// Tres pasos dentro de su propia `NavigationStack`: 1) «¿A dónde?», 2) importe + «Desde», 3) listo (IBAN o teléfono
 /// copiado durante 3 min + guía o botón para abrir el banco). Vive en `RootSheet` y se cierra al bloquear o salir.
+/// Movimiento (desde `\.motion`): el importe entra dígito a dígito (`KeypadAmountDisplay`); el paso «listo» es el
+/// momento de éxito de la maqueta (el ✓ salta y lo demás entra por turnos), con los textos de siempre: aquí se ha
+/// copiado un dato, no se ha enviado dinero. Con el ojo cerrado ningún importe se monta: son máscaras.
 struct MoveMoneySheet: View {
     let model: LedgerModel
     let accountBook: AccountBookModel
@@ -11,7 +14,8 @@ struct MoveMoneySheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Intensidad, Reducir movimiento y cámara lenta.
+    @Environment(\.motion) private var motion
     @Environment(\.openURL) private var openURL
     @Environment(AppPreferences.self) private var preferences
 
@@ -42,7 +46,7 @@ struct MoveMoneySheet: View {
     @State private var newPayeeIBAN = ""
     @State private var newPayeePhone = ""
     @State private var newPayeeError: String?
-    @State private var successTick = 0
+    @State private var preparedTick = 0
     @State private var errorTick = 0
     @State private var slideAttempt = 0
     @State private var initialized = false
@@ -97,13 +101,22 @@ struct MoveMoneySheet: View {
                 .frame(maxHeight: .infinity)
             }
             .background(Theme.canvas.ignoresSafeArea())
+            #if DEBUG
+            .overlay(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    DrawnTextAuditProbe()
+                    HomeProbeElement()
+                }
+                .allowsHitTesting(false)
+            }
+            #endif
             .navigationTitle("Mover dinero")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     if case .amount = step, request.target == nil {
                         Button("Atrás") {
-                            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                            withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
                                 step = .target
                             }
                         }
@@ -142,7 +155,8 @@ struct MoveMoneySheet: View {
         }
         .onChange(of: model.state) { _, _ in refreshUpcoming() }
         .onChange(of: accountBook.book) { _, _ in refreshUpcoming() }
-        .sensoryFeedback(Haptics.success, trigger: successTick)
+        // Preparar no es enviar (regla D9): un toque ligero, nunca la háptica de éxito.
+        .sensoryFeedback(.impact(weight: .light), trigger: preparedTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
 
@@ -244,7 +258,7 @@ struct MoveMoneySheet: View {
                         }
 
                         Button {
-                            withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
+                            withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
                                 addingPayee.toggle()
                                 newPayeeError = nil
                             }
@@ -283,8 +297,8 @@ struct MoveMoneySheet: View {
             }
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, 32)
-            .animation(reduceMotion ? nil : Theme.Motion.reveal, value: missingIBANBank)
-            .animation(reduceMotion ? nil : Theme.Motion.reveal, value: addingPayee)
+            .animation(motion.reduce ? nil : motion.calmAnimation(.snap), value: missingIBANBank)
+            .animation(motion.reduce ? nil : motion.calmAnimation(.snap), value: addingPayee)
         }
         .scrollIndicators(.hidden)
         .scrollDismissesKeyboard(.interactively)
@@ -418,21 +432,9 @@ struct MoveMoneySheet: View {
                         .padding(.top, 4)
                 }
 
-                Text(amount.typedText)
-                    .font(.system(size: amountSize, weight: .semibold))
-                    .tracking(-amountSize * 0.03)
-                    .monospacedDigit()
-                    .foregroundStyle(amount.cents > 0 ? Theme.label : Theme.label3)
-                    .contentTransition(.numericText())
-                    .animation(reduceMotion ? nil : Theme.Motion.morph, value: amount.typedText)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.55)
-                    .frame(maxWidth: .infinity)
-                    .blur(radius: hidden ? 14 : 0, opaque: false)
-                    .opacity(hidden ? 0.75 : 1)
-                    .privacySensitive()
-                    .accessibilityLabel(hidden ? "importe oculto" : amount.typedText)
-                    .accessibilityIdentifier("move-amount-display")
+                // El importe, dígito a dígito; con el ojo cerrado, un punto por dígito (nunca la cifra bajo un desenfoque).
+                KeypadAmountDisplay(amount: amount, hidden: hidden, size: amountSize)
+                    .frame(minHeight: amountSize * 1.25)
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Desde")
@@ -522,7 +524,7 @@ struct MoveMoneySheet: View {
         let hasSensitiveAmount = choice.hasKnownBalance && option.balanceAfterCents >= 0
 
         return Button {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+            withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
                 chosenFrom = option.bank
             }
         } label: {
@@ -538,9 +540,9 @@ struct MoveMoneySheet: View {
                             Text(detail)
                                 .foregroundStyle(selected ? Theme.onTileSelected.opacity(0.65) : Theme.label3)
                         } else if option.fits {
-                            Text(detail)
+                            // «te quedarían 1.084,55 €»; con el ojo cerrado, «te quedarían ••• €» (la cifra no se monta).
+                            MaskedAmountText(detail, masked: maskingAmounts(detail))
                                 .foregroundStyle(selected ? Theme.onTileSelected.opacity(0.7) : Theme.label2)
-                                .privateAmount(spoken: spokenDetail)
                         } else {
                             HStack(alignment: .top, spacing: 4) {
                                 Image(systemName: "exclamationmark.triangle.fill")
@@ -548,8 +550,7 @@ struct MoveMoneySheet: View {
                                     .padding(.top, 2)
                                     .accessibilityHidden(true)
                                 if hasSensitiveAmount {
-                                    Text(detail)
-                                        .privateAmount(spoken: spokenDetail)
+                                    MaskedAmountText(detail, masked: maskingAmounts(detail))
                                 } else {
                                     Text(detail)
                                 }
@@ -592,14 +593,10 @@ struct MoveMoneySheet: View {
 
         return ScrollView {
             VStack(spacing: 20) {
-                ZStack {
-                    Circle()
-                        .fill(Theme.label.opacity(0.12))
-                        .frame(width: 72, height: 72)
-                    DrawnCheck(lineWidth: 3, color: Theme.label)
-                        .frame(width: 30, height: 30)
-                }
-                .padding(.top, 28)
+                // Preparado, no enviado (regla D9): el ✓ neutro en aro de titanio aparece y se traza; lo demás entra por
+                // turnos, sin rebote (ver `SuccessSheet.swift`).
+                PreparedMark(size: 72)
+                    .padding(.top, 28)
 
                 VStack(spacing: 8) {
                     Text(headline)
@@ -612,6 +609,7 @@ struct MoveMoneySheet: View {
                         .foregroundStyle(Theme.label2)
                         .multilineTextAlignment(.center)
                 }
+                .successEntrance(0, calm: true)
 
                 VStack(alignment: .leading, spacing: 10) {
                     Text(shownHint)
@@ -632,8 +630,10 @@ struct MoveMoneySheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(18)
                 .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+                .successEntrance(1, calm: true)
 
                 if canOpenBank, let url = BankApps.url(for: from) {
+                    // Como siempre: blanco desde el principio (nada «se enciende» para celebrar).
                     Button {
                         openURL(url)
                     } label: {
@@ -646,6 +646,17 @@ struct MoveMoneySheet: View {
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.pressable)
+                    .successEntrance(2, calm: true)
+                }
+
+                if kind == .iban, let value = clipboardValue(for: target)?.value {
+                    // Volver a copiar (el portapapeles se borra a los 3 minutos): la cápsula se encoge, gira y enseña el ✓.
+                    MorphingButton(title: "Copiar IBAN", doneTitle: "Copiado") {
+                        Pasteboard.copy(value)
+                        return true
+                    }
+                    .accessibilityIdentifier("move-copy-again")
+                    .successEntrance(3, calm: true)
                 }
             }
             .padding(.horizontal, Theme.Space.gutter)
@@ -653,6 +664,19 @@ struct MoveMoneySheet: View {
         }
         .scrollIndicators(.hidden)
         .accessibilityIdentifier("move-ready-scroll")
+    }
+
+    /// Lo que se copia para ese destino (IBAN propio, IBAN del contacto o su teléfono); `nil` si no hay nada que copiar.
+    private func clipboardValue(for target: MoveTarget) -> (value: String, kind: PasteKind)? {
+        switch target {
+        case .own(let bank):
+            guard let iban = accountBook.book.ibans[bank] else { return nil }
+            return (value: normalizeIBAN(iban), kind: PasteKind.iban)
+        case .payee(let id):
+            if let iban = accountBook.payee(id: id)?.iban { return (value: normalizeIBAN(iban), kind: PasteKind.iban) }
+            if let phone = accountBook.payee(id: id)?.phone { return (value: phone, kind: PasteKind.phone) }
+            return nil
+        }
     }
 
     // MARK: - Lógica
@@ -718,7 +742,7 @@ struct MoveMoneySheet: View {
         if accountBook.book.ibans[bank] == nil {
             inlineIBAN = ""
             inlineIBANError = nil
-            withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
+            withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
                 missingIBANBank = bank
             }
             return
@@ -726,7 +750,7 @@ struct MoveMoneySheet: View {
         missingIBANBank = nil
         chosenTarget = .own(bank)
         if chosenFrom == bank { chosenFrom = nil }
-        withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+        withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
             step = .amount
         }
     }
@@ -744,7 +768,7 @@ struct MoveMoneySheet: View {
             missingIBANBank = nil
             chosenTarget = .own(bank)
             if chosenFrom == bank { chosenFrom = nil }
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+            withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
                 step = .amount
             }
         } catch {
@@ -756,7 +780,7 @@ struct MoveMoneySheet: View {
     private func selectPayee(_ payee: Payee) {
         guard payee.iban != nil || payee.phone != nil else { return }
         chosenTarget = .payee(payee.id)
-        withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+        withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
             step = .amount
         }
     }
@@ -803,7 +827,7 @@ struct MoveMoneySheet: View {
             newPayeeError = nil
             addingPayee = false
             chosenTarget = .payee(payee.id)
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+            withAnimation(motion.reduce ? nil : motion.calmAnimation(.snap)) {
                 step = .amount
             }
         } catch {
@@ -878,34 +902,17 @@ struct MoveMoneySheet: View {
 
     private func prepareTransfer(from: BankID, target: MoveTarget, cents: Int) {
         let isPayeeTarget: Bool = if case .payee = target { true } else { false }
-        let clipboardValue: String?
-        let kind: PasteKind
-        switch target {
-        case .own(let bank):
-            clipboardValue = accountBook.book.ibans[bank].map(normalizeIBAN)
-            kind = .iban
-        case .payee(let id):
-            if let iban = accountBook.payee(id: id)?.iban {
-                clipboardValue = normalizeIBAN(iban)
-                kind = .iban
-            } else if let phone = accountBook.payee(id: id)?.phone {
-                clipboardValue = phone
-                kind = .phone
-            } else {
-                clipboardValue = nil
-                kind = .iban
-            }
-        }
-        guard !(from == .tr && isPayeeTarget), let value = clipboardValue else {
+        guard !(from == .tr && isPayeeTarget), let copied = clipboardValue(for: target) else {
             slideAttempt += 1
             errorTick += 1
             return
         }
-        Pasteboard.copy(value)
+        Pasteboard.copy(copied.value)
         model.addPendingMove(PendingMove(from: from, target: target, amountCents: cents, createdAt: Date()))
-        successTick += 1
-        withAnimation(reduceMotion ? nil : Theme.Motion.morph) {
-            step = .ready(from: from, target: target, amountCents: cents, kind: kind)
+        preparedTick += 1
+        // El paso «listo» sustituye al del importe con un fundido; su contenido hace después su propia entrada.
+        withAnimation(motion.fade) {
+            step = .ready(from: from, target: target, amountCents: cents, kind: copied.kind)
         }
     }
 }

@@ -43,6 +43,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
         /// El fundido `id` (`fadeCount` cuando empezó) con el que se iba el bloqueo, ya desbloqueado, ha terminado: ya
         /// no queda nada suyo en pantalla. El aviso de un fundido anterior no da por acabado uno posterior.
         case lockFadeFinished(id: Int)
+        /// El estilo de movimiento de ahora: `true` = solo fundidos (Sutil o Reducir movimiento), sin marca que vuele.
+        case motionStyle(fadesOnly: Bool)
     }
 
     /// Cómo deja la pantalla el bloqueo al desbloquear.
@@ -87,6 +89,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public internal(set) var lockFading = false
     /// Cuántos fundidos del bloqueo han empezado: el número del último es el que acepta `lockFadeFinished(id:)`.
     public internal(set) var fadeCount = 0
+    /// El movimiento es solo de fundidos (Sutil o Reducir movimiento): al desbloquear, la marca no vuela.
+    public internal(set) var fadesOnly = false
     /// Un cambio del ajuste que llegó con el bloqueo delante: se aplica al desbloquear (nunca quita el bloqueo).
     var settingAfterUnlock: Setting?
 
@@ -152,6 +156,12 @@ public struct ShellState: Equatable, Hashable, Sendable {
     /// Inicio recibe los toques: ni con el bloqueo delante ni mientras el bloqueo, ya desbloqueado, se está fundiendo
     /// (un toque tardío sobre «Desbloquear» caería en la barra de pestañas que hay justo debajo).
     public var homeTakesTouches: Bool { !showsLock && !lockFading }
+
+    /// La ranura de la marca de la barra de Inicio no se dibuja (ni su nombre) porque el bloqueo se está fundiendo con
+    /// la suya: con solo fundidos nada vuela, y si la ranura apareciera a la vez que el bloqueo se va se verían dos
+    /// marcas a medias. Aparece, de una vez, cuando del bloqueo ya no queda nada (`lockFadeFinished`). Con piezas la
+    /// ranura la esconde la marca que vuela (`LaunchAnchor.flying`), no esto.
+    public var hidesBrandSlot: Bool { fadesOnly && lockFading && !showsLock }
 
     /// Las capas que hay ahora, de abajo arriba. La última es la que se ve encima.
     public var layers: [Layer] { layers(liveScene: scene) }
@@ -267,6 +277,9 @@ public struct ShellState: Equatable, Hashable, Sendable {
 
         case .lockFadeFinished(let id):
             if id == fadeCount { lockFading = false }
+
+        case .motionStyle(let fades):
+            fadesOnly = fades
         }
     }
 

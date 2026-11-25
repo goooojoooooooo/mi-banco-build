@@ -161,6 +161,8 @@ final class MotionShellTests: XCTestCase {
         let mark = element("lock-mark")
         XCTAssertTrue(mark.waitForExistence(timeout: 5), "Falta la marca del bloqueo")
         XCTAssertEqual(mark.value as? String, "piezas", "En el arranque en frío el bloqueo debe montar las piezas")
+        // D-9: el bloqueo puesto SÍ está a la vista de VoiceOver (lo apunta el mismo modificador que lo esconde al irse).
+        XCTAssertEqual(probe()["vozBloqueo"], "visible", "El bloqueo puesto no está a la vista de VoiceOver: \(probe())")
         // (XCUITest ve los elementos de Inicio aunque estén ocultos a VoiceOver y tapados por el bloqueo; lo que se
         // comprueba es que no se pueden tocar y que ninguna capa del arranque existe.)
         let eye = app.buttons["Ocultar importes"]
@@ -402,6 +404,30 @@ final class MotionShellTests: XCTestCase {
         XCTAssertEqual(probe()["ranura"], "-", "La marca de la barra se quedó escondida tras el vuelo: \(probe())")
         XCTAssertEqual(probe()["aterrizajes"], "1", "La marca no aterrizó en la ranura de Inicio: \(probe())")
         assertHomeResponds("Tras desbloquear a mitad de las piezas, Inicio no responde")
+    }
+
+    /// Lote 3 (0): en Sutil y con Reducir movimiento nada vuela al desbloquear; el bloqueo se funde con su marca grande.
+    /// Mientras se funde, la ranura de la marca de la barra de Inicio no se dibuja (`ranuraBloqueo=1`) y la app no
+    /// apunta ninguna vez «dos marcas»; al acabar el fundido la ranura vuelve. A ×20 el fundido dura 4–6 s.
+    func testFadingUnlockShowsOneMark() throws {
+        for arguments in [["-MiBancoMotionLevel", "subtle"], ["-MiBancoReduceMotion"]] {
+            launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "3", "-MiBancoMotionScale", "20"] + arguments)
+            let unlock = app.buttons["Desbloquear"]
+            XCTAssertTrue(unlock.waitForExistence(timeout: 15), "\(arguments): falta el bloqueo")
+            XCTAssertTrue(waitUntil(20) { self.probe()["fundido"] == "1" }, "\(arguments): el bloqueo no empezó a fundirse")
+            let fading = probe()
+            XCTAssertEqual(fading["salidas"], "0", "\(arguments): con solo fundidos la marca no debe volar: \(fading)")
+            XCTAssertEqual(fading["ranuraBloqueo"], "1",
+                           "\(arguments): la ranura de Inicio dibuja su marca mientras el bloqueo se funde con la suya: \(fading)")
+            XCTAssertEqual(fading["marcasDobles"], "0", "\(arguments): dos marcas durante el fundido: \(fading)")
+            XCTAssertTrue(waitUntil(20) { self.probe()["fundido"] == "0" }, "\(arguments): el fundido no terminó")
+            let done = probe()
+            XCTAssertEqual(done["ranuraBloqueo"], "0", "\(arguments): la ranura se quedó escondida: \(done)")
+            XCTAssertEqual(done["ranura"], "-", "\(arguments): \(done)")
+            XCTAssertEqual(done["marcasDobles"], "0", "\(arguments): \(done)")
+            XCTAssertFalse(unlock.exists, "\(arguments): el bloqueo sigue ahí")
+            app.terminate()
+        }
     }
 
     /// I-1: el orden de Face ID en el iPhone — el éxito llega con la escena aún inactiva y solo después vuelve a activa

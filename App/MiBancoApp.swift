@@ -139,6 +139,12 @@ private struct AppShellView: View {
                     // Ni con el bloqueo delante ni mientras el bloqueo, ya desbloqueado, se funde: un toque tardío sobre
                     // «Desbloquear» caería en la barra de pestañas que hay justo debajo.
                     .allowsHitTesting(shell.homeTakesTouches)
+                    // Con solo fundidos, mientras el bloqueo se funde con su marca, la ranura de la barra no dibuja la
+                    // suya (nunca dos marcas): lo decide `ShellState.hidesBrandSlot`, en esta misma actualización.
+                    .environment(\.brandSlotHiddenByLock, shell.hidesBrandSlot)
+                // El estilo de movimiento de ahora (solo fundidos o piezas) se lo cuenta a la carcasa una vista que ya
+                // vive dentro de `motionEnvironment()`: lee lo mismo que leen el bloqueo y el arranque.
+                MotionStyleReporter { fadesOnly in shell.apply(.motionStyle(fadesOnly: fadesOnly)) }
                 // ORDEN (no cambiar sin revisar el bloqueo; es el de `ShellState.layers`): Inicio; el bloqueo o el arranque;
                 // la marca que vuela; y, encima de todo, la tapa del selector de apps. Qué capa hay la decide `ShellState`:
                 // el arranque y la marca que vuela nunca existen con el bloqueo puesto, y la tapa nunca va encima de él.
@@ -360,6 +366,13 @@ private struct AppShellView: View {
     private func lockFadeStarted(_ seconds: Double) {
         #if DEBUG
         LaunchProbe.shared.lockFading = shell.lockFading
+        // Para las pruebas: el bloqueo se funde dibujando su marca, nada la esconde en la ranura de Inicio (ni la marca
+        // que vuela ni `hidesBrandSlot`) y la ranura está a la vista: dos marcas a medias durante el fundido.
+        if shell.lockFading, LaunchProbe.shared.lockFadesWithItsMark, launchAnchor.flying == nil, !shell.hidesBrandSlot,
+           launchAnchor.brandFrame != nil {
+            LaunchProbe.shared.doubleMarks += 1
+        }
+        LaunchProbe.shared.slotHiddenByLock = shell.hidesBrandSlot
         #endif
         // El número de ESTE fundido: si entre medias hay un re-bloqueo y otro desbloqueo, este aviso ya no acaba el
         // fundido nuevo (lo acabará el suyo, que también se manda siempre).
@@ -369,6 +382,7 @@ private struct AppShellView: View {
             shell.apply(.lockFadeFinished(id: fade))
             #if DEBUG
             LaunchProbe.shared.lockFading = shell.lockFading
+            LaunchProbe.shared.slotHiddenByLock = shell.hidesBrandSlot
             if !shell.lockFading { LaunchProbe.shared.lockFadesWithItsMark = false }
             #endif
         }
@@ -421,4 +435,19 @@ private struct AppShellView: View {
 private struct ExitGeometry {
     let id: Int
     let from: CGRect
+}
+
+/// No dibuja nada: cuenta a la carcasa si el movimiento de ahora es solo de fundidos (Sutil o Reducir movimiento, el
+/// mismo `LaunchTimeline` que usan el bloqueo y el arranque), al aparecer y cada vez que cambia.
+private struct MotionStyleReporter: View {
+    let report: (Bool) -> Void
+    @Environment(\.motion) private var motion
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onChange(of: LaunchTimeline(motion).style == .fade, initial: true) { _, fadesOnly in report(fadesOnly) }
+    }
 }

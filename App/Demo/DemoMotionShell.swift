@@ -82,6 +82,8 @@ extension DemoMode {
     /// Si el bloqueo que se está quitando sigue a la vista de VoiceOver: «oculto» desde el instante del desbloqueo
     /// (es el mismo valor que recibe su `accessibilityHidden`), «visible» mientras está puesto, «-» sin bloqueo aún.
     var lockVoiceOver = "-"
+    /// La ranura de la marca de Inicio está escondida porque el bloqueo se funde con la suya (solo fundidos).
+    var slotHiddenByLock = false
 
     /// «arranques=1;estilo=piezas;saltos=0;libre=963;fin=1344;bloqueoPiezas=0;bloqueoQuieto=0;salidas=0;empieza=1764000000.123»
     var summary: String {
@@ -94,6 +96,7 @@ extension DemoMode {
             "ranura=\(brandFlying)", "aterrizajes=\(landings)", "rechazados=\(refusedUnlocks)",
             "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
+            "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")
     }

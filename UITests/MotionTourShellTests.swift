@@ -111,6 +111,22 @@ final class MotionTourShellTests: MotionTourCase {
         burst("unlock", frames: 30, every: 0.2)
     }
 
+    /// Lote 3 (0): desbloquear en Sutil (a ×8: el fundido dura 2,4 s). Nada vuela: el bloqueo se funde con su marca
+    /// grande e Inicio aparece debajo SIN la marca de su barra, que sale de una vez al acabar el fundido. Una marca
+    /// por fotograma.
+    func testUnlockSubtle() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "8", "-MiBancoMotionLevel", "subtle"], scale: 8)
+        try sleepUntilLaunchStarts(lead: -7.7)
+        burst("unlock-sutil", frames: 18, every: 0.2)
+    }
+
+    /// Lo mismo con Reducir movimiento (a ×8: el fundido dura 1,8 s).
+    func testUnlockReduceMotion() throws {
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "8", "-MiBancoReduceMotion"], scale: 8)
+        try sleepUntilLaunchStarts(lead: -7.7)
+        burst("unlock-reducir", frames: 18, every: 0.2)
+    }
+
     /// I-2, como pide la revisión: el bloqueo de demo se quita a los 0,4 s de empezar las piezas (a ×8 apenas han
     /// asomado). El bloqueo se funde (2,7 s a ×8) ya sin piezas ni líneas y la marca entera vuela: nunca dos marcas.
     func testUnlockEarly() throws {

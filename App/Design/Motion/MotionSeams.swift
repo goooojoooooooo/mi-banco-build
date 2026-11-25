@@ -96,6 +96,9 @@ extension EnvironmentValues {
     @Entry var cardFlight: CardFlight? = nil
     @Entry var tabEntrance = TabEntrance()
     @Entry var detailAmountFrames: DetailAmountFrames? = nil
+    /// El bloqueo se está fundiendo con su marca y nada vuela (Sutil, Reducir movimiento): la ranura de la marca de la
+    /// barra de Inicio no se dibuja hasta que el bloqueo se haya ido (`ShellState.hidesBrandSlot`).
+    @Entry var brandSlotHiddenByLock = false
 }
 
 extension View {
@@ -126,9 +129,11 @@ private struct LaunchBrandSlot: ViewModifier {
     let markSide: CGFloat
     let gap: CGFloat
     @Environment(\.launchAnchor) private var anchor
+    @Environment(\.brandSlotHiddenByLock) private var hiddenByLock
 
     /// Cuánto de la ranura, desde la izquierda, deja de dibujarse: nada, la marca, o todo.
     private var hiddenLeading: CGFloat {
+        if hiddenByLock { return .infinity }
         switch anchor?.flying {
         case nil: 0
         case .mark: markSide + gap / 2

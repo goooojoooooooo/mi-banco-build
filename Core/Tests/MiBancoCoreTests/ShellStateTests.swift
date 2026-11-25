@@ -17,6 +17,7 @@ import Testing
             .launchAssembled, .launchFinished, .safetyFired,
             .exitFinished(id: state.exitCount), .exitFinished(id: state.exitCount - 1),
             .lockFadeFinished(id: state.fadeCount), .lockFadeFinished(id: state.fadeCount - 1),
+            .motionStyle(fadesOnly: true), .motionStyle(fadesOnly: false),
         ]
         for setting in settings {
             events.append(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
@@ -403,6 +404,52 @@ import Testing
             if !step.before.lockFading && step.after.lockFading { #expect(step.after.fadeCount == step.before.fadeCount + 1) }
             if case .lockFadeFinished(let id) = step.event, step.before.lockFading, id != step.before.fadeCount {
                 #expect(step.after.lockFading)
+            }
+        }
+    }
+
+    // MARK: Lote 3 (0) · Con solo fundidos, desbloquear no enseña dos marcas
+
+    /// En Sutil o con Reducir movimiento nada vuela: el bloqueo se funde con su marca grande sobre Inicio. Mientras se
+    /// funde, la ranura de la marca de la barra de Inicio no se dibuja (si no, se verían dos marcas a medias); aparece
+    /// en cuanto el fundido termina, y nunca se queda escondida.
+    @Test func aFadingUnlockNeverShowsTwoMarks() {
+        #expect(Self.states.contains { $0.hidesBrandSlot }, "el recorrido no llega a un desbloqueo con solo fundidos")
+        for state in Self.states {
+            // Con solo fundidos y el bloqueo fundiéndose (ya quitado), la ranura no se dibuja.
+            if state.fadesOnly, state.lockFading, !state.showsLock {
+                #expect(state.hidesBrandSlot, "dos marcas: el bloqueo se funde con la suya y la ranura dibuja otra: \(state)")
+            }
+            // Y solo entonces: ni con piezas (ahí la esconde la marca que vuela), ni sin fundido (se quedaría sin marca).
+            if state.hidesBrandSlot {
+                #expect(state.fadesOnly && state.lockFading && !state.showsLock, "\(state)")
+                #expect(!state.homeTakesTouches, "la ranura escondida con Inicio ya tocable: \(state)")
+            }
+        }
+        for step in Self.steps where step.event == .unlockSucceeded && step.before.showsLock && step.before.fadesOnly {
+            if step.after.lockFading { #expect(step.after.hidesBrandSlot, "\(step.before)") }
+        }
+        // Nunca se queda escondida: el aviso de fin del fundido en curso la devuelve, y también ir a segundo plano.
+        for step in Self.steps where step.before.hidesBrandSlot {
+            if step.event == .lockFadeFinished(id: step.before.fadeCount) { #expect(!step.after.hidesBrandSlot) }
+            if step.event == .scene(.background) { #expect(!step.after.hidesBrandSlot || !step.after.showsLock) }
+        }
+        // La secuencia: Sutil, desbloqueo en primer plano, fundido, fin.
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        state.apply(.motionStyle(fadesOnly: true))
+        #expect(!state.hidesBrandSlot)
+        state.apply(.unlockSucceeded)
+        #expect(state.lockFading && state.hidesBrandSlot)
+        state.apply(.lockFadeFinished(id: state.fadeCount))
+        #expect(!state.hidesBrandSlot)
+        // Con piezas, esto no esconde nada (la ranura la esconde la marca que vuela).
+        var pieces = ShellState(lockApplies: true, relocksOnBackground: true)
+        pieces.apply(.unlockSucceeded)
+        #expect(pieces.lockFading && !pieces.hidesBrandSlot)
+        // El estilo no toca el bloqueo: ni lo quita ni lo pone.
+        for step in Self.steps {
+            if case .motionStyle = step.event {
+                #expect(step.after.locked == step.before.locked && step.after.lockFading == step.before.lockFading)
             }
         }
     }

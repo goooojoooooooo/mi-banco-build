@@ -107,6 +107,16 @@ import Testing
                 #expect(brighter.isEmpty, "\(name): la marca se ve más que el negro en \(brighter.count) instantes")
                 #expect(doubled.isEmpty, "\(name): dos marcas a la vez en \(doubled.count) instantes, p. ej. \(doubled.prefix(2))")
             }
+            // Sin «fotograma en negro»: en ningún instante están a la vez casi apagadas la marca grande y Inicio (en
+            // Sutil, con la curva suave, la cola de la marca dejaba ~40 ms de negro casi total; run7, launch-sutil 5).
+            let fadeOutFrom = timeline.reduceMotion ? 0.24 : 0
+            var blank: [Double] = []
+            for t in stride(from: fadeOutFrom, through: timeline.duration, by: 0.001) {
+                let frame = timeline.frame(at: t)
+                if max(frame.mark, 1 - frame.black) < 0.1 { blank.append(t) }
+            }
+            // Como mucho un fotograma de 60 Hz (16,7 ms) en el que no se ve casi nada.
+            #expect(blank.count <= 18, "\(timeline.level) reducir=\(timeline.reduceMotion): \(blank.count) ms casi en negro")
             // Y el fundido sigue acabando: sin negro ni marca al final.
             #expect(timeline.frame(at: timeline.duration).black == 0)
             #expect(timeline.frame(at: timeline.duration).mark == 0)

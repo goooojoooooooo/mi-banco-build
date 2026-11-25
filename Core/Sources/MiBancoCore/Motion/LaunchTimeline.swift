@@ -168,8 +168,13 @@ public struct LaunchTimeline: Equatable, Sendable {
         let revealFrom = outFrom + Self.fadeMarkOut
         let markGone = Self.window(t, outFrom, revealFrom)
         let blackGone = Self.window(t, revealFrom, outFrom + Self.fadeOut)
-        frame.mark = 1 - (reduceMotion ? markGone : Self.easeOut(markGone))
-        frame.black = 1 - (reduceMotion ? blackGone : Self.easeOut(blackGone))
+        // La marca se apaga en línea recta (también en Sutil): con la curva de salida suave su cola se quedaba casi en
+        // cero unos 40 ms antes de que el negro empezara a aclararse, y a velocidad real se leía como un fotograma en
+        // negro (hoja `launch-sutil`, run7, fotograma 5). En recta llega a cero justo cuando empieza a verse Inicio.
+        frame.mark = 1 - markGone
+        // El negro se aclara con la curva de salida (rápido al principio): Inicio empieza a verse en cuanto la marca
+        // grande se ha ido. Es solo opacidad, también con Reducir movimiento.
+        frame.black = 1 - Self.easeOut(blackGone)
         return frame
     }
 

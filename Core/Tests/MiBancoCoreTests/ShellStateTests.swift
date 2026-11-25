@@ -202,8 +202,11 @@ import Testing
             #expect(step.before.showsLock || step.before.showsLaunch, "Inicio se volvió a montar estando a la vista: \(step.event)")
             switch step.event {
             case .unlockSucceeded:
-                #expect(step.before.showsLock)
-            case .launchAssembled, .launchFinished, .safetyFired, .scene(.inactive), .scene(.background):
+                // Con el bloqueo delante; o (m-8) sin bloqueo delante y con el arranque aún puesto: lo termina.
+                #expect(step.before.showsLock || (step.before.showsLaunch && step.before.coldStart))
+            case .launchAssembled, .launchFinished, .safetyFired, .scene(.inactive), .scene(.background),
+                 .lockSettingChanged:
+                // (m-8: un cambio del ajuste durante el arranque sin bloqueo también lo termina montando Inicio.)
                 #expect(step.before.showsLaunch && step.before.coldStart)
             default:
                 Issue.record("Inicio se montó con \(step.event)")

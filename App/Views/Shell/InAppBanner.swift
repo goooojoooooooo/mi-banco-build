@@ -40,7 +40,7 @@ struct InAppBanner: View {
                 details(left: left)
                     .opacity(Double(min(1, open * 1.4)))
                     // m-1: sus botones solo se tocan desplegado del todo (al recogerse, nada que no se ve recibe toques).
-                    .allowsHitTesting(actionsLive)
+                    .allowsHitTesting(open > 0.99) // PROVOCADO: como antes de N-2
             }
         }
         .padding(14)
@@ -52,8 +52,7 @@ struct InAppBanner: View {
         // de debajo. Lo que la máscara tapa, no (la forma de toque se desplaza con la máscara).
         .background(alignment: .top) {
             Color.clear
-                .contentShape(shape.offset(y: -hiddenBottom))
-                .onTapGesture {}
+                .allowsHitTesting(false) // PROVOCADO: sin el bloqueo de toques de N-1
                 .accessibilityHidden(true)
         }
         .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
@@ -152,6 +151,10 @@ struct InAppBanner: View {
         withAnimation(motion.animation(.release)) { dropped = true }
         guard await pause(0.95) else { return }
         leftRevealed = true
+        #if DEBUG
+        // Para las pruebas: el despliegue ha EMPEZADO (la máscara aún tapa los botones).
+        LaunchProbe.shared.bannerUnfolding = true
+        #endif
         withAnimation(motion.animation(.snap), completionCriteria: .logicallyComplete) { open = 1 } completion: {
             setActions(true)
         }
@@ -169,6 +172,7 @@ struct InAppBanner: View {
         actionsLive = live && open > 0.99
         #if DEBUG
         LaunchProbe.shared.bannerActions = actionsLive ? "1" : "0"
+        LaunchProbe.shared.bannerUnfolding = false
         #endif
     }
 

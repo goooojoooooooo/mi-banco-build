@@ -751,12 +751,12 @@ final class MotionShellTests: XCTestCase {
         launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "12"])
         let banner = element("in-app-banner")
         XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso dentro de la app")
-        let left = banner.staticTexts["Te quedan"]
-        XCTAssertTrue(left.waitForExistence(timeout: 30), "El aviso no llegó a desplegarse")
+        // Se toca cuando el despliegue ha EMPEZADO (el modelo ya dice «abierto»; la máscara aún tapa los botones).
+        XCTAssertTrue(waitUntil(40) { self.probe()["desplegandoAviso"] == "1" }, "El aviso no empezó a desplegarse")
         let note = banner.buttons["Añadir nota"]
         XCTAssertTrue(note.waitForExistence(timeout: 5), "Falta «Añadir nota»")
-        XCTAssertEqual(probe()["accionesAviso"], "0", "Ya desplegado al empezar a mirar: la prueba no dice nada")
         at(CGPoint(x: note.frame.midX, y: note.frame.midY)).tap()
+        XCTAssertEqual(probe()["accionesAviso"], "0", "Ya desplegado al tocar: la prueba no dice nada")
         Thread.sleep(forTimeInterval: 1.5)
         XCTAssertFalse(app.buttons["Cerrar"].exists, "«Añadir nota» abrió la hoja mientras el aviso se desplegaba")
         XCTAssertTrue(banner.exists, "Un toque durante el despliegue quitó el aviso")

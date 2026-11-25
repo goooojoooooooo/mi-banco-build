@@ -310,12 +310,14 @@ struct ImportStatementView: View {
             errorTick += 1
             return false
         }
-        // Guardado de verdad: el porcentaje corre de lo que se veía a 100 (0,25 s, la rueda sigue en el botón) y, justo
-        // cuando llega a 100, en la misma transacción el tercer nodo se rellena con su ✓ y el botón pasa a su ✓: los tres
-        // a la vez (menor m-5 del lote 2 y m-13 del lote 3; antes el ✓ llegaba con 99).
+        // Guardado de verdad: el porcentaje corre de lo que se veía a 100 (0,25 s, la rueda sigue en el botón). El tercer
+        // nodo y el botón tardan unos 0,15 s en enseñar su ✓ desde que se marcan (relleno y trazo), así que se marcan
+        // 0,15 s antes de que la cifra llegue: el 100 y los dos ✓ se ven a la vez (menor m-5 del lote 2 y m-13 del
+        // lote 3; antes el ✓ llegaba con 99, y marcándolos al llegar a 100, el 100 iba tres fotogramas por delante).
         steps.succeed(shown: drawn)
         stepStarted = Date()
-        try? await Task.sleep(for: .seconds(motion.reduce ? 0 : motion.seconds(StepPercent.finishSeconds)))
+        let lead = StepPercent.finishSeconds - 0.15
+        try? await Task.sleep(for: .seconds(motion.reduce ? 0 : motion.seconds(lead)))
         withAnimation(motion.calmAnimation(.row)) {
             importing = false
             applied = true

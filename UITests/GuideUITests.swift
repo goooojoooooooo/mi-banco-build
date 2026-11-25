@@ -219,8 +219,8 @@ final class GuideUITests: XCTestCase {
     private func visibleTop() -> CGFloat {
         let ids = ["guide-step-part", "guide-step-counter", "guide-stepper", "guide-progress", "guide-header"]
         let bottom = ids.map { app.descendants(matching: .any).matching(identifier: $0).firstMatch }
-            .filter(\.exists)
-            .map(\.frame.maxY)
+            .filter { $0.exists }
+            .map { $0.frame.maxY }
             .max() ?? 0
         return bottom + 12
     }

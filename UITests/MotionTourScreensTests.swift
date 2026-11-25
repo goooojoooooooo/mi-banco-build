@@ -570,7 +570,7 @@ final class MotionTourScreensTests: MotionTourCase {
         Thread.sleep(forTimeInterval: 5)
         XCTAssertTrue(confirm.isHittable, "«Importar» no se puede tocar")
         confirm.tap()
-        burst("import-confirm", frames: 14, every: 0.2)
+        burst("import-confirm", frames: 20, every: 0.2)
         XCTAssertTrue(app.buttons["bank-import-statement"].waitForExistence(timeout: 10), "Tras importar no volvió al banco")
     }
 }

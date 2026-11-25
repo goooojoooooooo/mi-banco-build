@@ -1085,10 +1085,13 @@ final class MotionHomeTests: XCTestCase {
     /// Con el texto más grande, la cabecera del abanico («Tus tarjetas» y la ayuda) no queda debajo de la primera
     /// tarjeta: su alto sale de lo que mide (antes, 92 pt fijos).
     func testWalletFanHeaderFitsAtLargestText() throws {
-        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes",
+        // Con este tamaño de texto la tarjeta no siempre queda bajo el dedo de la prueba: el abanico se abre por el mismo
+        // camino (`openFan`) con el momento de demo (tocar el segmento ya elegido).
+        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoDemoCardMoment", "fan",
                     "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
-        XCTAssertTrue(carousel().waitForExistence(timeout: 8), "Falta el carrusel")
-        carousel().coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3)).press(forDuration: 1.6)
+        let todo = segment("Todo")
+        XCTAssertTrue(todo.waitForExistence(timeout: 8), "Falta el segmento «Todo»")
+        todo.tap()
         XCTAssertTrue(waitUntil(5) { self.homeProbe()["abanico"] == "1" }, "No se abrió el abanico: \(homeProbe())")
         let help = app.staticTexts["Toca una para abrirla."]
         let first = app.buttons["wallet-card-all"]

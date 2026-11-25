@@ -562,6 +562,9 @@ struct MoveMoneySheet: View {
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
+                    // Al teclear, la línea no cambia de golpe antes de que entre el dígito: se apaga y vuelve con
+                    // la cifra nueva cuando el dígito ya ha entrado (0,1 s + fundido de 0,2 s).
+                    .modifier(DetailRefade(key: detail))
                 }
             }
             .padding(.horizontal, 14)
@@ -913,6 +916,27 @@ struct MoveMoneySheet: View {
         // El paso «listo» sustituye al del importe con un fundido; su contenido hace después su propia entrada.
         withAnimation(motion.fade) {
             step = .ready(from: from, target: target, amountCents: cents, kind: copied.kind)
+        }
+    }
+}
+
+/// La línea de una ficha de «Desde» cuando cambia al teclear: se apaga al instante, espera 0,1 s (lo que tarda el dígito
+/// en entrar) y vuelve con la cifra nueva en 0,2 s. Solo cambia la opacidad; con Reducir movimiento, sin espera.
+private struct DetailRefade: ViewModifier {
+    let key: String
+    @Environment(\.motion) private var motion
+
+    func body(content: Content) -> some View {
+        let wait = motion.reduce ? 0.001 : motion.seconds(0.1)
+        let back = motion.reduce ? 0.22 * motion.timeMultiplier : motion.seconds(0.2)
+        content.keyframeAnimator(initialValue: 1.0, trigger: key) { view, opacity in
+            view.opacity(opacity)
+        } keyframes: { _ in
+            KeyframeTrack {
+                MoveKeyframe(0.0)
+                LinearKeyframe(0.0, duration: wait)
+                LinearKeyframe(1.0, duration: back)
+            }
         }
     }
 }

@@ -833,7 +833,7 @@ final class MotionScreensTests: XCTestCase {
     /// «Todo listo», el porcentaje llega a 100 con los tres nodos hechos y SOLO entonces (tras la pausa) sale
     /// «imagin, conectado», ya sin los pasos. Mientras tanto «Cancelar» se apaga sin que nada de lo de debajo se mueva.
     func testConnectFinishShowsAllDoneBeforeConnected() throws {
-        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "3", "-MiBancoDemoConnectFill", "2",
+        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "6", "-MiBancoDemoConnectFill", "2",
                          "-MiBancoMotionScale", "10"])
         let renew = app.buttons["Renovar conexión"]
         XCTAssertTrue(renew.waitForExistence(timeout: 40), "Falta «Renovar conexión»")
@@ -847,7 +847,16 @@ final class MotionScreensTests: XCTestCase {
                       "No llegó al segundo paso: \(percent.label)")
         XCTAssertTrue(app.buttons["bank-cancel-wait"].exists, "Esperando al banco falta «Cancelar»")
         XCTAssertTrue(importButton.exists, "Falta «Importar extracto»")
-        let before = importButton.frame.minY
+        // A cámara lenta ×10 la entrada de la cabecera (un muelle) sigue asentándose unos segundos: se mide cuando el
+        // botón ya está quieto (dos lecturas iguales seguidas), para no confundir ese asentamiento con un salto.
+        var before = importButton.frame.minY
+        for _ in 0..<20 {
+            Thread.sleep(forTimeInterval: 0.4)
+            let now = importButton.frame.minY
+            if abs(now - before) < 0.1 { break }
+            before = now
+        }
+        XCTAssertTrue(percent.label.hasPrefix("Paso 2 de 3"), "El paso cambió antes de medir: \(percent.label)")
 
         // Tercer paso: «Cancelar» ya no se puede tocar, pero su hueco se queda: nada sube de golpe (14.3).
         XCTAssertTrue(waitFor(NSPredicate(format: "label BEGINSWITH %@", "Paso 3 de 3"), percent, timeout: 15),

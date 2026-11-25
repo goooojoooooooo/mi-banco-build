@@ -12,7 +12,6 @@ struct OnboardingView: View {
 
     @Environment(\.motion) private var motion
     @Environment(\.presentationGate) private var gate
-    @Environment(\.scenePhase) private var scenePhase
     /// La bienvenida ya está a la vista (el bloqueo se ha abierto o el arranque ha dejado ver lo de debajo): entonces
     /// cruzan las bandas y llegan las piezas. Si se jugara al montarse, pasaría entera detrás del bloqueo o del arranque.
     @State private var welcomed = false
@@ -88,14 +87,15 @@ struct OnboardingView: View {
             let stretch = max(motion.timeMultiplier, 0.01)
             let wait = launch.assembleAt * stretch
             try? await Task.sleep(for: .seconds(max(0.05, wait)))
-            if gate?.isLocked == true || scenePhase != .active {
+            if gate?.isLocked == true {
                 // Con el bloqueo delante la bienvenida empieza al abrirse (`onChange`). Respaldo (menor m-13): si ese
-                // aviso no llegara, se mira cada medio segundo (como mucho 10 min) y empieza en cuanto la escena esté
-                // activa y sin bloqueo; nunca se queda sin jugar ni con la marca escondida.
+                // aviso no llegara, se mira cada medio segundo (como mucho 10 min) el bloqueo DE VERDAD (la puerta es
+                // un objeto vivo; el `scenePhase` copiado en esta tarea no lo sería) y empieza en cuanto se abre; nunca
+                // se queda sin jugar ni con la marca escondida.
                 for _ in 0..<1_200 {
                     try? await Task.sleep(for: .seconds(0.5))
                     if Task.isCancelled || welcomed { return }
-                    if gate?.isLocked != true && scenePhase == .active { break }
+                    if gate?.isLocked != true { break }
                 }
                 guard !welcomed, gate?.isLocked != true else { return }
                 welcomed = true

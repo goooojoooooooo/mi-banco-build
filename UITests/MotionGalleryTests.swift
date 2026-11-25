@@ -593,14 +593,18 @@ final class MotionGalleryTests: XCTestCase {
         launchGallery()
         XCTAssertTrue(waitUntil { self.amountLabel() == "3.774,75 euros" })
         let ids = ["gallery.amount", "gallery.row.expense", "gallery.row.income", "gallery.row.plain", "gallery.row.long",
-                   "gallery.row.huge", "gallery.row.buttonAboveAmount", "gallery.row.buttonAmount", "gallery.row.buttonBelowAmount"]
+                   "gallery.row.huge", "gallery.row.buttonAboveAmount", "gallery.row.buttonAmount", "gallery.row.buttonBelowAmount",
+                   // Lote 2: la frase con el importe en línea, el importe en euros enteros y la cifra con millares.
+                   "gallery.sentence.amount", "gallery.whole.amount", "gallery.thousands.amount"]
+        // El importe en euros enteros se lee sin céntimos («1.290 euros»): es un importe, pero no una etiqueta con decimales.
+        let wholeEuroAmounts = 1
         for id in ids {
             XCTAssertTrue(any(id).label.hasSuffix(" euros"), "\(id) no es un importe a la vista: «\(any(id).label)»")
         }
         // Toda etiqueta con cifras es uno de esos importes o un botón que lleva uno dentro.
         let money = NSPredicate(format: "label MATCHES %@", #".*[0-9]{1,3}(\.[0-9]{3})*,[0-9]{2}.*"#)
         let buttons = app.buttons.matching(money).count
-        XCTAssertEqual(moneyLabelCount(), ids.count + buttons,
+        XCTAssertEqual(moneyLabelCount(), ids.count - wholeEuroAmounts + buttons,
                        "Etiquetas con cifras: \(moneyLabelCount()), importes \(ids.count), botones con importe \(buttons)")
         // Que acabe de rodar el protagonista (cuenta desde 0 al abrir).
         Thread.sleep(forTimeInterval: 2)
@@ -777,5 +781,75 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil { expressive.isSelected }, "«Expresivo» no es el nivel de partida")
         XCTAssertFalse(app.buttons["Equilibrado"].isSelected)
         XCTAssertFalse(app.buttons["Sutil"].isSelected)
+    }
+
+    // MARK: - Lote 2 · frases, euros enteros y millares
+
+    private func launchSentences(_ extra: [String] = []) {
+        launchGallery(["-MiBancoMotionGalleryPage", "frases"] + extra)
+        XCTAssertTrue(any("gallery.sentence.amount").waitForExistence(timeout: 20), "Falta la sección de frases de la galería")
+    }
+
+    /// Dentro de una frase (`inline`), un importe oculto ocupa lo que mide su máscara: no deja un blanco entre la
+    /// palabra de delante y él (antes la máscara iba pegada a la derecha del hueco del importe real: «Vas    •••,•• €»).
+    /// Y con el ojo abierto la frase sigue igual de junta.
+    func testHiddenInlineAmountLeavesNoGapInASentence() throws {
+        for extra in [["-MiBancoDemoPrivate"], []] {
+            launchSentences(extra)
+            let before = any("gallery.sentence.before").frame
+            let amount = any("gallery.sentence.amount").frame
+            let after = any("gallery.sentence.after").frame
+            XCTAssertTrue(amount.width > 20, "\(extra): el importe de la frase no tiene ancho: \(amount)")
+            // El espacio entre piezas de la frase es de 4 pt.
+            XCTAssertEqual(amount.minX - before.maxX, 4, accuracy: 1.5, "\(extra): hay un blanco delante del importe")
+            XCTAssertEqual(after.minX - amount.maxX, 4, accuracy: 1.5, "\(extra): hay un blanco detrás del importe")
+            if extra.isEmpty {
+                XCTAssertEqual(any("gallery.sentence.amount").label, "1.284,55 euros")
+            } else {
+                XCTAssertEqual(any("gallery.sentence.amount").label, "importe oculto")
+                // La máscara («•••,•• €») es más estrecha que la cifra a la que sustituye («1.284,55 €»): si ocupara su
+                // hueco, mediría lo mismo que ella.
+                let hiddenWidth = amount.width
+                app.terminate()
+                launchSentences()
+                XCTAssertLessThan(hiddenWidth, any("gallery.sentence.amount").frame.width - 4,
+                                  "Oculto, el importe de la frase sigue ocupando el hueco de la cifra")
+            }
+            app.terminate()
+        }
+    }
+
+    /// Euros enteros (`.whole`): se lee y se dibuja sin céntimos («1.290 €», redondeado), y oculto es «importe oculto»
+    /// sin una sola cifra ni «€» a la vista de las pruebas.
+    func testWholeEuroAmountHasNoDecimals() throws {
+        launchSentences()
+        let whole = any("gallery.whole.amount")
+        XCTAssertEqual(whole.label, "1.290 euros", "El importe en euros enteros no se lee redondeado y sin céntimos")
+        let width = whole.frame.width
+        let withCents = any("gallery.sentence.amount").frame.width
+        XCTAssertLessThan(width, withCents - 8, "El importe en euros enteros ocupa lo mismo que uno con céntimos")
+        app.terminate()
+
+        launchSentences(["-MiBancoDemoPrivate"])
+        XCTAssertEqual(any("gallery.whole.amount").label, "importe oculto")
+        let money = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@ OR label CONTAINS %@ OR label CONTAINS %@", "€", "1.290", "1.289"))
+        XCTAssertEqual(money.count, 0, "Con el ojo cerrado queda a la vista: «\(money.firstMatch.label)»")
+    }
+
+    /// Abrir y cerrar el ojo sobre una cifra con millares: la etiqueta pasa de «importe oculto» a la cifra y vuelve, y
+    /// el importe no cambia de ancho (su hueco es el de la cifra). Que al abrirse no asoma «0.145,19 €» lo prueban
+    /// `LeadingZeroTests` (Core) y la hoja `gallery-eye-thousands`.
+    func testThousandsAmountSurvivesTheEye() throws {
+        launchSentences(["-MiBancoDemoPrivate"])
+        let amount = any("gallery.thousands.amount")
+        XCTAssertEqual(amount.label, "importe oculto")
+        let hiddenWidth = amount.frame.width
+        tap("gallery.sentence.eye")
+        XCTAssertTrue(waitUntil(5) { amount.label == "3.145,19 euros" }, "Al abrir el ojo la cifra no se lee: «\(amount.label)»")
+        Thread.sleep(forTimeInterval: 1.2)
+        XCTAssertEqual(amount.frame.width, hiddenWidth, accuracy: 1, "La cifra con millares cambia de ancho al abrir el ojo")
+        tap("gallery.sentence.eye")
+        XCTAssertTrue(waitUntil(5) { amount.label == "importe oculto" }, "Al cerrar el ojo la cifra se sigue leyendo")
     }
 }

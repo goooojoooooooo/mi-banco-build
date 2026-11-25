@@ -7,6 +7,9 @@ struct MiBancoApp: App {
     init() {
         // Antes de terminar el arranque: así un toque en un aviso que abre la app en frío también llega al router.
         UNUserNotificationCenter.current().delegate = ForegroundPresenter.shared
+        #if DEBUG
+        LaunchProbe.shared.appInitAt = Date().timeIntervalSince1970
+        #endif
     }
 
     var body: some Scene {
@@ -81,12 +84,6 @@ private struct AppShellView: View {
         }
     }
 
-    /// Tapa opaca del selector de apps: la regla está en `ShellState.showsCover` (fuera de primer plano y sin el bloqueo
-    /// ya delante, con el bloqueo activado o sin él).
-    private var showsCover: Bool {
-        ShellState.showsCover(scene: coverScene, showsLock: shell.showsLock)
-    }
-
     /// Lo que se le cuenta a `ShellState` de un cambio de fase. En la demo, «inactiva» no se cuenta (parpadea en CI) y
     /// «activa» tampoco mientras dura la simulación de una prueba.
     private func shellScene(_ phase: ScenePhase) -> ShellState.Scene? {
@@ -106,6 +103,13 @@ private struct AppShellView: View {
         }
     }
 
+    /// Cómo entra y sale una capa: lo dice `ShellState` (solo se anima el bloqueo al quitarse; todo lo demás, de golpe).
+    private func transition(of layer: ShellState.Layer) -> AnyTransition {
+        .asymmetric(
+            insertion: ShellState.animatesInsertion(of: layer) ? .opacity : .identity,
+            removal: ShellState.animatesRemoval(of: layer) ? .opacity : .identity)
+    }
+
     var body: some View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-MiBancoSelfTest") {
@@ -119,16 +123,19 @@ private struct AppShellView: View {
         #endif
     }
 
-    @ViewBuilder
     private var content: some View {
-            ZStack {
+            // Las capas que hay, tal cual las da `ShellState` con la fase de escena de este instante. Esta vista no
+            // decide ninguna: pinta cada una si está en la lista, a la altura y con la entrada y la salida que dice él.
+            let layers = shell.layers(liveScene: coverScene)
+            return ZStack {
                 #if DEBUG
                 if DemoMode.isActive { LaunchProbeView() }
                 #endif
                 RootView(model: model, portfolio: portfolio, accountBook: accountBook,
                          briefing: briefing, speaker: speaker,
                          isLocked: shell.showsLock, revealToken: homeRevealToken)
-                    .accessibilityHidden(shell.hidesHome)
+                    // VoiceOver no lee Inicio con el bloqueo delante, ni bajo el negro del arranque, ni bajo la tapa.
+                    .accessibilityHidden(shell.hidesHomeFromVoiceOver || layers.contains(.cover))
                     // Ni con el bloqueo delante ni mientras el bloqueo, ya desbloqueado, se funde: un toque tardío sobre
                     // «Desbloquear» caería en la barra de pestañas que hay justo debajo.
                     .allowsHitTesting(shell.homeTakesTouches)
@@ -136,25 +143,25 @@ private struct AppShellView: View {
                 // la marca que vuela; y, encima de todo, la tapa del selector de apps. Qué capa hay la decide `ShellState`:
                 // el arranque y la marca que vuela nunca existen con el bloqueo puesto, y la tapa nunca va encima de él.
                 // Solo se anima una cosa: el bloqueo al quitarse (`ShellState.animatesRemoval`); todo lo demás entra y sale
-                // de golpe.
-                // Cada capa lleva su `zIndex`: sin él, una vista que se está quitando de un `ZStack` pasa al fondo, y el
-                // bloqueo, en vez de fundirse sobre Inicio, desaparecía de golpe detrás de él (visto en las hojas).
-                if shell.showsLock {
+                // de golpe (`transition(of:)`).
+                // Cada capa lleva su `zIndex` (`ShellState.zIndex(of:)`): sin él, una vista que se está quitando de un
+                // `ZStack` pasa al fondo, y el bloqueo, en vez de fundirse sobre Inicio, desaparecía de golpe detrás de él.
+                if layers.contains(.lock) {
                     // Entra sin animación (la captura del selector de apps nunca pilla la app a medias);
                     // al desbloquear en primer plano se desvanece, porque solo ese cambio va en `withAnimation`; si la
                     // escena no está activa se quita de golpe y lo releva la tapa (`ShellState.lockExitOnUnlock`).
                     // En el arranque en frío monta las piezas sobre su propia marca; en un re-bloqueo, la marca está quieta.
                     LockView(locked: unlockBinding, playsLaunch: shell.lockPlaysLaunch,
                              leaveOnUnlock: lockLeave, fadeStarted: lockFadeStarted)
-                        .transition(.opacity)
-                        .zIndex(1)
-                } else if shell.showsLaunch {
+                        .transition(transition(of: .lock))
+                        .zIndex(ShellState.zIndex(of: .lock))
+                } else if layers.contains(.launch) {
                     // Sin bloqueo: el arranque. Se quita cuando ya es transparente (sin transición).
                     LaunchSequence(onAssemble: { shell.apply(.launchAssembled) }, onFinish: { shell.apply(.launchFinished) })
-                        .transition(.identity)
-                        .zIndex(1)
+                        .transition(transition(of: .launch))
+                        .zIndex(ShellState.zIndex(of: .launch))
                 }
-                if let exit = shell.shownExit, let geometry = exitGeometry, geometry.id == exit.id {
+                if layers.contains(.exit), let exit = shell.shownExit, let geometry = exitGeometry, geometry.id == exit.id {
                     // Aparece y se quita de golpe aunque el desbloqueo vaya animado: su primer fotograma es la marca
                     // donde estaba (el bloqueo suelta la suya en ese mismo instante) y el último no pinta nada.
                     // Va por encima del bloqueo SOLO mientras este se está fundiendo (ya desbloqueado).
@@ -162,14 +169,14 @@ private struct AppShellView: View {
                         shell.apply(.exitFinished(id: exit.id))
                     }
                     .id(exit.id)
-                    .transition(.identity)
-                    .zIndex(2)
+                    .transition(transition(of: .exit))
+                    .zIndex(ShellState.zIndex(of: .exit))
                 }
-                if showsCover {
+                if layers.contains(.cover) {
                     // De golpe, al ponerse y al quitarse: nunca se funde con el bloqueo ni deja un destello.
                     privacyCover
-                        .transition(.identity)
-                        .zIndex(3)
+                        .transition(transition(of: .cover))
+                        .zIndex(ShellState.zIndex(of: .cover))
                 }
             }
             .environment(\.launchAnchor, launchAnchor)
@@ -228,6 +235,15 @@ private struct AppShellView: View {
                 // El bloqueo al ir a segundo plano, el corte del arranque fuera de primer plano y el vuelo de la marca
                 // que esperaba a primer plano: lo decide `ShellState`.
                 if let scene = shellScene(phase) { shell.apply(.scene(scene)) }
+                #if DEBUG
+                switch phase {
+                case .active: LaunchProbe.shared.scene = "activa"
+                case .background:
+                    LaunchProbe.shared.scene = "fondo"
+                    LaunchProbe.shared.backgrounds += 1
+                default: LaunchProbe.shared.scene = "inactiva"
+                }
+                #endif
                 switch phase {
                 case .active:
                     model.reload()
@@ -262,6 +278,20 @@ private struct AppShellView: View {
             .onChange(of: shell.showsLock) { _, isLocked in
                 if isLocked { speaker.stop() }
             }
+            // La marca de la barra de Inicio se esconde mientras vuela la del arranque (`LaunchAnchor.flying`, que ponen
+            // y quitan las propias capas que vuelan). Respaldo: sin ninguna de esas capas, nunca se queda escondida.
+            .onChange(of: layers.contains(.launch) || layers.contains(.exit)) { _, flying in
+                if !flying { launchAnchor.flying = nil }
+            }
+            #if DEBUG
+            .onChange(of: launchAnchor.flying) { _, flying in
+                switch flying {
+                case nil: LaunchProbe.shared.brandFlying = "-"
+                case .mark: LaunchProbe.shared.brandFlying = "marca"
+                case .markAndName: LaunchProbe.shared.brandFlying = "marcaYNombre"
+                }
+            }
+            #endif
             // Inicio se monta por capas cuando sube el contador. El salto por `onChange` lo saca de la transacción animada
             // del desbloqueo (como siempre fue): las piezas de Inicio se ocultan de golpe y luego entran.
             .onChange(of: shell.revealToken) { _, token in
@@ -309,6 +339,8 @@ private struct AppShellView: View {
     /// primer plano se funde y, si la marca echa a volar en ese instante, suelta la suya (para que no se vean dos);
     /// fuera de primer plano se quita de golpe, porque la tapa lo releva.
     private func lockLeave() -> LockLeave {
+        // En segundo plano no se desbloquea (`ShellState` lo ignoraría): el bloqueo se queda como está.
+        guard shell.acceptsUnlock else { return .refused }
         #if DEBUG
         // La prueba que simula «inactiva tras desbloquear»: para la carcasa la escena ya está inactiva en el desbloqueo
         // (`simulateInactiveUnlockIfAsked` se lo cuenta a `ShellState` justo antes de desbloquear).
@@ -329,12 +361,15 @@ private struct AppShellView: View {
         #if DEBUG
         LaunchProbe.shared.lockFading = shell.lockFading
         #endif
+        // El número de ESTE fundido: si entre medias hay un re-bloqueo y otro desbloqueo, este aviso ya no acaba el
+        // fundido nuevo (lo acabará el suyo, que también se manda siempre).
+        let fade = shell.fadeCount
         Task { @MainActor in
             if seconds > 0 { try? await Task.sleep(for: .seconds(seconds), tolerance: .milliseconds(20)) }
-            shell.apply(.lockFadeFinished)
+            shell.apply(.lockFadeFinished(id: fade))
             #if DEBUG
-            LaunchProbe.shared.lockFading = false
-            LaunchProbe.shared.lockFadesWithItsMark = false
+            LaunchProbe.shared.lockFading = shell.lockFading
+            if !shell.lockFading { LaunchProbe.shared.lockFadesWithItsMark = false }
             #endif
         }
     }
@@ -373,7 +408,8 @@ private struct AppShellView: View {
         return LockFace(nameOpacity: plain ? 0 : 1, taglineOpacity: 0) {
             AppMark(size: 76).opacity(plain ? 0 : 1)
         } action: {
-            Color.clear.frame(height: 52)
+            // El hueco del botón del bloqueo, con su alto de verdad (crece con el tamaño del texto).
+            UnlockLabel().hidden()
         }
         .background(Theme.canvas.ignoresSafeArea())
         .accessibilityHidden(true)

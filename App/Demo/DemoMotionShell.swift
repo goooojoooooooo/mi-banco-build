@@ -48,8 +48,12 @@ extension DemoMode {
     var exits = 0
     /// Veces que Inicio ha recibido la orden de montarse por capas (`ShellState.revealToken`).
     var reveals = 0
-    /// Cómo estaba la marca del bloqueo al empezar a fundirse en el último desbloqueo: «completa» o «piezas».
-    var lockMarkAtUnlock = "-"
+    /// Cómo estaba la marca del bloqueo en el instante del último desbloqueo, ANTES de que el bloqueo la dejara
+    /// terminada: «piezas» (aún se montaba), «completa» o «fija» (re-bloqueo).
+    var lockMarkBeforeLeaving = "-"
+    /// Cómo dejó el bloqueo su marca al irse en el último desbloqueo (lo que recoge la marca que vuela): tiene que ser
+    /// siempre «completa».
+    var lockMarkLeaving = "-"
     /// El bloqueo, ya desbloqueado, se está fundiendo (`ShellState.lockFading`): Inicio aún no recibe toques.
     var lockFading = false
     /// Hay un bloqueo fundiéndose que sigue dibujando su marca (no la entregó a la que vuela).
@@ -59,6 +63,25 @@ extension DemoMode {
     /// Cuándo empieza (o empezó) el último arranque o montaje del bloqueo: segundos desde 1970, para que una prueba que
     /// lo graba sepa cuándo hacer la primera captura.
     var startsAt: Double?
+    /// Qué parte de la marca de la barra de Inicio NO se dibuja ahora porque la lleva la que vuela
+    /// (`LaunchAnchor.flying`): «-», «marca» o «marcaYNombre».
+    var brandFlying = "-"
+    /// Veces que un desbloqueo ha llegado con la app en segundo plano y no se ha aceptado (`ShellState.acceptsUnlock`).
+    var refusedUnlocks = 0
+    /// Veces que la marca que vuela tras desbloquear ha aterrizado en la ranura de Inicio (entera, hasta el final).
+    var landings = 0
+    /// Cuándo se creó la app (segundos desde 1970) y cuántos milisegundos pasaron hasta montarse la capa del arranque:
+    /// lo que el arranque tarda en EMPEZAR, que la propia capa no puede medir.
+    var appInitAt: Double?
+    var mountedAfterMs: Int?
+    /// Veces que la app ha visto su escena pasar a segundo plano, y la fase de ahora («activa», «inactiva», «fondo»):
+    /// una prueba que manda la app atrás sabe así si de verdad llegó (la vista desde fuera no basta: con dos simuladores
+    /// en paralelo el gesto de Inicio puede llegar tarde o no llegar).
+    var backgrounds = 0
+    var scene = "-"
+    /// Si el bloqueo que se está quitando sigue a la vista de VoiceOver: «oculto» desde el instante del desbloqueo
+    /// (es el mismo valor que recibe su `accessibilityHidden`), «visible» mientras está puesto, «-» sin bloqueo aún.
+    var lockVoiceOver = "-"
 
     /// «arranques=1;estilo=piezas;saltos=0;libre=963;fin=1344;bloqueoPiezas=0;bloqueoQuieto=0;salidas=0;empieza=1764000000.123»
     var summary: String {
@@ -66,8 +89,11 @@ extension DemoMode {
             "arranques=\(launches)", "estilo=\(style)", "saltos=\(skips)",
             "libre=\(freeAfterMs.map { String($0) } ?? "-")", "fin=\(finishedAfterMs.map { String($0) } ?? "-")",
             "bloqueoPiezas=\(lockPlays)", "bloqueoQuieto=\(lockStatic)", "salidas=\(exits)", "montajes=\(reveals)",
-            "marcaAlDesbloquear=\(lockMarkAtUnlock)",
+            "marcaAntes=\(lockMarkBeforeLeaving)", "marcaAlIrse=\(lockMarkLeaving)",
             "fundido=\(lockFading ? 1 : 0)", "marcasDobles=\(doubleMarks)",
+            "ranura=\(brandFlying)", "aterrizajes=\(landings)", "rechazados=\(refusedUnlocks)",
+            "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
+            "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",
         ].joined(separator: ";")
     }

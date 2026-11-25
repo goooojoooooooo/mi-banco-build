@@ -122,8 +122,9 @@ public struct LaunchTimeline: Equatable, Sendable {
         style == .pieces ? Self.flightStart * scale : nil
     }
 
-    /// Desde cuándo la capa deja pasar los toques a Inicio (antes, un toque la salta).
-    public var interactiveAt: Double { flightAt ?? assembleAt }
+    /// Desde cuándo la capa deja pasar los toques a Inicio (antes, un toque la salta). Con solo fundido, cuando Inicio
+    /// empieza a verse (la marca grande ya se ha apagado): nunca se toca un Inicio que aún está bajo el negro entero.
+    public var interactiveAt: Double { flightAt ?? (assembleAt + Self.fadeMarkOut) }
 
     /// Cuándo encajan las dos mitades de la ola (el golpe háptico); nil si solo hay fundido.
     public var piecesLockAt: Double? {

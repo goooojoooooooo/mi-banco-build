@@ -168,7 +168,8 @@ private struct AppShellView: View {
                         .zIndex(ShellState.zIndex(of: .lock))
                 } else if layers.contains(.launch) {
                     // Sin bloqueo: el arranque. Se quita cuando ya es transparente (sin transición).
-                    LaunchSequence(onAssemble: { shell.apply(.launchAssembled) }, onFinish: { shell.apply(.launchFinished) })
+                    LaunchSequence(onAssemble: { shell.apply(.launchAssembled) }, onFinish: { shell.apply(.launchFinished) },
+                                   noSlot: model.needsOnboarding)
                         .transition(transition(of: .launch))
                         .zIndex(ShellState.zIndex(of: .launch))
                 }
@@ -342,6 +343,8 @@ private struct AppShellView: View {
     /// De dónde saldría volando la marca: el sitio de la marca del bloqueo, si se conoce y hay a dónde ir (en frío, a
     /// donde estará la ranura de Inicio; después, solo si Inicio la tiene a la vista).
     private func flightOrigin(cold: Bool) -> CGRect? {
+        // En la bienvenida (primera vez) no hay Inicio ni ranura: la marca no vuela a ninguna parte.
+        guard !model.needsOnboarding else { return nil }
         guard let from = launchAnchor.lockMarkFrame, from.width > 0, cold || launchAnchor.brandFrame != nil else { return nil }
         return from
     }

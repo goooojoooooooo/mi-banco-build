@@ -20,6 +20,9 @@ struct LaunchSequence: View {
     let onAssemble: () -> Void
     /// La capa ya no pinta nada: se puede quitar.
     let onFinish: () -> Void
+    /// Debajo no hay Inicio sino la bienvenida (primera vez): no hay ranura a la que volar. La marca no vuela: se apaga
+    /// sobre el negro entero y solo después el negro se aclara (la bienvenida tiene su propia marca: nunca dos).
+    var noSlot = false
 
     @Environment(\.motion) private var motion
     @Environment(\.launchAnchor) private var anchor
@@ -76,11 +79,19 @@ struct LaunchSequence: View {
         let center = CGPoint(x: size.width / 2, y: size.height * 0.45)
         // Con la ranura de Inicio a la vista, la marca y el nombre ATERRIZAN en ella, enteros, y en ese instante la
         // capa se quita y la ranura dibuja los suyos en el mismo sitio. Sin ranura, se deshacen por el camino.
-        let brand = anchor?.brandFrame
+        let brand = noSlot ? nil : anchor?.brandFrame
         let lands = pieces && brand != nil
         let slot = brand ?? LaunchGeometry.fallbackSlot(topInset: topInset)
         let markSide = lands ? anchor?.brandMarkSide : nil
-        let flight = CGFloat(frame.flight)
+        // Sin ranura (bienvenida): nada vuela; la marca se apaga mientras el negro va de 1 a 0,5 y el negro, ya sin
+        // marca encima, se aclara de 0,5 a 0 (en el tiempo del guion: lo mismo dura).
+        let flight = noSlot ? 0 : CGFloat(frame.flight)
+        let held = LaunchGeometry.heldForWelcome(black: frame.black, mark: frame.mark)
+        var frame = frame
+        if noSlot {
+            frame.black = held.black
+            frame.mark = held.mark
+        }
         let target = LaunchGeometry.markTarget(in: slot, markSide: markSide)
         let nameHome = CGPoint(x: center.x, y: center.y + Self.markSize / 2 + 28)
         let tracking = CGFloat(0.42 - 0.24 * frame.name) * Self.nameSize
@@ -247,7 +258,9 @@ struct LaunchExit: View {
     private func scene(_ frame: LaunchFrame, topInset: CGFloat) -> some View {
         let home = CGPoint(x: from.midX, y: from.midY)
         let brand = anchor?.brandFrame
-        let lands = landsOnSlot ?? (brand != nil)
+        // m-7: si la ranura desaparece a mitad del vuelo (otra pestaña), la marca ya no aterriza: se deshace por el
+        // camino en vez de quedarse entera donde estaba.
+        let lands = (landsOnSlot ?? true) && brand != nil
         let slot = brand ?? (cold ? LaunchGeometry.fallbackSlot(topInset: topInset) : from)
         let flight = CGFloat(frame.flight)
         let target = LaunchGeometry.markTarget(in: slot, markSide: lands && brand != nil ? anchor?.brandMarkSide : nil)
@@ -292,6 +305,14 @@ enum LaunchGeometry {
     /// estará), se va deshaciendo por el camino: no aterriza encima de nada.
     static func landingOpacity(flight: CGFloat, hasSlot: Bool) -> Double {
         hasSlot ? 1 : Double(max(0, min(1, 1 - (flight - 0.25) / 0.6)))
+    }
+
+    /// Sin ranura (bienvenida): la marca grande solo se ve mientras el negro está entero o casi (de 1 a 0,5 se apaga) y
+    /// el negro tapa del todo hasta entonces; luego, ya sin marca, el negro se aclara. Nunca se ven a la vez la marca
+    /// del arranque y lo que hay debajo.
+    static func heldForWelcome(black: Double, mark: Double) -> (black: Double, mark: Double) {
+        let markShown = min(mark, max(0, min(1, black * 2 - 1)))
+        return (min(1, black * 2), markShown)
     }
 
     static func lerp(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {

@@ -39,7 +39,9 @@ func maskedEURWhole(_ cents: Int, sign: Bool) -> String {
 
 /// «+1.290 €» / «−310 €»: euros enteros con signo tipográfico.
 func signedEURWhole(_ cents: Int) -> String {
-    (cents < 0 ? "−" : "+") + formatEURWhole(abs(cents))
+    // Lo que redondea a 0 € no lleva signo («0 €», nunca «−0 €» ni «+0 €»), como `formatEURWhole`.
+    guard (cents.magnitude + 50) / 100 > 0 else { return formatEURWhole(0) }
+    return (cents < 0 ? "−" : "+") + formatEURWhole(abs(cents))
 }
 
 /// Un importe que rueda como un cuentakilómetros. Lee el modo privado, el movimiento y la entrada por capas del
@@ -154,6 +156,11 @@ struct RollingDigits: View {
             .privacySensitive()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(spokenLabel)
+            #if DEBUG
+            // Solo DEBUG y solo si la prueba lo pide (`-MiBancoDrawnText`): lo que está DIBUJADO ahora, para que las
+            // pruebas de privacidad comprueben cifras que de otro modo solo se ven en un lienzo.
+            .modifier(DrawnTextValue(text: drawnTextForTests, on: DemoMode.exposesDrawnText))
+            #endif
             .onAppear(perform: start)
             .task(id: planID) { await finishRoll() }
             .onChange(of: hidden) { _, nowHidden in
@@ -189,7 +196,9 @@ struct RollingDigits: View {
                 }
                 .census(.face)
                 .id(motion.reduce ? shownValue : 0)
-                .transition(.opacity)
+                // Con Reducir movimiento la cifra vieja se va y DESPUÉS entra la nueva (la mitad del fundido cada una):
+                // nunca dos cifras encima una de otra.
+                .transition(motion.reduce ? Self.sequentialFade(motion) : .opacity)
             }
             // Al cerrar el ojo las cifras se quitan al instante, aunque quien llama (o `ReduceFade`) anime el cambio:
             // nunca se funden encima de la máscara (K23). Al abrirlo sí aparecen fundiéndose.
@@ -200,6 +209,29 @@ struct RollingDigits: View {
             row(maskGlyphs(), at: .infinity)
         }
     }
+
+    /// Con Reducir movimiento: sale la cifra vieja en la primera mitad del fundido y entra la nueva en la segunda.
+    static func sequentialFade(_ motion: MotionContext) -> AnyTransition {
+        let half = 0.11 * max(motion.timeMultiplier, 0.01)
+        return .asymmetric(
+            insertion: .opacity.animation(.easeOut(duration: half).delay(half)),
+            removal: .opacity.animation(.easeIn(duration: half)))
+    }
+
+    #if DEBUG
+    /// Lo dibujado ahora: la cifra (su valor de llegada), los dígitos al azar del barajado o la máscara.
+    private var drawnTextForTests: String {
+        switch drawnNow {
+        case .real:
+            let parts = texts(of: shownValue)
+            return parts.main + parts.small
+        case .scramble:
+            return String(maskGlyphs(scrambleStep: scrambleStep).map { g in g.fixed.map { Character(String(Int($0))) } ?? g.char })
+        case .dots:
+            return String(maskGlyphs().map(\.char))
+        }
+    }
+    #endif
 
     /// El valor que dibuja el modo `.real` (solo se lee con el modo privado apagado).
     private var shownValue: Int { value ?? (countsUp && !motion.reduce ? 0 : cents) }
@@ -735,3 +767,15 @@ private struct ReduceFade: ViewModifier {
         }
     }
 }
+
+#if DEBUG
+/// Solo DEBUG: pone lo dibujado como valor de accesibilidad cuando la prueba lo pide; si no, no toca nada.
+private struct DrawnTextValue: ViewModifier {
+    let text: String
+    let on: Bool
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if on { content.accessibilityValue(text) } else { content }
+    }
+}
+#endif

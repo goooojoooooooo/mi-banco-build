@@ -267,6 +267,22 @@ final class MotionGalleryTests: XCTestCase {
         }
     }
 
+    /// Lote 3 (petición de A y B): el botón que se transforma avisa cuando termina (`onFinish`): tras el ✓ con `true` y
+    /// tras el error con `false`. Sin el aviso, el contador de la galería no se mueve.
+    func testMorphingButtonReportsWhenItFinishes() throws {
+        launchGallery()
+        let finished = any("gallery.morph.finished")
+        let ok = app.buttons["Probar aviso"]
+        revealWhole(ok)
+        XCTAssertEqual(finished.label, "Terminados: 0 · -")
+        ok.tap()
+        XCTAssertTrue(waitUntil(10) { finished.label == "Terminados: 1 · bien" }, "Tras el ✓ no avisó: «\(finished.label)»")
+        let fail = app.buttons["Probar fallo"]
+        revealWhole(fail)
+        fail.tap()
+        XCTAssertTrue(waitUntil(10) { finished.label == "Terminados: 2 · mal" }, "Tras el error no avisó: «\(finished.label)»")
+    }
+
     /// K9: a tamaño normal el botón mide su alto de siempre (no se estira con el hueco).
     func testMorphingButtonHeightAtDefaultSize() throws {
         launchGallery()
@@ -851,5 +867,27 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertEqual(amount.frame.width, hiddenWidth, accuracy: 1, "La cifra con millares cambia de ancho al abrir el ojo")
         tap("gallery.sentence.eye")
         XCTAssertTrue(waitUntil(5) { amount.label == "importe oculto" }, "Al cerrar el ojo la cifra se sigue leyendo")
+    }
+
+    /// Lote 3 (petición de A): con `-MiBancoDrawnText` cada importe del kit dice como valor lo que tiene DIBUJADO. Con el
+    /// ojo abierto es la cifra; al cerrar el ojo, durante el barajado y después, nunca los dígitos reales (el barajado
+    /// enseña dígitos al azar y luego la máscara). Sin la bandera, el valor no existe.
+    func testDrawnTextValueTellsWhatIsDrawn() throws {
+        launchGallery(["-MiBancoDrawnText", "-MiBancoMotionScale", "4"])
+        let amount = any("gallery.amount")
+        XCTAssertTrue(waitUntil(15) { (amount.value as? String)?.hasPrefix("3.774,75") == true },
+                      "Lo dibujado no es la cifra: «\(amount.value as? String ?? "nil")»")
+        tap("gallery.eye")
+        var seen: [String] = []
+        for _ in 0..<30 {
+            let drawn = amount.value as? String ?? ""
+            seen.append(drawn)
+            XCTAssertFalse(drawn.contains("774"), "Con el ojo cerrándose se dibuja la cifra real: «\(drawn)»")
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        XCTAssertTrue(waitUntil(10) { (amount.value as? String)?.contains("•") == true }, "No acaba en la máscara: \(seen)")
+        app.terminate()
+        launchGallery()
+        XCTAssertTrue((any("gallery.amount").value as? String ?? "").isEmpty, "Sin la bandera el importe tiene valor")
     }
 }

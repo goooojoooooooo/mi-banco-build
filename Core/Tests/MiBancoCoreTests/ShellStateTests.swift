@@ -457,6 +457,22 @@ import Testing
         }
     }
 
+    // MARK: m-8 · Vivacidad: Inicio a la vista siempre se ha montado
+
+    /// En ningún estado alcanzable se ve Inicio (sin bloqueo, sin arranque y sin tapa) sin haber recibido nunca la
+    /// orden de montarse: si no, se quedaría sin montar para siempre (nada más lo montaría).
+    @Test func homeOnScreenHasAlwaysBeenAssembled() {
+        for state in Self.states where !state.showsLock && !state.showsLaunch && !state.showsCover {
+            #expect(state.revealToken >= 1, "Inicio a la vista sin montarse nunca: \(state)")
+            #expect(!state.coldStart, "Inicio a la vista y la app sigue «sin enseñar Inicio»: \(state)")
+        }
+        // El caso de la revisión: un cambio del ajuste durante el arranque sin bloqueo lo termina montando Inicio.
+        var state = ShellState(lockApplies: false, relocksOnBackground: false)
+        #expect(state.showsLaunch)
+        state.apply(.lockSettingChanged(lockApplies: false, relocksOnBackground: false))
+        #expect(!state.showsLaunch && state.revealToken == 1 && !state.coldStart)
+    }
+
     // MARK: C6 · El aviso dentro de la app
 
     /// Nunca encima del bloqueo (ni con él delante ni mientras se funde), nunca fuera de primer plano, se cierra al

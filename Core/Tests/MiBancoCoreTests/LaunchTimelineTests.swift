@@ -165,9 +165,23 @@ import Testing
     }
 
     @Test func skipOnAFadeJumpsToTheReveal() {
-        // Con Reducir movimiento no hay vuelo: el salto va al momento en que Inicio empieza a verse.
-        #expect(near(reduced.time(elapsed: 0.1, skippedAt: 0.1), reduced.assembleAt))
+        // Con Reducir movimiento no hay vuelo: el salto va al momento en que Inicio empieza a verse (la marca grande ya
+        // se ha apagado: 0,24 + 0,12 s).
+        #expect(near(reduced.interactiveAt, 0.24 + 0.12))
+        #expect(near(reduced.time(elapsed: 0.1, skippedAt: 0.1), reduced.interactiveAt))
         #expect(reduced.finishesAt(skippedAt: 0.1) < reduced.duration)
+    }
+
+    /// Re-revisión del lote 2, nota 2: con solo fundido, los toques no pasan a Inicio mientras sigue bajo el negro
+    /// entero; justo cuando empieza a verse, sí.
+    @Test func aFadeLetsTouchesThroughOnlyOnceHomeShows() {
+        for timeline in [subtle, reduced, LaunchTimeline(level: .subtle, reduceMotion: true)] {
+            let before = timeline.frame(at: timeline.interactiveAt - 0.01)
+            #expect(before.black == 1, "\(timeline.level): Inicio toca bajo el negro entero")
+            let after = timeline.frame(at: timeline.interactiveAt + 0.02)
+            #expect(after.black < 1, "\(timeline.level): a la hora de tocar, Inicio aún no se ve")
+            #expect(timeline.interactiveAt < timeline.duration)
+        }
     }
 
     @Test func scriptTimeNeverGoesBackwards() {

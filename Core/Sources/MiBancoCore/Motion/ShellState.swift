@@ -222,13 +222,18 @@ public struct ShellState: Equatable, Hashable, Sendable {
             let lockWasShowing = showsLock
             let cold = coldStart
             locked = false
-            launching = false
+            if lockWasShowing { launching = false }
             if let setting = settingAfterUnlock {
                 lockApplies = setting.lockApplies
                 relocksOnBackground = setting.relocksOnBackground
                 settingAfterUnlock = nil
             }
-            guard lockWasShowing else { return }
+            guard lockWasShowing else {
+                // m-8: sin bloqueo delante, un desbloqueo durante el arranque lo termina como su final (Inicio se
+                // monta una vez), nunca dejándolo a medias sin nada que vaya a montar Inicio.
+                if showsLaunch { finishLaunch() } else { launching = false }
+                return
+            }
             coldStart = false
             // Inicio se monta YA, esté o no la escena en primer plano (si no lo está, debajo de la tapa).
             revealToken += 1
@@ -282,7 +287,8 @@ public struct ShellState: Equatable, Hashable, Sendable {
             relocksOnBackground = relocks
             // Cambiar el ajuste solo es posible con la app ya desbloqueada: no se vuelve a pedir Face ID.
             locked = false
-            launching = false
+            // m-8: si el arranque sin bloqueo seguía, se termina como su final (Inicio se monta una vez).
+            if showsLaunch { finishLaunch() } else { launching = false }
             // Salvo en segundo plano (no se puede provocar desde la interfaz): ahí manda la regla de siempre, y con el
             // bloqueo activado la app queda bloqueada.
             if scene == .background, relocksOnBackground {

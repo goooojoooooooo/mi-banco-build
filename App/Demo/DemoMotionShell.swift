@@ -16,6 +16,10 @@ extension DemoMode {
         return min(max(seconds, 0), 60)
     }
 
+    /// `-MiBancoDrawnText`: cada importe del kit pone como valor de accesibilidad lo que tiene DIBUJADO (cifra, dígitos
+    /// al azar del barajado o máscara), para las pruebas de privacidad. Sin la bandera no cambia nada.
+    static var exposesDrawnText: Bool { isActive && arguments.contains("-MiBancoDrawnText") }
+
     /// `-MiBancoDemoUnlockInactive <s>`: tras el desbloqueo en frío de la demo, la carcasa hace como que la escena sigue
     /// inactiva estos segundos reales y luego vuelve a activa. Es el orden de Face ID en el iPhone (el éxito llega con la
     /// escena aún inactiva), que el simulador no reproduce. nil = sin simular.

@@ -11,6 +11,9 @@ struct MorphingButton: View {
     let doneTitle: String
     let action: () async -> Bool
     var failureText = "No se ha podido. Inténtalo otra vez."
+    /// Se llama cuando el botón ha terminado su transformación y vuelve a estar en reposo: `true` tras el ✓, `false`
+    /// tras el error. Opcional (por defecto, nada).
+    var onFinish: ((Bool) -> Void)? = nil
 
     private enum Phase { case idle, loading, done }
 
@@ -23,6 +26,9 @@ struct MorphingButton: View {
     @ScaledMetric(relativeTo: .body) private var width = 220.0
     /// Alto de la cápsula en reposo (lo mide `onGeometryChange`): el círculo de carga tiene ese mismo alto.
     @State private var idleHeight = Self.minHeight
+    /// Ancho del título en reposo: mientras la cápsula se encoge al círculo, el título (que se funde) conserva este ancho
+    /// y sus líneas, en vez de partirse en muchas líneas a medida que el botón estrecha.
+    @State private var idleTitleWidth: CGFloat?
 
     private static let minHeight: CGFloat = 52
 
@@ -70,7 +76,11 @@ struct MorphingButton: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
                 .padding(.vertical, 14)
-                .frame(maxWidth: .infinity)
+                .frame(width: phase == .idle ? nil : idleTitleWidth)
+                .frame(maxWidth: phase == .idle ? .infinity : nil)
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+                    if phase == .idle { idleTitleWidth = width }
+                }
                 .opacity(phase == .idle ? 1 : 0)
             ProgressView()
                 .tint(.black)
@@ -85,6 +95,8 @@ struct MorphingButton: View {
             minWidth: isCircle ? idleHeight : nil, maxWidth: isCircle ? idleHeight : width,
             minHeight: isCircle ? idleHeight : Self.minHeight, maxHeight: isCircle ? idleHeight : nil)
         .background(Capsule().fill(.white))
+        // El título que se funde (con su ancho de reposo) no asoma fuera del círculo.
+        .clipShape(Capsule())
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
             // Solo en reposo: durante la carga el marco ya es el círculo.
             if phase == .idle { idleHeight = height }
@@ -104,12 +116,19 @@ struct MorphingButton: View {
         if ok {
             withAnimation(motion.animation(.snap)) { phase = .done }
             doneCount += 1
+            // VoiceOver oye que ha terminado (la etiqueta pasa a `doneTitle`).
+            AccessibilityNotification.Announcement(doneTitle).post()
             try? await Task.sleep(for: .seconds(motion.pause(1.1)))
-            withAnimation(motion.animation(.snap)) { phase = .idle }
+            withAnimation(motion.animation(.snap), completionCriteria: .logicallyComplete) {
+                phase = .idle
+            } completion: {
+                onFinish?(true)
+            }
         } else {
             withAnimation(motion.animation(.snap)) { phase = .idle }
             failCount += 1
             withAnimation(motion.fade) { errorShown = true }
+            onFinish?(false)
             try? await Task.sleep(for: .seconds(motion.pause(2.5)))
             withAnimation(motion.fade) { errorShown = false }
         }

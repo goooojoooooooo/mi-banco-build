@@ -144,6 +144,9 @@ struct RootView: View {
                 .transition(.opacity)
             }
         }
+        // Para las pantallas: la hoja única abierta y el estado de la carcasa (bloqueo, montaje por capas).
+        .environment(\.singleSheetOpen, sheet != nil)
+        .environment(\.shellReveal, ShellReveal(locked: isLocked, token: activeRevealToken))
         .tint(Theme.label)
         // C6: el aviso dentro de la app, arriba, por encima de las pestañas y por debajo de la hoja única (que es una
         // presentación aparte) y del bloqueo (otra capa de la carcasa, más alta). Solo si la carcasa lo deja.

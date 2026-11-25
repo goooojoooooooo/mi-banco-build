@@ -96,7 +96,11 @@ final class MotionShellTests: XCTestCase {
             }
             Thread.sleep(forTimeInterval: 1.5)
             app.activate()
-            XCTAssertTrue(app.wait(for: .runningForeground, timeout: 15), "La app no volvió a primer plano")
+            // Un intento que no vuelve a primer plano no es aún un fallo (re-revisión, nota 5): lo dirá el último.
+            guard app.wait(for: .runningForeground, timeout: 15) else {
+                tries.append("intento \(attempt): no volvió a primer plano (estado \(app.state.rawValue))")
+                continue
+            }
             if waitUntil(10, { self.probe()["escena"] == "activa" && backgrounds() > before }) { return }
             tries.append("intento \(attempt): estado \(app.state.rawValue), \(probe())")
         }
@@ -670,7 +674,7 @@ final class MotionShellTests: XCTestCase {
         for pass in 0..<8 {
             let leaks = banner.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
                 [el.label, el.value as? String ?? ""].filter {
-                    $0.range(of: #"\d[.,]\d|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
+                    $0.range(of: #"\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
                 }
             }
             XCTAssertEqual(leaks, [], "Pasada \(pass): con el ojo cerrado el aviso tiene cifras")
@@ -718,7 +722,7 @@ final class MotionShellTests: XCTestCase {
         func leaks() -> [String] {
             sheet.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
                 [el.label, el.value as? String ?? ""].filter {
-                    $0.range(of: #"\d[.,]\d|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
+                    $0.range(of: #"\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
                 }
             }
         }

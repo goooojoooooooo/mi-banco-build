@@ -18,6 +18,7 @@ import Testing
             .exitFinished(id: state.exitCount), .exitFinished(id: state.exitCount - 1),
             .lockFadeFinished(id: state.fadeCount), .lockFadeFinished(id: state.fadeCount - 1),
             .motionStyle(fadesOnly: true), .motionStyle(fadesOnly: false),
+            .bannerRequested, .bannerDismissed(id: state.banner ?? 0), .bannerDismissed(id: state.bannerCount - 1),
         ]
         for setting in settings {
             events.append(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
@@ -32,6 +33,8 @@ import Testing
         copy.exitCount = 0
         copy.fadeCount = 0
         if let exit = copy.exit { copy.exit = ShellState.Exit(id: 0, cold: exit.cold) }
+        copy.bannerCount = 0
+        if copy.banner != nil { copy.banner = 0 }
         return copy
     }
 
@@ -452,6 +455,63 @@ import Testing
                 #expect(step.after.locked == step.before.locked && step.after.lockFading == step.before.lockFading)
             }
         }
+    }
+
+    // MARK: C6 · El aviso dentro de la app
+
+    /// Nunca encima del bloqueo (ni con él delante ni mientras se funde), nunca fuera de primer plano, se cierra al
+    /// bloquear y al salir de primer plano y no vuelve solo; va siempre en la capa de Inicio, debajo del bloqueo y de
+    /// la tapa. Un aviso pedido con el bloqueo delante no se guarda para después.
+    @Test func theInAppBannerNeverSitsAboveTheLock() {
+        #expect(Self.states.contains { $0.shownBanner != nil }, "el recorrido no llega a enseñar un aviso")
+        for state in Self.states {
+            if state.showsLock || state.lockFading || state.scene != .active {
+                #expect(state.shownBanner == nil, "aviso a la vista con bloqueo, fundido o fuera de primer plano: \(state)")
+            }
+            if state.showsLock { #expect(state.banner == nil, "aviso guardado bajo el bloqueo: \(state)") }
+            // Nada de la carcasa va por debajo de Inicio: el aviso (en Inicio) queda siempre bajo bloqueo y tapa.
+            #expect(ShellState.zIndex(of: .home) < ShellState.zIndex(of: .lock))
+            #expect(ShellState.zIndex(of: .home) < ShellState.zIndex(of: .cover))
+        }
+        for step in Self.steps {
+            switch step.event {
+            case .scene(.inactive), .scene(.background):
+                #expect(step.after.banner == nil, "el aviso sigue puesto al salir de primer plano: \(step.before)")
+            case .bannerRequested:
+                if step.before.showsLock || step.before.lockFading || step.before.scene != .active {
+                    #expect(step.after.banner == step.before.banner, "se puso un aviso que no se podía ver: \(step.before)")
+                } else {
+                    #expect(step.after.shownBanner != nil)
+                }
+            case .bannerDismissed(let id):
+                if step.before.banner == id { #expect(step.after.banner == nil) }
+                else { #expect(step.after.banner == step.before.banner, "un cierre viejo cerró el aviso nuevo") }
+            default:
+                break
+            }
+            // El aviso no toca el bloqueo ni los toques de Inicio.
+            if step.event == .bannerRequested || { if case .bannerDismissed = step.event { true } else { false } }() {
+                #expect(step.after.locked == step.before.locked && step.after.homeTakesTouches == step.before.homeTakesTouches)
+                #expect(step.after.layers(liveScene: step.after.scene) == step.before.layers(liveScene: step.before.scene))
+            }
+        }
+        // La secuencia: llega con la app delante, se va a segundo plano, vuelve bloqueada: ni rastro del aviso.
+        var state = ShellState(lockApplies: true, relocksOnBackground: true)
+        state.apply(.bannerRequested)
+        #expect(state.banner == nil, "con el bloqueo delante no se pide")
+        state.apply(.unlockSucceeded)
+        state.apply(.lockFadeFinished(id: state.fadeCount))
+        state.apply(.bannerRequested)
+        let id = state.banner
+        #expect(state.shownBanner != nil && id != nil)
+        state.apply(.scene(.inactive))
+        #expect(state.shownBanner == nil && state.banner == nil)
+        state.apply(.scene(.active))
+        #expect(state.shownBanner == nil, "el aviso volvió solo")
+        state.apply(.bannerRequested)
+        state.apply(.scene(.background))
+        state.apply(.scene(.active))
+        #expect(state.showsLock && state.banner == nil)
     }
 
     // MARK: D-10 · Con el bloqueo activado, la app nunca está desbloqueada en segundo plano

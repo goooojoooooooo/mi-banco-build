@@ -14,6 +14,11 @@ struct RootView: View {
     var isLocked = false
     /// Sube al arrancar y al desbloquear: Inicio se monta por capas y la barra llega la última.
     var revealToken = 0
+    /// C6: el aviso dentro de la app que deja enseñar la carcasa ahora (`ShellState.shownBanner`; nil con el bloqueo,
+    /// fundiéndose o fuera de primer plano), y cómo pedirlo y darlo por ido.
+    var bannerID: Int? = nil
+    var requestBanner: () -> Void = {}
+    var dismissBanner: (Int) -> Void = { _ in }
     @State private var tab: AppTab = .home
     @State private var settingsFocus: BankID?
     @State private var settingsScroll: String?
@@ -68,6 +73,9 @@ struct RootView: View {
     @State private var lastTab: AppTab = .home
     @State private var tabChanges = 0
     @State private var tabDirection = 1
+    /// C6: la llegada que enseña el aviso dentro de la app, y el número de aviso que le dio la carcasa.
+    @State private var bannerArrival: Arrival?
+    @State private var bannerFor: Int?
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -137,6 +145,26 @@ struct RootView: View {
             }
         }
         .tint(Theme.label)
+        // C6: el aviso dentro de la app, arriba, por encima de las pestañas y por debajo de la hoja única (que es una
+        // presentación aparte) y del bloqueo (otra capa de la carcasa, más alta). Solo si la carcasa lo deja.
+        .overlay(alignment: .top) {
+            if let id = bannerID, let arrival = bannerArrival, bannerFor == id {
+                InAppBanner(
+                    arrival: arrival,
+                    left: model.snapshot.balanceAfter[arrival.id],
+                    onOpen: {
+                        dismissBanner(id)
+                        openDetail(arrival.id)
+                    },
+                    onNotMine: {
+                        try? model.setFlaggedNotMine(true, for: arrival.id)
+                        dismissBanner(id)
+                    },
+                    onFinished: { dismissBanner(id) })
+                    .id(id)
+                    .transition(.identity)
+            }
+        }
         .environment(\.presentationGate, gate)
         // La única hoja de la app. Se cierra al bloquear y en cuanto la app deja de estar activa (selector de apps,
         // segundo plano): nunca queda encima del bloqueo ni en la captura del selector, y no se vuelve a abrir sola.
@@ -270,6 +298,17 @@ struct RootView: View {
         }
         // Un aviso tocado: se aplica en cuanto no hay bloqueo delante (nunca se abre una hoja encima del bloqueo).
         .onChange(of: router.pending) { _, _ in applyRoute() }
+        // C6: un movimiento que llega con la app delante y en OTRA pestaña (en Inicio ya lo cuenta Inicio), sin la hoja
+        // abierta: se pide el aviso. La carcasa decide si se puede enseñar (nunca con el bloqueo ni fuera de primer plano).
+        .onChange(of: model.arrival) { _, arrival in
+            guard let arrival, tab != .home, sheet == nil, !isLocked, scenePhase == .active else { return }
+            bannerArrival = arrival
+            requestBanner()
+        }
+        .onChange(of: bannerID) { old, new in
+            // El número del aviso que acaba de pedirse es el de esta llegada.
+            if let new, new != old, bannerArrival != nil { bannerFor = new }
+        }
         .onChange(of: isLocked) { _, locked in
             gate.isLocked = locked
             if locked {

@@ -620,6 +620,64 @@ final class MotionShellTests: XCTestCase {
                       "«Te quedaban» no dice «importe oculto»")
     }
 
+    /// C6: el aviso dentro de la app. (a) Con el bloqueo delante llega un pago (la demo lo mete a los ~4 s): no aparece
+    /// ningún aviso mientras dura el bloqueo, ni después (no se guarda). (b) Sin bloqueo, en Gasto: el aviso cae, se
+    /// puede tocar y abre la hoja del movimiento (la única hoja), y nunca es una hoja él mismo. (c) Con el ojo cerrado,
+    /// el aviso no tiene ningún texto con forma de importe. (d) Ir a segundo plano lo quita y no vuelve.
+    func testInAppBannerNeverAboveLock() throws {
+        let banner = element("in-app-banner")
+        // (a)
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "9", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"])
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta el bloqueo")
+        var looks = 0
+        while unlock.exists && looks < 60 {
+            XCTAssertFalse(banner.exists, "Mirada \(looks): el aviso dentro de la app está con el bloqueo delante")
+            looks += 1
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        XCTAssertGreaterThan(looks, 20, "El bloqueo se quitó antes de que llegara el pago: la prueba no dice nada")
+        XCTAssertTrue(waitUntil(20) { !unlock.exists }, "El bloqueo de demo no se quitó")
+        for look in 0..<15 {
+            XCTAssertFalse(banner.exists, "Mirada \(look): el aviso pedido con el bloqueo apareció al desbloquear")
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        app.terminate()
+
+        // (b) y (d)
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"])
+        XCTAssertTrue(banner.waitForExistence(timeout: 20), "No apareció el aviso dentro de la app en Gasto")
+        XCTAssertFalse(app.buttons["Cerrar"].exists, "El aviso no debe ser una hoja")
+        let open = element("in-app-banner-open")
+        XCTAssertTrue(open.waitForExistence(timeout: 3), "El aviso no se puede tocar")
+        open.tap()
+        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 8), "Tocar el aviso no abrió la hoja del movimiento")
+        XCTAssertTrue(waitUntil(5) { !banner.exists }, "El aviso sigue puesto con la hoja abierta")
+        app.terminate()
+
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "6"])
+        XCTAssertTrue(banner.waitForExistence(timeout: 30), "No apareció el aviso dentro de la app (×6)")
+        sendToBackgroundAndReturn()
+        for look in 0..<10 {
+            XCTAssertFalse(banner.exists, "Mirada \(look): el aviso sigue (o vuelve) tras pasar por segundo plano")
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+        app.terminate()
+
+        // (c)
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoDemoPrivate", "-MiBancoMotionScale", "6"])
+        XCTAssertTrue(banner.waitForExistence(timeout: 30), "No apareció el aviso con el ojo cerrado")
+        for pass in 0..<8 {
+            let leaks = banner.descendants(matching: .any).allElementsBoundByIndex.flatMap { el -> [String] in
+                [el.label, el.value as? String ?? ""].filter {
+                    $0.range(of: #"\d[.,]\d|\d\s*€|€\s*\d|\d\s*euros"#, options: .regularExpression) != nil
+                }
+            }
+            XCTAssertEqual(leaks, [], "Pasada \(pass): con el ojo cerrado el aviso tiene cifras")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
     /// C4 (D1, decisión del dueño): «Te quedaban» empieza oculto y solo dice su cifra cuando el importe de arriba se ha
     /// posado. A ×20 el vuelo del importe dura varios segundos: justo al abrir la hoja, «Te quedaban» no tiene forma de
     /// importe; después sí (si no llegara nunca, la prueba tampoco pasa).

@@ -133,7 +133,12 @@ private struct AppShellView: View {
                 #endif
                 RootView(model: model, portfolio: portfolio, accountBook: accountBook,
                          briefing: briefing, speaker: speaker,
-                         isLocked: shell.showsLock, revealToken: homeRevealToken)
+                         isLocked: shell.showsLock, revealToken: homeRevealToken,
+                         // C6: el aviso dentro de la app lo decide `ShellState` (nunca con el bloqueo ni fuera de
+                         // primer plano); se calcula con la fase de escena de este instante, como la tapa.
+                         bannerID: coverScene == .active ? shell.shownBanner : nil,
+                         requestBanner: { shell.apply(.bannerRequested) },
+                         dismissBanner: { shell.apply(.bannerDismissed(id: $0)) })
                     // VoiceOver no lee Inicio con el bloqueo delante, ni bajo el negro del arranque, ni bajo la tapa.
                     .accessibilityHidden(shell.hidesHomeFromVoiceOver || layers.contains(.cover))
                     // Ni con el bloqueo delante ni mientras el bloqueo, ya desbloqueado, se funde: un toque tardío sobre

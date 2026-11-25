@@ -210,6 +210,23 @@ final class MotionTourShellTests: MotionTourCase {
 
     func testTabChangeReduceMotion() throws { tabChangeBursts("tab-change-reducir", extra: ["-MiBancoReduceMotion"]) }
 
+    // MARK: - Aviso dentro de la app (C6)
+
+    /// En Gasto llega un pago (la demo lo mete a los ~4 s reales): a ×4 el aviso cae, se despliega con «Te quedan»
+    /// rodando y dos acciones, se recoge y se va (≈ 14,6 s).
+    private func bannerBursts(_ name: String, extra: [String] = []) {
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"] + extra)
+        let banner = element("in-app-banner")
+        XCTAssertTrue(banner.waitForExistence(timeout: 30), "No apareció el aviso dentro de la app")
+        burst(name, frames: 24, every: 0.6)
+    }
+
+    func testInAppBanner() throws { bannerBursts("in-app-banner") }
+
+    func testInAppBannerWithTheEyeClosed() throws { bannerBursts("in-app-banner-ojo", extra: ["-MiBancoDemoPrivate"]) }
+
+    func testInAppBannerReduceMotion() throws { bannerBursts("in-app-banner-reducir", extra: ["-MiBancoReduceMotion"]) }
+
     // MARK: - Importes que ruedan en las hojas
 
     /// Fila → detalle a ×4: el importe grande entra y rueda; «Te quedaban» empieza oculto y rueda cuando el importe se posa.

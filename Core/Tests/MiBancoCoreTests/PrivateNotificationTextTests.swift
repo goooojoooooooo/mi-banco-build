@@ -149,9 +149,9 @@ private func noDigits(_ text: String) -> Bool { !text.contains { $0.isNumber } }
         let all = generatedInsights()
         for kind in InsightKind.allCases {
             guard let (title, body) = golden[kind] else { Issue.record("\(kind) sin cadena dorada"); continue }
-            let first = all.first { $0.kind == kind }
-            let open = first.map { notificationText(for: $0, hidden: false) }
-            #expect(open?.title == title && open?.body == body, "\(kind): «\(open?.title ?? "nil")» / «\(open?.body ?? "nil")»")
+            // El generador saca esa cadena exacta (entre las de su tipo: el feed de una escena puede traer más de una).
+            let opens = all.filter { $0.kind == kind }.map { notificationText(for: $0, hidden: false) }
+            #expect(opens.contains { $0.title == title && $0.body == body }, "\(kind): \(opens)")
         }
     }
 

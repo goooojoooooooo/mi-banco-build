@@ -120,8 +120,8 @@ struct BriefingSheet: View {
                     .accessibilityHidden(true)
             }
         }
-        // El reloj de la entrada (B1): una vista vacía cuya opacidad se anima lo que dura la entrada.
-        .background { Color.clear.opacity(entranceClock).accessibilityHidden(true) }
+        // El reloj de la entrada (B1, `animationClock`): no dibuja nada.
+        .animationClock(entranceClock)
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .sensoryFeedback(Haptics.detent, trigger: feedbackTick)
@@ -639,7 +639,7 @@ struct BriefingSheet: View {
         let total = motion.reduce ? 0.25 : motion.seconds(0.12) + motion.stagger(7, firstGap: 0.12, decay: 0.92)
             + motion.seconds(0.5)
         withAnimation(.linear(duration: total), completionCriteria: .removed) {
-            entranceClock = entranceClock == 0 ? 0.001 : 0
+            entranceClock = entranceClock == 0 ? 1 : 0
         } completion: {
             if entranceToken == token { entranceCompleted = true }
         }

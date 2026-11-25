@@ -198,9 +198,13 @@ final class MotionTourShellTests: MotionTourCase {
         waitForLaunchToEnd()
         let gasto = app.tabBars.buttons["Gasto"]
         XCTAssertTrue(gasto.waitForExistence(timeout: 10), "Falta la pestaña Gasto")
-        gasto.tap()
+        // Un toque normal en la barra de cristal a veces no cambia de pestaña en el simulador (Plan3TapTests lo sabe):
+        // una pulsación corta en su centro sí.
+        Thread.sleep(forTimeInterval: 1)
+        gasto.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.12)
         burst(name, frames: 10, every: 0.15)
-        app.tabBars.buttons["Inicio"].tap()
+        XCTAssertTrue(gasto.isSelected, "No se cambió a Gasto: la ráfaga no enseña el cambio")
+        app.tabBars.buttons["Inicio"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.12)
         burst(name + "-vuelta", frames: 10, every: 0.15)
     }
 

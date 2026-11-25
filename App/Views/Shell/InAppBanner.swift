@@ -52,7 +52,7 @@ struct InAppBanner: View {
         .padding(.horizontal, 10)
         .offset(y: dropped || motion.reduce ? 0 : -160)
         .opacity(motion.reduce ? (dropped ? 1 : 0) : 1)
-        .background { Color.clear.opacity(clock).accessibilityHidden(true) }
+        .animationClock(clock)
         .onAppear(perform: run)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("in-app-banner")
@@ -156,7 +156,7 @@ struct InAppBanner: View {
     /// propia de una vista vacía, no `Task.sleep`.
     private func after(_ seconds: Double, _ next: @escaping () -> Void) {
         withAnimation(.linear(duration: motion.pause(seconds)), completionCriteria: .removed) {
-            clock = clock < 0.0005 ? 0.001 : 0
+            clock = clock < 0.5 ? 1 : 0
         } completion: {
             next()
         }

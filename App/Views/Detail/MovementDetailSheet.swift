@@ -82,6 +82,10 @@ private struct DetailContent: View {
     @State private var flyScale: CGFloat = 1
     @State private var slotFrame: CGRect?
     @State private var landingStarted = false
+    /// El vuelo espera a que la hoja se pose (su subida o su zoom la lleva el sistema): mientras se mueve, el sitio
+    /// medido del importe no es el final. Reloj propio (sin `Task.sleep`).
+    @State private var flightArmed = false
+    @State private var flyClock: Double = 0
     /// Respaldo sin `Task.sleep`: una animación de vigilancia que, al acabar, posa el importe si su vuelo no avisó.
     @State private var watchdog: Double = 0
     @State private var editingNote = false
@@ -249,8 +253,9 @@ private struct DetailContent: View {
         .onChange(of: noteFocused) { _, focused in
             if !focused && editingNote { commitNote() }
         }
-        // El reloj del respaldo: una vista vacía cuya opacidad se anima; su animación no depende de la del importe.
-        .background { Color.clear.opacity(watchdog).accessibilityHidden(true) }
+        // Los relojes del respaldo y de la espera del vuelo (`animationClock`): no dibujan nada.
+        .animationClock(watchdog)
+        .animationClock(flyClock)
         .onAppear(perform: landAmount)
         .onAppear(perform: armWatchdog)
     }
@@ -260,7 +265,24 @@ private struct DetailContent: View {
     /// movimiento, solo un fundido. Al posarse destapa «Te quedaban», que rueda desde 0 (nunca enseña antes su cifra).
     /// Se llama al aparecer y cuando se mide su sitio: empieza una sola vez, con lo que se sepa entonces.
     private func landAmount() {
-        guard !landingStarted, slotFrame != nil || amountOrigin == nil || motion.reduce else { return }
+        guard !landingStarted else { return }
+        if !motion.reduce, amountOrigin != nil {
+            // La presentación de la hoja (subida o zoom desde el logo) la anima el sistema, a su velocidad: el vuelo
+            // sale cuando ha terminado (0,45 s reales), desde donde estaba el importe en la fila hasta su sitio ya quieto.
+            guard !flightArmed else { return }
+            flightArmed = true
+            withAnimation(.linear(duration: 0.45), completionCriteria: .removed) {
+                flyClock = 1
+            } completion: {
+                startFlight()
+            }
+            return
+        }
+        startFlight()
+    }
+
+    private func startFlight() {
+        guard !landingStarted else { return }
         landingStarted = true
         if !motion.reduce, let start = FlyInGeometry.start(from: amountOrigin, to: slotFrame) {
             // Desde la fila: en su sitio de salida, sin animar, y desde ahí vuela (el sitio ya está medido).
@@ -286,7 +308,7 @@ private struct DetailContent: View {
     /// una animación propia.
     private func armWatchdog() {
         withAnimation(.linear(duration: motion.seconds(0.8) + motion.pause(1)), completionCriteria: .removed) {
-            watchdog = 0.001
+            watchdog = 1
         } completion: {
             guard !amountLanded else { return }
             withAnimation(motion.fade) {

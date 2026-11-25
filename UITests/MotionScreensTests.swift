@@ -675,6 +675,12 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(waitFor(hittable, balance, timeout: 8), "El saldo grande no está a la vista")
         let curves = try XCTUnwrap(dockProbe(probe)["curvas"], "La sonda no dice el solape de las curvas: \(value(probe))")
         XCTAssertLessThanOrEqual(curves, 0.02, "En algún punto del recorrido se ven a la vez el saldo grande y el título pequeño")
+        // Despacio y soltando en parado: a 500 pt/s el arrastre sintético sigue solo al soltar (inercia) y se pasa.
+        let drag = { (from: CGFloat, to: CGFloat) in
+            let start = self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: from))
+            let end = self.app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: to))
+            start.press(forDuration: 0.05, thenDragTo: end, withVelocity: 70, thenHoldForDuration: 0.7)
+        }
         let settled = { (what: String) -> Double in
             Thread.sleep(forTimeInterval: 2.5)
             let p = self.dockProbe(probe)["p"] ?? -1

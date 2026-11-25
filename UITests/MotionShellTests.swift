@@ -674,14 +674,13 @@ final class MotionShellTests: XCTestCase {
         // lectura elemento a elemento fallaba, run 45623451092). Cada mirada es UNA consulta con predicado.
         launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoDemoPrivate", "-MiBancoMotionScale", "12"])
         XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso con el ojo cerrado")
-        let money = NSPredicate(format: "label MATCHES %@ OR value MATCHES %@",
-                                #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros).*"#,
-                                #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros).*"#)
+        let money = #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|€\s*\d|\d\s*euros).*"#
         XCTAssertGreaterThan(banner.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "importe oculto")).count, 0,
                              "El aviso no dice «importe oculto»: ¿estaba vacío?")
         var looked = 0
         for pass in 0..<8 where banner.exists {
-            let leaks = banner.descendants(matching: .any).matching(money).count
+            let leaks = banner.descendants(matching: .any)
+                .matching(NSPredicate(format: "label MATCHES %@ OR value MATCHES %@", money, money)).count
             XCTAssertEqual(leaks, 0, "Pasada \(pass): con el ojo cerrado el aviso tiene \(leaks) textos con cifras")
             looked += 1
             Thread.sleep(forTimeInterval: 0.5)

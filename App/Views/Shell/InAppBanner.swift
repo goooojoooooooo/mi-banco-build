@@ -42,15 +42,15 @@ struct InAppBanner: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.raised, in: shape)
+        // m-1: el fondo no recibe toques (al caer, su parte tapada por la máscara se tragaba los de debajo); solo los
+        // botones los reciben, y los de abajo solo desplegados del todo.
+        .background { shape.fill(Theme.raised).allowsHitTesting(false) }
         .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
         // Se destapa de arriba abajo: la máscara (con las esquinas del aviso) se desplaza; el aviso no cambia de tamaño.
         .mask(alignment: .top) {
             shape.offset(y: -hiddenBottom)
         }
-        // m-1: lo que la máscara esconde tampoco recibe toques (al caer, la parte de abajo se tragaba los de debajo).
-        .contentShape(VisibleTop(hiddenBottom: hiddenBottom))
         .shadow(color: .black.opacity(0.45), radius: 18, y: 8)
         .padding(.horizontal, 10)
         .offset(y: dropped || motion.reduce ? 0 : -160)
@@ -156,11 +156,3 @@ struct InAppBanner: View {
     }
 }
 
-/// La parte del aviso que se ve: todo menos lo que la máscara esconde por abajo.
-private struct VisibleTop: Shape {
-    var hiddenBottom: CGFloat
-
-    func path(in rect: CGRect) -> Path {
-        Path(CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: max(0, rect.height - hiddenBottom)))
-    }
-}

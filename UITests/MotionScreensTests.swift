@@ -885,16 +885,19 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(title.waitForExistence(timeout: 20), "Tras el remate no salió «conectado»")
         XCTAssertFalse(percent.exists, "Los pasos siguen a la vista con «conectado»")
         XCTAssertFalse(allDone.exists, "«Todo listo» sigue a la vista con «conectado»")
-        // El relevo no mueve la hoja de golpe: al salir «conectado» sigue donde estaba y después, si sube, lo hace poco a
-        // poco (a ×10, nunca más de 8 pt entre dos lecturas seguidas).
+        // El relevo no mueve la hoja de golpe: al salir «conectado» sigue donde estaba; después, el hueco sobrante se suelta
+        // con el muelle de la hoja, poco a poco. Se mide la velocidad entre lecturas (cada lectura tarda lo suyo): a ×10,
+        // el muelle no pasa de unos 30 pt/s, y el salto de antes (~55 pt en un fotograma) da más de 100 pt/s con
+        // cualquier separación de lecturas por debajo de medio segundo.
         XCTAssertEqual(sheetTitle.frame.minY, sheetTop, accuracy: 2,
                        "Al salir «conectado» la hoja saltó \(sheetTitle.frame.minY - sheetTop) pt")
-        var last = sheetTitle.frame.minY
+        var last = (y: sheetTitle.frame.minY, at: Date())
         // Unos 15 s: el relevo y, a los 10 s (1 s del kit ×10), el hueco sobrante que se suelta con el muelle de la hoja.
-        for _ in 0..<60 {
+        for _ in 0..<40 {
             Thread.sleep(forTimeInterval: 0.2)
-            let now = sheetTitle.frame.minY
-            XCTAssertLessThanOrEqual(abs(now - last), 8, "La hoja saltó \(now - last) pt de una lectura a otra")
+            let now = (y: sheetTitle.frame.minY, at: Date())
+            let speed = abs(now.y - last.y) / max(0.05, now.at.timeIntervalSince(last.at))
+            XCTAssertLessThanOrEqual(speed, 50, "La hoja se movió a \(Int(speed)) pt/s (\(now.y - last.y) pt): un salto")
             last = now
         }
     }

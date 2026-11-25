@@ -93,8 +93,7 @@ struct HomeView: View {
                     onShareIBAN: shareText,
                     onOpenAccounts: openAccounts
                 )
-                .opacity(listAlpha)
-                .homeEntrance(.row(0))
+                .homeEntrance(.row(0), listOpacity: listAlpha)
 
                 PendingMoveBanner(
                     moves: visiblePendingMoves(for: card),
@@ -110,12 +109,10 @@ struct HomeView: View {
 
                 WeekBlock(card: card, week: snapshot.weeks[card] ?? WeekSpend(), pace: snapshot.pace,
                           balance: card.bank.flatMap { snapshot.balances[$0] })
-                    .opacity(listAlpha)
-                    .homeEntrance(.row(1))
+                    .homeEntrance(.row(1), listOpacity: listAlpha)
                 ForEach(entries) { entry in
                     row(entry, snapshot: snapshot, swipes: true)
-                        .opacity(listAlpha)
-                        .homeEntrance(.row(2 + entry.order))
+                        .homeEntrance(.row(2 + entry.order), listOpacity: listAlpha)
                 }
                 if entries.isEmpty {
                     Text("Aún no hay movimientos en esta cuenta.")
@@ -429,9 +426,8 @@ struct HomeView: View {
         var swap = Transaction()
         swap.disablesAnimations = true
         #if DEBUG
-        // Lo que se DIBUJA en el cambio: cada pieza de la lista nueva anota su opacidad efectiva en su primer pase
-        // (esta opacidad de la lista × la de su entrada, `HomeEntrance`) y la sonda guarda la menor.
-        HomeProbe.shared.listAlphaAtSwap = listAlpha
+        // Lo que se DIBUJA en el cambio: cada pieza de la lista nueva anota la opacidad que de verdad recibe mientras
+        // espera su turno (`HomeEntrance` → `DrawnOpacity`) y la sonda guarda la menor.
         HomeProbe.shared.listSwapFloor = 100
         #endif
         withTransaction(swap) { listCard = selection ?? .all }

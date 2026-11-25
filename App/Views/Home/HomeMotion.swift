@@ -54,6 +54,8 @@ struct HomeEntrance: ViewModifier {
     static let animatedRows = 9
 
     let piece: Piece
+    /// La opacidad de la lista a la que pertenece la pieza (atenuada mientras cambia de tarjeta, ver `HomeView.listAlpha`).
+    var listOpacity: Double = 1
     @Environment(\.entrance) private var entrance
     @Environment(\.motion) private var motion
     @State private var landed = -1
@@ -96,9 +98,10 @@ struct HomeEntrance: ViewModifier {
         let waiting = plan != nil && landed != entrance.token
         // En un cambio de tarjeta la lista nueva no parte de invisible: sale de donde se quedó la vieja (atenuada, ver
         // `HomeView.showList`), así la pantalla nunca se queda en negro entre las dos. Solo sube a su sitio.
-        let waitingOpacity = opacityWhileWaiting
+        // Una sola cifra: la que recibe `.opacity` es la misma que apunta la sonda de las pruebas (`DrawnOpacity`).
+        let drawn = listOpacity * (waiting ? opacityWhileWaiting : 1)
         content
-            .opacity(waiting ? waitingOpacity : 1)
+            .modifier(DrawnOpacity(value: drawn, measured: entrance.scope == .list && waiting))
             .scaleEffect(waiting && !motion.reduce ? (plan?.scale ?? 1) : 1)
             .offset(y: waiting ? motion.distance(plan?.rise ?? 0) : 0)
             .onAppear(perform: land)
@@ -118,12 +121,6 @@ struct HomeEntrance: ViewModifier {
 
     private func land() {
         guard let plan else { return }
-        #if DEBUG
-        if entrance.scope == .list {
-            let drawn = Int((HomeProbe.shared.listAlphaAtSwap * opacityWhileWaiting * 100).rounded())
-            HomeProbe.shared.listSwapFloor = min(HomeProbe.shared.listSwapFloor, drawn)
-        }
-        #endif
         let token = entrance.token
         // Con Reducir movimiento todas las piezas se funden a la vez, sin escalonado.
         withAnimation(motion.animation(plan.spring).delay(motion.reduce ? 0 : plan.delay)) { landed = token }
@@ -131,11 +128,40 @@ struct HomeEntrance: ViewModifier {
 }
 
 extension View {
-    /// Esta pieza entra por capas con Inicio (ver `HomeEntrance`).
-    func homeEntrance(_ piece: HomeEntrance.Piece) -> some View {
-        modifier(HomeEntrance(piece: piece))
+    /// Esta pieza entra por capas con Inicio (ver `HomeEntrance`). `listOpacity`: la opacidad de su lista.
+    func homeEntrance(_ piece: HomeEntrance.Piece, listOpacity: Double = 1) -> some View {
+        modifier(HomeEntrance(piece: piece, listOpacity: listOpacity))
     }
 }
+
+/// Aplica la opacidad de una pieza de Inicio y, solo en DEBUG, apunta ESE MISMO valor en la sonda del cambio de lista
+/// (`fondoLista`, la menor de las piezas de la lista nueva mientras esperan su turno). Así la prueba ve lo que se dibuja:
+/// cambiar la opacidad de las piezas obliga a pasar por aquí.
+private struct DrawnOpacity: ViewModifier {
+    let value: Double
+    /// La pieza es de la lista nueva de un cambio de tarjeta y aún espera su turno.
+    let measured: Bool
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        content
+            .opacity(value)
+            .onChange(of: DrawnSample(value: value, measured: measured), initial: true) { _, sample in
+                guard sample.measured else { return }
+                HomeProbe.shared.listSwapFloor = min(HomeProbe.shared.listSwapFloor, Int((sample.value * 100).rounded()))
+            }
+        #else
+        content.opacity(value)
+        #endif
+    }
+}
+
+#if DEBUG
+private struct DrawnSample: Equatable {
+    let value: Double
+    let measured: Bool
+}
+#endif
 
 /// Un importe de la tarjeta que, al montarse Inicio (arranque o desbloqueo), vuelve a contar desde 0: el kit lo pone a 0
 /// y espera 0,15 s (× intensidad y cámara lenta) antes de rodar. Durante esa espera no se enseña: lo primero que se ve
@@ -293,8 +319,6 @@ struct DrawnTextAuditProbe: View {
     /// (opacidad de la lista × la de su entrada): nunca 0 con movimiento (la pantalla no se queda en negro entre las
     /// dos listas). -1 = aún no ha habido cambio.
     var listSwapFloor = -1
-    /// Opacidad de la lista en el instante del cambio (la usa `HomeEntrance` para calcular lo de arriba).
-    @ObservationIgnored var listAlphaAtSwap = 1.0
     /// 1 mientras alguna fila está marcada como recién llegada (fondo y, si es un ingreso, ✓ verde).
     var freshRows = 0
     /// Llegadas anunciadas (aterricen o no).

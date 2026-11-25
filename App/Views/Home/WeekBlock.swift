@@ -10,7 +10,11 @@ struct WeekBlock: View {
     let balance: BalanceInfo?
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.entrance) private var entrance
     @ScaledMetric(relativeTo: .caption) private var barArea: CGFloat = 40
+
+    /// Cuenta desde 0 solo dentro del montaje de Inicio; en un cambio de tarjeta (o fuera de una entrada) sale con su cifra.
+    private var countsOnAssembly: Bool { entrance.active && entrance.scope == .assembly }
 
     var body: some View {
         let hidden = preferences.privateMode
@@ -20,12 +24,13 @@ struct WeekBlock: View {
                     Text(card.bank.map { "Gastado en 7 días · \($0.shortName)" } ?? "Gastado en 7 días")
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
-                    // Rueda al cambiar de tarjeta o al llegar un movimiento; con el ojo cerrado dibuja «•••,•• €».
-                    RollingAmount(cents: week.totalCents, countsUp: false)
+                    // Un importe por tarjeta (`.id(card)`): al cambiar de tarjeta se monta de nuevo y sale ya con el suyo,
+                    // con la lista (nunca enseña un instante la cifra de la otra tarjeta, ni rueda de una a otra, ni un
+                    // «0,00 €»). Al montarse Inicio (arranque o desbloqueo) cuenta desde 0 como las cifras de la tarjeta
+                    // (su fila aún está oculta mientras el kit espera para rodar). Llega un movimiento: rueda a la cifra
+                    // nueva. Con el ojo cerrado dibuja «•••,•• €».
+                    RollingAmount(cents: week.totalCents, countsUp: countsOnAssembly)
                         .titan(.week)
-                        // Un importe por tarjeta: al cambiar de tarjeta se monta de nuevo y sale ya con el suyo, con la lista
-                        // (nunca enseña un instante la cifra de la otra tarjeta, ni rueda de una a otra, ni un «0,00 €»).
-                        // Dentro de la misma tarjeta (llega un movimiento), rueda.
                         .id(card)
                 }
                 .accessibilityElement(children: .ignore)

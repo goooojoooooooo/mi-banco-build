@@ -1065,13 +1065,19 @@ final class MotionHomeTests: XCTestCase {
     /// Cambiar de tarjeta es un fundido cruzado: la lista vieja se atenúa (al 30 %) y la nueva sale desde ahí. En el
     /// instante del cambio la lista nunca está al 0 % (antes, ~100 ms de pantalla en negro bajo el selector).
     func testCardChangeNeverBlanksTheList() throws {
-        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"])
+        assertCardChangeNeverBlanks([])
+    }
+
+    /// El cuerpo de la prueba de arriba. `fondoLista` es la opacidad que de verdad recibe cada pieza de la lista nueva
+    /// mientras espera su turno (la misma cifra que se pasa a `.opacity`, ver `DrawnOpacity`); la menor de todas.
+    private func assertCardChangeNeverBlanks(_ extra: [String]) {
+        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"] + extra)
         let summaries = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Gastado en 7 días:"))
         XCTAssertTrue(summaries.firstMatch.waitForExistence(timeout: 8), "Falta el resumen de 7 días")
         let before = summaries.firstMatch.label
         segment("Revolut").tap()
         XCTAssertTrue(waitUntil(5) { self.homeProbe()["listas"] == "1" }, "La lista no hizo su cambio: \(homeProbe())")
-        XCTAssertEqual(homeProbe()["fondoLista"], "30", "La lista vieja se apagó del todo antes del cambio: \(homeProbe())")
+        XCTAssertEqual(homeProbe()["fondoLista"], "30", "La lista se quedó en negro en el cambio de tarjeta: \(homeProbe())")
         XCTAssertTrue(waitUntil(5) { summaries.firstMatch.label != before }, "El resumen no cambió con la tarjeta: \(before)")
         // Sigue respondiendo: la fila abre su detalle.
         let row = firstRow()
@@ -1082,16 +1088,17 @@ final class MotionHomeTests: XCTestCase {
         close.tap()
     }
 
-    /// Prueba de la prueba de arriba: con la regresión exacta (`-MiBancoDemoListBlanks`: la lista nueva parte de
-    /// invisible, la pantalla se queda en negro bajo el selector) la sonda tiene que dar 0, que es lo que la prueba
-    /// anterior rechaza. Así se sabe que esa prueba puede fallar por el defecto que vigila.
+    /// La prueba de arriba, vista en ROJO: el MISMO cuerpo de aserciones lanzado con la regresión exacta
+    /// (`-MiBancoDemoListBlanks`: la lista nueva parte de invisible, actúa antes del valor único que se dibuja y se
+    /// mide). Tiene que fallar justo en «se quedó en negro»: `XCTExpectFailure` estricto (si no falla, esta prueba sale
+    /// roja; si falla por otra cosa, también).
     func testListBlankGuardGoesRedWhenTheListBlanks() throws {
-        launchHome(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoDemoListBlanks"])
-        let summaries = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Gastado en 7 días:"))
-        XCTAssertTrue(summaries.firstMatch.waitForExistence(timeout: 8), "Falta el resumen de 7 días")
-        segment("Revolut").tap()
-        XCTAssertTrue(waitUntil(5) { self.homeProbe()["listas"] == "1" }, "La lista no hizo su cambio: \(homeProbe())")
-        XCTAssertEqual(homeProbe()["fondoLista"], "0", "Con la lista nueva invisible la sonda no lo vio: \(homeProbe())")
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        options.issueMatcher = { $0.compactDescription.contains("se quedó en negro") }
+        XCTExpectFailure("Con la lista nueva invisible, la prueba vigilante tiene que fallar", options: options) {
+            assertCardChangeNeverBlanks(["-MiBancoDemoListBlanks"])
+        }
     }
 
     /// Una llegada anunciada cuyo movimiento no se publica nunca (como un aviso que sustituye a otro sin cambiar el

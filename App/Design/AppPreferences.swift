@@ -82,8 +82,9 @@ final class AppPreferences {
 
     init() {
         let stored = UserDefaults.standard.string(forKey: Self.motionLevelKey).flatMap(MotionLevel.init(rawValue:))
-        privateMode = Self.storedPrivateMode
-        Self.shareEye(privateMode)
+        let storedEye = Self.storedPrivateMode
+        privateMode = storedEye
+        Self.shareEye(storedEye)
         #if DEBUG
         if DemoMode.isActive {
             motionLevel = DemoMode.motionLevelOverride ?? Self.defaultMotionLevel

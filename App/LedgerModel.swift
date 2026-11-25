@@ -323,9 +323,13 @@ final class LedgerModel {
     /// Demo (`-MiBancoDemoArrival`): ingesta un pago de Apple Pay con el mismo `Ledger.ingest` que los intents,
     /// deja el estado nuevo donde `reload` lo lee y publica `ledgerDidChange`: el resto (detección de la llegada,
     /// coreografía, háptica, aviso de VoiceOver) es el código real.
-    func demoSimulateArrival() {
+    /// `income` (`-MiBancoDemoArrivalIncome`): en vez del pago, llega dinero (un aviso de «Has recibido…» de Revolut).
+    func demoSimulateArrival(income: Bool = DemoMode.arrivalIsIncome) {
         var ledger = Ledger(state: state)
-        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: clock) else { return }
+        let input: IngestInput = income
+            ? .notification(bank: .rev, title: nil, subtitle: nil, body: "Has recibido 120,00 € de Carlos")
+            : .wallet(bank: .ima, amount: "23,45", merchant: "Carrefour")
+        guard case .stored = ledger.ingest(input, now: clock) else { return }
         demoIncoming = ledger.state
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
     }

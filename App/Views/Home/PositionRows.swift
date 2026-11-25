@@ -2,7 +2,8 @@ import SwiftUI
 import MiBancoCore
 
 /// Lista de posiciones de la tarjeta «Cartera» en Inicio (Plan 4b, tarea 7).
-/// Filas de 64 pt con monograma, acciones, cambio del día, valor y ganancia; todo ocultable con el ojo.
+/// Filas de 64 pt con monograma, acciones, cambio del día, valor y ganancia. Con el ojo cerrado cada cifra es su
+/// máscara («•••,•• €», «•••»): no se monta bajo un desenfoque.
 struct PositionRows: View {
     let summary: PortfolioSummary
     let onOpen: (String) -> Void
@@ -66,12 +67,12 @@ private struct PositionRowView: View {
 
                 VStack(alignment: stacked ? .leading : .trailing, spacing: 2) {
                     if let cents = value.valueCents {
-                        Text(formatEUR(cents).replacingOccurrences(of: "-", with: "\u{2212}"))
+                        MaskedAmountText(formatEUR(cents).replacingOccurrences(of: "-", with: "\u{2212}"),
+                                         masked: maskedEUR(cents, sign: false))
                             .titan(.row)
                             .foregroundStyle(Theme.label)
                             .lineLimit(1)
                             .fixedSize()
-                            .privateAmount(spoken: spokenAmount(cents, hidden: false))
                     } else {
                         Text("Sin precio")
                             .titan(.subtitle)
@@ -81,12 +82,11 @@ private struct PositionRowView: View {
                     }
                     if let gainCents = value.gainCents {
                         let gainText = gainLabel(cents: gainCents, tenths: value.gainTenths)
-                        Text(gainText)
+                        MaskedAmountText(gainText, masked: "•••")
                             .titan(.meta)
                             .foregroundStyle(gainCents > 0 ? Theme.income : Theme.label2)
                             .lineLimit(1)
                             .fixedSize()
-                            .privateAmount(spoken: gainText)
                     }
                 }
                 .padding(.leading, stacked ? tileSize + 14 : 0)
@@ -118,14 +118,12 @@ private struct PositionRowView: View {
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
             : AnyLayout(HStackLayout(spacing: 4))
         sessionLayout {
-            Text(shares)
-                .privateAmount(spoken: shares)
+            MaskedAmountText(shares, masked: "•••")
             if let tenths = PositionFormatting.todayTenths(for: value), let day = positionChangeDay {
                 if !stacked { Text("·") }
                 let sessionText = "\(formatPercentTenths(tenths, signed: true).replacingOccurrences(of: "-", with: "\u{2212}")) \(PositionFormatting.sessionShortLabel(changeDay: day))"
-                Text(sessionText)
+                MaskedAmountText(sessionText, masked: "•••")
                     .foregroundStyle(tenths > 0 ? Theme.income : Theme.label3)
-                    .privateAmount(spoken: sessionText)
             }
         }
         .titan(.subtitle)

@@ -2,6 +2,9 @@ import SwiftUI
 import MiBancoCore
 
 /// Aviso en la parte superior de la lista de Inicio para traspasos preparados pendientes o recién confirmados.
+/// Cuando la app ve salir el dinero (estado «hecho»), el reloj deja su sitio a un ✓ que salta de 0,3 a 1 y se traza
+/// (el mismo del éxito de «Mover dinero», en pequeño) y la frase cambia con un fundido. El importe, con el ojo
+/// cerrado, es «•••»: nunca se monta la cifra.
 struct PendingMoveBanner: View {
     let moves: [PendingMove]
     let states: [UUID: MoveState]
@@ -9,6 +12,7 @@ struct PendingMoveBanner: View {
     let onDismiss: (UUID) -> Void
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.motion) private var motion
 
     var body: some View {
         if !moves.isEmpty {
@@ -39,8 +43,8 @@ struct PendingMoveBanner: View {
 
         return HStack(spacing: 12) {
             if isDone {
-                DrawnCheck(lineWidth: 2.2, color: Theme.label)
-                    .frame(width: 18, height: 18)
+                SuccessMark(size: 20)
+                    .transition(.opacity)
             } else {
                 Image(systemName: "clock")
                     .font(.system(size: 15, weight: .medium))
@@ -50,6 +54,7 @@ struct PendingMoveBanner: View {
 
             Text(sentence)
                 .titan(.subtitle)
+                .contentTransition(.opacity)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .privacySensitive()
@@ -74,5 +79,6 @@ struct PendingMoveBanner: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.logoLarge, style: .continuous))
+        .animation(motion.calmAnimation(.snap), value: isDone)
     }
 }

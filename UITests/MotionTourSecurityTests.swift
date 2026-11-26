@@ -7,7 +7,7 @@ final class MotionTourSecurityTests: MotionTourCase {
 
     private func scrollTo(_ el: XCUIElement, in container: XCUIElement? = nil, swipes: Int = 8) {
         if el.waitForExistence(timeout: 2), el.isHittable { return }
-        let target = container ?? app
+        let target: XCUIElement = container ?? app!
         for _ in 0..<swipes {
             if el.exists && el.isHittable { return }
             target.swipeUp()

@@ -32,10 +32,10 @@ public enum ConnectEvent: Equatable, Sendable {
     case needsChoice(BankID, [EBASPSP])
     case webOpened(BankID)
     /// La persona cerró la hoja web del banco (no la cerró la app).
-    case webDismissedByUse
+    case webDismissedByUser
     case callback(PendingCheck)
     /// La vuelta ya comprobada contra el `state` guardado. Una vuelta que no se puede verificar (`state` falso o ausente,
-    /// forma rara) o sin intento en el Llavero que llega por `onOpenURL` se ignora sin tocar nada (la puede mandar cualquie
+    /// forma rara) o sin intento en el Llavero que llega por `onOpenURL` se ignora sin tocar nada (la puede mandar cualquier
     /// app); si llega por el propio cierre de la hoja web (`fromWebSession: true`), la hoja ya se ha cerrado y el flujo
     /// termina en `.failed(bank, foreignLink)` para no dejar `.waitingForBank` colgado (R43).
     case callbackReceived(PendingCheck, AuthCallbackResult, fromWebSession: Bool = false)

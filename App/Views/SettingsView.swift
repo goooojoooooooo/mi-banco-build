@@ -71,7 +71,7 @@ struct SettingsView: View {
             estimated: model.snapshot.balances[bank]?.estimated,
             canConnect: BankConnector.shared.canConnect(bank),
             now: now,
-            calendar: DateText.madridCalenda
+            calendar: DateText.madridCalendar
         ).primary
     }
 
@@ -309,7 +309,7 @@ struct SettingsView: View {
         .onChange(of: preferences.privateMode) { _, on in
             if on { releaseAmountFocus() }
         }
-        // (Demo: `-MiBancoDemoCloseEyeAfter` y `-MiBancoDemoFocusBalanceAfter` cuentan desde que aparece el interrupto
+        // (Demo: `-MiBancoDemoCloseEyeAfter` y `-MiBancoDemoFocusBalanceAfter` cuentan desde que aparece el interruptor
         // «Modo privado», ver `armDemoTimers`.)
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
@@ -371,7 +371,7 @@ struct SettingsView: View {
         if let seconds = DemoMode.focusesBalanceAfterSeconds {
             Task {
                 try? await Task.sleep(for: .seconds(seconds))
-                focused = .t
+                focused = .tr
             }
         }
     }
@@ -603,7 +603,7 @@ private struct BalanceRow: View {
                 origin: info.origin,
                 setAt: info.setAt,
                 now: now,
-                calendar: DateText.madridCalenda
+                calendar: DateText.madridCalendar
             )
         }
         guard let info else { return "Sin saldo todavía" }

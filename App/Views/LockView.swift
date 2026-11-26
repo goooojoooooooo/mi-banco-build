@@ -74,7 +74,7 @@ struct LockView: View {
         let center = CGPoint(x: markFrame.midX, y: markFrame.midY)
         LaunchStage(
             timeline: timeline, act: .lock, start: launchStart, finished: markSettled,
-            timeMultiplier: motion.timeMultiplie
+            timeMultiplier: motion.timeMultiplier
         ) { frame in
             LockFace(
                 nameOpacity: textsDropped ? 0 : frame.name, nameSpread: CGFloat(1 - frame.name),
@@ -292,7 +292,7 @@ struct LockView: View {
     /// obedece la intensidad, Reducir movimiento (también el forzado al grabar) y la cámara lenta.
     ///
     /// Devuelve `false` si la carcasa no acepta el desbloqueo (la app ya está en segundo plano: `ShellState` lo
-    /// ignoraría). Entonces este bloqueo no cambia NADA de su dibujo y se queda como estaba, listo para volver a pedi
+    /// ignoraría). Entonces este bloqueo no cambia NADA de su dibujo y se queda como estaba, listo para volver a pedir
     /// Face ID al volver a primer plano.
     @discardableResult
     private func unlockWithFade() -> Bool {
@@ -419,7 +419,7 @@ struct LockFace<Mark: View, Action: View>: View {
     var awayDrop: CGFloat = 0
     @ViewBuilder let mark: Mark
     @ViewBuilder let action: Action
-    @Environment(\.launchAnchor) private var ancho
+    @Environment(\.launchAnchor) private var anchor
 
     var body: some View {
         VStack(spacing: 0) {
@@ -469,7 +469,7 @@ private struct NameSpread: ViewModifier {
     }
 }
 
-/// D-9: mientras el bloqueo se funde, VoiceOver no lo ve (ni su «Desbloquear»). En DEBUG, este mismo modificado
+/// D-9: mientras el bloqueo se funde, VoiceOver no lo ve (ni su «Desbloquear»). En DEBUG, este mismo modificador
 /// apunta en la sonda lo que acaba de recibir al aparecer: quitarlo deja la sonda sin «visible», y la prueba lo nota.
 private struct LockVoiceOverHidden: ViewModifier {
     let hidden: Bool

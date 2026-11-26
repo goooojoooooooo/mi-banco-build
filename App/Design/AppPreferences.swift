@@ -9,7 +9,7 @@ final class AppPreferences {
     /// M-4: la misma clave que la carga de los avisos y la suite compartida (una sola fuente).
     nonisolated static let privateModeKey = SharedPrivacy.key
 
-    /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arranca
+    /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arrancar
     /// con `-MiBancoDemoPrivate`, para que la demo nunca toque el ojo del dueño y, aun así, quien observe lo guardado
     /// (`RollingAmount` sin preferencias) lo vea cambiar en vivo.
     nonisolated(unsafe) static let privateModeStore: UserDefaults = {

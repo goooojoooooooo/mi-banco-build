@@ -6,8 +6,8 @@ public struct DeliveredAlertDescriptor: Equatable, Sendable {
     public let categoryIdentifier: String
 
     public init(identifier: String, categoryIdentifier: String) {
-        self.identifier = identifie
-        self.categoryIdentifier = categoryIdentifie
+        self.identifier = identifier
+        self.categoryIdentifier = categoryIdentifier
     }
 }
 

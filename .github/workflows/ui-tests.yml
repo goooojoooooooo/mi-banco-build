@@ -107,9 +107,9 @@ jobs:
           tail -n 60 build/ui.log
           exit 0
       # G26: a veces el simulador no deja arrancar las pruebas y ninguna llega a empezar («The test runner failed to
-      # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulado
+      # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulador
       # y se repite una sola vez la misma orden de «Pruebas de toques».
-      - name: Reintento si las pruebas no llegaron a empeza
+      - name: Reintento si las pruebas no llegaron a empezar
         run: |
           if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test [Cc]ase " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
             exit 0

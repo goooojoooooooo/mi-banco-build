@@ -30,7 +30,7 @@ struct PositionDetailSheet: View {
                     onClose: { dismiss() }
                 )
             } else {
-                Color.clea
+                Color.clear
             }
         }
         .environment(\.entrance, entrance)
@@ -199,7 +199,7 @@ private struct PositionDetailContent: View {
                 }
 
                 if editingPrice {
-                    manualPriceEdito
+                    manualPriceEditor
                         .staggeredEntrance(9)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }

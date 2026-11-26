@@ -140,7 +140,7 @@ struct AccountsView: View {
 
     // MARK: - Banco: IBAN + Colchón mínimo
 
-    @ViewBuilde
+    @ViewBuilder
     private func bankSectionRow(_ bank: BankID) -> some View {
         let iban = accountBook.book.ibans[bank]
         let isRevealed = revealedBank == bank && scenePhase == .active && gate?.isLocked != true
@@ -646,7 +646,7 @@ func spokenMaskedPhone(_ phone: String) -> String {
 /// Al soltar «Ver» se tapa al instante. Solo en la demo de pruebas (`-MiBancoDemoRevealLinger <s>`) se tapa unos segundos
 /// después, para que una prueba de interfaz pueda leer lo que reveló la pulsación (U74). El bloqueo y salir de primer plano
 /// lo siguen tapando al momento (`isRevealed` mira `scenePhase` y el bloqueo).
-@MainActo
+@MainActor
 private func endReveal(_ hide: @escaping @MainActor () -> Void) {
     #if DEBUG
     if let seconds = DemoMode.revealLingerSeconds {

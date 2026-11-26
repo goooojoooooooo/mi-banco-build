@@ -20,7 +20,7 @@ public func csvLimitErrorMessage(_ error: CSVLimitError) -> String {
     }
 }
 
-/// Una tabla CSV leída tal cual: cabeceras y filas de texto. Las columnas se buscan por nombre (con alias), nunca po
+/// Una tabla CSV leída tal cual: cabeceras y filas de texto. Las columnas se buscan por nombre (con alias), nunca por
 /// posición, y las desconocidas se ignoran: ningún formato de banco está confirmado con un fichero real.
 public struct CSVTable: Equatable, Sendable {
     public static let maxRows = 50_000

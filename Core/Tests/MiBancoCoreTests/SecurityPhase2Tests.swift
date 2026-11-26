@@ -83,7 +83,7 @@ import Testing
         #expect(LogoCachePolicy.defaultDownloadsEnabled == false)
     }
 
-    // MARK: - SEC-11 · Puerta de onOpenURL sin conexión pendiente y mensajes de CSVLimitErro
+    // MARK: - SEC-11 · Puerta de onOpenURL sin conexión pendiente y mensajes de CSVLimitError
 
     @Test func externalBankCallbackIgnoredWithoutPendingConnection() throws {
         let callbackURL = try #require(URL(string: "mibanco://cb?code=abc&state=xyz"))

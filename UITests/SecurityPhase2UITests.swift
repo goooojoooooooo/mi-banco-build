@@ -4,7 +4,7 @@ import XCTest
 /// - SEC-05: `PositionDetailSheet` y `AccountsView` con `MaskedAmountTextField` (ojo cerrado, vacío al abrir,
 ///   conservar valor al salir vacío, soltar foco sin animación al cerrar el ojo, y prueba en rojo con `issueMatcher`).
 /// - SEC-07: descarga de logos apagada por defecto en instalación limpia y explicación clara de Google.
-/// - SEC-08: bloqueo sin código ni Face ID no desbloquea en silencio, muestra el mensaje exacto e impide ver o toca
+/// - SEC-08: bloqueo sin código ni Face ID no desbloquea en silencio, muestra el mensaje exacto e impide ver o tocar
 ///   Inicio hasta desactivar a conciencia.
 /// - SEC-13: cerrar el ojo mientras el resumen habla para la voz de inmediato.
 final class SecurityPhase2UITests: XCTestCase {

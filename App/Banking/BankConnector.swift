@@ -94,7 +94,7 @@ final class BankConnector {
         NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
     }
 
-    // MARK: - Conecta
+    // MARK: - Conectar
 
     func connect(_ bank: BankID, aspsp: EBASPSP? = nil) async {
         #if DEBUG
@@ -342,7 +342,7 @@ final class BankConnector {
         }
     }
 
-    // MARK: - Desconecta
+    // MARK: - Desconectar
 
     func disconnect(_ bank: BankID) async {
         #if DEBUG
@@ -443,7 +443,7 @@ final class BankConnector {
             }
         }
         session.prefersEphemeralWebBrowserSession = true
-        session.presentationContextProvider = anchorProvide
+        session.presentationContextProvider = anchorProvider
         webSession = session
         if session.start() {
             flow.handle(.webOpened(bank))

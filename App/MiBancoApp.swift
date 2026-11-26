@@ -85,8 +85,8 @@ private struct AppShellView: View {
         return ShellState(lockApplies: setting.applies, relocksOnBackground: setting.relocks)
     }
 
-    /// La fase de escena con la que se decide la tapa, leída del entorno en este mismo instante (la tapa tiene que esta
-    /// puesta en la misma actualización en que cambia la fase). En la demo la fase no cuenta (parpadea en el simulado
+    /// La fase de escena con la que se decide la tapa, leída del entorno en este mismo instante (la tapa tiene que estar
+    /// puesta en la misma actualización en que cambia la fase). En la demo la fase no cuenta (parpadea en el simulador
     /// de CI): activa siempre, salvo cuando una prueba pide simular «inactiva tras desbloquear».
     private var coverScene: ShellState.Scene {
         #if DEBUG
@@ -208,7 +208,7 @@ private struct AppShellView: View {
                 }
                 if layers.contains(.cover) {
                     // De golpe, al ponerse y al quitarse: nunca se funde con el bloqueo ni deja un destello.
-                    privacyCove
+                    privacyCover
                         .transition(transition(of: .cover))
                         .zIndex(ShellState.zIndex(of: .cover))
                 }
@@ -411,7 +411,7 @@ private struct AppShellView: View {
         shell.apply(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
     }
 
-    /// El bloqueo solo escribe `false` aquí (la autenticación ha salido bien), dentro de su animación de salida. Bloquea
+    /// El bloqueo solo escribe `false` aquí (la autenticación ha salido bien), dentro de su animación de salida. Bloquear
     /// lo decide `ShellState` al ir a segundo plano. En esa misma transacción se da por terminado el arranque: su capa
     /// nunca asoma entre el bloqueo e Inicio.
     private var unlockBinding: Binding<Bool> {
@@ -539,7 +539,7 @@ private struct MotionStyleReporter: View {
     @Environment(\.motion) private var motion
 
     var body: some View {
-        Color.clea
+        Color.clear
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .accessibilityHidden(true)

@@ -5,9 +5,9 @@ import SwiftUI
 /// Permite conectar o renovar con Enable Banking, actualizar ahora, importar extractos CSV o desconectar.
 /// Confirmaciones y selector de archivos pasan por `RootView` (regla de una sola hoja).
 ///
-/// Forma (fase B, S8): una cabecera oscura (banco, saldo, estado y acciones) y, encima, una hoja que sube al desplaza
+/// Forma (fase B, S8): una cabecera oscura (banco, saldo, estado y acciones) y, encima, una hoja que sube al desplazar
 /// con los últimos movimientos de ESE banco y, debajo, su historial y la desconexión (`BankHeaderSheet`).
-/// Conectar (S9) enseña los pasos Verificar › Conectar › Importar con un porcentaje que sigue la fase REAL del conecto
+/// Conectar (S9) enseña los pasos Verificar › Conectar › Importar con un porcentaje que sigue la fase REAL del conector
 /// (`StepPercent`), y al acabar bien, «Banco, conectado». Mientras la lista se llena por primera vez tras conectar, un
 /// esqueleto con brillo (S11).
 /// Si se llega volando desde Inicio (`CardFlight.request` de este banco), la cabecera espera a que la tarjeta aterrice;
@@ -80,7 +80,7 @@ struct BankLinkView: View {
             estimated: model.snapshot.balances[bank]?.estimated,
             canConnect: canConnect,
             now: now,
-            calendar: DateText.madridCalenda
+            calendar: DateText.madridCalendar
         )
         if syncStatus.running.contains(bank) {
             return BankStatusLines(
@@ -107,7 +107,7 @@ struct BankLinkView: View {
         return connector.phase
     }
 
-    /// La fase traducida para ESTE banco (Core: `BankConnectProgress`). La primera carga de movimientos tras conecta
+    /// La fase traducida para ESTE banco (Core: `BankConnectProgress`). La primera carga de movimientos tras conectar
     /// cuenta dentro del tercer paso solo si el trámite se ha visto en esta pantalla.
     private var stage: BankConnectStage {
         progress.stage(of: phase, bank: bank, syncing: syncStatus.running.contains(bank))
@@ -172,7 +172,7 @@ struct BankLinkView: View {
             try? await Task.sleep(for: .seconds(motion.seconds(1.0)))
             guard run == finishRun, progress.showsSuccess else { return }
             // EXCEPCIÓN DECLARADA a «solo transformación, opacidad y color»: soltar el hueco anima el alto de la cabecera
-            // (maquetación). Es un único muelle de la hoja, acotado a este momento, sin bucle y nunca con Reduci
+            // (maquetación). Es un único muelle de la hoja, acotado a este momento, sin bucle y nunca con Reducir
             // movimiento (aceptado en la re-revisión del lote 3).
             withAnimation(motion.animation(.sheet)) { reservedHeight = 0 }
         }
@@ -481,7 +481,7 @@ struct BankLinkView: View {
         .assemblesOnFirstAppear()
     }
 
-    @ViewBuilde
+    @ViewBuilder
     private var phaseRows: some View {
         if let shown = shownProgress, !needsResumeForThisBank {
             VStack(alignment: .leading, spacing: 14) {
@@ -626,7 +626,7 @@ struct BankLinkView: View {
         }
     }
 
-    @ViewBuilde
+    @ViewBuilder
     private func actionRows(lines: BankStatusLines) -> some View {
         if progress.showsStartActions(for: stage) {
             switch lines.action {

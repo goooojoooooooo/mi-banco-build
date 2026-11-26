@@ -5,11 +5,15 @@ import MiBancoCore
 /// el mes anterior y la previsión; debajo, una fila por categoría. Todo sale de `model.snapshot` (las páginas ya vienen hechas).
 struct SpendingView: View {
     let model: LedgerModel
+    let accountBook: AccountBookModel
     var isVisible = false
     /// Abre el detalle de un movimiento (la hoja de `RootView`).
     var openDetail: (UUID) -> Void = { _ in }
+    var openMoveMoney: (MoveRequest) -> Void = { _ in }
+    @Binding var openBudgetsRequest: Bool
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// El movimiento del kit: intensidad, cámara lenta y Reducir movimiento (el del sistema o el forzado para grabar).
+    @Environment(\.motion) private var motion
     /// El mes elegido (su inicio) y hacia dónde se fue, en un solo valor: cambian en la misma transacción.
     /// nil = el mes actual. Si ese mes deja de existir (otra lista de meses), se vuelve al actual.
     @State private var selection = Selection()
@@ -31,19 +35,27 @@ struct SpendingView: View {
                             move(by: step, months: months, from: index)
                         }
                         .padding(.horizontal, 4)
-                        .staggeredEntrance(0, rise: 8)
+                        .motionEntrance(0, rise: 8)
 
                         SpendingTotal(cents: content.month.totalCents, monthName: content.title)
                             .padding(.horizontal, Theme.Space.gutter)
                             .padding(.top, 2)
-                            .staggeredEntrance(1)
+                            .motionEntrance(1)
 
                         // Lo que cambia con el mes: se funde y se desliza hacia donde vas; las filas entran escalonadas.
                         VStack(alignment: .leading, spacing: 0) {
                             SpendingSentences(comparison: content.comparison, forecast: content.forecast)
                                 .padding(.horizontal, Theme.Space.gutter)
                                 .padding(.top, 8)
-                                .staggeredEntrance(2, listIndex: 0)
+                                .motionEntrance(2, listIndex: 0)
+
+                            // El gráfico del mes: se dibuja solo al entrar y al cambiar de mes (nada que dibujar sin gasto).
+                            if !content.series.isEmpty {
+                                MonthChart(series: content.series, title: content.title, previousTitle: content.previousTitle)
+                                    .padding(.horizontal, Theme.Space.gutter)
+                                    .padding(.top, 14)
+                                    .motionEntrance(2, listIndex: 0)
+                            }
 
                             // El presupuesto del mes («412 de 700 €  59 %»), solo en el mes en curso.
                             if index == months.count - 1, let budget = snapshot.budgets.first(where: { $0.scope == .month }) {
@@ -51,7 +63,7 @@ struct SpendingView: View {
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 14)
                                     .accessibilityIdentifier("gasto.presupuestoMes")
-                                    .staggeredEntrance(2, listIndex: 0)
+                                    .motionEntrance(2, listIndex: 0)
                             }
 
                             Text("Por categoría")
@@ -61,7 +73,7 @@ struct SpendingView: View {
                                 .padding(.top, Theme.Space.section)
                                 .padding(.bottom, 6)
                                 .accessibilityAddTraits(.isHeader)
-                                .staggeredEntrance(3, listIndex: 0)
+                                .motionEntrance(3, listIndex: 0)
 
                             if !content.rows.isEmpty {
                                 Text(content.markCaption)
@@ -70,18 +82,18 @@ struct SpendingView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.bottom, 4)
-                                    .staggeredEntrance(3, listIndex: 0)
+                                    .motionEntrance(3, listIndex: 0)
                                     .accessibilityHidden(true)
                                     .accessibilityIdentifier("gasto.marca")
                             }
 
                             if content.rows.isEmpty {
-                                Text("Este mes aún no has gastado nada.")
+                                Text(index == months.count - 1 ? "Este mes aún no has gastado nada." : "Ese mes no gastaste nada.")
                                     .titan(.callout)
                                     .foregroundStyle(Theme.label2)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 8)
-                                    .staggeredEntrance(4, listIndex: 1)
+                                    .motionEntrance(4, listIndex: 1)
                                     .accessibilityIdentifier("gasto.vacio")
                             } else {
                                 ForEach(Array(content.rows.enumerated()), id: \.element.id) { i, row in
@@ -89,7 +101,7 @@ struct SpendingView: View {
                                         CategoryRow(row: row, index: i, markName: content.markName)
                                     }
                                     .buttonStyle(.row)
-                                    .staggeredEntrance(4 + i, listIndex: 1 + i)
+                                    .motionEntrance(4 + i, listIndex: 1 + i)
                                 }
                             }
                         }
@@ -98,22 +110,42 @@ struct SpendingView: View {
 
                         SpendingLinkRows(links: snapshot.spendingLinks)
                             .padding(.top, Theme.Space.section)
-                            .staggeredEntrance(5, listIndex: 3)
+                            .motionEntrance(5, listIndex: 3)
                     }
+                    #if DEBUG
+                    // Solo en la demo con `-MiBancoDemoEntranceCount`: cuántas entradas (de pestaña o de mes) ha jugado
+                    // Gasto, para comprobar desde una prueba que Reducir movimiento las apaga. En la app de verdad, nada.
+                    if DemoMode.isActive, DemoMode.exposesEntranceCount {
+                        Color.clear
+                            .frame(width: 1, height: 1)
+                            .accessibilityElement()
+                            .accessibilityLabel("Entradas de Gasto")
+                            .accessibilityValue("\(entrance.token)")
+                            .accessibilityIdentifier("gasto.entradas")
+                    }
+                    #endif
                 }
                 .padding(.bottom, Theme.Space.section)
+                // Las barras de la raíz solo avisan (ámbar con pulso y vibración) si Gasto es la pestaña que se ve y no
+                // tiene ninguna pantalla empujada encima: la raíz sigue viva debajo y cruzaría el límite a la vez.
+                .environment(\.fillBarsOnScreen, isVisible && path.isEmpty)
             }
             .scrollIndicators(.hidden)
             .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Gasto")
             .navigationDestination(for: SpendingRoute.self) { route in
-                switch route {
-                case let .category(category, month): CategoryDetailView(model: model, category: category, month: month, openDetail: openDetail)
-                case .budgets: BudgetsView(model: model)
-                case .transfers: TransfersView(model: model, openDetail: openDetail)
-                case .subscriptions: SubscriptionsView(model: model)
-                case .hiddenSubscriptions: HiddenSubscriptionsView(model: model)
+                Group {
+                    switch route {
+                    case let .category(category, month): CategoryDetailView(model: model, category: category, month: month, openDetail: openDetail)
+                    case .budgets: BudgetsView(model: model)
+                    case .transfers: TransfersView(model: model, openDetail: openDetail)
+                    case .subscriptions: SubscriptionsView(model: model)
+                    case .hiddenSubscriptions: HiddenSubscriptionsView(model: model)
+                    case .upcoming: UpcomingCalendarView(model: model, accountBook: accountBook, onMoveMoney: openMoveMoney)
+                    }
                 }
+                // Lo mismo para cada pantalla empujada: solo avisa la que está arriba del todo, con Gasto a la vista.
+                .environment(\.fillBarsOnScreen, isVisible && path.last == route)
             }
             // Deslizar en horizontal cambia de mes (umbral 60 pt, y más horizontal que vertical).
             .simultaneousGesture(
@@ -132,6 +164,8 @@ struct SpendingView: View {
             guard DemoMode.isActive else { return }
             if let category = DemoMode.openCategory, let current = model.snapshot.spendingMonths.last {
                 path = [.category(category, current)]
+            } else if DemoMode.opensUpcoming {
+                path = [.upcoming]
             } else if DemoMode.opensSubscriptions {
                 path = [.subscriptions]
             } else if DemoMode.opensBudgets {
@@ -140,21 +174,29 @@ struct SpendingView: View {
             guard DemoMode.monthOffset != 0 else { return }
             let months = model.snapshot.spendingMonths
             guard !months.isEmpty else { return }
-            selection.month = months[max(0, min(months.count - 1, months.count - 1 + DemoMode.monthOffset))]
+            let target = max(0, min(months.count - 1, months.count - 1 + DemoMode.monthOffset))
+            selection.month = target == months.count - 1 ? nil : months[target]
         }
         #endif
+        .onChange(of: openBudgetsRequest, initial: true) { _, open in
+            guard open else { return }
+            openBudgetsRequest = false
+            path = [.budgets]
+        }
         .onChange(of: isVisible) { _, visible in
-            guard visible, !reduceMotion else { return }
+            guard visible, !motion.reduce else { return }
             begin(.assembly)
         }
     }
 
     private var blockTransition: AnyTransition {
-        guard !reduceMotion else { return .opacity }
+        guard !motion.reduce else { return .opacity }
         // El mes que entra se construye en el mismo render que cambia la dirección, así que siempre lleva la buena;
         // el que sale solo se funde (su transición se fijó antes del cambio y no puede conocer hacia dónde vas).
-        let x = CGFloat(selection.direction) * 28
-        return .asymmetric(insertion: .opacity.combined(with: .offset(x: x)), removal: .opacity)
+        let x = CGFloat(selection.direction) * motion.distance(28)
+        // El mes que sale se apaga en 0,1 s: casi no coincide con el que entra (menor m-6).
+        return .asymmetric(insertion: .opacity.combined(with: .offset(x: x)),
+                           removal: .opacity.animation(.easeOut(duration: motion.seconds(0.10))))
     }
 
     /// Mes y dirección cambian juntos, dentro de la misma animación: sin temporizador ni tarea.
@@ -162,17 +204,20 @@ struct SpendingView: View {
         let target = index + step
         guard target >= 0, target < months.count else { return }
         tick += 1
-        if !reduceMotion { begin(.list) }
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
-            selection = Selection(month: months[target], direction: step)
+        if !motion.reduce { begin(.list) }
+        withAnimation(motion.calmAnimation(.enter)) {
+            // El mes en curso se guarda como nil: así sigue al mes nuevo cuando cambia el mes con la app abierta.
+            selection = Selection(month: target == months.count - 1 ? nil : months[target], direction: step)
         }
     }
 
     private func begin(_ scope: Entrance.Scope) {
         let token = entrance.token + 1
         entrance = Entrance(token: token, active: true, scope: scope)
+        // La ventana de la entrada dura 1,2 s del kit: sigue la intensidad y la cámara lenta.
+        let window = motion.seconds(MotionEntranceWindow.seconds)
         Task {
-            try? await Task.sleep(for: .seconds(1.2))
+            try? await Task.sleep(for: .seconds(window))
             if entrance.token == token { entrance.active = false }
         }
     }

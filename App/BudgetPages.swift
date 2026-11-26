@@ -65,7 +65,7 @@ extension LedgerSnapshot {
         var grouped: [String: [Movement]] = [:]
         for m in spendingMovements(in: state.movements, notSpending: notSpending) {
             guard let start = calendar.dateInterval(of: .month, for: m.date)?.start, monthSet.contains(start) else { continue }
-            if start == currentStart && m.date > now { continue }
+            if start == currentStart && !movementCounts(m, upTo: now, calendar: calendar) { continue }
             let category = categoryOf(m, in: state, subscriptionKeys: keys) ?? .sinCategoria
             grouped[categoryKey(month: start, category: category, calendar: calendar), default: []].append(m)
         }
@@ -81,7 +81,8 @@ extension LedgerSnapshot {
                     $0.date != $1.date ? $0.date > $1.date : $0.id.uuidString > $1.id.uuidString
                 }
                 out.categoryEntries[key] = ListEntry.flatten(
-                    sections(for: sorted.map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar),
+                    sections(for: sorted.map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar,
+                             ownTransfers: transfers),
                     prefix: "cat-\(key)")
                 out.categoryHeaders[key] = CategoryHeader(
                     cents: row.cents, comparison: row.change.map { "\($0) frente a \(previousName)" })
@@ -91,7 +92,8 @@ extension LedgerSnapshot {
         // Traspasos entre tus cuentas: los más recientes primero.
         let moved = state.movements.filter { transfers.contains($0.id) }.sorted { $0.date > $1.date }
         out.transferEntries = ListEntry.flatten(
-            sections(for: moved.prefix(maxTransferRows).map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar),
+            sections(for: moved.prefix(maxTransferRows).map { LedgerItem.movement($0) }, showsBank: true, now: now, calendar: calendar,
+                     ownTransfers: transfers),
             prefix: "tr")
 
         out.links.budgets = budgetsSummary(state.budgets)

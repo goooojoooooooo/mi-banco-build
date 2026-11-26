@@ -1,8 +1,9 @@
 import SwiftUI
 import MiBancoCore
 
-/// Una categoría del mes: ficha con el símbolo, nombre, importe y una barra blanca de 4 pt (la mayor del mes la llena)
-/// con una marca fina donde quedó el mes anterior; a su lado, el cambio. Un solo elemento para VoiceOver.
+/// Una categoría del mes: ficha con el símbolo, nombre, importe y la barra blanca del kit (`FillBar`, sin aviso: la mayor
+/// del mes la llena), que se llena con un muelle, una fila tras otra, con una marca fina donde quedó el mes anterior; a su
+/// lado, el cambio. Un solo elemento para VoiceOver.
 struct CategoryRow: View {
     let row: CategoryRowModel
     /// Orden de la fila: escalona el crecimiento de la barra.
@@ -11,10 +12,11 @@ struct CategoryRow: View {
     var markName = "el mes anterior"
 
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var grown = false
+    /// Cabe «+1.234 %» al tamaño de letra que sea.
+    @ScaledMetric(relativeTo: .caption) private var changeWidth: CGFloat = 66
 
     var body: some View {
+        let hidden = preferences.privateMode
         HStack(spacing: 14) {
             Image(systemName: row.category.symbolName)
                 .font(.system(size: 17, weight: .regular))
@@ -29,22 +31,30 @@ struct CategoryRow: View {
                         .foregroundStyle(Theme.label)
                         .lineLimit(1)
                     Spacer(minLength: 8)
-                    Text(formatEUR(row.cents))
+                    // Con el ojo cerrado no se monta ninguna cifra: la máscara del kit («•••,•• €»), no un desenfoque.
+                    Text(hidden ? maskedEUR(row.cents, sign: false) : formatEUR(row.cents))
                         .titan(.row)
                         .foregroundStyle(Theme.label)
-                        .privateAmount()
+                        .contentTransition(.identity)
+                        .privacySensitive()
                 }
                 HStack(spacing: 10) {
-                    SpendBar(fraction: row.fraction, previous: row.previousFraction, grown: grown)
+                    SpendBar(name: row.category.displayName, fraction: row.fraction, previous: row.previousFraction, index: index)
                     // Columna fija (aunque no haya cambio): todas las barras comparten escala y se pueden comparar.
-                    Text(row.change ?? "")
+                    Text(hidden && row.change != nil ? "•••" : (row.change ?? ""))
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
                         .lineLimit(1)
-                        .frame(width: 56, alignment: .trailing)
-                        .privateAmount(radius: 6)
+                        .frame(width: changeWidth, alignment: .trailing)
+                        .contentTransition(.identity)
+                        .privacySensitive()
                 }
             }
+            // Empuja la pantalla de la categoría.
+            Image(systemName: "chevron.right")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Theme.passive)
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, Theme.Space.gutter)
         .frame(minHeight: 64)
@@ -52,19 +62,6 @@ struct CategoryRow: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
         .accessibilityIdentifier("gasto.fila.\(row.category.rawValue)")
-        .onAppear(perform: grow)
-    }
-
-    /// La barra crece con el muelle de montaje, una fila tras otra; con Reducir movimiento ya está llena.
-    private func grow() {
-        guard !grown else { return }
-        if reduceMotion {
-            grown = true
-        } else {
-            withAnimation(Theme.Motion.assemble.delay(0.1 + Double(min(index, Theme.Motion.staggerLimit)) * Theme.Motion.staggerStep)) {
-                grown = true
-            }
-        }
     }
 
     private var spoken: String {
@@ -77,32 +74,28 @@ struct CategoryRow: View {
     }
 }
 
-/// Barra de 4 pt sobre #1C1C1E; la marca de 1 pt señala el mes anterior.
+/// La barra de la categoría (`FillBar` sin aviso: siempre blanca) y, encima, la marca de 1 pt del mes anterior.
+/// Las categorías entran 0,2 s después de empezar y luego una tras otra (48 ms × 0,86ⁿ), como en la maqueta.
 private struct SpendBar: View {
+    let name: String
     let fraction: Double
     let previous: Double?
-    let grown: Bool
+    let index: Int
 
     var body: some View {
-        GeometryReader { geo in
-            let width = geo.size.width
-            ZStack(alignment: .leading) {
-                Capsule().fill(Theme.raised).frame(height: 4)
-                Capsule()
-                    .fill(Theme.label)
-                    .frame(width: max(4, width * fraction) * (grown ? 1 : 0.0001), height: 4)
-                    .opacity(grown ? 1 : 0)
+        FillBar(fraction: fraction, warnAt: nil, label: name,
+                delay: 0.4 + MotionMath.staggerDelays(count: index + 1, firstGap: 0.048, decay: 0.86)[index])
+            .overlay {
                 if let previous {
-                    Rectangle()
-                        .fill(Theme.label2)
-                        .frame(width: 1, height: 10)
-                        .offset(x: min(max(width * previous, 0), width - 1))
-                        .opacity(grown ? 1 : 0)
+                    GeometryReader { geo in
+                        Rectangle()
+                            .fill(Theme.label2)
+                            .frame(width: 1, height: 14)
+                            .position(x: min(max(geo.size.width * previous, 0.5), geo.size.width - 0.5), y: geo.size.height / 2)
+                    }
                 }
             }
-            .frame(height: geo.size.height)
-        }
-        .frame(height: 10)
-        .accessibilityHidden(true)
+            .frame(height: 14)
+            .accessibilityHidden(true)
     }
 }

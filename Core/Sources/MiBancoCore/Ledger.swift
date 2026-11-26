@@ -241,12 +241,15 @@ public struct LedgerState: Codable, Equatable, Sendable {
     /// Periodos que cubren los extractos importados, por banco (R38): de la primera fila al último día completo antes de
     /// importarlo. Un día solo está cubierto dentro de uno de ellos; entre dos extractos no hay cobertura.
     public var statementCoverage: [BankID: [DateInterval]]
+    /// Primer y último aviso visto por cada guía de Atajos (clave: `GuideTrack.rawValue`).
+    public var guideSightings: [String: GuideSighting]
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
                 alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
                 categoryOverrides: [String: SpendingCategory] = [:], budgets: Budgets = Budgets(),
                 dismissedSubscriptions: Set<String> = [],
-                links: [BankID: BankLinkInfo] = [:], statementCoverage: [BankID: [DateInterval]] = [:]) {
+                links: [BankID: BankLinkInfo] = [:], statementCoverage: [BankID: [DateInterval]] = [:],
+                guideSightings: [String: GuideSighting] = [:]) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
@@ -257,10 +260,11 @@ public struct LedgerState: Codable, Equatable, Sendable {
         self.dismissedSubscriptions = dismissedSubscriptions
         self.links = links
         self.statementCoverage = statementCoverage
+        self.guideSightings = guideSightings
     }
 
     private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides, budgets, dismissedSubscriptions
-        case links, statementCoverage
+        case links, statementCoverage, guideSightings
     }
 
     /// Los libros guardados antes de los avisos no traen ajustes ni silenciados: valores por defecto.
@@ -276,6 +280,8 @@ public struct LedgerState: Codable, Equatable, Sendable {
         dismissedSubscriptions = try c.decodeIfPresent(Set<String>.self, forKey: .dismissedSubscriptions) ?? []
         links = try c.decodeIfPresent([BankID: BankLinkInfo].self, forKey: .links) ?? [:]
         statementCoverage = try c.decodeIfPresent([BankID: [DateInterval]].self, forKey: .statementCoverage) ?? [:]
+        // Tolerante: un registro ausente o estropeado no impide abrir el libro.
+        guideSightings = (try? c.decodeIfPresent([String: GuideSighting].self, forKey: .guideSightings)) ?? [:]
     }
 }
 
@@ -398,6 +404,32 @@ public struct Ledger: Sendable {
         }
     }
 
+    /// true si la categoría de este pago la eligió el dueño (en el pago o para todo su comercio), no la app.
+    public func hasChosenCategory(_ id: UUID) -> Bool {
+        guard let m = state.movements.first(where: { $0.id == id }) else { return false }
+        if m.category != nil { return true }
+        let key = normalizeMerchant(m.merchant ?? "")
+        return !key.isEmpty && state.categoryOverrides[key] != nil
+    }
+
+    /// true si este pago tiene categoría elegida en él mismo (no solo la de su comercio).
+    public func hasOwnCategory(_ id: UUID) -> Bool {
+        state.movements.first(where: { $0.id == id })?.category != nil
+    }
+
+    /// «Volver a la categoría automática». Si el pago tiene elección propia, quita solo esa (el pago pasa a seguir la
+    /// del comercio, si la hay, o la automática; la del comercio NO se toca). Solo si no tiene elección propia y hay una
+    /// para todo su comercio, quita esa.
+    public mutating func resetCategoryToAutomatic(for id: UUID) {
+        guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
+        if state.movements[i].category != nil {
+            state.movements[i].category = nil
+            return
+        }
+        let key = normalizeMerchant(state.movements[i].merchant ?? "")
+        if !key.isEmpty { state.categoryOverrides[key] = nil }
+    }
+
     public mutating func setOwnTransfer(_ value: Bool?, for id: UUID) {
         guard let i = state.movements.firstIndex(where: { $0.id == id }) else { return }
         state.movements[i].ownTransfer = value
@@ -428,6 +460,17 @@ public struct Ledger: Sendable {
             rewound.historyLoaded = false
             return rewound
         }
+        // En `guideSightings` se conserva, por cada guía, la fecha más reciente de último aviso (y la más antigua de primero).
+        for (key, local) in state.guideSightings {
+            if let fromBackup = restored.guideSightings[key] {
+                restored.guideSightings[key] = GuideSighting(
+                    first: min(local.first, fromBackup.first),
+                    last: max(local.last, fromBackup.last)
+                )
+            } else {
+                restored.guideSightings[key] = local
+            }
+        }
         state = restored
     }
 
@@ -451,7 +494,9 @@ public struct Ledger: Sendable {
         body(&state.alertSettings)
     }
 
-    public mutating func ingest(_ input: IngestInput, now: Date) -> IngestOutcome {
+    public mutating func ingest(_ rawInput: IngestInput, now: Date) -> IngestOutcome {
+        let input = sanitizeIngestInput(rawInput)
+        state.recordGuideSighting(for: input, now: now)
         let bank: BankID
         let parsed: ParsedMovement
         let source: Movement.Source
@@ -465,7 +510,13 @@ public struct Ledger: Sendable {
             case .unreadable:
                 return storeUnread(bank: b, text: [title, subtitle, body].compactMap { $0 }.joined(separator: "\n"), now: now)
             case .movement(let m):
-                parsed = m
+                parsed = ParsedMovement(
+                    kind: m.kind,
+                    amountCents: m.amountCents,
+                    merchant: sanitizeMerchant(m.merchant),
+                    reportedBalanceCents: m.reportedBalanceCents,
+                    merchantIsShop: m.merchantIsShop
+                )
             }
         case let .wallet(b, amount, merchant):
             bank = b
@@ -473,8 +524,9 @@ public struct Ledger: Sendable {
             guard let cents = parseAmountToCents(Substring(amount)) else {
                 return storeUnread(bank: b, text: amount, now: now)
             }
+            let cleanMerchant = sanitizeMerchant(merchant)
             // Apple Pay con comercio: siempre una compra en una tienda.
-            parsed = ParsedMovement(kind: .payment, amountCents: cents, merchant: merchant, merchantIsShop: !(merchant ?? "").isEmpty)
+            parsed = ParsedMovement(kind: .payment, amountCents: cents, merchant: cleanMerchant, merchantIsShop: cleanMerchant != nil)
         }
 
         let signed = parsed.kind == .payment ? -parsed.amountCents : parsed.amountCents
@@ -545,18 +597,19 @@ public struct Ledger: Sendable {
     /// comercio antiguo tenía una categoría «para todo el comercio» y la nueva no tiene ninguna, la categoría pasa al propio
     /// movimiento para no perderla con el cambio de clave.
     mutating func setMerchantKeepingCategory(_ merchant: String?, at i: Int) {
+        let clean = sanitizeMerchant(merchant)
         let oldKey = normalizeMerchant(state.movements[i].merchant ?? "")
-        let newKey = normalizeMerchant(merchant ?? "")
+        let newKey = normalizeMerchant(clean ?? "")
         if oldKey != newKey, !oldKey.isEmpty, state.movements[i].category == nil,
            let inherited = state.categoryOverrides[oldKey], state.categoryOverrides[newKey] == nil {
             state.movements[i].category = inherited
         }
-        state.movements[i].merchant = merchant
+        state.movements[i].merchant = clean
     }
 
     /// Un aviso sin leer idéntico dentro de la ventana de reentrega no se guarda dos veces.
     private mutating func storeUnread(bank: BankID, text raw: String, now: Date) -> IngestOutcome {
-        let text = String(raw.prefix(Self.unreadTextLimit))
+        let text = sanitizeNoticeField(raw, maxLength: Self.unreadTextLimit) ?? ""
         let repeated = state.unread.contains {
             $0.bank == bank && $0.text == text && abs($0.date.timeIntervalSince(now)) <= Self.redeliveryWindow
         }
@@ -732,6 +785,19 @@ public struct Ledger: Sendable {
     public func total() -> Int? {
         let known = BankID.allCases.compactMap { balance($0)?.cents }
         return known.isEmpty ? nil : known.reduce(0, +)
+    }
+}
+
+/// Decide en el arranque si abrir la bienvenida y si marcar `onboardingDone` (U56).
+/// Solo arranca si la lectura fue bien, el libro está vacío y `onboardingDone` es falso.
+public func onboardingDecision(load: Result<LedgerState, Error>, onboardingDone: Bool) -> (startSession: Bool, markDone: Bool) {
+    guard !onboardingDone else { return (false, false) }
+    switch load {
+    case .failure:
+        return (false, false)
+    case .success(let state):
+        let isEmpty = state.balances.isEmpty && state.movements.isEmpty && state.links.isEmpty
+        return isEmpty ? (true, false) : (false, true)
     }
 }
 

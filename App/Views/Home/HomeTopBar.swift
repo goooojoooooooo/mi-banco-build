@@ -1,17 +1,22 @@
 import SwiftUI
 
-/// Barra fija de Inicio: "Tu dinero" y dos controles de cristal (ojo y lupa) en un mismo `GlassEffectContainer`.
-/// La lupa se transforma en el campo de búsqueda (en iOS 26, el cristal se funde de una forma a otra con
-/// `glassEffectID`; antes, un fundido con escala). El título se compacta un poco al bajar la lista.
+/// Barra fija de Inicio, como en la maqueta aprobada: a la izquierda la marca con el nombre de la app (la ranura a la que
+/// vuela la marca del arranque; tocarla abre «Tu resumen») y a la derecha dos controles de cristal (ojo y lupa) en un
+/// mismo `GlassEffectContainer`. La lupa se transforma en el campo de búsqueda (en iOS 26, el cristal se funde de una
+/// forma a otra con `glassEffectID`; antes, un fundido con escala). El título «Tu dinero» va con el contenido
+/// (`HomeTitle`) y se desliza bajo la barra.
 struct HomeTopBar: View {
     @Binding var searching: Bool
     @Binding var query: String
     let motion: HomeMotion
+    var openBriefing: () -> Void = {}
 
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Intensidad, Reducir movimiento y cámara lenta: el ojo y la lupa se mueven con esto.
+    @Environment(\.motion) private var kit
     @FocusState private var fieldFocused: Bool
     @Namespace private var glass
+    @ScaledMetric(relativeTo: .subheadline) private var nameSize: CGFloat = 15
 
     var body: some View {
         let hidden = preferences.privateMode
@@ -33,26 +38,25 @@ struct HomeTopBar: View {
                     .buttonStyle(.pressable)
                     .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .trailing)))
                 } else {
-                    Text("Tu dinero")
-                        .titan(.homeTitle)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .modifier(TitleCompression(motion: motion, enabled: !reduceMotion))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .accessibilityAddTraits(.isHeader)
+                    brand
+                        .homeEntrance(.brand)
                         .transition(.opacity)
+                    Spacer(minLength: 0)
                     Button(action: togglePrivacy) {
                         Image(systemName: hidden ? "eye.slash" : "eye")
                             .font(.system(size: 18, weight: .medium))
                             .contentTransition(.symbolEffect(.replace))
+                            // El símbolo cambia con su propia animación, también cuando ocultar va sin ella.
+                            .animation(kit.fade, value: hidden)
                             .foregroundStyle(Theme.label)
                             .frame(width: 44, height: 44)
                             .glassSurface(Circle())
                             .glassID("eye", in: glass)
                             .contentShape(Circle())
                     }
-                    .buttonStyle(.pressable)
+                    // Cristal que reacciona: se hunde a 0,88 y rebota al soltar (el cristal en sí no es interactivo).
+                    .buttonStyle(.glassPress)
+                    .homeEntrance(.buttons)
                     .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     .accessibilityLabel(hidden ? "Mostrar importes" : "Ocultar importes")
                     .accessibilityValue(hidden ? "Importes ocultos" : "Importes visibles")
@@ -65,7 +69,8 @@ struct HomeTopBar: View {
                             .glassID("search", in: glass)
                             .contentShape(Circle())
                     }
-                    .buttonStyle(.pressable)
+                    .buttonStyle(.glassPress)
+                    .homeEntrance(.buttons)
                     .transition(.opacity.combined(with: .scale(scale: 0.6)))
                     .accessibilityLabel("Buscar movimientos")
                 }
@@ -83,6 +88,33 @@ struct HomeTopBar: View {
         .onChange(of: searching) { _, on in
             fieldFocused = on
         }
+    }
+
+    /// La ranura de la marca: la pieza negra de 30 pt y el nombre en mayúsculas, 15 pt seminegrita con 0,18 em entre
+    /// letras. Su marco (marca + nombre, sin el margen del botón) es el destino del vuelo del arranque
+    /// (`.launchBrandSlot()`). Es el botón de «Tu resumen»: antes era la misma marca dentro de un círculo de cristal.
+    private var brand: some View {
+        Button(action: openBriefing) {
+            HStack(spacing: 10) {
+                AppMark(size: 30)
+                Text(AppIdentity.displayName.uppercased())
+                    .font(.system(size: nameSize, weight: .semibold))
+                    .tracking(nameSize * 0.18)
+                    .foregroundStyle(Theme.label)
+                    .lineLimit(1)
+            }
+            .launchBrandSlot()
+            .padding(.trailing, 8)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.pressable)
+        // El nombre no crece sin límite: comparte fila con los dos botones.
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .accessibilityLabel("Tu resumen")
+        // Control por voz: lo que se ve es el nombre de la app, así que también responde a él («Toca Onyx»).
+        .accessibilityInputLabels(["Tu resumen", "Resumen", AppIdentity.displayName])
+        .accessibilityIdentifier("home-briefing-button")
     }
 
     private var searchField: some View {
@@ -121,21 +153,47 @@ struct HomeTopBar: View {
     }
 
     private func togglePrivacy() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.privacy) {
-            preferences.privateMode.toggle()
+        if preferences.privateMode {
+            // Al mostrar, lo que aún se difumine en otras pantallas vuelve con un fundido (los importes de Inicio son
+            // máscaras que cambian en el acto, y los que ruedan hacen su propia entrada).
+            withAnimation(kit.fade) {
+                preferences.privateMode = false
+            }
+        } else {
+            // Al ocultar, se tapan en el acto: ni un fotograma con la cifra legible después del toque. (Los importes
+            // que ruedan hacen su propio barajado con dígitos al azar, sin depender de esta animación.)
+            withAnimation(nil) { preferences.privateMode = true }
         }
         AccessibilityNotification.Announcement(preferences.privateMode ? "Importes ocultos" : "Importes visibles").post()
     }
 
+    /// La lupa se transforma en el campo con el muelle de encaje (con Reducir movimiento, un fundido).
     private func startSearch() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph) { searching = true }
+        withAnimation(kit.animation(.snap)) { searching = true }
     }
 
     private func cancel() {
         fieldFocused = false
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph) {
+        withAnimation(kit.animation(.snap)) {
             searching = false
             query = ""
         }
+    }
+}
+
+/// «Tu dinero»: el título grande de Inicio. Va con el contenido, encima del carrusel, y se desliza bajo la barra al
+/// bajar la lista (como en la maqueta aprobada).
+struct HomeTitle: View {
+    var body: some View {
+        Text("Tu dinero")
+            .titan(.homeTitle)
+            .foregroundStyle(Theme.label)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Theme.Space.gutter)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
+            .accessibilityAddTraits(.isHeader)
     }
 }

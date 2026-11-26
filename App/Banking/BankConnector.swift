@@ -20,7 +20,9 @@ final class BankConnector {
 
     private var flow = ConnectFlow()
     /// Lista de bancos de Enable Banking, solo en memoria.
-    private var cachedASPSPs: [EBASPSP]?
+    private(set) var cachedASPSPs: [EBASPSP]?
+    /// true mientras «Olvidar clave y conexiones» borra lo local (U43).
+    var isForgetting = false
 
     // La dirección del banco y la hoja web viven solo en memoria.
     @ObservationIgnored private var authURL: URL?
@@ -33,8 +35,47 @@ final class BankConnector {
 
     /// Un intento a medias que ya caducó no sirve para nada: se borra al arrancar.
     private init() {
+        #if DEBUG
+        if DemoMode.isActive {
+            if let spec = DemoMode.demoConnectPhase {
+                applyDemoPhase(spec.phase, bank: spec.bank)
+            }
+            return
+        }
+        #endif
         if let pending = loadPending(), pending.isExpired(now: Date()) { deletePending() }
     }
+
+    #if DEBUG
+    private func applyDemoPhase(_ name: String, bank: BankID) {
+        switch name {
+        case "opening":
+            _ = flow.handle(.start(bank))
+        case "waitingForBank":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.webOpened(bank))
+        case "finishing":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.webOpened(bank))
+            _ = flow.handle(.callback(.valid(bank)))
+        case "needsResume":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.webOpened(bank))
+            _ = flow.handle(.cancel)
+        case "failed":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.failed(bank, ConnectMessage.tooSlow))
+        case "chooseASPSP":
+            _ = flow.handle(.start(bank))
+            _ = flow.handle(.needsChoice(bank, [
+                EBASPSP(name: "Revolut", country: "ES"),
+                EBASPSP(name: "imaginBank", country: "ES"),
+            ]))
+        default:
+            break
+        }
+    }
+    #endif
 
     var phase: ConnectPhase { flow.phase }
 
@@ -50,11 +91,19 @@ final class BankConnector {
         guard let client = try? BankingCredentials.client(),
               let list = try? await client.aspsps(country: BankingConstants.country) else { return }
         cachedASPSPs = list
+        NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
     }
 
     // MARK: - Conectar
 
     func connect(_ bank: BankID, aspsp: EBASPSP? = nil) async {
+        #if DEBUG
+        if DemoMode.isActive {
+            guard !isActive else { return }
+            _ = flow.handle(.start(bank))
+            return
+        }
+        #endif
         guard !isActive else { return }
         // Un intento anterior (de este banco u otro) ya no puede contestar a este: se borra ANTES del primer `await`.
         deletePending()
@@ -140,9 +189,25 @@ final class BankConnector {
         }
     }
 
-    /// Cancelación explícita: cierra la hoja web y deja el trámite en `needsResume`.
+    /// Cancelación explícita: cierra la hoja web; en `.opening` vuelve a reposo y en `.waitingForBank` pasa a `.needsResume` (U50).
     func cancelWebSession() {
         run(flow.handle(.cancel))
+    }
+
+    /// Sale de `.needsResume` o `.failed` («Dejarlo» o al salir de la pantalla, U50).
+    func resetTransientPhase() {
+        run(flow.handle(.reset))
+    }
+
+    /// Abandona cualquier trámite en curso desde CUALQUIER fase y vuelve a `.idle` (U42: «Olvidar clave y conexiones»).
+    func resetForForgetEverything() {
+        attempt = UUID()
+        authURL = nil
+        requestedUntil = nil
+        closeWebSession()
+        deletePending()
+        cachedASPSPs = nil
+        run(flow.handle(.forgetAll))
     }
 
     /// Cambios de escena. El bloqueo no se mira: solo cuánto tiempo se ha estado fuera.
@@ -156,14 +221,18 @@ final class BankConnector {
 
     // MARK: - La vuelta del banco
 
-    func handle(url: URL) async {
+    func handle(url: URL, fromWebSession: Bool = false) async {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         // Solo `mibanco://cb`: lo demás se ignora sin ruido.
         guard isBankCallbackURL(url) else { return }
 
         // Todo lo siguiente, hasta el primer `await`, es síncrono: la primera llamada consume el intento
         // (lo borra del Llavero) y una segunda no encuentra nada.
         // La vuelta se VERIFICA primero contra el `state` guardado: cualquier app puede abrir `mibanco://cb?...`, y una
-        // vuelta falsa no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora).
+        // vuelta falsa por `onOpenURL` no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora);
+        // si vino del propio cierre de la hoja web (`fromWebSession: true`), falla con `foreignLink` (R43).
         let pending = loadPending()
         let check: PendingCheck
         if let pending {
@@ -172,7 +241,7 @@ final class BankConnector {
             check = .none
         }
         let result: AuthCallbackResult = pending.map { parseAuthCallback(url, expectedState: $0.state) } ?? .malformed
-        let actions = flow.handle(.callbackReceived(check, result))
+        let actions = flow.handle(.callbackReceived(check, result, fromWebSession: fromWebSession))
 
         var bankToProcess: BankID?
         for action in actions {
@@ -214,6 +283,7 @@ final class BankConnector {
         let accounts = selectAccounts(session.accounts)
         guard !accounts.isEmpty else {
             try? await client.deleteSession(id: session.sessionID)
+            guard attempt == mine else { return }
             fail(bank, ConnectMessage.noEuroAccount(bank))
             return
         }
@@ -234,11 +304,19 @@ final class BankConnector {
                 ledger.setLink(bank, info)
             }
         } catch {
+            var canDeleteNewRemote = true
             switch rollbackAfterLedgerFailure(previous: previous) {
-            case .restore(let old): try? KeychainVault.setCodable(old, for: item)
-            case .deleteNew: try? KeychainVault.delete(item)
+            case .restore(let old):
+                if (try? KeychainVault.setCodable(old, for: item)) == nil {
+                    canDeleteNewRemote = false
+                }
+            case .deleteNew:
+                try? KeychainVault.delete(item)
             }
-            try? await client.deleteSession(id: session.sessionID)
+            if canDeleteNewRemote {
+                try? await client.deleteSession(id: session.sessionID)
+            }
+            guard attempt == mine else { return }
             fail(bank, ConnectMessage.storeFailed)
             return
         }
@@ -256,34 +334,43 @@ final class BankConnector {
     // MARK: - Desconectar
 
     func disconnect(_ bank: BankID) async {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         // Un trámite de este banco (también uno que está terminando) se abandona: `attempt` cambia y `finish` se retira.
         attempt = UUID()
         run(flow.handle(.disconnected(bank)))
-        if let session = try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)),
-           let client = try? BankingCredentials.client() {
-            try? await client.deleteSession(id: session.sessionID)
-        }
-        try? KeychainVault.delete(KeychainVault.session(for: bank))
-        _ = try? SharedStore.make().update { ledger in
-            ledger.setLink(bank, nil)
-            if let balance = ledger.state.balances[bank], balance.origin == .bank {
-                ledger.adoptBalance(bank, cents: balance.cents, at: balance.setAt, origin: .manual)
+        // U78 (B-M9): como «Olvidar», lo local primero (sesión del Llavero y enlace del libro) y el aviso al banco al final.
+        // El cliente se crea antes de borrar nada, para poder avisar al banco aunque luego falte algo.
+        let remoteClient = try? BankingCredentials.client()
+        await disconnectBankPlan(
+            readSessionID: {
+                (try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank)))?.sessionID
+            },
+            deleteLocal: {
+                try? KeychainVault.delete(KeychainVault.session(for: bank))
+            },
+            unlinkLedger: {
+                _ = try? SharedStore.make().update { ledger in
+                    ledger.setLink(bank, nil)
+                    if let balance = ledger.state.balances[bank], balance.origin == .bank {
+                        ledger.adoptBalance(bank, cents: balance.cents, at: balance.setAt, origin: .manual)
+                    }
+                }
+                await MainActor.run {
+                    NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
+                    NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
+                }
+            },
+            deleteRemote: { sessionID in
+                if let remoteClient {
+                    try? await remoteClient.deleteSession(id: sessionID)
+                }
             }
-        }
-        NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
-        NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
+        )
     }
 
     // MARK: - Interno
-
-    private var phaseBank: BankID? {
-        switch flow.phase {
-        case .idle: nil
-        case .opening(let b), .waitingForBank(let b), .finishing(let b), .connected(let b), .needsResume(let b),
-             .failed(let b, _), .chooseASPSP(let b, _):
-            b
-        }
-    }
 
     private func fail(_ bank: BankID, _ message: String) {
         run(flow.handle(.failed(bank, message)))
@@ -300,7 +387,10 @@ final class BankConnector {
     }
 
     private func loadPending() -> PendingAuth? {
-        (try? KeychainVault.codable(PendingAuth.self, for: .pendingAuth)) ?? nil
+        #if DEBUG
+        if DemoMode.isActive { return nil }
+        #endif
+        return (try? KeychainVault.codable(PendingAuth.self, for: .pendingAuth)) ?? nil
     }
 
     private func pendingCheck() -> PendingCheck {
@@ -309,6 +399,9 @@ final class BankConnector {
     }
 
     private func deletePending() {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
         try? KeychainVault.delete(.pendingAuth)
     }
 
@@ -329,7 +422,7 @@ final class BankConnector {
             Task { @MainActor in
                 guard let self else { return }
                 if let callbackURL {
-                    await self.handle(url: callbackURL)
+                    await self.handle(url: callbackURL, fromWebSession: true)
                 } else if self.webToken == token {
                     // Cerrada por la persona (la app, al cerrarla, anula antes el `webToken`).
                     self.webToken = nil

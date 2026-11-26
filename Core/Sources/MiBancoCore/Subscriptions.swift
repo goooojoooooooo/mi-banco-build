@@ -52,19 +52,53 @@ public func detectSubscriptions(in movements: [Movement], now: Date, calendar: C
             i -= 1
         }
         guard chainLength >= 2 else { continue }
+        let chainStart = sorted.count - chainLength
+        let chainDates = sorted[chainStart...].map(\.date)
         let previous = abs(sorted[sorted.count - 2].amountCents)
         let latest = abs(last.amountCents)
         let key = normalizeMerchant(last.merchant ?? "")
+        let nextDate = nextAnchoredMonthlyDate(last: last.date, priorDates: chainDates, calendar: calendar)
         result.append(Subscription(
             id: key, merchant: last.merchant ?? key, bank: last.bank, amountCents: latest,
             previousAmountCents: previous == latest ? nil : previous, lastDate: last.date,
-            nextDate: calendar.date(byAdding: .month, value: 1, to: last.date) ?? last.date))
+            nextDate: nextDate))
     }
     return result.sorted { a, b in
         if a.nextDate != b.nextDate { return a.nextDate < b.nextDate }
         if a.id != b.id { return a.id < b.id }
         return a.bank.rawValue < b.bank.rawValue
     }
+}
+
+/// Fecha del mes siguiente respetando el día ancla de fin de mes (U22): si `last` cayó el último día de su mes
+/// y alguna fecha previa de la cadena tiene un día mayor (p. ej. 31 ene + 28 feb), el ancla es ese día mayor
+/// recortado a la longitud del mes siguiente (31 mar).
+func nextAnchoredMonthlyDate(last: Date, priorDates: [Date], calendar: Calendar, fixedHour: Int? = nil) -> Date {
+    let lastDay = calendar.component(.day, from: last)
+    let lastMonthLength = calendar.range(of: .day, in: .month, for: last)?.count ?? lastDay
+    var anchorDay = lastDay
+    if lastDay == lastMonthLength {
+        let maxPrior = priorDates.map { calendar.component(.day, from: $0) }.max() ?? lastDay
+        if maxPrior > lastDay { anchorDay = maxPrior }
+    }
+    guard let lastMonthStart = calendar.dateInterval(of: .month, for: last)?.start,
+          let nextMonthStart = calendar.date(byAdding: .month, value: 1, to: lastMonthStart),
+          let nextMonthLength = calendar.range(of: .day, in: .month, for: nextMonthStart)?.count else {
+        return calendar.date(byAdding: .month, value: 1, to: last) ?? last
+    }
+    var parts = calendar.dateComponents([.year, .month], from: nextMonthStart)
+    parts.day = min(anchorDay, nextMonthLength)
+    if let fixedHour {
+        parts.hour = fixedHour
+        parts.minute = 0
+        parts.second = 0
+    } else {
+        let time = calendar.dateComponents([.hour, .minute, .second], from: last)
+        parts.hour = time.hour
+        parts.minute = time.minute
+        parts.second = time.second
+    }
+    return calendar.date(from: parts) ?? (calendar.date(byAdding: .month, value: 1, to: last) ?? last)
 }
 
 /// Las suscripciones detectadas sin las que el dueño ocultó (id `"<banco>|<clave>"` en `dismissedSubscriptions`).

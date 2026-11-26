@@ -13,7 +13,7 @@ struct SlideToConfirm: View {
     @State private var offset: CGFloat = 0
     @State private var done = false
     @State private var confirmCount = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
 
     private let height: CGFloat = 56
     private let inset: CGFloat = 4
@@ -74,7 +74,7 @@ struct SlideToConfirm: View {
                 if offset >= travel * 0.85 || value.predictedEndTranslation.width >= travel * 1.2 {
                     complete()
                 } else {
-                    withAnimation(.spring(response: 0.38, dampingFraction: 0.82)) { offset = 0 }
+                    withAnimation(motion.animation(.snap)) { offset = 0 }
                 }
             }
     }
@@ -82,7 +82,7 @@ struct SlideToConfirm: View {
     private func complete() {
         guard !done else { return }
         confirmCount += 1
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph) {
+        withAnimation(motion.animation(.snap)) {
             done = true
         } completion: {
             action()

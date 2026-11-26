@@ -1,0 +1,429 @@
+#if DEBUG
+import SwiftUI
+import MiBancoCore
+
+/// Galería de movimiento solo para compilaciones DEBUG: enseña, sobre negro, cada pieza del kit sin enlazarla a ninguna
+/// pantalla. Se abre con `-MiBancoMotionGallery` (junto a `-MiBancoDemo`, para que nada toque datos ni UserDefaults).
+/// `-MiBancoMotionGalleryPage cifras|filas|controles|botones|segmentado|pasos` baja hasta esa parte; `-MiBancoMotionReduce` la abre con
+/// Reducir movimiento simulado; `-MiBancoMotionGalleryNoPrefs` la monta FUERA del entorno de preferencias (como lo haría
+/// una hoja o una ventana nueva que se olvidase de ellas). Datos inventados.
+enum MotionGalleryLaunch {
+    private static var arguments: [String] { ProcessInfo.processInfo.arguments }
+    static var isActive: Bool { arguments.contains("-MiBancoMotionGallery") }
+    static var startsReduced: Bool { arguments.contains("-MiBancoMotionReduce") || DemoMode.forcesReduceMotion }
+    /// Sin `AppPreferences` en el entorno de la galería.
+    static var withoutPreferences: Bool { arguments.contains("-MiBancoMotionGalleryNoPrefs") }
+    /// Hasta dónde baja al abrir: una de las seis anclas de arriba (o nada).
+    static var page: String? {
+        guard let i = arguments.firstIndex(of: "-MiBancoMotionGalleryPage"), i + 1 < arguments.count else { return nil }
+        return arguments[i + 1]
+    }
+}
+
+extension View {
+    /// Con `-MiBancoMotionGallery`, tapa toda la app con la galería (y la oculta a la accesibilidad de lo de debajo).
+    func motionGalleryOverlay() -> some View {
+        modifier(MotionGalleryOverlay())
+    }
+}
+
+private struct MotionGalleryOverlay: ViewModifier {
+    @Environment(AppPreferences.self) private var preferences: AppPreferences?
+
+    func body(content: Content) -> some View {
+        // Con la galería, la app de debajo ni se monta (así no deja elementos de accesibilidad ni tareas).
+        if MotionGalleryLaunch.isActive {
+            MotionGallery()
+                .motionEnvironment()
+                // `-MiBancoMotionGalleryNoPrefs`: el entorno sin preferencias (el ojo guardado sigue mandando).
+                .environment(MotionGalleryLaunch.withoutPreferences ? nil : preferences)
+                .background(Color.black.ignoresSafeArea())
+        } else {
+            content
+        }
+    }
+}
+
+struct MotionGallery: View {
+    /// Opcional: sin preferencias la galería usa su propio nivel local y no se cierra.
+    @Environment(AppPreferences.self) private var preferences: AppPreferences?
+    @Environment(\.motion) private var baseMotion
+
+    @State private var forceReduce = MotionGalleryLaunch.startsReduced
+    @State private var replay = 0
+    @State private var cents = 377475
+    @State private var lifted = false
+    @State private var burst = 0
+    /// Cuántas veces ha avisado un botón que se transforma de que terminó (`onFinish`), y con qué.
+    @State private var morphFinished = 0
+    @State private var morphLast = "-"
+    @State private var sheenPhase: CGFloat = 0.3
+    @State private var fraction = 0.45
+    @State private var step = 0
+    @State private var stepsDone = false
+    @State private var period = 1
+    @State private var localLevel = AppPreferences.defaultMotionLevel
+    @State private var rowTaps = 0
+    @State private var rowTapsAbove = 0
+    @State private var rowTapsBelow = 0
+    @State private var census = (faces: -1, slots: -1, frames: -1)
+
+    private var motion: MotionContext {
+        var m = baseMotion
+        m.reduce = m.reduce || forceReduce
+        return m
+    }
+
+    private var levelBinding: Binding<MotionLevel> {
+        Binding(
+            get: { preferences?.motionLevel ?? localLevel },
+            set: { if let preferences { preferences.motionLevel = $0 } else { localLevel = $0 } })
+    }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 32) {
+                    Text("Galería de movimiento")
+                        .titan(.sheetTitle)
+                        .foregroundStyle(Theme.label)
+                        .accessibilityIdentifier("gallery.title")
+                        .padding(.top, 24)
+                    levelSection
+                    markSection
+                    Color.clear.frame(height: 1).id("cifras")
+                    amountSection
+                    Color.clear.frame(height: 1).id("filas")
+                    rowsSection
+                    Color.clear.frame(height: 1).id("controles")
+                    glassSection
+                    liftSection
+                    burstSection
+                    Color.clear.frame(height: 1).id("botones")
+                    morphSection
+                    Color.clear.frame(height: 1).id("segmentado")
+                    segmentedSection
+                    fillSection
+                    Color.clear.frame(height: 1).id("pasos")
+                    stepperSection
+                    censusSection
+                    Color.clear.frame(height: 1).id("frases")
+                    sentenceSection
+                }
+                .padding(.horizontal, Theme.Space.gutter)
+                .padding(.bottom, 48)
+            }
+            .scrollIndicators(.hidden)
+            .task {
+                guard let page = MotionGalleryLaunch.page else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                proxy.scrollTo(page, anchor: .top)
+            }
+        }
+        .environment(\.motion, motion)
+        .foregroundStyle(Theme.label)
+        .tint(.white)
+    }
+
+    // MARK: Secciones
+
+    private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(spacing: 14) {
+            Text(title)
+                .titan(.header)
+                .foregroundStyle(Theme.label3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            content()
+        }
+    }
+
+    private func chip(_ title: String, id: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .padding(.horizontal, 16)
+                .frame(minHeight: 44)
+                .background(Theme.raised, in: Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier(id)
+    }
+
+    private var levelSection: some View {
+        section("Intensidad") {
+            TitanSegmented(
+                selection: levelBinding,
+                options: [(.subtle, "Sutil"), (.balanced, "Equilibrado"), (.expressive, "Expresivo")])
+            Toggle("Reducir movimiento", isOn: $forceReduce)
+                .toggleStyle(TitanToggleStyle())
+                .accessibilityIdentifier("gallery.reduce")
+        }
+    }
+
+    private var markSection: some View {
+        section("Marca") {
+            MarkReveal(size: 132, replay: replay)
+            chip("Repetir marca", id: "gallery.mark.replay") { replay += 1 }
+        }
+    }
+
+    private var amountSection: some View {
+        section("Cifras") {
+            RollingAmount(
+                cents: cents, countsUp: true,
+                style: .hero(euros: 44, cents: 24, centsColor: Theme.label2))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("gallery.amount")
+            HStack(spacing: 10) {
+                chip("Pago", id: "gallery.pay") { cents -= 480 }
+                chip("Ingreso", id: "gallery.income") { cents += 124_500 }
+                // Sin preferencias el ojo no puede funcionar: no se enseña.
+                if let preferences {
+                    chip("Ojo", id: "gallery.eye") {
+                        withAnimation(motion.fade) { preferences.privateMode.toggle() }
+                    }
+                } else {
+                    // Cierra el ojo guardado sin tocar el estado de la galería (como Ajustes desde otra pantalla): el
+                    // importe sin preferencias lo observa en vivo.
+                    chip("Cerrar ojo guardado", id: "gallery.storedEye.close") {
+                        AppPreferences.privateModeStore.set(true, forKey: AppPreferences.privateModeKey)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Importes de una línea con la tipografía de una fila puesta por quien los coloca (`.plain` no trae la suya).
+    private var rowsSection: some View {
+        section("Filas") {
+            VStack(spacing: 4) {
+                rowAmount("Café", cents: -480, sign: false, color: Theme.label, id: "gallery.row.expense")
+                rowAmount("Nómina", cents: 125_000, sign: true, color: Theme.income, id: "gallery.row.income")
+                rowAmount("Saldo", cents: 6_120, sign: false, color: Theme.label, id: "gallery.row.plain")
+                // Título e importe largos: con el texto más grande, el importe tiene que encoger de verdad (K18).
+                rowAmount("Nómina de noviembre", cents: 1_234_567, sign: true, color: Theme.income, id: "gallery.row.long")
+                // Un importe enorme con un título largo: el importe baja hasta la mitad y, de ahí, cede el título (se
+                // parte); el importe nunca se sale de la fila (K21).
+                rowAmount("Traspaso a la cuenta de ahorro", cents: 123_456_789, sign: true, color: Theme.income, id: "gallery.row.huge")
+                // Filas que son botones, pegadas (como en una lista): cada una recibe el toque en toda su forma visible y
+                // ninguna se lo roba a sus vecinas (K19). «Ahorro» empieza por 5: con las tiras «0…9,0» de antes, la de
+                // ese dígito subía 5 líneas por encima de su fila, sobre «Hucha». Va encima de sus vecinas (`zIndex`),
+                // para que una fuga de su área hacia abajo, sobre «Alquiler», se vea en la prueba (K24).
+                rowButton("Hucha", cents: 12_345, taps: $rowTapsAbove, id: "gallery.row.buttonAbove")
+                rowButton("Ahorro", cents: 50_000, taps: $rowTaps, id: "gallery.row.button")
+                    .zIndex(1)
+                rowButton("Alquiler", cents: -95_000, taps: $rowTapsBelow, id: "gallery.row.buttonBelow")
+            }
+        }
+    }
+
+    /// Cuántas caras con cifras reales (cada una con su `TimelineView`) y cuántas copias de medida (texto oculto, sin
+    /// `TimelineView`) hay montadas: una de cada por importe; y cuántos fotogramas han dibujado las caras (en reposo, no
+    /// suben) (K22). Al final de la galería, para no poner un botón en el hueco bajo las filas (las pruebas de toques lo
+    /// quieren vacío). `verbatim`: sin separador de miles.
+    private var censusSection: some View {
+        section("Recuento") {
+            HStack(spacing: 10) {
+                chip("Contar caras", id: "gallery.census") {
+                    census = (RollingAmountCensus.liveFaces, RollingAmountCensus.measuringSlots, RollingAmountCensus.faceFrames)
+                }
+                censusValue(census.faces, id: "gallery.census.value")
+                censusValue(census.slots, id: "gallery.census.slots")
+                censusValue(census.frames, id: "gallery.census.frames")
+            }
+            // El multiplicador de tiempo que ven las piezas (`-MiBancoMotionScale`): 1 sin bandera.
+            Text(verbatim: String(motion.timeMultiplier))
+                .titan(.subtitle)
+                .foregroundStyle(Theme.label2)
+                .accessibilityIdentifier("gallery.motion.scale")
+        }
+    }
+
+    /// Importes dentro de una frase (`inline`: ocultos no dejan un blanco delante) y en euros enteros (`.whole`), y una
+    /// cifra con millares para ver el ojo abrirse (nunca «0.145,19 €»). Al final de la galería.
+    private var sentenceSection: some View {
+        section("Frases y euros enteros") {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Vas").accessibilityIdentifier("gallery.sentence.before")
+                RollingAmount(cents: 128_455, countsUp: false, style: .plain(sign: false), inline: true)
+                    .accessibilityIdentifier("gallery.sentence.amount")
+                Text("de gasto").accessibilityIdentifier("gallery.sentence.after")
+                Spacer(minLength: 0)
+            }
+            .titan(.subtitle)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text("Previsto").accessibilityIdentifier("gallery.whole.before")
+                RollingAmount(cents: 128_960, countsUp: false, style: .whole(sign: false), inline: true)
+                    .accessibilityIdentifier("gallery.whole.amount")
+                Spacer(minLength: 0)
+            }
+            .titan(.subtitle)
+            RollingAmount(cents: 314_519, countsUp: false, style: .plain(sign: false))
+                .titan(.row)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityIdentifier("gallery.thousands.amount")
+            HStack(spacing: 10) {
+                if let preferences {
+                    chip("Ojo (frases)", id: "gallery.sentence.eye") {
+                        withAnimation(motion.fade) { preferences.privateMode.toggle() }
+                    }
+                }
+            }
+        }
+    }
+
+    private func censusValue(_ value: Int, id: String) -> some View {
+        Text(verbatim: String(value))
+            .titan(.subtitle)
+            .foregroundStyle(Theme.label2)
+            .accessibilityIdentifier(id)
+    }
+
+    /// Una fila-botón con importe; su valor de accesibilidad cuenta los toques. El importe dentro lleva el identificador
+    /// de la fila con «Amount» al final.
+    private func rowButton(_ name: String, cents: Int, taps: Binding<Int>, id: String) -> some View {
+        Button {
+            taps.wrappedValue += 1
+        } label: {
+            rowAmount(name, cents: cents, sign: false, color: Theme.label, id: id + "Amount")
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
+        .accessibilityValue("\(taps.wrappedValue)")
+    }
+
+    private func rowAmount(_ name: String, cents: Int, sign: Bool, color: Color, id: String) -> some View {
+        // El reparto del kit: el título hasta su ancho ideal y el importe a tamaño completo si cabe (K21).
+        AmountRowLayout {
+            Text(name)
+                .titan(.subtitle)
+                .foregroundStyle(Theme.label2)
+            RollingAmount(cents: cents, countsUp: false, style: .plain(sign: sign))
+                .titan(.row)
+                .foregroundStyle(color)
+                .accessibilityIdentifier(id)
+        }
+        .frame(minHeight: 44)
+    }
+
+    private var glassSection: some View {
+        section("Cristal") {
+            Button {
+                burst += 1
+            } label: {
+                Image(systemName: "eye")
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 52, height: 52)
+                    .glassSurface(Circle())
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.glassPress)
+            .accessibilityLabel("Botón de cristal")
+            .accessibilityIdentifier("gallery.glass")
+        }
+    }
+
+    private var liftSection: some View {
+        section("Levantar y brillo") {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(CardMaterial.all.gradient)
+                .overlay { SheenOverlay(phase: sheenPhase, tilt: 0).clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous)) }
+                .frame(width: 230, height: 130)
+                .lift(lifted)
+                .padding(.vertical, 18)
+                .accessibilityHidden(true)
+            HStack(spacing: 10) {
+                chip(lifted ? "Soltar" : "Levantar", id: "gallery.lift") { lifted.toggle() }
+                chip("Brillo", id: "gallery.sheen") {
+                    sheenPhase = 0
+                    withAnimation(.easeInOut(duration: motion.seconds(0.9))) { sheenPhase = 1 }
+                }
+            }
+        }
+    }
+
+    private var burstSection: some View {
+        section("Destello") {
+            ZStack {
+                SuccessBurst(trigger: burst)
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(Theme.income)
+                    .accessibilityHidden(true)
+            }
+            .frame(height: 150)
+            chip("Destello", id: "gallery.burst") { burst += 1 }
+        }
+    }
+
+    private var morphSection: some View {
+        section("Botón que se transforma") {
+            MorphingButton(title: "Probar aviso", doneTitle: "Enviado", action: {
+                try? await Task.sleep(for: .milliseconds(700))
+                return true
+            }, onFinish: { ok in
+                morphFinished += 1
+                morphLast = ok ? "bien" : "mal"
+            })
+            MorphingButton(title: "Probar fallo", doneTitle: "Enviado", action: {
+                try? await Task.sleep(for: .milliseconds(500))
+                return false
+            }, onFinish: { ok in
+                morphFinished += 1
+                morphLast = ok ? "bien" : "mal"
+            })
+            Text("Terminados: \(morphFinished) · \(morphLast)")
+                .titan(.meta)
+                .foregroundStyle(Theme.label2)
+                .accessibilityIdentifier("gallery.morph.finished")
+            // Un título largo: mientras se encoge al círculo no se parte en más líneas.
+            MorphingButton(title: "Probar un aviso con un título largo", doneTitle: "Enviado") {
+                try? await Task.sleep(for: .milliseconds(900))
+                return true
+            }
+            // Un hueco alto con un `Spacer` hermano: el botón conserva su alto (K9).
+            VStack(spacing: 0) {
+                MorphingButton(title: "Probar en hueco", doneTitle: "Enviado") { true }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 200)
+        }
+    }
+
+    private var segmentedSection: some View {
+        section("Segmentado") {
+            TitanSegmented(selection: $period, options: [(0, "Hoy"), (1, "Semana"), (2, "Mes")])
+                .accessibilityIdentifier("gallery.segmented")
+        }
+    }
+
+    private var fillSection: some View {
+        section("Presupuesto") {
+            FillBar(fraction: fraction, label: "Gasto en comida")
+                .accessibilityIdentifier("gallery.fill")
+            HStack(spacing: 10) {
+                chip("Llenar 95 %", id: "gallery.fill.up") { fraction = 0.95 }
+                chip("Bajar 45 %", id: "gallery.fill.down") { fraction = 0.45 }
+            }
+        }
+    }
+
+    private var stepperSection: some View {
+        section("Pasos") {
+            StepperProgress(steps: ["Autorizar", "Leer cuentas", "Listo"], current: step, finished: stepsDone)
+                .padding(.horizontal, 12)
+            HStack(spacing: 10) {
+                chip("Siguiente paso", id: "gallery.step.next") {
+                    if step < 2 { step += 1 } else { stepsDone = true }
+                }
+                chip("Reiniciar pasos", id: "gallery.step.reset") {
+                    step = 0
+                    stepsDone = false
+                }
+            }
+        }
+    }
+}
+#endif

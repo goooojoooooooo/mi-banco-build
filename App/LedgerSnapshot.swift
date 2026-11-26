@@ -32,6 +32,8 @@ struct ListRow: Identifiable, Equatable, Sendable {
     let order: Int
     let title: String
     let subtitle: String
+    /// Capturado (aviso o Cartera) sin confirmar por el banco tras el margen de cobertura (Plan 2, tarea 11).
+    var unconfirmed = false
     var id: UUID { item.id }
 }
 
@@ -77,9 +79,18 @@ struct BalanceInfo: Equatable, Sendable {
     let cents: Int
     /// false = lo dijo el banco en su último aviso y no ha habido movimientos después.
     let estimated: Bool
-    /// Cuándo se fijó la base (aviso del banco o corrección a mano).
+    /// Cuándo se fijó la base (aviso del banco, conexión, extracto o corrección a mano).
     let setAt: Date
     let fromBank: Bool
+    let origin: BalanceOrigin
+
+    init(cents: Int, estimated: Bool, setAt: Date, fromBank: Bool, origin: BalanceOrigin = .manual) {
+        self.cents = cents
+        self.estimated = estimated
+        self.setAt = setAt
+        self.fromBank = fromBank
+        self.origin = origin
+    }
 }
 
 /// Un comercio silenciado: su clave normalizada (lo que guarda Core) y cómo se llama.
@@ -153,20 +164,26 @@ struct LedgerSnapshot: Sendable {
     var categories: [UUID: SpendingCategory] = [:]
     /// Ids de los traspasos entre tus cuentas (pares detectados y marcados a mano), calculados una sola vez.
     var ownTransfers: Set<UUID> = []
+    /// Capturados sin confirmar por el banco tras el margen de cobertura (Plan 2, tarea 11).
+    /// Las líneas de estado de cada banco se calculan en vivo al dibujar (U45).
+    var unconfirmed: Set<UUID> = []
     /// Día en que se calculó; al cambiar de día hay que recalcular aunque el estado no cambie.
     var day = Date.distantPast
 
     init() {}
 
-    init(state: LedgerState, now: Date = Date(), calendar: Calendar = .current) {
+    init(state: LedgerState, now: Date = Date(), calendar: Calendar = .current, cachedASPSPs: [EBASPSP]? = nil) {
         day = calendar.startOfDay(for: now)
         let ledger = Ledger(state: state)
         for bank in BankID.allCases {
             if let b = ledger.balance(bank), let base = state.balances[bank] {
-                balances[bank] = BalanceInfo(cents: b.cents, estimated: b.estimated, setAt: base.setAt, fromBank: base.fromBank)
+                balances[bank] = BalanceInfo(cents: b.cents, estimated: b.estimated, setAt: base.setAt, fromBank: base.fromBank,
+                                             origin: base.origin)
             }
         }
         total = ledger.total()
+        let unconfirmedSet = unconfirmedCaptureIDs(in: state, now: now)
+        unconfirmed = unconfirmedSet
         // Lo que no suma como gasto (traspasos entre tus cuentas, capturados sin confirmar y capturados con pareja probable
         // en una fila del banco) se calcula una sola vez por reconstrucción y se pasa a todas las sumas.
         // `transfers` (solo los traspasos) sirve únicamente para la lista «Traspasos entre tus cuentas» y su cuenta.
@@ -185,10 +202,10 @@ struct LedgerSnapshot: Sendable {
         let items = (byDate.map { LedgerItem.movement($0) } + state.unread.map { LedgerItem.unread($0) })
             .sorted { $0.date > $1.date }
         hasItems = !items.isEmpty
-        for card in AccountCard.allCases {
+        for card in AccountCard.bankCards {
             let mine = card.bank.map { bank in items.filter { $0.bank == bank } } ?? items
             let grouped = Self.sections(for: Array(mine.prefix(Self.maxRows)), showsBank: card == .all, now: now, calendar: calendar,
-                                       ownTransfers: transfers)
+                                       ownTransfers: transfers, unconfirmed: unconfirmedSet)
             entries[card] = ListEntry.flatten(grouped, prefix: card.rawValue)
             weeks[card] = WeekSpend(movements: state.movements, bank: card.bank, now: now, calendar: calendar, notSpending: notSpending)
         }
@@ -196,7 +213,7 @@ struct LedgerSnapshot: Sendable {
         // Gasto del mes por tarjeta.
         let monthStart = calendar.dateInterval(of: .month, for: now)?.start ?? now
         var spent: [AccountCard: Int] = [:]
-        for m in spendingMovements(in: state.movements, notSpending: notSpending) where m.date >= monthStart && m.date <= now {
+        for m in spendingMovements(in: state.movements, notSpending: notSpending) where m.date >= monthStart && movementCounts(m, upTo: now, calendar: calendar) {
             spent[.all, default: 0] += abs(m.amountCents)
             spent[AccountCard(bank: m.bank), default: 0] += abs(m.amountCents)
         }
@@ -296,13 +313,24 @@ struct LedgerSnapshot: Sendable {
 
     // MARK: - Agrupar por día
 
-    /// `items` ya ordenados del más reciente al más antiguo.
+    /// `items` ya ordenados del más reciente al más antiguo. `ownTransfers` (los traspasos solos, sin valor por defecto:
+    /// toda lista lo pasa) pone «Traspaso» en vez de la hora.
     static func sections(for items: [LedgerItem], showsBank: Bool, now: Date, calendar: Calendar,
-                         ownTransfers: Set<UUID> = []) -> [DaySection] {
+                         ownTransfers: Set<UUID>, unconfirmed: Set<UUID> = []) -> [DaySection] {
         var out: [DaySection] = []
         for (order, item) in items.enumerated() {
             let day = calendar.startOfDay(for: item.date)
-            let row = ListRow(item: item, order: order, title: title(of: item), subtitle: subtitle(of: item, showsBank: showsBank, ownTransfers: ownTransfers))
+            let isUnconfirmed: Bool = {
+                if case .movement(let m) = item { return unconfirmed.contains(m.id) }
+                return false
+            }()
+            let row = ListRow(
+                item: item,
+                order: order,
+                title: title(of: item),
+                subtitle: subtitle(of: item, showsBank: showsBank, ownTransfers: ownTransfers),
+                unconfirmed: isUnconfirmed
+            )
             if out.last?.id == day {
                 out[out.count - 1].rows.append(row)
             } else {
@@ -320,12 +348,26 @@ struct LedgerSnapshot: Sendable {
     }
 
     /// Todo: "Revolut · 18:47". Un banco: "18:47". La nota, si la hay, sustituye a la hora; un traspaso entre tus
-    /// cuentas pone "Traspaso" en su lugar (la nota tiene prioridad).
+    /// cuentas pone "Traspaso" en su lugar (la nota tiene prioridad); una fila de solo día (`dayOnly`) no muestra hora;
+    /// `bankStatus == .pending` añade " · Pendiente".
     private static func subtitle(of item: LedgerItem, showsBank: Bool, ownTransfers: Set<UUID>) -> String {
         switch item {
         case .movement(let m):
-            let detail = m.note ?? (ownTransfers.contains(m.id) ? "Traspaso" : m.date.formatted(timeStyle))
-            return showsBank ? "\(m.bank.displayName) · \(detail)" : detail
+            let detail: String
+            if let note = m.note {
+                detail = note
+            } else if ownTransfers.contains(m.id) {
+                detail = "Traspaso"
+            } else if m.dayOnly {
+                detail = ""
+            } else {
+                detail = m.date.formatted(timeStyle)
+            }
+            var parts: [String] = []
+            if showsBank { parts.append(m.bank.displayName) }
+            if !detail.isEmpty { parts.append(detail) }
+            if m.bankStatus == .pending { parts.append("Pendiente") }
+            return parts.joined(separator: " · ")
         case .unread(let n):
             return showsBank ? "\(n.bank.displayName) · \(n.text)" : n.text
         }

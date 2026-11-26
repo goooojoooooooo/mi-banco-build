@@ -32,6 +32,7 @@ struct CardMaterial: Sendable, Equatable {
     static let revolut = CardMaterial(top: Color(hex: "#30353C"), middle: Color(hex: "#1F2226"), bottom: Color(hex: "#15171A"))
     static let imagin = CardMaterial(top: Color(hex: "#243532"), middle: Color(hex: "#172422"), bottom: Color(hex: "#0F1817"))
     static let tradeRepublic = CardMaterial(top: Color(hex: "#3A3026"), middle: Color(hex: "#271F19"), bottom: Color(hex: "#1A1511"))
+    static let investments = CardMaterial(top: Color(hex: "#3E342A"), middle: Color(hex: "#2B231C"), bottom: Color(hex: "#1D1813"))
 
     /// 160° en CSS ≈ de arriba-izquierda (algo inclinado) hacia abajo-derecha.
     var gradient: LinearGradient {
@@ -141,6 +142,31 @@ enum Theme {
         static let reveal = Animation.spring(duration: 0.42, bounce: 0)
         /// Cifras que se ocultan con el ojo: los dígitos se barajan durante este tiempo antes de difuminarse.
         static let scramble: Duration = .milliseconds(240)
+
+        // MARK: Extensiones (C7, D16)
+        // El aviso ampliado y la Live Activity no tienen preferencias de movimiento ni `\.motion`: usan los muelles del
+        // kit (los mismos valores que `SpringToken`) a intensidad Expresivo, fija, que es la que aprobó el dueño.
+
+        /// Encaje (el logo que se posa, la cifra de la Live Activity): 0,46 / 0,74.
+        static let snapSpec = SpringSpec(response: 0.46, dampingFraction: 0.74)
+        /// Entradas de piezas y filas: 0,50 / 0,82.
+        static let enterSpec = SpringSpec(response: 0.50, dampingFraction: 0.82)
+        /// Escalonado de las filas del aviso ampliado: 55 ms × 0,8ⁿ (como el kit).
+        static let rowFirstGap = 0.055
+        static let rowDecay = 0.8
+
+        /// Un muelle a intensidad Expresivo (tiempos ×1,12 y el rebote que le toca), para las extensiones.
+        static func expressive(_ spec: SpringSpec) -> Animation {
+            let scaled = MotionMath.scaled(spec, level: .expressive)
+            return .spring(response: scaled.response, dampingFraction: scaled.dampingFraction)
+        }
+
+        /// El retraso de la fila `index` de una entrada escalonada a intensidad Expresivo (s).
+        static func expressiveStagger(_ index: Int) -> Double {
+            guard index >= 0 else { return 0 }
+            let delays = MotionMath.staggerDelays(count: index + 1, firstGap: rowFirstGap, decay: rowDecay)
+            return delays[index] * MotionLevel.expressive.timeScale
+        }
     }
 
     /// Papeles de texto con estilos del sistema (SF Pro, Dynamic Type, cifras tabulares).

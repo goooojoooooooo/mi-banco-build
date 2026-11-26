@@ -538,8 +538,11 @@ private let trCSV = ([trHeaders.joined(separator: ",")] + [
                      "comision tarjeta"] {
             #expect(!isTwin(text), "\(text)")
         }
-        // Palabra entera: «Recibos» o «Bizumeria» no son las palabras de la lista.
-        #expect(isTwin("Bar Los Recibos"))
+        // Plurales (+s/+es, R43): «Recibos», «Comisiones», «Transferencias», «Domiciliaciones» también vetan; «Bizumeria» no.
+        #expect(!isTwin("Bar Los Recibos"))
+        #expect(!isTwin("Comisiones bancarias"))
+        #expect(!isTwin("Transferencias varias"))
+        #expect(!isTwin("Domiciliaciones mes"))
         #expect(isTwin("Bizumeria Lua"))
         // Una fila marcada «no es mío» tampoco.
         #expect(!isTwin("Restaurante Lua", notMine: true))

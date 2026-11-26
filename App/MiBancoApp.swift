@@ -209,6 +209,12 @@ private struct AppShellView: View {
                 if DemoMode.isActive {
                     if DemoMode.simulatesArrival {
                         try? await Task.sleep(for: .seconds(4))
+                        // Lote final: durante el arranque no se pide el aviso dentro de la app; a cámara lenta el
+                        // arranque dura más de 4 s, así que el pago de demo espera a que acabe (con el bloqueo puesto
+                        // el arranque no se ve y llega igual, debajo del bloqueo).
+                        while shell.showsLaunch, !Task.isCancelled {
+                            try? await Task.sleep(for: .milliseconds(200))
+                        }
                         model.demoSimulateArrival()
                     }
                     return

@@ -162,33 +162,41 @@ private let excludedInsightKinds: Set<InsightKind> = [.budgetWarning, .budgetExc
 /// Los días sin dato del banco a partir de los cuales se avisa de que los datos están viejos.
 private let staleBankSeconds: TimeInterval = 172_800
 
-/// Qué ha pasado desde el resumen anterior (`record.since`, `now`]. Los gastos usan las funciones de gasto del Core con su
-/// tratamiento por defecto (valores, traspasos propios y capturas dudosas fuera). Nada se registra en ningún sitio.
-public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: AccountBook, record: BriefingRecord, isFirst: Bool,
-                          now: Date, calendar: Calendar) -> BriefingInput {
-    let since = record.since
-    // Un movimiento pertenece al periodo por el PRIMER momento en que la app lo supo: un aviso o pago de Cartera, el día de su
-    // fecha (enlazarlo después a una fila del banco no lo mueve a otro periodo); una fila del banco o de un extracto, cuando se
-    // importó si fue después de su fecha. Así ninguno se pierde ni sale en dos resúmenes.
+/// Primer momento en que la app supo de un movimiento: un aviso o pago de Cartera, el día de su fecha (enlazarlo después
+/// a una fila del banco no lo mueve a otro periodo); una fila del banco o de un extracto, cuando se importó si fue después.
+func movementKnownAt(_ m: Movement) -> Date {
+    m.source.isBankSourced ? max(m.date, m.importedAt ?? m.date) : m.date
+}
+
+/// Movimientos que la app conoció en `(since, now]`, descartando los de más de 7 días antes de `since`, los marcados
+/// «no es mío» y las filas del banco cuya pareja capturada ya se conocía en `since` o antes.
+func movementsKnown(in state: LedgerState, since: Date, now: Date) -> [Movement] {
     // Límite: solo entra si su propia fecha no es anterior a 7 días antes del «desde» (una importación de meses de historial
-    // no inunda el resumen).
+    // no inunda el resumen ni la vigilancia).
     let lateLimit = since.addingTimeInterval(-7 * 86_400)
-    func knownAt(_ m: Movement) -> Date { m.source.isBankSourced ? max(m.date, m.importedAt ?? m.date) : m.date }
-    // Una fila del banco cuya pareja probable (capturado) ya se conocía en el resumen anterior no es nueva: ya se contó.
     let ownTransfers = ownTransferIDs(in: state.movements)
-    let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
-    let twinPairs = probableTwinPairs(in: state.movements, skipping: ownTransfers.union(unconfirmed))
     // Para saber si una fila del banco ya se contó, la pareja se busca saltando solo los traspasos: un capturado ya «sin
     // confirmar» (llegó la fila 7-8 días tarde) sigue siendo la pareja de esa fila.
     let countedPairs = probableTwinPairs(in: state.movements, skipping: ownTransfers)
     let capturesByID = Dictionary(state.movements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let rowsAlreadyCounted = Set(countedPairs.compactMap { pair in
-        capturesByID[pair.captureID].flatMap { knownAt($0) <= since ? pair.rowID : nil }
+        capturesByID[pair.captureID].flatMap { movementKnownAt($0) <= since ? pair.rowID : nil }
     })
-    func inPeriod(_ m: Movement) -> Bool {
-        let known = knownAt(m)
+    return state.movements.filter { m in
+        let known = movementKnownAt(m)
         return known > since && known <= now && m.date > lateLimit && !m.flaggedNotMine && !rowsAlreadyCounted.contains(m.id)
     }
+}
+
+/// Qué ha pasado desde el resumen anterior (`record.since`, `now`]. Los gastos usan las funciones de gasto del Core con su
+/// tratamiento por defecto (valores, traspasos propios y capturas dudosas fuera). Nada se registra en ningún sitio.
+public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: AccountBook, record: BriefingRecord, isFirst: Bool,
+                          now: Date, calendar: Calendar) -> BriefingInput {
+    let since = record.since
+    // Una fila del banco cuya pareja probable (capturado) ya se conocía en el resumen anterior no es nueva: ya se contó.
+    let ownTransfers = ownTransferIDs(in: state.movements)
+    let unconfirmed = unconfirmedCaptureIDs(in: state, now: now)
+    let twinPairs = probableTwinPairs(in: state.movements, skipping: ownTransfers.union(unconfirmed))
     let ledger = Ledger(state: state)
     // Se calcula una vez y se pasa a todas las sumas de gasto (traspasos, capturados sin confirmar y gemelos).
     let exclusions = spendingExclusions(in: state, now: now)
@@ -196,7 +204,8 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     // cada banco. Los traspasos propios se quedan en el cambio del banco.
     let twins = Set(twinPairs.map(\.captureID))
     let doubleCounted = unconfirmed.union(twins).subtracting(ownTransfers)
-    let period = state.movements.filter(inPeriod)
+    let period = movementsKnown(in: state, since: since, now: now)
+    let periodIDs = Set(period.map(\.id))
     func name(_ m: Movement) -> String { m.displayMerchant ?? m.merchant ?? m.bank.displayName }
     func digest(_ m: Movement) -> MovementDigest {
         MovementDigest(id: m.id, bank: m.bank, name: name(m), cents: abs(m.amountCents), date: m.date)
@@ -206,18 +215,16 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     }
 
     // Traspasos entre tus cuentas
-    let transferIDs = ownTransferIDs(in: state.movements)
     let byID = Dictionary(state.movements.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     let transfers: [TransferDigest] = ownTransferPairs(in: state.movements).compactMap { pair -> (Date, TransferDigest)? in
-        guard let payment = byID[pair.paymentID], let income = byID[pair.incomeID], inPeriod(payment) else { return nil }
+        guard let payment = byID[pair.paymentID], let income = byID[pair.incomeID], periodIDs.contains(payment.id) else { return nil }
         return (payment.date, TransferDigest(from: payment.bank, to: income.bank, cents: abs(payment.amountCents)))
     }.sorted { $0.0 < $1.0 }.map { $0.1 }
 
     let income = period.filter {
-        $0.kind == .income && !transferIDs.contains($0.id) && !$0.excludedFromSpending && !doubleCounted.contains($0.id)
+        $0.kind == .income && !ownTransfers.contains($0.id) && !$0.excludedFromSpending && !doubleCounted.contains($0.id)
     }
         .map(digest).sorted(by: byAmount)
-    let periodIDs = Set(period.map(\.id))
     let payments = spendingMovements(in: state.movements, notSpending: exclusions).filter { periodIDs.contains($0.id) }
         .map(digest).filter { $0.cents > 0 }.sorted(by: byAmount)
 

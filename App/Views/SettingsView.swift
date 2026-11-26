@@ -304,11 +304,8 @@ struct SettingsView: View {
         .onChange(of: preferences.privateMode) { _, on in
             if on { releaseAmountFocus() }
         }
-        #if DEBUG
-        // `-MiBancoDemoCloseEyeAfter <s>` y `-MiBancoDemoFocusBalanceAfter <s>`: los segundos cuentan desde que el
-        // interruptor «Modo privado» aparece en pantalla (`armDemoTimers`), no desde que se abre Ajustes: así una prueba
-        // que se desplaza hasta él sabe cuándo empezar a grabar.
-        #endif
+        // (Demo: `-MiBancoDemoCloseEyeAfter` y `-MiBancoDemoFocusBalanceAfter` cuentan desde que aparece el interruptor
+        // «Modo privado», ver `armDemoTimers`.)
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
         .sensoryFeedback(.success, trigger: saveCount)

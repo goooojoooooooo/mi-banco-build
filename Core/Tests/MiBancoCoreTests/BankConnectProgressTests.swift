@@ -368,6 +368,117 @@ import Testing
         }
     }
 
+    // MARK: El remate (ojo de diseño 14.1): 100, tercer ✓, «Todo listo», pausa y entonces «conectado»
+
+    /// El remate solo llega con el éxito REAL: mientras el tercer paso sigue (minutos si hace falta) no hay remate, ni
+    /// 100, ni «Todo listo»; al conectar, el remate parte de la cifra que se veía y «conectado» espera a `revealSuccess`.
+    @Test func elRemateSoloTrasElExitoReal() {
+        var screen = Screen()
+        screen.send(.start(.ima))
+        screen.send(.webOpened(.ima))
+        screen.send(.callback(.valid(.ima)))
+        screen.wait(40)
+        #expect(!screen.progress.finishing)
+        #expect(screen.progress.caption(for: screen.stage, bankName: "imagin") == "Terminando con imagin…")
+        let before = screen.drawn!
+        screen.send(.succeeded(.ima))
+        #expect(screen.progress.finishing)
+        #expect(screen.progress.success)
+        #expect(!screen.progress.showsSuccess, "«conectado» antes del remate")
+        #expect(screen.progress.caption(for: screen.stage, bankName: "imagin") == BankConnectProgress.finishCaption)
+        #expect(BankConnectProgress.finishCaption == "Todo listo")
+        // El remate arranca en la cifra que se veía (no salta) y acaba en 100.
+        let finish = screen.progress.shown(for: screen.stage)!
+        #expect(finish.drawn(elapsed: 0, reduce: false) == before)
+        #expect(finish.drawn(elapsed: StepPercent.finishSeconds, reduce: false) == 100)
+        // Mientras dura el remate no hay acciones de inicio ni nada se puede cancelar.
+        #expect(!screen.progress.showsStartActions(for: screen.stage))
+        // Mirar la fase otra vez (o que se quite el trámite) no lo corta ni lo repite.
+        screen.update()
+        screen.send(.reset)
+        #expect(screen.progress.finishing)
+        screen.progress.revealSuccess()
+        #expect(!screen.progress.finishing)
+        #expect(screen.progress.showsSuccess)
+        #expect(screen.progress.caption(for: screen.stage, bankName: "imagin") == nil)
+        screen.progress.dismissSuccess()
+        #expect(!screen.progress.finishing && !screen.progress.showsSuccess)
+    }
+
+    /// Un fallo (en cualquier paso), cancelar, la espera cortada o elegir banco NUNCA enseñan el remate, y
+    /// `revealSuccess` sin éxito no hace nada: el error se ve en el mismo instante en que llega.
+    @Test func sinExitoNoHayRemate() {
+        for failingStep in 0..<3 {
+            var screen = Screen()
+            screen.send(.start(.ima))
+            if failingStep >= 1 { screen.send(.webOpened(.ima)) }
+            if failingStep >= 2 { screen.send(.callback(.valid(.ima))) }
+            screen.wait(1)
+            screen.send(.failed(.ima, ConnectMessage.offline))
+            #expect(screen.stage == .failed(ConnectMessage.offline))
+            #expect(!screen.progress.finishing)
+            screen.progress.revealSuccess()
+            #expect(!screen.progress.showsSuccess)
+            #expect(screen.progress.caption(for: screen.stage, bankName: "imagin") == nil)
+        }
+        for (opened, event) in [(true, ConnectEvent.cancel), (false, .cancel), (false, .needsChoice(.ima, Self.list))] {
+            var screen = Screen()
+            screen.send(.start(.ima))
+            if opened { screen.send(.webOpened(.ima)) }
+            screen.send(event)
+            #expect(!screen.progress.finishing, "\(event)")
+            screen.progress.revealSuccess()
+            #expect(!screen.progress.showsSuccess, "\(event)")
+        }
+        // Conectado sin trámite seguido en esta pantalla: tampoco.
+        var opened = Screen()
+        opened.flow.handle(.start(.ima))
+        opened.flow.handle(.webOpened(.ima))
+        opened.flow.handle(.callback(.valid(.ima)))
+        opened.flow.handle(.succeeded(.ima))
+        opened.update()
+        #expect(!opened.progress.finishing)
+        #expect(!opened.progress.showsSuccess)
+    }
+
+    /// Conectado mientras la primera carga sigue: el remate espera a que la carga termine (el trabajo real).
+    @Test func elRemateEsperaALaPrimeraCarga() {
+        var screen = Screen()
+        screen.send(.start(.ima))
+        screen.send(.webOpened(.ima))
+        screen.send(.callback(.valid(.ima)))
+        screen.setSyncing(true)
+        screen.send(.succeeded(.ima))
+        screen.wait(10)
+        #expect(!screen.progress.finishing)
+        screen.setSyncing(false)
+        #expect(screen.progress.finishing)
+    }
+
+    /// Un trámite nuevo durante el remate (o tras él) lo quita: vuelve a empezar desde 0.
+    @Test func unTramiteNuevoQuitaElRemate() {
+        var progress = BankConnectProgress()
+        progress.apply(.step(2), elapsed: 0)
+        progress.apply(.connected, elapsed: 3)
+        #expect(progress.finishing)
+        #expect(progress.apply(.step(0), elapsed: 0) == .stepStarted)
+        #expect(!progress.finishing && !progress.success)
+        #expect(progress.isTracking)
+    }
+
+    /// Con Reducir movimiento la cifra no cuenta (se ve el suelo del paso): un fallo congela ESA cifra, no una mayor que
+    /// nunca se vio (menor m-2), y el remate parte también de ella.
+    @Test func conReducirSeCongelaLoQueSeVeia() {
+        var failed = BankConnectProgress()
+        failed.apply(.step(1), elapsed: 0, reduce: true)
+        #expect(failed.apply(.failed("x"), elapsed: 2.5, reduce: true) == .failed)
+        #expect(failed.percent?.value(elapsed: 0) == 34)
+        var done = BankConnectProgress()
+        done.apply(.step(2), elapsed: 0, reduce: true)
+        done.apply(.connected, elapsed: 4, reduce: true)
+        #expect(done.percent?.finishFrom == 67)
+    }
+
     /// Aplicar dos veces la misma etapa no cambia nada (la pantalla puede volver a mirar la fase en cualquier momento).
     @Test func aplicarLaMismaEtapaNoCambiaNada() {
         for stage: BankConnectStage in [.step(0), .step(1), .step(2)] {

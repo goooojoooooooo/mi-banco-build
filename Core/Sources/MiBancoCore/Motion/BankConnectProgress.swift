@@ -32,7 +32,9 @@ public enum BankConnectStage: Equatable, Sendable {
         case .failed(let b, let message) where b == bank: return .failed(message)
         case .needsResume(let b) where b == bank: return .needsResume
         case .chooseASPSP(let b, let list) where b == bank: return .chooseASPSP(list)
-        default: return .none
+        // Sin `default`: una fase nueva de `ConnectPhase` no compila hasta decidir aquí qué enseña.
+        case .idle, .opening, .waitingForBank, .finishing, .connected, .failed, .needsResume, .chooseASPSP:
+            return .none
         }
     }
 
@@ -54,13 +56,28 @@ public enum BankConnectStage: Equatable, Sendable {
 public struct BankConnectProgress: Equatable, Sendable {
     /// El porcentaje seguido (`nil` = ninguno).
     public private(set) var percent: StepPercent?
-    /// «Banco, conectado» a la vista (hasta «Listo» o «Ver movimientos»).
+    /// El trámite acabó bien de verdad (hasta «Listo» o «Ver movimientos»).
     public private(set) var success = false
+    /// El remate a la vista: el porcentaje corre a 100, el tercer paso se marca y la línea dice «Todo listo». Solo
+    /// existe tras un éxito REAL (`.connected` de un trámite seguido); dura `finishHold` y entonces la pantalla llama a
+    /// `revealSuccess()`. Un fallo o cancelar nunca lo enseñan.
+    public private(set) var finishing = false
+
+    /// Lo que dura el remate (segundos del kit): la cifra corre a 100 (0,25 s) mientras el último nodo se rellena y
+    /// dibuja su ✓ (0,3 s), y una pausa de 0,18 s (maqueta y ojo de diseño 14.1).
+    public static let finishHold = 0.48
+    /// Lo que tardan en irse los pasos, el saldo y el estado antes de que salte el ✓ de «conectado» (14.2).
+    public static let clearBeforeSuccess = 0.15
+    /// La línea del remate (maqueta «Conectando tu banco», el texto tras el tercer paso).
+    public static let finishCaption = "Todo listo"
 
     public init() {}
 
     /// Hay un porcentaje en marcha.
     public var isTracking: Bool { percent?.isRunning == true }
+
+    /// «Banco, conectado» a la vista: el éxito, una vez pasado el remate.
+    public var showsSuccess: Bool { success && !finishing }
 
     /// La etapa de `bank` con lo que esta pantalla está siguiendo.
     public func stage(of phase: ConnectPhase, bank: BankID, syncing: Bool) -> BankConnectStage {
@@ -77,9 +94,10 @@ public struct BankConnectProgress: Equatable, Sendable {
         case failed
     }
 
-    /// La etapa cambió. `elapsed`: segundos que lleva el paso en curso (para congelar justo la cifra que se veía).
+    /// La etapa cambió. `elapsed`: segundos que lleva el paso en curso; `reduce`: Reducir movimiento (la cifra no
+    /// cuenta y se ve el suelo del paso). Con los dos se congela, o se remata, justo la cifra que se DIBUJABA.
     @discardableResult
-    public mutating func apply(_ stage: BankConnectStage, elapsed: Double) -> Effect {
+    public mutating func apply(_ stage: BankConnectStage, elapsed: Double, reduce: Bool = false) -> Effect {
         switch stage {
         case .step(let index):
             if let current = percent, current.isRunning, index >= current.step {
@@ -91,16 +109,18 @@ public struct BankConnectProgress: Equatable, Sendable {
                 fresh.enter(step: index)
                 percent = fresh
                 success = false
+                finishing = false
             }
             return .stepStarted
         case .connected:
-            guard isTracking else { return .none }
-            percent?.succeed()
+            guard isTracking, let current = percent else { return .none }
+            percent?.succeed(shown: current.drawn(elapsed: elapsed, reduce: reduce))
             success = true
+            finishing = true
             return .succeeded
         case .failed:
             guard let current = percent, current.isRunning else { return .none }
-            percent?.fail(shown: current.value(elapsed: elapsed))
+            percent?.fail(shown: current.drawn(elapsed: elapsed, reduce: reduce))
             return .failed
         case .none, .needsResume, .chooseASPSP:
             // No queda trámite que enseñar (el éxito sí se queda hasta «Listo»).
@@ -109,10 +129,22 @@ public struct BankConnectProgress: Equatable, Sendable {
         }
     }
 
+    /// Pasado el remate: «Banco, conectado». Solo tras un éxito real.
+    public mutating func revealSuccess() {
+        guard finishing, success, percent?.outcome == .succeeded else { return }
+        finishing = false
+    }
+
     /// «Listo» o «Ver movimientos».
     public mutating func dismissSuccess() {
         success = false
+        finishing = false
         percent = nil
+    }
+
+    /// Lo que dice la línea bajo los pasos: «Todo listo» durante el remate; si no, el texto del paso en curso.
+    public func caption(for stage: BankConnectStage, bankName: String) -> String? {
+        finishing ? Self.finishCaption : stage.caption(bankName: bankName)
     }
 
     /// El porcentaje que se dibuja con esta etapa: el seguido o, en el primer instante de un paso (antes de `apply`), uno

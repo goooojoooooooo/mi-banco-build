@@ -24,7 +24,6 @@ struct SettingsView: View {
     @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// El movimiento tal como lo ve el kit: la fila «Animaciones» dice el nivel que de verdad está en uso.
     @Environment(\.motion) private var motion
     /// El cambio de pestaña que anuncia RootView (cuando lo haga): repite la entrada de las filas de Bancos.
@@ -337,7 +336,7 @@ struct SettingsView: View {
     /// El interruptor y el ojo de Inicio son el mismo estado, con la misma animación.
     private var privacyBinding: Binding<Bool> {
         Binding(get: { preferences.privateMode }, set: { on in
-            withAnimation(reduceMotion ? nil : Theme.Motion.privacy) { preferences.privateMode = on }
+            withAnimation(motion.reduce ? nil : motion.calmAnimation(.enter)) { preferences.privateMode = on }
         })
     }
 
@@ -416,7 +415,7 @@ struct SettingsView: View {
             return
         }
         guard let cents = parseBalanceInput(text) else {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[bank] = "Escribe un importe como 340,20" }
+            withAnimation(motion.fade) { errors[bank] = "Escribe un importe como 340,20" }
             errorCount += 1
             return
         }
@@ -431,7 +430,7 @@ struct SettingsView: View {
             refresh(bank)
             flashSaved(bank)
         } catch {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[bank] = "No se pudo guardar. Inténtalo de nuevo." }
+            withAnimation(motion.fade) { errors[bank] = "No se pudo guardar. Inténtalo de nuevo." }
             errorCount += 1
         }
     }
@@ -451,6 +450,7 @@ struct SettingsView: View {
 /// Fila de saldo: logo, nombre, estado según origen real (banco conectado, extracto, aviso o a mano; R25) y el campo
 /// (solo lectura si el banco está conectado). Para VoiceOver, el campo editable es "Saldo de Revolut".
 private struct BalanceRow: View {
+    @Environment(\.motion) private var motion
     let bank: BankID
     let info: BalanceInfo?
     var link: BankLinkInfo? = nil
@@ -517,7 +517,7 @@ private struct BalanceRow: View {
                             .padding(.horizontal, 10)
                             .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
                             .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                            .animation(Theme.Motion.quick, value: isEditing)
+                            .animation(motion.fade, value: isEditing)
                             .accessibilityLabel("Saldo de \(bank.displayName)")
                             .accessibilityValue(masked ? "importe oculto" : text)
                     }

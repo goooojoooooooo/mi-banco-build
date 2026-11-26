@@ -315,9 +315,9 @@ final class MotionTourShellTests: MotionTourCase {
         if wait > 0 { Thread.sleep(forTimeInterval: wait) }
         burst("eye-close-rolling", frames: 14, every: 0.1)
         // Desde el cierre, ningún importe dibuja un dígito (ni al azar): se mira varias veces mientras la ráfaga sigue.
-        let digits = NSPredicate(format: "value MATCHES %@", ".*[0-9].*€.*")
         XCTAssertGreaterThan(Date().timeIntervalSince1970, at, "La comprobación empieza antes del cierre")
         for look in 0..<8 {
+            let digits = NSPredicate(format: "value MATCHES %@", ".*[0-9].*€.*")
             let drawn = app.descendants(matching: .any).matching(digits).allElementsBoundByIndex.map { $0.value as? String ?? "" }
             XCTAssertEqual(drawn, [], "Mirada \(look): con el ojo cerrado se dibujan dígitos: \(drawn)")
             Thread.sleep(forTimeInterval: 0.15)

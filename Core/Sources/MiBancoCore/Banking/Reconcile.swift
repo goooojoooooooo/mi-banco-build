@@ -126,7 +126,10 @@ extension Ledger {
                 if state.movements[i].source.isBankSourced == false, let name = r.merchant, !name.isEmpty {
                     state.movements[i].bankMerchant = name
                 }
-                state.movements[i].isShop = state.movements[i].isShop || r.isShop
+                // Un nombre que solo se parece a una marca no le quita la señal a un aviso de Bizum (M-10).
+                if !(r.shopFromName && state.movements[i].personPayment == true) {
+                    state.movements[i].isShop = state.movements[i].isShop || r.isShop
+                }
                 if r.personPayment { state.movements[i].personPayment = true }
                 state.movements[i].excludedFromSpending = state.movements[i].excludedFromSpending || r.excludedFromSpending
                 report.linked += 1
@@ -175,6 +178,7 @@ extension Ledger {
                         if state.movements[i].statementRef == nil { state.movements[i].statementRef = row.statementRef }
                         if let name = row.merchant, !name.isEmpty { state.movements[i].bankMerchant = name }
                         state.movements[i].isShop = state.movements[i].isShop || row.isShop
+                        if row.personPayment == true { state.movements[i].personPayment = true }
                         state.movements[i].excludedFromSpending =
                             state.movements[i].excludedFromSpending || row.excludedFromSpending
                         toDelete.insert(row.id)

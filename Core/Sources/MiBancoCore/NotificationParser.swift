@@ -44,10 +44,10 @@ private let ignoredWords: Set<Substring> = [
     "code", "codigo", "confirma", "aprueba", "autoriza", "approve", "confirm", "pendiente", "pending",
 ]
 
-/// Palabras enteras (ya plegadas) de un envío a otra persona; también vale cualquier palabra que empiece por "transfer".
-private let transferWords: Set<Substring> = [
-    "enviado", "enviada", "enviaste", "envio", "send", "sent", "bizum", "traspaso",
-]
+/// Palabras enteras de un envío a otra persona en el cuerpo de un aviso: las de `personPaymentWords` más las que en un
+/// aviso hablan de la operación («envío realizado», «enviaste», «sent»). También vale cualquier palabra que empiece
+/// por "transfer". Se normalizan con `foldedWords`, como las del comercio.
+let notificationSendWords: Set<String> = personPaymentWords.union(["enviaste", "envio", "envios", "send", "sent"])
 
 /// Frases de pago explícitas: ganan a cualquier palabra de ingreso ("recibo de" es una factura, no "recibido").
 private let explicitPaymentStems = ["has pagado", "has enviado", "recibo de", "cargado", "pago con tarjeta"]
@@ -123,10 +123,9 @@ public func parseNotification(bank: BankID, title: String?, subtitle: String?, b
     guard let kind = sign(of: folded[pay.index]) ?? sign(of: others) else { return .unreadable }
 
     // Un envío a alguien (en cualquier línea del aviso, sin contar el título) nunca es una compra en tienda.
-    let bodyWords = folded[titleCount...].joined(separator: "\n")
-        .split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+    let bodyWords = foldedWords(lines[titleCount...].joined(separator: "\n"))
     let isTransfer = bodyWords.contains { word in
-        transferWords.contains(word) || word.hasPrefix("transfer")
+        notificationSendWords.contains(word) || word.hasPrefix("transfer")
     }
 
     var merchant: String?
@@ -149,6 +148,9 @@ public func parseNotification(bank: BankID, title: String?, subtitle: String?, b
         isShop = kind == .payment && hit == nil && !isTransfer && merchantDomain(for: t, isShop: true) != nil
     }
 
+    // Pagar CON Bizum o transferencia EN un comercio («… con Bizum en Bar Pepe») no es pagar a una persona.
+    let paidAtShop = hit.map { $0.0 == " en " || $0.0 == " at " } ?? false
+    let personPayment = kind == .payment && isTransfer && !paidAtShop && !mentionsOwnAccount(merchant)
     return .movement(ParsedMovement(kind: kind, amountCents: pay.cents, merchant: merchant, reportedBalanceCents: balance,
-                                    merchantIsShop: isShop, personPayment: kind == .payment && isTransfer))
+                                    merchantIsShop: isShop, personPayment: personPayment))
 }

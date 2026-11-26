@@ -77,6 +77,19 @@ public struct EBBankTransactionCode: Codable, Equatable, Sendable {
         self.code = code
         self.subCode = subCode
     }
+
+    /// Un banco que lo mande con otra forma (un texto, un número) no rompe la descarga: lo que no se entiende queda nil.
+    public init(from decoder: any Decoder) throws {
+        if let c = try? decoder.container(keyedBy: CodingKeys.self) {
+            description = try? c.decodeIfPresent(String.self, forKey: .description)
+            code = try? c.decodeIfPresent(String.self, forKey: .code)
+            subCode = try? c.decodeIfPresent(String.self, forKey: .subCode)
+        } else {
+            description = try? decoder.singleValueContainer().decode(String.self)
+            code = nil
+            subCode = nil
+        }
+    }
 }
 
 public struct EBTransaction: Codable, Equatable, Sendable {

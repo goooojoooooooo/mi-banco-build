@@ -171,6 +171,15 @@ struct SwipeActionsRow<Content: View>: View {
         let target: CGFloat = open ? -span : 0
         if motion.reduce {
             offset = target
+        } else if open, offset == 0 {
+            // Abierta desde cerrada sin dedo (desde fuera): primero se montan las acciones y lo que tapa el importe con la
+            // fila casi cerrada y, en el pase siguiente, se abre con su muelle. Así siguen la apertura fotograma a
+            // fotograma, como con el dedo (montadas ya abiertas, aparecerían de golpe sobre el importe).
+            offset = -1
+            let spring = motion.animation(.snap)
+            Task { @MainActor in
+                withAnimation(spring) { offset = target }
+            }
         } else {
             withAnimation(open ? motion.animation(.snap) : motion.calmAnimation(.snap)) { offset = target }
         }

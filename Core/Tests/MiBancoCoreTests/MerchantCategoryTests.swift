@@ -62,7 +62,8 @@ private func category(_ m: Movement, overrides: [String: SpendingCategory] = [:]
         #expect(category(pay("Bizum a Manuel García")) == .personas)
         #expect(category(pay("Transferencia a Laura Pérez", source: .bank)) == .personas)
         #expect(category(pay("TRANSF A FAVOR DE LAURA PEREZ", source: .statement)) == .personas)
-        #expect(category(pay("Traspaso a ahorro")) == .personas)
+        // Un traspaso a tu propia hucha o cuenta de ahorro no es una persona (ronda 1, M-1).
+        #expect(category(pay("Traspaso a ahorro")) == .sinCategoria)
         #expect(category(pay("Envío a Lucía")) == .personas)
         #expect(category(pay("Pago Bizum a Laura", source: .bank)) == .personas)
     }
@@ -114,8 +115,8 @@ private func category(_ m: Movement, overrides: [String: SpendingCategory] = [:]
     }
 
     @Test func lasSuscripcionesGananALaPalabraClave() {
-        #expect(category(pay("Pub Irlandés"), subscriptions: ["pub irlandes"]) == .suscripciones)
-        #expect(category(pay("Pub Irlandés")) == .comerFuera)
+        #expect(category(pay("Sidrería El Tigre"), subscriptions: ["sidreria el tigre"]) == .suscripciones)
+        #expect(category(pay("Sidrería El Tigre")) == .comerFuera)
     }
 
     @Test func variasPalabrasAntesQueUna() {
@@ -202,11 +203,10 @@ private func category(_ m: Movement, overrides: [String: SpendingCategory] = [:]
         ("chocolateria", .comerFuera), ("hamburgueseria", .comerFuera), ("wok", .comerFuera), ("sushi", .comerFuera),
         ("ramen", .comerFuera), ("tapas", .comerFuera), ("taperia", .comerFuera), ("bocateria", .comerFuera),
         ("sidreria", .comerFuera), ("vermuteria", .comerFuera), ("gastrobar", .comerFuera), ("restaurant", .comerFuera),
-        ("trattoria", .comerFuera), ("pub", .comerFuera), ("cocteleria", .comerFuera), ("chiringuito", .comerFuera),
+        ("trattoria", .comerFuera), ("cocteleria", .comerFuera), ("chiringuito", .comerFuera),
         ("cantina", .comerFuera), ("comidas", .comerFuera), ("comida rapida", .comerFuera), ("braseria", .comerFuera),
         ("creperia", .comerFuera), ("arroceria", .comerFuera), ("pulperia", .comerFuera), ("freiduria", .comerFuera),
-        ("bistro", .comerFuera), ("restaurante chino", .comerFuera), ("comida china", .comerFuera),
-        ("wok chino", .comerFuera), ("horno de lena", .comerFuera),
+        ("bistro", .comerFuera), ("comida china", .comerFuera), ("horno de lena", .comerFuera),
         // Transporte
         ("autoescuela", .transporte), ("taller mecanico", .transporte), ("neumaticos", .transporte), ("itv", .transporte),
         // Casa y facturas
@@ -215,7 +215,7 @@ private func category(_ m: Movement, overrides: [String: SpendingCategory] = [:]
         ("herbolario", .salud), ("parafarmacia", .salud), ("ortopedia", .salud), ("veterinario", .salud),
         ("veterinaria", .salud),
         // Compras
-        ("bazar", .compras), ("super bazar", .compras), ("bazar chino", .compras), ("tienda china", .compras),
+        ("bazar", .compras), ("super bazar", .compras), ("tienda china", .compras),
         ("multiprecio", .compras), ("multiprecios", .compras), ("todo a 100", .compras), ("todo a cien", .compras),
         ("ferreteria", .compras), ("papeleria", .compras), ("libreria", .compras), ("estanco", .compras),
         ("tabacos", .compras), ("drogueria", .compras), ("perfumeria", .compras), ("zapateria", .compras),

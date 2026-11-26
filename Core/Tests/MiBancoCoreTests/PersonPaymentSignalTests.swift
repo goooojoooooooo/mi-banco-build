@@ -82,7 +82,10 @@ private let revolutHeader = "Type,Product,Started Date,Completed Date,Descriptio
 
     @Test func unIngresoNoLlevaLaSenal() {
         if case .movement(let parsed) = parseNotification(bank: .ima, title: nil, subtitle: nil, body: "Bizum de Laura: 20 €") {
+            #expect(parsed.kind == .income)
             #expect(!parsed.personPayment)
+        } else {
+            Issue.record("«Bizum de Laura: 20 €» debería leerse como ingreso")
         }
     }
 

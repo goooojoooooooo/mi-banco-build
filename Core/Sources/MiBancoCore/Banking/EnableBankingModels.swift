@@ -60,6 +60,25 @@ public struct EBParty: Codable, Equatable, Sendable {
     public init(name: String?) { self.name = name }
 }
 
+/// Tipo de operación del banco (`bank_transaction_code`, ISO 20022): familia (`code`, p. ej. «ICDT», transferencia
+/// emitida) y subfamilia (`sub_code`), con su descripción. Todo opcional: muchos bancos no lo mandan.
+public struct EBBankTransactionCode: Codable, Equatable, Sendable {
+    public let description: String?
+    public let code: String?
+    public let subCode: String?
+
+    enum CodingKeys: String, CodingKey {
+        case description, code
+        case subCode = "sub_code"
+    }
+
+    public init(description: String?, code: String?, subCode: String?) {
+        self.description = description
+        self.code = code
+        self.subCode = subCode
+    }
+}
+
 public struct EBTransaction: Codable, Equatable, Sendable {
     public let entryReference: String?
     public let transactionID: String?
@@ -74,6 +93,7 @@ public struct EBTransaction: Codable, Equatable, Sendable {
     public let debtor: EBParty?
     public let merchantCategoryCode: String?
     public let balanceAfterTransaction: EBAmount?
+    public let bankTransactionCode: EBBankTransactionCode?
 
     enum CodingKeys: String, CodingKey {
         case entryReference = "entry_reference"
@@ -88,6 +108,7 @@ public struct EBTransaction: Codable, Equatable, Sendable {
         case creditor, debtor
         case merchantCategoryCode = "merchant_category_code"
         case balanceAfterTransaction = "balance_after_transaction"
+        case bankTransactionCode = "bank_transaction_code"
     }
 
     public init(
@@ -95,7 +116,7 @@ public struct EBTransaction: Codable, Equatable, Sendable {
         entryReference: String? = nil, transactionID: String? = nil, bookingDate: String? = nil,
         valueDate: String? = nil, transactionDate: String? = nil, remittanceInformation: [String]? = nil,
         creditor: EBParty? = nil, debtor: EBParty? = nil, merchantCategoryCode: String? = nil,
-        balanceAfterTransaction: EBAmount? = nil
+        balanceAfterTransaction: EBAmount? = nil, bankTransactionCode: EBBankTransactionCode? = nil
     ) {
         self.entryReference = entryReference
         self.transactionID = transactionID
@@ -110,6 +131,7 @@ public struct EBTransaction: Codable, Equatable, Sendable {
         self.debtor = debtor
         self.merchantCategoryCode = merchantCategoryCode
         self.balanceAfterTransaction = balanceAfterTransaction
+        self.bankTransactionCode = bankTransactionCode
     }
 
     /// DBIT negativo, CRDT positivo, siempre sobre el valor absoluto del importe.

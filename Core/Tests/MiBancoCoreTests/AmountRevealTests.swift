@@ -24,12 +24,12 @@ import Testing
     @Test(arguments: [false, true])
     func changeWhileHiddenShowsTheLatestOnOpening(settleDotsFirst: Bool) {
         var r = AmountReveal(cents: Self.before, hidden: false)
-        guard case .startScramble(let closing) = r.apply(.eyeChanged(hidden: true), reduceMotion: false) else {
-            Issue.record("Cerrar el ojo debe empezar el barajado")
-            return
-        }
+        // Ronda 1 (m-4): cerrar el ojo no baraja: puntos en el acto.
+        #expect(r.apply(.eyeChanged(hidden: true), reduceMotion: false) == .showDots)
+        #expect(r.drawn == .dots)
         if settleDotsFirst {
-            #expect(r.apply(.scrambleEnded(generation: closing), reduceMotion: false) == .showDots)
+            // Un «barajado terminado» tardío (de una apertura anterior) no cambia nada.
+            #expect(r.apply(.scrambleEnded(generation: r.generation), reduceMotion: false) == .none)
             #expect(r.drawn == .dots)
         }
         #expect(r.apply(.valueChanged(Self.after), reduceMotion: false) == .none)
@@ -62,12 +62,7 @@ import Testing
         var seen: [AmountReveal.Drawn] = [b.drawn]
         b.apply(.eyeChanged(hidden: false), reduceMotion: false); seen.append(b.drawn)
         let closed = b.apply(.eyeChanged(hidden: true), reduceMotion: false); seen.append(b.drawn)
-        guard case .startScramble(let genB) = closed else {
-            Issue.record("El último cambio debe empezar el barajado")
-            return
-        }
-        #expect(b.apply(.scrambleEnded(generation: genB), reduceMotion: false) == .showDots)
-        seen.append(b.drawn)
+        #expect(closed == .showDots, "Cerrar el ojo debe poner los puntos en el acto")
         #expect(b.drawn == .dots)
         #expect(!seen.contains(.real))
     }
@@ -88,27 +83,25 @@ import Testing
     /// Un «barajado terminado» de un temporizador cancelado no cambia nada.
     @Test func staleScrambleEndedChangesNothing() {
         var r = AmountReveal(cents: Self.before, hidden: true)
-        guard case .startScramble(let old) = r.apply(.eyeChanged(hidden: false), reduceMotion: false),
-              case .startScramble(let new) = r.apply(.eyeChanged(hidden: true), reduceMotion: false) else {
-            Issue.record("Cada cambio de ojo debe empezar un barajado")
+        guard case .startScramble(let old) = r.apply(.eyeChanged(hidden: false), reduceMotion: false) else {
+            Issue.record("Abrir el ojo debe empezar un barajado")
             return
         }
-        #expect(old != new)
+        #expect(r.apply(.eyeChanged(hidden: true), reduceMotion: false) == .showDots)
         let snapshot = r
         #expect(r.apply(.scrambleEnded(generation: old), reduceMotion: false) == .none)
         #expect(r == snapshot)
-        #expect(r.apply(.scrambleEnded(generation: new), reduceMotion: false) == .showDots)
         // Y repetido, tampoco.
-        let settled = r
-        #expect(r.apply(.scrambleEnded(generation: new), reduceMotion: false) == .none)
-        #expect(r == settled)
+        #expect(r.apply(.scrambleEnded(generation: r.generation), reduceMotion: false) == .none)
+        #expect(r == snapshot)
     }
 
     /// El primer fotograma tras tocar el ojo (el valor ya es true, el evento aún no): nunca la cifra real.
     @Test func displayedNeverShowsRealWhileTheInputIsHidden() {
         let r = AmountReveal(cents: Self.before, hidden: false)
         #expect(r.displayed(hiddenInput: false, reduceMotion: false) == .real)
-        #expect(r.displayed(hiddenInput: true, reduceMotion: false) == .scramble)
+        // Ronda 1 (m-4): ni barajado: puntos.
+        #expect(r.displayed(hiddenInput: true, reduceMotion: false) == .dots)
         #expect(r.displayed(hiddenInput: true, reduceMotion: true) == .dots)
     }
 
@@ -121,6 +114,8 @@ import Testing
                 func walk(_ state: AmountReveal, _ depth: Int, _ path: [E]) {
                     // Estado final de esta secuencia.
                     if state.hidden { #expect(state.drawn != .real, "Cifra real con el ojo cerrado: \(path)") }
+                    // Ronda 1 (m-4): con el ojo cerrado, ni dígitos al azar.
+                    if state.hidden { #expect(state.drawn == .dots, "Algo que no son puntos con el ojo cerrado: \(path)") }
                     if reduce { #expect(state.drawn != .scramble, "Barajado con Reducir movimiento: \(path)") }
                     if !state.hidden, !state.scramblePending {
                         #expect(state.drawn == .real, "Abierto sin barajado pendiente y sin cifra real: \(path)")

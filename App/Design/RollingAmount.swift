@@ -588,9 +588,14 @@ struct RollingDigits: View {
         case .startScramble(let generation):
             startScramble(generation)
         case .showDots:
+            // Ronda 1 (m-4): los puntos salen todos a la vez y sin fundido (un fundido dejaba un instante la casilla casi
+            // vacía: el «, €» suelto).
+            transition?.cancel()
             rolling = false
             scrambleStep = 0
-            withAnimation(motion.fade) { popped = dotCount }
+            var now = Transaction()
+            now.disablesAnimations = true
+            withTransaction(now) { popped = dotCount }
         }
     }
 

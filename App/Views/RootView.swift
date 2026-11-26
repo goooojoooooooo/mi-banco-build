@@ -113,20 +113,12 @@ struct RootView: View {
                         SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
                                      openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
                                      openBudgetsRequest: $openBudgetsRequest)
-                            .tabContentEntrance()
-                            .environment(\.tabEntrance, entrance(for: .spending))
-                            // Lote final: el mismo negro con degradado que Inicio bajo la barra de cristal (lo de debajo
-                            // se funde en negro en vez de cortarse bajo el cristal).
-                            .overlay(alignment: .bottom) { TabBarFade() }
+                            .modifier(FadedTabContent(entrance: entrance(for: .spending)))
                     }
                     Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                         AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
                                    onMorningRuleChanged: rescheduleMorningReminder)
-                            .tabContentEntrance()
-                            .environment(\.tabEntrance, entrance(for: .alerts))
-                            // Lote final: el mismo negro con degradado que Inicio bajo la barra de cristal (lo de debajo
-                            // se funde en negro en vez de cortarse bajo el cristal).
-                            .overlay(alignment: .bottom) { TabBarFade() }
+                            .modifier(FadedTabContent(entrance: entrance(for: .alerts)))
                     }
                     .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
                     Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
@@ -139,11 +131,7 @@ struct RootView: View {
                                          importBackup: { startImport(.backup) },
                                          importTradeRepublic: { startImport(.tradeRepublic) })
                         }
-                        .tabContentEntrance()
-                        .environment(\.tabEntrance, entrance(for: .settings))
-                            // Lote final: el mismo negro con degradado que Inicio bajo la barra de cristal (lo de debajo
-                            // se funde en negro en vez de cortarse bajo el cristal).
-                            .overlay(alignment: .bottom) { TabBarFade() }
+                        .modifier(FadedTabContent(entrance: entrance(for: .settings)))
                     }
                 }
                 .modifier(MinimizesTabBarOnScroll())
@@ -168,16 +156,7 @@ struct RootView: View {
                         dismissBanner(id)
                         openDetail(arrival.id)
                     },
-                    onNotMine: {
-                        // Si no se guarda, el aviso se queda (y lo dice): no se va como si se hubiera hecho.
-                        do {
-                            try model.setFlaggedNotMine(true, for: arrival.id)
-                        } catch {
-                            return false
-                        }
-                        dismissBanner(id)
-                        return true
-                    },
+                    onNotMine: { markNotMine(arrival.id, banner: id) },
                     onFinished: { dismissBanner(id) })
                     .id(id)
                     .transition(.identity)
@@ -559,6 +538,18 @@ struct RootView: View {
     private func openSettings(_ bank: BankID?) {
         settingsFocus = bank
         tab = .settings
+    }
+
+    /// «No es mío» desde el aviso dentro de la app. Si no se guarda, el aviso se queda (y lo dice): no se va como si se
+    /// hubiera hecho.
+    private func markNotMine(_ movement: UUID, banner id: Int) -> Bool {
+        do {
+            try model.setFlaggedNotMine(true, for: movement)
+        } catch {
+            return false
+        }
+        dismissBanner(id)
+        return true
     }
 
     private func openBankSettings(_ bank: BankID) {
@@ -949,6 +940,19 @@ private struct MinimizesTabBarOnScroll: ViewModifier {
 
 /// En el montaje de Inicio la barra de pestañas llega la última: un velo negro sobre ella se aparta a los 0,6 s.
 /// No intercepta toques; con Reducir movimiento no aparece.
+/// La entrada de una pestaña y, debajo de la barra de cristal, el mismo negro con degradado que Inicio (lote final: lo
+/// de debajo se funde en negro en vez de cortarse bajo el cristal). Un modificador aparte para que `body` se compile.
+private struct FadedTabContent: ViewModifier {
+    let entrance: TabEntrance
+
+    func body(content: Content) -> some View {
+        content
+            .tabContentEntrance()
+            .environment(\.tabEntrance, entrance)
+            .overlay(alignment: .bottom) { TabBarFade() }
+    }
+}
+
 private struct TabBarCurtain: View {
     let token: Int
     @State private var covered = false

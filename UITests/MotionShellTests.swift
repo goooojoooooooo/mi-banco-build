@@ -811,8 +811,11 @@ final class MotionShellTests: XCTestCase {
     }
 
     /// N-3 (ronda 1 de avisos): los avisos (texto y carga) y la Live Activity leen el ojo de la APP, no la copia de la
-    /// suite compartida. Con `-MiBancoDemoSharedEyeOpposite` la copia dice lo contrario del ojo: si alguno volviera a
-    /// leer la suite, aquí diría lo contrario de lo esperado.
+    /// suite compartida. Por qué falla si vuelve el defecto (N-B, re-revisión): en la demo la copia del ojo va a un
+    /// dominio propio (`DemoSharedEye`) que solo lee la sonda `ojoCompartido`; la suite del grupo de apps de verdad, que
+    /// es la que leería el código defectuoso, la demo no la escribe nunca, así que ahí no hay «cerrado» y el aviso
+    /// saldría con el ojo abierto. `-MiBancoDemoSharedEyeOpposite` (copia al revés) solo sirve para comprobar que la
+    /// sonda de la copia no es la que manda.
     func testAlertsReadTheAppEyeNotTheSharedCopy() throws {
         launch(["-MiBancoDemoPrivate", "-MiBancoDemoSharedEyeOpposite"])
         waitForLaunchToEnd(30)

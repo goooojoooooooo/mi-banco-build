@@ -55,7 +55,7 @@ enum AlertPoster {
     /// El ojo de la app ahora mismo (la fuente de verdad: el almacén de `AppPreferences`), para componer avisos.
     static var eyeClosed: Bool {
         // N-3: la fuente de verdad de la app (no la copia de la suite). M-4: con la misma lectura que la app.
-        AppPreferences.storedPrivateMode
+        SharedPrivacy.read(from: SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)) ?? false // PROVOCADO
     }
 
     /// Sin importes ni texto del aviso.

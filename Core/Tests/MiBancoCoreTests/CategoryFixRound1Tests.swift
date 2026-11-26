@@ -261,13 +261,32 @@ private let revolutHeader = "Type,Product,Started Date,Completed Date,Descriptio
         #expect(category(pay("Hucha", personPayment: true)) == .sinCategoria)
         // A una persona, sigue siendo Personas.
         #expect(category(pay("Transferencia a Laura")) == .personas)
-        #expect(category(pay("Traspaso a Juan")) == .personas)
+    }
+
+    // MARK: «traspaso» a secas no prueba nada (casi siempre es entre tus cuentas)
+
+    @Test func traspasoASecasNoEsPersona() throws {
+        #expect(category(pay("Traspaso a Ana")) == .sinCategoria)
+        #expect(category(pay("TRASPASOS", source: .bank)) == .sinCategoria)
+        #expect(category(pay("Ana", personPayment: nil)) == .sinCategoria)
+        // Con otra señal, sí: un Bizum o una transferencia que además diga «traspaso».
+        #expect(category(pay("Traspaso Bizum a Ana")) == .personas)
+        #expect(category(pay("Traspaso a Ana", personPayment: true)) == .personas)
+        // El aviso: «traspaso» solo no da la señal.
+        let parsed = try #require(notice("Has pagado 50,00 € a Ana\nTraspaso realizado"))
+        #expect(!parsed.personPayment)
+        // El banco: un concepto «TRASPASO A ANA» sin código tampoco.
+        let out = records([debit("50.00", creditor: "ANA LOPEZ", remittance: ["TRASPASO A ANA"], entry: "t1")])
+        #expect(out.map(\.personPayment) == [false])
+        // Sigue siendo un concepto genérico (no se aplica por defecto a todo el comercio).
+        #expect(isGenericPayee("Traspaso a Ana"))
+        #expect(isGenericPayee("Traspasos"))
     }
 
     // MARK: M-5: una sola lista de palabras de envío y una sola normalización
 
     @Test func avisoYTextoReconocenLasMismasPalabras() throws {
-        for word in ["Bizum", "transferencia", "TRANSF", "traspaso", "Enviado", "Transferencias"] {
+        for word in ["Bizum", "transferencia", "TRANSF", "Enviado", "Transferencias"] {
             let parsed = try #require(notice("Has pagado 10,00 € a Ana " + word), "«\(word)»")
             #expect(parsed.personPayment, "aviso con «\(word)»")
             #expect(category(pay(word + " a Ana")) == .personas, "texto con «\(word)»")

@@ -3,7 +3,7 @@ import Testing
 @testable import MiBancoCore
 
 // Comercios de barrio y pagos a personas: «Personas» solo con una prueba de que el pago fue a alguien (Bizum,
-// transferencia, traspaso, envío); un comercio que no se conoce va a «Sin categoría», nunca a «Personas».
+// transferencia, envío); un comercio que no se conoce va a «Sin categoría», nunca a «Personas».
 
 private let when = Date(timeIntervalSince1970: 1_795_000_000)
 

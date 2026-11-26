@@ -56,6 +56,16 @@ public enum MotionMath {
             dampingFraction: 1 - bounce)
     }
 
+    /// Cuándo se VE posado un muelle (s): el instante en que su envolvente (e^(−ζ·ω₀·t), ω₀ = 2π / respuesta) baja del
+    /// 5 %. Es antes que el final lógico de la animación: a la vista ya no se mueve. Para el muelle `fly` (0,50 / 0,84):
+    /// ~0,28 s en Equilibrado. Sin rebote ni amortiguación válidos, la respuesta entera.
+    public static func visibleSettle(_ spec: SpringSpec) -> Double {
+        let zeta = spec.dampingFraction
+        guard spec.response > 0, zeta > 0 else { return max(0, spec.response) }
+        let omega = 2 * Double.pi / spec.response
+        return log(20) / (zeta * omega)
+    }
+
     /// Retardo de cada pieza: acumulado de `firstGap × decayⁿ`; congelado desde la pieza `animatedLimit − 1`
     /// (como mucho `animatedLimit` piezas animadas; el resto aparece con la última).
     public static func staggerDelays(count: Int, firstGap: Double, decay: Double, animatedLimit: Int = 9) -> [Double] {

@@ -62,13 +62,33 @@ final class MotionHomeTests: XCTestCase {
 
     /// Vuelve a la pestaña «Inicio» (en iOS 26 un toque normal en una pestaña a veces no se registra: una pulsación
     /// de 0,25 s sí).
+    /// Si hay una pantalla empujada encima (la del banco abierta desde el abanico), primero vuelve atrás con su botón de
+    /// volver: no depende de que la barra de pestañas se vea mientras esa pantalla está abierta (la línea B la oculta ahí).
     private func backToHomeTab() {
         let tab = app.tabBars.buttons["Inicio"]
-        for _ in 0..<3 {
+        for _ in 0..<4 {
             if app.staticTexts["Tu dinero"].exists { return }
+            if let back = pushedScreenBackButton() {
+                back.tap()
+                _ = app.staticTexts["Tu dinero"].waitForExistence(timeout: 2)
+                continue
+            }
             if tab.exists { tab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25) }
             if app.staticTexts["Tu dinero"].waitForExistence(timeout: 4) { return }
         }
+    }
+
+    /// El botón de volver de una pantalla empujada en una pila de navegación, si la hay.
+    private func pushedScreenBackButton() -> XCUIElement? {
+        let system = app.navigationBars.buttons.matching(identifier: "BackButton").firstMatch
+        if system.exists && system.isHittable { return system }
+        // Con una hoja abierta (p. ej. «Mover dinero», con su propio «Atrás») no hay pantalla empujada que deshacer.
+        if app.navigationBars["Mover dinero"].exists { return nil }
+        for label in ["Ajustes", "Volver"] {
+            let button = app.navigationBars.buttons[label]
+            if button.exists && button.isHittable { return button }
+        }
+        return nil
     }
 
     /// Un texto con forma de importe: una cifra pegada a «€», «12,50» o «… euros».
@@ -653,6 +673,8 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertTrue(note.exists, "Falta la acción «Nota»")
         XCTAssertEqual(flag.label, "No es mío")
         XCTAssertGreaterThanOrEqual(flag.frame.width, 44, "La acción no llega a 44 pt: \(flag.frame)")
+        // Abierta, el nombre sigue a la vista: la fila solo se aparta un poco (antes, entera: 140 pt fuera de pantalla).
+        XCTAssertGreaterThan(row.frame.minX, -70, "Con la fila abierta el nombre se sale de la pantalla: \(row.frame)")
         XCTAssertEqual(frontCardNumber(), 1, "Deslizar una fila movió el carrusel")
         flag.tap()
         XCTAssertTrue(waitUntil(5) { self.firstRow().label.contains("Marcado como no es mío") },
@@ -1002,9 +1024,11 @@ final class MotionHomeTests: XCTestCase {
 
         // «Mover dinero».
         openMoveAmountStep()
-        for key in ["1", "2", "5"] { app.buttons[key].tap() }
         let display = any("move-amount-display")
         XCTAssertTrue(display.waitForExistence(timeout: 5), "Falta el importe tecleado")
+        // Sin nada tecleado, la máscara es la atenuada de «vacío» (se distingue de un importe tecleado).
+        XCTAssertEqual(display.value as? String, "•••€ (vacío)", "Con el ojo cerrado, «vacío» y «tecleado» se ven igual")
+        for key in ["1", "2", "5"] { app.buttons[key].tap() }
         XCTAssertEqual(display.label, "importe oculto", "El importe tecleado se lee con el ojo cerrado")
         // Lo dibujado tampoco dice cuántas cifras lleva: con 3 y con 4 cifras (punto de millar) es la misma máscara.
         XCTAssertEqual(display.value as? String, "•••€", "La máscara del importe tecleado deja ver su tamaño")
@@ -1045,7 +1069,28 @@ final class MotionHomeTests: XCTestCase {
     /// Con Reducir movimiento, cambiar de tarjeta no superpone dos listas ni dos cifras: mientras dura el cambio el
     /// resumen de 7 días existe una sola vez, y al acabar dice lo de la tarjeta nueva.
     func testReduceMotionListSwapNeverShowsTwoSummaries() throws {
-        launchHome(["-MiBancoReduceMotion", "-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"])
+        assertReduceMotionListSwap([])
+    }
+
+    /// La prueba de arriba en ROJO con la regresión de m-11 (`-MiBancoDemoOldReduceSwap`: la lista cambia sin esperar a
+    /// que vuelva la tarjeta): el mismo cuerpo tiene que fallar en «sin tarjeta ni lista».
+    func testReduceMotionSwapGuardGoesRedWithTheOldSwap() throws {
+        expectStrictFailure(containing: "sin tarjeta ni lista") {
+            assertReduceMotionListSwap(["-MiBancoDemoOldReduceSwap"])
+        }
+    }
+
+    /// `XCTExpectFailure` estricto: el cuerpo TIENE que fallar, y solo por una aserción cuyo mensaje contenga `text`
+    /// (si no falla, o falla por otra cosa, la prueba sale roja).
+    private func expectStrictFailure(containing text: String, _ body: () -> Void) {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        options.issueMatcher = { $0.compactDescription.contains(text) }
+        XCTExpectFailure("La prueba vigilante tiene que fallar con la regresión", options: options, failingBlock: body)
+    }
+
+    private func assertReduceMotionListSwap(_ extra: [String]) {
+        launchHome(["-MiBancoReduceMotion", "-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"] + extra)
         let summaries = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Gastado en 7 días:"))
         XCTAssertTrue(summaries.firstMatch.waitForExistence(timeout: 8), "Falta el resumen de 7 días")
         let before = summaries.firstMatch.label
@@ -1058,6 +1103,8 @@ final class MotionHomeTests: XCTestCase {
         XCTAssertEqual(homeProbe()["listas"], "1", "La lista no hizo su cambio (salir, cambiar, entrar): \(homeProbe())")
         // Con Reducir movimiento la lista vieja sí se funde del todo (las cifras se funden por su cuenta).
         XCTAssertEqual(homeProbe()["fondoLista"], "0", "Con Reducir movimiento la lista vieja no se fundió: \(homeProbe())")
+        // Y nunca a la vez la tarjeta y la lista a 0: la lista cambia cuando la tarjeta nueva ya vuelve a verse (m-11).
+        XCTAssertEqual(homeProbe()["vacios"], "0", "Con Reducir movimiento hubo un instante sin tarjeta ni lista: \(homeProbe())")
     }
 
     // MARK: Retoques de diseño
@@ -1078,6 +1125,8 @@ final class MotionHomeTests: XCTestCase {
         segment("Revolut").tap()
         XCTAssertTrue(waitUntil(5) { self.homeProbe()["listas"] == "1" }, "La lista no hizo su cambio: \(homeProbe())")
         XCTAssertEqual(homeProbe()["fondoLista"], "30", "La lista se quedó en negro en el cambio de tarjeta: \(homeProbe())")
+        // Y la lista NUEVA se ha medido de verdad (no solo la vieja atenuada).
+        XCTAssertGreaterThan(Int(homeProbe()["muestrasNueva"] ?? "") ?? 0, 0, "La lista nueva no pasó por la sonda: \(homeProbe())")
         XCTAssertTrue(waitUntil(5) { summaries.firstMatch.label != before }, "El resumen no cambió con la tarjeta: \(before)")
         // Sigue respondiendo: la fila abre su detalle.
         let row = firstRow()
@@ -1136,5 +1185,117 @@ final class MotionHomeTests: XCTestCase {
                                  "La primera tarjeta \(first.frame) tapa la ayuda del abanico \(help.frame)")
         app.buttons["wallet-fan-close"].tap()
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["abanico"] == "0" }, "El abanico no se cerró")
+    }
+
+    // MARK: Lote de cierre — ronda 1
+
+    /// La fila abierta: el importe se apaga (nunca a la vez que las acciones) y, a tamaño normal, el nombre sigue a la
+    /// vista. Con texto de accesibilidad la fila va apilada y el importe está debajo del nombre, a la izquierda.
+    private func assertOpenRow(_ extra: [String], largeText: Bool) {
+        var args = ["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"] + extra
+        if largeText { args += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
+        launchHome(args)
+        let row = firstRow()
+        XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas")
+        XCTAssertEqual(homeProbe()["importeOculto"], "0", "El importe ya estaba apagado: \(homeProbe())")
+        // Con texto grande la primera fila queda bajo el borde: se sube la lista hasta tenerla a la vista.
+        let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        for _ in 0..<8 where !row.isHittable {
+            centre.press(forDuration: 0.1, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: -260)), withVelocity: 500,
+                         thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(row.isHittable, "La primera fila no llega a verse")
+        row.swipeLeft()
+        let flag = app.buttons["row-action-flag"]
+        XCTAssertTrue(flag.waitForExistence(timeout: 5), "Deslizar la fila no enseñó sus acciones")
+        XCTAssertTrue(waitUntil(3) { (Int(self.homeProbe()["importeOculto"] ?? "") ?? 0) >= 1 },
+                      "Con la fila abierta el importe se ve a la vez que las acciones: \(homeProbe())")
+        if !largeText {
+            XCTAssertGreaterThan(row.frame.minX, -70, "Con la fila abierta el nombre se sale de la pantalla: \(row.frame)")
+        }
+        flag.tap()
+        XCTAssertTrue(waitUntil(5) { !flag.exists }, "La fila no se cerró tras la acción")
+    }
+
+    func testOpenRowHidesAmountAndKeepsName() throws {
+        assertOpenRow([], largeText: false)
+    }
+
+    func testOpenRowHidesAmountAtLargestText() throws {
+        assertOpenRow([], largeText: true)
+    }
+
+    /// En ROJO con la fila de antes de la ronda (`-MiBancoDemoOldSwipe`: el importe no se apaga), a texto máximo.
+    func testOpenRowAmountGuardGoesRedWithTheOldSwipe() throws {
+        expectStrictFailure(containing: "se ve a la vez que las acciones") {
+            assertOpenRow(["-MiBancoDemoOldSwipe"], largeText: true)
+        }
+    }
+
+    /// En ROJO con la fila de antes del lote (`-MiBancoDemoFullSwipe`: se aparta entera), a tamaño normal (m-6).
+    func testOpenRowNameGuardGoesRedWithTheFullSwipe() throws {
+        expectStrictFailure(containing: "el nombre se sale") {
+            assertOpenRow(["-MiBancoDemoFullSwipe"], largeText: false)
+        }
+    }
+
+    /// Con el ojo cerrado y nada tecleado, la máscara de «Mover dinero» es la atenuada de «vacío» (m-5).
+    private func assertHiddenKeypadShowsEmpty(_ extra: [String]) {
+        launchHome(["-MiBancoDemoPrivate", "-MiBancoDemoDrawnText"] + extra)
+        openMoveAmountStep()
+        let display = any("move-amount-display")
+        XCTAssertTrue(display.waitForExistence(timeout: 5), "Falta el importe tecleado")
+        XCTAssertEqual(display.value as? String, "•••€ (vacío)", "Con el ojo cerrado, vacío y tecleado se ven igual")
+        app.buttons["1"].tap()
+        XCTAssertTrue(waitUntil(3) { (display.value as? String) == "•••€" }, "Tecleado, la máscara sigue de vacío")
+    }
+
+    func testHiddenKeypadShowsEmptyMask() throws {
+        assertHiddenKeypadShowsEmpty([])
+    }
+
+    func testHiddenKeypadGuardGoesRedWithTheOldMask() throws {
+        expectStrictFailure(containing: "vacío y tecleado se ven igual") {
+            assertHiddenKeypadShowsEmpty(["-MiBancoDemoOldKeypadMask"])
+        }
+    }
+
+    /// Montado con el ojo cerrado, «Gastado en 7 días» no se queda esperando a contar (se quedaría invisible hasta el
+    /// final del montaje si el ojo se abre a mitad; punto 4).
+    private func assertWeekNeverWaitsHidden(_ extra: [String]) {
+        launchHome(["-MiBancoDemoPrivate", "-MiBancoDemoHomeProbes"] + extra)
+        XCTAssertTrue(waitUntil(5) { (Int(self.homeProbe()["montajes"] ?? "") ?? 0) >= 1 }, "Inicio no se montó: \(homeProbe())")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(homeProbe()["cuentaOculta"], "0", "Gastado en 7 días quedó esperando a contar con el ojo cerrado: \(homeProbe())")
+    }
+
+    func testWeekNeverWaitsToCountWithTheEyeClosed() throws {
+        assertWeekNeverWaitsHidden([])
+    }
+
+    func testWeekGuardGoesRedWithTheOldCount() throws {
+        expectStrictFailure(containing: "quedó esperando a contar") {
+            assertWeekNeverWaitsHidden(["-MiBancoDemoOldWeekCount"])
+        }
+    }
+
+    /// Al teclear, las fichas de «Desde» no cambian de cifra a la vez que el importe (antes de que entre el dígito;
+    /// punto 8).
+    private func assertChipsFollowTheDigit(_ extra: [String]) {
+        launchHome(["-MiBancoDemoHomeProbes"] + extra)
+        openMoveAmountStep()
+        for key in ["1", "2", "3"] { app.buttons[key].tap() }
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(homeProbe()["fichasAntes"], "0", "Las fichas cambiaron antes que el dígito: \(homeProbe())")
+    }
+
+    func testChipsChangeAfterTheDigit() throws {
+        assertChipsFollowTheDigit([])
+    }
+
+    func testChipsGuardGoesRedWithTheOldChips() throws {
+        expectStrictFailure(containing: "cambiaron antes que el dígito") {
+            assertChipsFollowTheDigit(["-MiBancoDemoOldChips"])
+        }
     }
 }

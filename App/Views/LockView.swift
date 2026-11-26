@@ -18,7 +18,8 @@ struct LockView: View {
     var leaveOnUnlock: () -> LockLeave = { .fades(handsMark: false) }
     /// Aviso a la carcasa, justo después de desbloquear: cuánto dura el fundido con el que se va este bloqueo (0 si se
     /// quita de golpe). Hasta entonces Inicio no recibe toques.
-    var fadeStarted: (_ seconds: Double) -> Void = { _ in }
+    /// El fundido empieza: cuánto dura y si este bloqueo se funde con su marca dibujada (nada la recoge para volar).
+    var fadeStarted: (_ seconds: Double, _ keepsItsMark: Bool) -> Void = { _, _ in }
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motion) private var motion
     @State private var authenticating = false
@@ -39,6 +40,8 @@ struct LockView: View {
     /// doble toque) y `unlock()` no hace nada, así que no vuelve a pedir Face ID. Los toques tampoco llegan a Inicio:
     /// la carcasa no se los da hasta que este fundido termina (`ShellState.homeTakesTouches`).
     @State private var leaving = false
+    /// Retoque 1: el nombre, el lema y el botón ya se han apagado (0,12 s) al desbloquear.
+    @State private var textsAway = false
 
     /// Lo que recibe `accessibilityHidden`: VoiceOver deja de ver el bloqueo (y su «Desbloquear») en cuanto se va.
     private var hiddenFromVoiceOver: Bool { leaving }
@@ -50,6 +53,14 @@ struct LockView: View {
     #endif
 
     private static let markSize: CGFloat = 76
+    /// Lo que tardan en apagarse el nombre, el lema y el botón al desbloquear (s a nivel Equilibrado; retoque 1).
+    static let textsAwaySeconds = 0.12
+
+    /// Esos 0,12 s con la intensidad y la cámara lenta (con Reducir, solo la cámara lenta): lo que dura la animación de
+    /// los textos y lo que espera el fundido del bloqueo.
+    private var textsAwayDuration: Double {
+        motion.reduce ? motion.pause(Self.textsAwaySeconds) : motion.seconds(Self.textsAwaySeconds)
+    }
 
     /// La marca ya no se mueve: no es un arranque en frío, o ya se montó.
     private var markSettled: Bool { !playsLaunch || launchFinished }
@@ -63,7 +74,10 @@ struct LockView: View {
         ) { frame in
             LockFace(
                 nameOpacity: textsDropped ? 0 : frame.name, nameSpread: CGFloat(1 - frame.name),
-                taglineOpacity: textsDropped ? 0 : frame.name
+                taglineOpacity: textsDropped ? 0 : frame.name,
+                textsAway: textsAway,
+                awayAnimation: .easeOut(duration: textsAwayDuration),
+                awayDrop: motion.distance(8)
             ) {
                 LaunchMark(frame: frame, size: Self.markSize)
                     .opacity(markHandedOff ? 0 : frame.mark)
@@ -240,12 +254,31 @@ struct LockView: View {
         case .refused:
             return false
         case .fades:
+            // Retoque 1: nombre, lema y botón se van en 0,12 s, antes que el resto del bloqueo; nunca flotan sobre
+            // Inicio ni pisan la barra de pestañas.
+            textsAway = true
+            // I-1 (ronda 1): los dos fundidos van en orden, a todos los niveles: el bloqueo (lo que destapa Inicio)
+            // empieza a irse cuando los textos y el botón ya se han ido. `locked` cambia YA (la carcasa desbloquea en
+            // este instante, como siempre); solo el DIBUJO del fundido espera.
+            var away = textsAwayDuration
+            #if DEBUG
+            // Solo para la prueba que demuestra su propio rojo (ronda 2, N-1): el defecto de antes, sin retardo.
+            if DemoMode.lockFadeWithoutDelay { away = 0 }
+            #endif
             // La misma duración que el fundido: `motion.fade` dura 0,22 s (× cámara lenta). Es una curva con final
             // (no un muelle, que a su duración nominal aún deja el bloqueo a un par de puntos de opacidad): cuando la
             // carcasa devuelve los toques a Inicio, del bloqueo no queda ni un píxel.
             let seconds = motion.reduce ? 0.22 * motion.timeMultiplier : motion.seconds(0.3)
-            withAnimation(motion.reduce ? motion.fade : .easeOut(duration: seconds)) { locked = false }
-            fadeStarted(seconds)
+            withAnimation((motion.reduce ? motion.fade : .easeOut(duration: seconds)).delay(away)) { locked = false }
+            // (Los textos siguen apagándose en `textsAwayDuration`.)
+            fadeStarted(away + seconds, !takesTheMark)
+            #if DEBUG
+            // Ronda 2 (N-1): las sondas las escribe lo DIBUJADO (`DrawnOpacityProbe` en el nombre y en el fundido del
+            // bloqueo), fotograma a fotograma; aquí solo se vacían para este desbloqueo.
+            LaunchProbe.shared.lockTextsGoneAt = nil
+            LaunchProbe.shared.lockFadeBeganAt = nil
+            LaunchProbe.shared.lockFadeArmed = true
+            #endif
         case .covered:
             // La escena no está activa (Face ID aún la tiene): la tapa se pone encima en esta misma actualización y este
             // bloqueo se quita de golpe, sin fundido. Si se fundiera debajo, al volver la escena a activa antes de
@@ -253,7 +286,7 @@ struct LockView: View {
             var atOnce = Transaction()
             atOnce.disablesAnimations = true
             withTransaction(atOnce) { locked = false }
-            fadeStarted(0)
+            fadeStarted(0, !takesTheMark)
         }
         return true
     }
@@ -297,6 +330,11 @@ struct LockFace<Mark: View, Action: View>: View {
     var nameSpread: CGFloat = 0
     /// El lema aparece con el nombre mientras la marca se monta; la tapa del selector de apps no lo enseña (0).
     var taglineOpacity: Double = 1
+    /// Retoque 1 (desbloqueo limpio): al desbloquear, el nombre, el lema y el botón se apagan solos (el botón bajando
+    /// 8 pt) con `awayAnimation`, antes de que Inicio empiece a verse. La marca no: es de quien vuela o del fundido.
+    var textsAway = false
+    var awayAnimation: Animation? = nil
+    var awayDrop: CGFloat = 0
     @ViewBuilder let mark: Mark
     @ViewBuilder let action: Action
     @Environment(\.launchAnchor) private var anchor
@@ -311,6 +349,8 @@ struct LockFace<Mark: View, Action: View>: View {
                 .titan(.sheetTitle)
                 .foregroundStyle(Theme.label)
                 .opacity(nameOpacity)
+                .modifier(DrawnOpacityProbe(opacity: textsAway ? 0 : 1, mark: .lockTextsGone))
+                .animation(awayAnimation, value: textsAway)
                 .padding(.top, Theme.Space.gutter)
                 .accessibilityAddTraits(.isHeader)
             Text("Tu dinero, solo para ti.")
@@ -319,8 +359,13 @@ struct LockFace<Mark: View, Action: View>: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
                 .opacity(taglineOpacity)
+                .opacity(textsAway ? 0 : 1)
+                .animation(awayAnimation, value: textsAway)
             Spacer()
             action
+                .opacity(textsAway ? 0 : 1)
+                .offset(y: textsAway ? awayDrop : 0)
+                .animation(awayAnimation, value: textsAway)
                 .padding(.horizontal, Theme.Space.gutter + 8)
                 .padding(.bottom, Theme.Space.gutter)
         }
@@ -354,4 +399,39 @@ private struct LockVoiceOverHidden: ViewModifier {
             .onAppear { LaunchProbe.shared.lockVoiceOver = hidden ? "oculto" : "visible" }
             #endif
     }
+}
+
+/// Ronda 2 (N-1): una opacidad animable que, en DEBUG, apunta en `LaunchProbe` el primer fotograma DIBUJADO en que cruza
+/// su umbral: el nombre del bloqueo ya apagado (≤ 0,02) o el bloqueo empezando a irse (< 0,99). Así la prueba compara lo
+/// que se ve, no lo que se programó. En Release solo es una opacidad.
+struct DrawnOpacityProbe: ViewModifier, Animatable {
+    enum Mark { case lockTextsGone, lockFadeBegan }
+
+    var opacity: Double
+    let mark: Mark
+
+    nonisolated var animatableData: Double {
+        get { opacity }
+        set { opacity = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        note()
+        #endif
+        return content.opacity(opacity)
+    }
+
+    #if DEBUG
+    private func note() {
+        let probe = LaunchProbe.shared
+        let now = Date().timeIntervalSince1970
+        switch mark {
+        case .lockTextsGone:
+            if opacity <= 0.02, probe.lockTextsGoneAt == nil, probe.lockFadeArmed { probe.lockTextsGoneAt = now }
+        case .lockFadeBegan:
+            if opacity < 0.99, probe.lockFadeBeganAt == nil, probe.lockFadeArmed { probe.lockFadeBeganAt = now }
+        }
+    }
+    #endif
 }

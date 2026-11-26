@@ -348,7 +348,11 @@ struct CardCarousel: View {
         // empieza hasta que la app está quieta— deslice de verdad con él en curso. En Release siempre es falso.
         let holdsOpen = glideWins && !forcedBack
         if kit.reduce {
-            withAnimation(kit.fade) {
+            #if DEBUG
+            motion.carouselHiddenFrom = Date()
+            motion.carouselHiddenUntil = .distantFuture
+            #endif
+            withAnimation(ReduceCardSwap.animation(kit)) {
                 crossFaded = true
             } completion: {
                 guard scrollTargetToken == token else { return }
@@ -385,7 +389,11 @@ struct CardCarousel: View {
         var still = Transaction()
         still.disablesAnimations = true
         withTransaction(still) { scrolledID = card }
-        withAnimation(kit.fade) { crossFaded = false }
+        #if DEBUG
+        // La tarjeta nueva vuelve a verse de verdad cuando pasa de la mitad de su fundido de entrada.
+        motion.carouselHiddenUntil = Date().addingTimeInterval(kit.pause(ReduceCardSwap.fade) / 2)
+        #endif
+        withAnimation(ReduceCardSwap.animation(kit)) { crossFaded = false }
     }
 
     /// Fin de un desplazamiento programado. Si el dedo lo interrumpió y dejó el carrusel en otra tarjeta, esa pasa a ser

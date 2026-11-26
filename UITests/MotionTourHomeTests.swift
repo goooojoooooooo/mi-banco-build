@@ -57,6 +57,15 @@ final class MotionTourHomeTests: MotionTourCase {
         unlockAndBurst("home-build-eye", extra: ["-MiBancoDemoPrivate"])
     }
 
+    /// Montado con el ojo cerrado y abierto a mitad del montaje (a cámara lenta la ventana del montaje dura 5,6 s):
+    /// «Gastado en 7 días» aparece en cuanto se abre el ojo, sin quedarse invisible hasta el final de la ventana.
+    func testHomeBuildEyeOpensMidway() throws {
+        // El ojo lo abre la demo 0,3 s (× cámara lenta) tras empezar el montaje: un toque de la prueba esperaría a que
+        // la app estuviera quieta, o sea, a que el montaje acabara.
+        unlockAndBurst("home-build-eye-opens", extra: ["-MiBancoDemoPrivate", "-MiBancoDemoEyeOpensMidBuild"], frames: 20,
+                       every: 0.25)
+    }
+
     func testHomeBuildReduceMotion() throws {
         unlockAndBurst("home-build-reduce", extra: ["-MiBancoReduceMotion"], frames: 12, every: 0.15)
     }
@@ -87,7 +96,7 @@ final class MotionTourHomeTests: MotionTourCase {
         launch(["-MiBancoReduceMotion"])
         waitForHome()
         segment("Revolut").tap()
-        burst("carousel-drag-reduce", frames: 12, every: 0.12)
+        burst("carousel-drag-reduce", frames: 20, every: 0.12)
     }
 
     /// El ojo en Inicio: al cerrarlo las cifras se barajan y pasan a puntos; al abrirlo ruedan hasta la cifra.
@@ -312,9 +321,21 @@ final class MotionTourHomeTests: MotionTourCase {
     }
 
     /// `-MiBancoDemoCardMoment rowSwipe`: la primera fila se abre (como al deslizarla) y, al tocar otra vez, se cierra.
-    private func rowSwipe(_ suffix: String, extra: [String], frames: Int = 12) {
+    private func rowSwipe(_ suffix: String, extra: [String], frames: Int = 12, bringRowsUp: Bool = false) {
         launch(["-MiBancoDemoCardMoment", "rowSwipe"] + extra)
         waitForHome()
+        if bringRowsUp {
+            // Con el texto más grande las filas quedan bajo el borde: se sube la lista hasta ver la primera (el
+            // segmentado se queda arriba, fijo).
+            let row = app.buttons.matching(identifier: "movementRow").firstMatch
+            let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+            let bottom = app.windows.firstMatch.frame.maxY - 160
+            for _ in 0..<10 where !(row.exists && row.isHittable && row.frame.maxY < bottom) {
+                centre.press(forDuration: 0.1, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: -260)), withVelocity: 500,
+                             thenHoldForDuration: 0.3)
+            }
+            Thread.sleep(forTimeInterval: 2)
+        }
         segment("Todo").tap()
         burst("row-swipe" + suffix, frames: frames, every: 0.2)
         Thread.sleep(forTimeInterval: 1.5)
@@ -328,6 +349,18 @@ final class MotionTourHomeTests: MotionTourCase {
 
     func testRowSwipeEyeClosed() throws {
         rowSwipe("-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    /// Con el texto de accesibilidad más grande (fila apilada, el importe debajo del nombre): al abrirse, el importe se
+    /// apaga antes de que se lean las acciones.
+    func testRowSwipeLargestText() throws {
+        rowSwipe("-ax", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"],
+                 bringRowsUp: true)
+    }
+
+    func testRowSwipeLargestTextEyeClosed() throws {
+        rowSwipe("-ax-eye", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+                                    "-MiBancoDemoPrivate"], bringRowsUp: true)
     }
 
     func testRowSwipeReduceMotion() throws {
@@ -381,6 +414,15 @@ final class MotionTourHomeTests: MotionTourCase {
     /// El camino de verdad: mantener el dedo sobre la tarjeta (se levanta a los 0,42 s y a los 0,92 s se abre el
     /// abanico). La pulsación bloquea la prueba 1,6 s, así que la ráfaga empieza con el abanico a medio abrir; después,
     /// «Cerrar»: las tarjetas vuelven bajo la tarjeta de la que salieron.
+    /// Abanico con Reducir movimiento, fotograma a fotograma: a cámara lenta ×8 y con capturas seguidas (~15 ms reales
+    /// entre fotogramas), para ver el paso de Inicio al abanico entero (ni un fotograma negro ni dos títulos).
+    func testWalletFanReduceMotionFine() throws {
+        launch(["-MiBancoDemoCardMoment", "fan", "-MiBancoReduceMotion"], scale: 8)
+        waitForHome()
+        segment("Todo").tap()
+        fastBurst("wallet-fan-reduce-fine", frames: 32, every: 0.05)
+    }
+
     func testWalletFanFromLongPress() throws {
         launch()
         waitForHome()
@@ -427,6 +469,8 @@ final class MotionTourHomeTests: MotionTourCase {
         launch(["-MiBancoDemoKeypadDelay", "0.8"] + extra)
         waitForHome()
         openMoveAmountStep()
+        // Con el ojo cerrado, primero el importe vacío (la máscara atenuada).
+        if extra.contains("-MiBancoDemoPrivate") { burst("keypad" + suffix + "-empty", frames: 3, every: 0.2) }
         for key in ["1", "2", "3"] {
             app.buttons[key].tap()
             Thread.sleep(forTimeInterval: 2.6)

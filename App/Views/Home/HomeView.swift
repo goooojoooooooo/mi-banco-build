@@ -82,7 +82,7 @@ struct HomeView: View {
         Section {
             if card == .investments, let summary = portfolio.summary {
                 PositionRows(summary: summary, onOpen: openPosition)
-                    .opacity(listAlpha)
+                    .listOpacity(listAlpha)
             } else {
                 QuickActions(
                     card: card,
@@ -105,7 +105,7 @@ struct HomeView: View {
                         }
                     }
                 )
-                .opacity(listAlpha)
+                .listOpacity(listAlpha)
 
                 WeekBlock(card: card, week: snapshot.weeks[card] ?? WeekSpend(), pace: snapshot.pace,
                           balance: card.bank.flatMap { snapshot.balances[$0] })
@@ -249,6 +249,8 @@ struct HomeView: View {
                               onPick: pickFromFan, onClose: { self.fan = nil })
                 }
             }
+            // Línea C (lote final, carcasa): con el abanico abierto la barra de pestañas no queda encima de él.
+            .toolbar(fan == nil ? .automatic : .hidden, for: .tabBar)
             #if DEBUG
             .overlay(alignment: .topLeading) {
                 VStack(spacing: 0) {
@@ -403,19 +405,32 @@ struct HomeView: View {
     /// nueva sube escalonada (34 ms × 0,8ⁿ entre filas) mientras vuelve al 100 %: un fundido cruzado sin hueco negro.
     /// Un cambio rápido de tarjeta deja sin efecto el anterior (`listSwap`), y si la animación de salida no termina
     /// (p. ej. otra transacción la interrumpe), un respaldo vuelve a enseñar la lista: nunca se queda oculta.
-    /// Con Reducir movimiento la vieja se funde del todo y la nueva sale en su sitio con un fundido, sin escalonado.
+    /// Con Reducir movimiento la vieja se funde del todo y la nueva sale en su sitio con un fundido, sin escalonado; y
+    /// la vieja espera a que la tarjeta nueva vaya por la mitad de su fundido de entrada (el carrusel se funde, salta y
+    /// vuelve: `CardCarousel.glide`), así nunca están a la vez la tarjeta y la lista a 0 (m-11).
     private func showList(for card: AccountCard) {
         guard card != listCard || listHidden else { return }
         listSwap += 1
         let swapID = listSwap
-        let out = kit.seconds(0.12)
-        withAnimation(.easeOut(duration: out)) {
+        #if DEBUG
+        // La sonda del cambio (`fondoLista`) cubre el cambio entero, desde que la lista vieja empieza a atenuarse: la
+        // menor opacidad que de verdad recibe cualquier pieza de la lista hasta que la nueva ha entrado.
+        HomeProbe.shared.listSwapFloor = 100
+        #endif
+        let reduceFade = kit.pause(ReduceCardSwap.fade)
+        var hold = kit.reduce ? reduceFade * 1.5 : 0
+        #if DEBUG
+        // Solo para probar la prueba (`-MiBancoDemoOldReduceSwap`): el cambio de antes, sin esperar a la tarjeta.
+        if DemoMode.oldReduceSwap { hold = 0 }
+        #endif
+        let out = kit.reduce ? reduceFade * 0.5 : kit.seconds(0.12)
+        withAnimation(.easeOut(duration: out).delay(hold)) {
             listHidden = true
         } completion: {
             swapList(swapID)
         }
         Task {
-            try? await Task.sleep(for: .seconds(out + kit.seconds(0.26)))
+            try? await Task.sleep(for: .seconds(hold + out + kit.seconds(0.26)))
             swapList(swapID)
         }
     }
@@ -425,20 +440,17 @@ struct HomeView: View {
         // El cambio de lista va sin animación (la vieja ya es invisible): nada se queda ocupando sitio.
         var swap = Transaction()
         swap.disablesAnimations = true
-        #if DEBUG
-        // Lo que se DIBUJA en el cambio: cada pieza de la lista nueva anota la opacidad que de verdad recibe mientras
-        // espera su turno (`HomeEntrance` → `DrawnOpacity`) y la sonda guarda la menor.
-        HomeProbe.shared.listSwapFloor = 100
-        #endif
         withTransaction(swap) { listCard = selection ?? .all }
         beginEntrance(.list)
         #if DEBUG
         HomeProbe.shared.listEntrances += 1
+        // Con Reducir movimiento: si en el instante del cambio la tarjeta también está fundida a 0, bajo el selector no
+        // hay nada (el fotograma vacío de m-11).
+        if kit.reduce, motion.carouselHiddenNow { HomeProbe.shared.blankSwaps += 1 }
         #endif
-        // Con Reducir movimiento las cifras que cambian con la tarjeta se funden por su cuenta: la lista vuelve a
-        // verse cuando ese fundido ha terminado, así nunca se leen dos cifras superpuestas.
-        let wait = kit.reduce ? 0.22 * kit.timeMultiplier : 0
-        withAnimation(.easeOut(duration: kit.seconds(0.16)).delay(wait)) { listHidden = false }
+        // Con Reducir movimiento la lista vieja ya ha esperado al fundido de la tarjeta (`showList`) y «Gastado en 7
+        // días» se monta de nuevo con la tarjeta (`WeekBlock`, `.id`): la nueva puede entrar ya, sin dos cifras a la vez.
+        withAnimation(.easeOut(duration: kit.seconds(0.16))) { listHidden = false }
     }
 
     // MARK: - Montaje y llegada
@@ -451,6 +463,16 @@ struct HomeView: View {
         HomeProbe.shared.assemblies += 1
         #endif
         beginEntrance(.assembly)
+        #if DEBUG
+        // Solo demo (`-MiBancoDemoEyeOpensMidBuild`): el ojo se abre a mitad del montaje, como con el botón.
+        if DemoMode.eyeOpensMidBuild, preferences.privateMode {
+            let wait = kit.seconds(0.3)
+            Task {
+                try? await Task.sleep(for: .seconds(wait))
+                withAnimation(kit.fade) { preferences.privateMode = false }
+            }
+        }
+        #endif
     }
 
     /// Abre la ventana de una entrada. Mientras está abierta, las piezas esperan su turno; al cerrarse, todo lo que

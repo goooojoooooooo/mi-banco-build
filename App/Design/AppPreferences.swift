@@ -57,8 +57,9 @@ final class AppPreferences {
         #if DEBUG
         if DemoMode.isActive {
             // N-5: la demo nunca escribe en el grupo de apps de verdad ni toca la Live Activity de verdad: su copia va a
-            // un dominio propio. Con `-MiBancoDemoSharedEyeOpposite` la copia dice lo CONTRARIO del ojo, para probar que
-            // los avisos y la Live Activity leen la fuente de verdad de la app y no esta copia (N-3).
+            // un dominio propio, que solo lee la sonda `ojoCompartido`. Con `-MiBancoDemoSharedEyeOpposite` esa copia
+            // dice lo CONTRARIO del ojo. (N-B: la prueba N-3 falla si los avisos leyeran la suite porque la del grupo
+            // de verdad, en la demo, nunca se escribe; no por esta copia, que nadie más lee.)
             let copy = DemoMode.writesOppositeSharedEye ? !hidden : hidden
             return (UserDefaults(suiteName: "DemoSharedEye"), copy, false)
         }

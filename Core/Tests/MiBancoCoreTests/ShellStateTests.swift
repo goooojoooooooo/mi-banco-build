@@ -18,6 +18,7 @@ import Testing
             .exitFinished(id: state.exitCount), .exitFinished(id: state.exitCount - 1),
             .lockFadeFinished(id: state.fadeCount), .lockFadeFinished(id: state.fadeCount - 1),
             .motionStyle(fadesOnly: true), .motionStyle(fadesOnly: false),
+            .lockKeepsItsMark(true), .lockKeepsItsMark(false),
             .bannerRequested, .bannerDismissed(id: state.banner ?? 0), .bannerDismissed(id: state.bannerCount - 1),
         ]
         for setting in settings {
@@ -422,13 +423,13 @@ import Testing
     @Test func aFadingUnlockNeverShowsTwoMarks() {
         #expect(Self.states.contains { $0.hidesBrandSlot }, "el recorrido no llega a un desbloqueo con solo fundidos")
         for state in Self.states {
-            // Con solo fundidos y el bloqueo fundiéndose (ya quitado), la ranura no se dibuja.
-            if state.fadesOnly, state.lockFading, !state.showsLock {
+            // Con el bloqueo fundiéndose (ya quitado) con su marca dibujada, la ranura no se dibuja, sea cual sea el estilo.
+            if state.lockKeepsItsMark, state.lockFading, !state.showsLock {
                 #expect(state.hidesBrandSlot, "dos marcas: el bloqueo se funde con la suya y la ranura dibuja otra: \(state)")
             }
-            // Y solo entonces: ni con piezas (ahí la esconde la marca que vuela), ni sin fundido (se quedaría sin marca).
+            // Y solo entonces: ni si la marca vuela (ahí la esconde la que vuela), ni sin fundido (se quedaría sin marca).
             if state.hidesBrandSlot {
-                #expect(state.fadesOnly && state.lockFading && !state.showsLock, "\(state)")
+                #expect(state.lockKeepsItsMark && state.lockFading && !state.showsLock, "\(state)")
                 #expect(!state.homeTakesTouches, "la ranura escondida con Inicio ya tocable: \(state)")
             }
         }
@@ -448,10 +449,21 @@ import Testing
         #expect(state.lockFading && state.hidesBrandSlot)
         state.apply(.lockFadeFinished(id: state.fadeCount))
         #expect(!state.hidesBrandSlot)
-        // Con piezas, esto no esconde nada (la ranura la esconde la marca que vuela).
+        // Con piezas y la marca entregada a la que vuela, esto no esconde nada (la esconde la que vuela)...
         var pieces = ShellState(lockApplies: true, relocksOnBackground: true)
         pieces.apply(.unlockSucceeded)
+        pieces.apply(.lockKeepsItsMark(false))
         #expect(pieces.lockFading && !pieces.hidesBrandSlot)
+        // ...pero si el bloqueo se queda con su marca (nada la recoge para volar), también con piezas se esconde la
+        // ranura: una sola marca en cada fotograma a todos los niveles (lote final).
+        pieces.apply(.lockKeepsItsMark(true))
+        #expect(pieces.hidesBrandSlot)
+        pieces.apply(.lockFadeFinished(id: pieces.fadeCount))
+        #expect(!pieces.hidesBrandSlot)
+        // Fuera de un fundido, el aviso no hace nada.
+        var idle = ShellState(lockApplies: true, relocksOnBackground: true)
+        idle.apply(.lockKeepsItsMark(true))
+        #expect(!idle.lockKeepsItsMark && !idle.hidesBrandSlot)
         // El estilo no toca el bloqueo: ni lo quita ni lo pone.
         for step in Self.steps {
             if case .motionStyle = step.event {
@@ -487,6 +499,8 @@ import Testing
             if state.showsLock || state.lockFading || state.scene != .active {
                 #expect(state.shownBanner == nil, "aviso a la vista con bloqueo, fundido o fuera de primer plano: \(state)")
             }
+            // Lote final: tampoco durante el arranque (con el bloqueo apagado, el arranque es lo que se ve).
+            if state.showsLaunch { #expect(state.shownBanner == nil, "aviso a la vista durante el arranque: \(state)") }
             if state.showsLock { #expect(state.banner == nil, "aviso guardado bajo el bloqueo: \(state)") }
             // Nada de la carcasa va por debajo de Inicio: el aviso (en Inicio) queda siempre bajo bloqueo y tapa.
             #expect(ShellState.zIndex(of: .home) < ShellState.zIndex(of: .lock))
@@ -497,7 +511,7 @@ import Testing
             case .scene(.inactive), .scene(.background):
                 #expect(step.after.banner == nil, "el aviso sigue puesto al salir de primer plano: \(step.before)")
             case .bannerRequested:
-                if step.before.showsLock || step.before.lockFading || step.before.scene != .active {
+                if step.before.showsLock || step.before.lockFading || step.before.scene != .active || step.before.showsLaunch {
                     #expect(step.after.banner == step.before.banner, "se puso un aviso que no se podía ver: \(step.before)")
                 } else {
                     #expect(step.after.shownBanner != nil)
@@ -514,6 +528,14 @@ import Testing
                 #expect(step.after.layers(liveScene: step.after.scene) == step.before.layers(liveScene: step.before.scene))
             }
         }
+        // Lote final: con el bloqueo apagado, un pago que llega durante el arranque no pide aviso; acabado, sí.
+        var open = ShellState(lockApplies: false, relocksOnBackground: false)
+        #expect(open.showsLaunch)
+        open.apply(.bannerRequested)
+        #expect(open.banner == nil, "se pidió un aviso durante el arranque")
+        open.apply(.launchFinished)
+        open.apply(.bannerRequested)
+        #expect(open.shownBanner != nil)
         // La secuencia: llega con la app delante, se va a segundo plano, vuelve bloqueada: ni rastro del aviso.
         var state = ShellState(lockApplies: true, relocksOnBackground: true)
         state.apply(.bannerRequested)

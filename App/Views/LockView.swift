@@ -56,6 +56,12 @@ struct LockView: View {
     /// Lo que tardan en apagarse el nombre, el lema y el botón al desbloquear (s a nivel Equilibrado; retoque 1).
     static let textsAwaySeconds = 0.12
 
+    /// Esos 0,12 s con la intensidad y la cámara lenta (con Reducir, solo la cámara lenta): lo que dura la animación de
+    /// los textos y lo que espera el fundido del bloqueo.
+    private var textsAwayDuration: Double {
+        motion.reduce ? motion.pause(Self.textsAwaySeconds) : motion.seconds(Self.textsAwaySeconds)
+    }
+
     /// La marca ya no se mueve: no es un arranque en frío, o ya se montó.
     private var markSettled: Bool { !playsLaunch || launchFinished }
 
@@ -70,8 +76,7 @@ struct LockView: View {
                 nameOpacity: textsDropped ? 0 : frame.name, nameSpread: CGFloat(1 - frame.name),
                 taglineOpacity: textsDropped ? 0 : frame.name,
                 textsAway: textsAway,
-                awayAnimation: .easeOut(duration: motion.reduce ? motion.pause(Self.textsAwaySeconds)
-                                                               : motion.seconds(Self.textsAwaySeconds)),
+                awayAnimation: .easeOut(duration: textsAwayDuration),
                 awayDrop: motion.distance(8)
             ) {
                 LaunchMark(frame: frame, size: Self.markSize)
@@ -252,12 +257,21 @@ struct LockView: View {
             // Retoque 1: nombre, lema y botón se van en 0,12 s, antes que el resto del bloqueo; nunca flotan sobre
             // Inicio ni pisan la barra de pestañas.
             textsAway = true
+            // I-1 (ronda 1): los dos fundidos van en orden, a todos los niveles: el bloqueo (lo que destapa Inicio)
+            // empieza a irse cuando los textos y el botón ya se han ido. `locked` cambia YA (la carcasa desbloquea en
+            // este instante, como siempre); solo el DIBUJO del fundido espera.
+            let away = textsAwayDuration
             // La misma duración que el fundido: `motion.fade` dura 0,22 s (× cámara lenta). Es una curva con final
             // (no un muelle, que a su duración nominal aún deja el bloqueo a un par de puntos de opacidad): cuando la
             // carcasa devuelve los toques a Inicio, del bloqueo no queda ni un píxel.
             let seconds = motion.reduce ? 0.22 * motion.timeMultiplier : motion.seconds(0.3)
-            withAnimation(motion.reduce ? motion.fade : .easeOut(duration: seconds)) { locked = false }
-            fadeStarted(seconds, !takesTheMark)
+            withAnimation((motion.reduce ? motion.fade : .easeOut(duration: seconds)).delay(away)) { locked = false }
+            fadeStarted(away + seconds, !takesTheMark)
+            #if DEBUG
+            let now = Date().timeIntervalSince1970
+            LaunchProbe.shared.lockTextsGoneAt = now + away
+            LaunchProbe.shared.lockFadeBeganAt = now + away
+            #endif
         case .covered:
             // La escena no está activa (Face ID aún la tiene): la tapa se pone encima en esta misma actualización y este
             // bloqueo se quita de golpe, sin fundido. Si se fundiera debajo, al volver la escena a activa antes de

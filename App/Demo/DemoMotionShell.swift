@@ -28,6 +28,34 @@ extension DemoMode {
         return min(seconds, 60)
     }
 
+    /// `-MiBancoDemoRouteChange <s>`: a los `s` segundos de empezar a leer el resumen, se simula que se desconectan los
+    /// auriculares (I-6: la voz se para). Como mucho 60 s.
+    static var routeChangeSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoRouteChange").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
+    /// `-MiBancoDemoCloseEyeAfter <s>`: a los `s` segundos de arrancar, el ojo se cierra solo (para grabar el cierre
+    /// sobre una cifra que rueda). Como mucho 60 s.
+    static var closeEyeAfterSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoCloseEyeAfter").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
+    /// `-MiBancoDemoNotMineFails`: «No es mío» desde el aviso dentro de la app no se guarda (M-2: el aviso se queda y lo
+    /// dice).
+    static var notMineFails: Bool { isActive && arguments.contains("-MiBancoDemoNotMineFails") }
+
+    /// `-MiBancoDemoBriefingDelay <s>`: el resumen tarda `s` segundos en llegar a la hoja (I-5 / m-13: la entrada empieza
+    /// cuando llega). Como mucho 60 s.
+    static var briefingDelaySeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoBriefingDelay").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
     /// `-MiBancoDemoSharedEyeOpposite`: la copia del ojo en la suite compartida (de la demo) dice lo contrario del ojo
     /// (N-3: los avisos y la Live Activity no deben leerla).
     static var writesOppositeSharedEye: Bool { isActive && arguments.contains("-MiBancoDemoSharedEyeOpposite") }
@@ -122,8 +150,15 @@ extension DemoMode {
     /// Lote final: cuándo se tapó y cuándo empezó a destaparse la barra de pestañas en el último montaje (s desde 1970).
     var tabBarCoveredAt: Double?
     var tabBarUncoveredAt: Double?
-    /// C8: cuántas tarjetas han aterrizado en la cabecera de su banco.
-    var cardLandings = 0
+    /// Ronda 1: «No es mío» desde el aviso que no se ha podido guardar (M-2) y cuándo se han ido los textos del bloqueo
+    /// y empezó su fundido (I-1).
+    var notMineFailures = 0
+    /// Ronda 1: cuándo se cerrará solo el ojo (`-MiBancoDemoCloseEyeAfter`).
+    var eyeClosesAt: Double?
+    /// I-4 (ronda 1): cuándo se cerrará sola la hoja del movimiento (`-MiBancoDemoAutoCloseDetail`).
+    var detailCloseAt: Double?
+    var lockTextsGoneAt: Double?
+    var lockFadeBeganAt: Double?
     /// Lote final: pagos llegados (`model.arrival`) y cuántos con el bloqueo delante.
     var arrivals = 0
     var arrivalsUnderLock = 0
@@ -157,7 +192,9 @@ extension DemoMode {
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
             "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "lineaDibujada=\(drawnLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
-            "llegadas=\(arrivals)", "aterrizajesTarjeta=\(cardLandings)",
+            "llegadas=\(arrivals)", "ojoCierraEn=\(eyeClosesAt.map { String(format: "%.3f", $0) } ?? "-")", "cierreDetalle=\(detailCloseAt.map { String(format: "%.3f", $0) } ?? "-")", "noEsMioFallos=\(notMineFailures)",
+            "textosFuera=\(lockTextsGoneAt.map { String(format: "%.3f", $0) } ?? "-")",
+            "fundidoBloqueo=\(lockFadeBeganAt.map { String(format: "%.3f", $0) } ?? "-")",
             "barraTapada=\(tabBarCoveredAt.map { String(format: "%.3f", $0) } ?? "-")",
             "barraDestapada=\(tabBarUncoveredAt.map { String(format: "%.3f", $0) } ?? "-")", "llegadasBloqueo=\(arrivalsUnderLock)",
             "ojoAviso=\(alertEye)", "ojoActividad=\(activityEye)",

@@ -397,6 +397,8 @@ struct RollingDigits: View {
                     DigitCell(position: Double(digit), blur: 0, blurRadius: blurRadius(g.small))
                         .cellFont(font(g.small))
                         .cellStyle(glyphStyle(g.small))
+                        // m-4: el dígito al azar se va de golpe cuando sale su punto (nunca los dos superpuestos).
+                        .transition(.identity)
                 } else if let dot = g.dot {
                     // La máscara es el «•» de la propia tipografía, en la fuente de su celda (grande en euros, pequeña
                     // en céntimos), con el avance del propio glifo.
@@ -529,8 +531,8 @@ struct RollingDigits: View {
     /// Cuánto rueda este importe: lo pedido o, si nada, según el estilo.
     private var rollLength: RollLength {
         if let length { return length }
-        if case .hero = style { return .lead }
-        return .brief
+        if case .hero = style { return RollLength.default(isHero: true) }
+        return RollLength.default(isHero: false)
     }
 
     private func roll(
@@ -544,6 +546,13 @@ struct RollingDigits: View {
         }
         // La intensidad va dentro de `RollLength` (con su tope); aquí solo la cámara lenta de las grabaciones.
         let paced = rollLength.timing(timing, digitCount: n, level: motion.level).scaled(max(motion.timeMultiplier, 0.01))
+        // m-2: una duración de 0 deja la cifra puesta, sin rodar.
+        guard paced.total(digitCount: n) > 0 else {
+            plan = []
+            value = new
+            rolling = false
+            return
+        }
         plan = DigitRoll.columns(
             from: rollUnits(old), to: rollUnits(new), digitCount: n, startingAt: aligned,
             base: paced.base, perColumn: paced.perColumn, stagger: paced.stagger)

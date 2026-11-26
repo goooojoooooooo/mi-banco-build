@@ -46,10 +46,12 @@ public struct RollTiming: Equatable, Sendable {
         RollTiming(base: base * factor, perColumn: perColumn * factor, stagger: stagger * factor)
     }
 
-    /// Con la misma forma, dura exactamente `seconds` con `digitCount` columnas.
+    /// Con la misma forma, dura exactamente `seconds` con `digitCount` columnas. Con 0 (o menos), nada rueda: la cifra
+    /// queda puesta en el acto.
     public func lasting(_ seconds: Double, digitCount: Int) -> RollTiming {
+        guard seconds > 0 else { return RollTiming(base: 0, perColumn: 0, stagger: 0) }
         let natural = total(digitCount: digitCount)
-        guard natural > 0, seconds > 0 else { return self }
+        guard natural > 0 else { return self }
         return scaled(seconds / natural)
     }
 
@@ -72,6 +74,9 @@ public enum RollLength: Equatable, Sendable {
 
     public static let leadLimit = 0.8
     public static let briefLimit = 0.45
+
+    /// La duración por defecto de un importe: la cifra protagonista (`hero`) es `.lead`; las demás, `.brief`.
+    public static func `default`(isHero: Bool) -> RollLength { isHero ? .lead : .brief }
 
     /// El ritmo de `timing` para `digitCount` columnas a la intensidad `level`.
     public func timing(_ timing: RollTiming, digitCount: Int, level: MotionLevel) -> RollTiming {

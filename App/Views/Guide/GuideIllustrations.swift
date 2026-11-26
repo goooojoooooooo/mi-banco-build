@@ -4,52 +4,24 @@ import MiBancoCore
 // Dibujos de la guía: maquetas simplificadas de la pantalla de Atajos hechas en SwiftUI (nunca capturas de Apple),
 // con lo que hay que tocar resaltado por un aro blanco de 2 pt que late. Los nombres salen de `GuideNames`.
 
-/// Aro blanco de 2 pt alrededor de lo que hay que tocar: al llegar el paso late tres veces (0,8 s cada media vuelta,
-/// con los tiempos del kit `\.motion`) y se queda quieto y entero. Nada en bucle (lote 3, I-3). Con Reducir movimiento
-/// no late: está quieto desde el principio.
+/// Aro blanco de 2 pt que late cada 1,6 s. Con Reducir movimiento se queda quieto.
 /// Al aparecer el paso, además, un aro de «toca aquí» sale una vez de lo que hay que tocar (`TapRing`: crece de 0,4 a
 /// 1,5 y se apaga en 760 ms, medio segundo después de que el paso llegue).
 private struct PulseRing: ViewModifier {
     let radius: CGFloat
-    @Environment(\.motion) private var motion
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var on = false
     @State private var taps = 0
-
-    private struct Beat {
-        var opacity: Double = 1
-        var scale: CGFloat = 1
-    }
 
     func body(content: Content) -> some View {
         content
             .overlay {
-                let ring = RoundedRectangle(cornerRadius: radius, style: .continuous)
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
                     .stroke(Color.white, lineWidth: 2)
                     .padding(-4)
-                if motion.reduce {
-                    ring
-                } else {
-                    ring.keyframeAnimator(initialValue: Beat(), trigger: taps) { view, beat in
-                        view.opacity(beat.opacity).scaleEffect(beat.scale)
-                    } keyframes: { _ in
-                        let half = motion.seconds(0.8)
-                        KeyframeTrack(\.opacity) {
-                            CubicKeyframe(0.5, duration: half)
-                            CubicKeyframe(1, duration: half)
-                            CubicKeyframe(0.5, duration: half)
-                            CubicKeyframe(1, duration: half)
-                            CubicKeyframe(0.5, duration: half)
-                            CubicKeyframe(1, duration: half)
-                        }
-                        KeyframeTrack(\.scale) {
-                            CubicKeyframe(1, duration: half)
-                            CubicKeyframe(1.04, duration: half)
-                            CubicKeyframe(1, duration: half)
-                            CubicKeyframe(1.04, duration: half)
-                            CubicKeyframe(1, duration: half)
-                            CubicKeyframe(1, duration: half)
-                        }
-                    }
-                }
+                    .opacity(reduceMotion || on ? 1 : 0.5)
+                    .scaleEffect(reduceMotion || !on ? 1 : 1.04)
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: on)
             }
             .overlay {
                 GeometryReader { geo in
@@ -59,6 +31,7 @@ private struct PulseRing: ViewModifier {
                 .allowsHitTesting(false)
             }
             .onAppear {
+                on = true
                 taps += 1
             }
     }

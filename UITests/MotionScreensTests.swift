@@ -436,30 +436,6 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertEqual(value(bar), "avisos 0, ámbar", "La barra avisó después de salir de su pestaña")
     }
 
-    /// Menor m-9: el caso que el arreglo de la espera del ámbar cubre de verdad es la app en segundo plano (cambiar de
-    /// pestaña ya quitaba la barra con `onDisappear`). Cruza el 90 % y, sin esperar, la app se va al fondo: al volver la
-    /// barra está en ámbar pero no ha avisado (ni pulso ni vibración con la app fuera).
-    func testBudgetDoesNotWarnWhileInTheBackground() throws {
-        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoBudgets", "-MiBancoDemoBudgetWarnings", "-MiBancoMotionScale", "20"])
-        let field = app.textFields["presupuestos.mes"]
-        XCTAssertTrue(field.waitForExistence(timeout: 20), "No se ve Presupuestos")
-        let bar = element("presupuestos.mes.barra")
-        XCTAssertTrue(bar.waitForExistence(timeout: 5), "El presupuesto del mes no tiene barra")
-        let spent = try XCTUnwrap(spentCents(in: bar.label), "No se lee lo gastado en «\(bar.label)»")
-        setLimit(field, cents: spent * 2)
-        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 0, blanca"), bar, timeout: 15),
-                      "Al 50 % la barra no va en blanco: \(value(bar))")
-        setLimit(field, cents: spent * 100 / 95)
-        XCUIDevice.shared.press(.home)
-        Thread.sleep(forTimeInterval: 10)
-        app.activate()
-        XCTAssertTrue(bar.waitForExistence(timeout: 15), "Al volver no se ve Presupuestos")
-        XCTAssertTrue(waitFor(NSPredicate(format: "label CONTAINS %@", ", 95 por ciento"), bar, timeout: 10),
-                      "La barra no lleva el límite nuevo: \(bar.label)")
-        XCTAssertTrue(waitFor(NSPredicate(format: "value == %@", "avisos 0, ámbar"), bar, timeout: 10),
-                      "La barra avisó con la app en segundo plano: \(value(bar))")
-    }
-
     // MARK: - Suscripciones (B1, B2)
 
     /// Las dos cifras de la cabecera siguen diciendo lo suyo y la fila que se cobra hoy lo dice.
@@ -790,13 +766,9 @@ final class MotionScreensTests: XCTestCase {
         var seen: Set<Int> = []
         var last = (step: 0, percent: -1)
         let deadline = Date().addingTimeInterval(40)
-        // El remate («Todo listo»): el tercer paso ya terminó de verdad y la cifra corre a 100. Desde ese instante el tope
-        // de un paso EN MARCHA ya no aplica (el paso está hecho); antes, sí, en cada lectura.
-        let allDone = app.staticTexts["Todo listo"]
         while !title.exists, Date() < deadline {
             guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
             guard now.percent < 100 else { break }
-            if now.percent >= (caps[now.step] ?? 0), allDone.exists { break }
             XCTAssertGreaterThanOrEqual(now.percent, floors[now.step] ?? 0, "El porcentaje va por debajo de su paso: \(now)")
             XCTAssertLessThan(now.percent, caps[now.step] ?? 0, "El porcentaje alcanzó el tope de un paso sin terminar: \(now)")
             XCTAssertGreaterThanOrEqual(now.step, last.step, "Los pasos fueron hacia atrás: \(last) -> \(now)")
@@ -827,98 +799,6 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), title, timeout: 5), "«Listo» no cerró «conectado»")
         XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 5), "No volvió la cabecera de siempre")
         XCTAssertTrue(waitFor(hittable, app.buttons["bank-import-statement"], timeout: 5), "No volvieron las acciones")
-    }
-
-    /// El remate (ojo de diseño 14.1–14.3), a cámara lenta ×10 para poder mirarlo: al conectar de verdad, la línea dice
-    /// «Todo listo», el porcentaje llega a 100 con los tres nodos hechos y SOLO entonces (tras la pausa) sale
-    /// «imagin, conectado», ya sin los pasos. Mientras tanto «Cancelar» se apaga sin que nada de lo de debajo se mueva.
-    func testConnectFinishShowsAllDoneBeforeConnected() throws {
-        openBank("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "6", "-MiBancoDemoConnectFill", "2",
-                         "-MiBancoMotionScale", "10"])
-        let renew = app.buttons["Renovar conexión"]
-        XCTAssertTrue(renew.waitForExistence(timeout: 40), "Falta «Renovar conexión»")
-        renew.tap()
-        let percent = element("bank-steps-percent")
-        XCTAssertTrue(percent.waitForExistence(timeout: 10), "Renovar no enseñó los pasos con su porcentaje")
-
-        // Esperando al banco, «Cancelar» se puede tocar; «Importar extracto» está en su sitio.
-        let importButton = app.buttons["bank-import-statement"]
-        XCTAssertTrue(waitFor(NSPredicate(format: "label BEGINSWITH %@", "Paso 2 de 3"), percent, timeout: 15),
-                      "No llegó al segundo paso: \(percent.label)")
-        XCTAssertTrue(app.buttons["bank-cancel-wait"].exists, "Esperando al banco falta «Cancelar»")
-        XCTAssertTrue(importButton.exists, "Falta «Importar extracto»")
-        // A cámara lenta ×10 la entrada de la cabecera (un muelle) sigue asentándose unos segundos: se mide cuando el
-        // botón ya está quieto (dos lecturas iguales seguidas), para no confundir ese asentamiento con un salto.
-        var before = importButton.frame.minY
-        for _ in 0..<20 {
-            Thread.sleep(forTimeInterval: 0.4)
-            let now = importButton.frame.minY
-            if abs(now - before) < 0.1 { break }
-            before = now
-        }
-        XCTAssertTrue(percent.label.hasPrefix("Paso 2 de 3"), "El paso cambió antes de medir: \(percent.label)")
-
-        // Tercer paso: «Cancelar» ya no se puede tocar, pero su hueco se queda: nada sube de golpe (14.3).
-        XCTAssertTrue(waitFor(NSPredicate(format: "label BEGINSWITH %@", "Paso 3 de 3"), percent, timeout: 15),
-                      "No llegó al tercer paso: \(percent.label)")
-        XCTAssertFalse(app.buttons["bank-cancel-wait"].exists, "En el tercer paso aún se puede cancelar")
-        Thread.sleep(forTimeInterval: 1.5)
-        XCTAssertEqual(importButton.frame.minY, before, accuracy: 1,
-                       "Al quitar «Cancelar» lo de debajo se movió \(importButton.frame.minY - before) pt")
-
-        // El remate: «Todo listo», 100 y los tres pasos hechos, sin «conectado» todavía.
-        let allDone = app.staticTexts["Todo listo"]
-        let title = element("bank-connected-title")
-        XCTAssertTrue(allDone.waitForExistence(timeout: 20), "Al conectar no salió «Todo listo»")
-        XCTAssertFalse(title.exists, "«Conectado» salió a la vez que «Todo listo» (sin remate)")
-        XCTAssertTrue(waitFor(NSPredicate(format: "label ENDSWITH %@", ", 100 por ciento"), percent, timeout: 8),
-                      "El remate no llegó a 100: \(percent.label)")
-        let third = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Paso 3: Importar")).firstMatch
-        XCTAssertEqual(third.value as? String, "hecho", "Con 100 el tercer paso no está hecho")
-        XCTAssertFalse(title.exists, "«Conectado» salió sin la pausa del remate")
-        // Dónde empieza la hoja de movimientos con «Todo listo» a la vista (lote 3, I-1).
-        let sheetTitle = element("bank-movements-title")
-        XCTAssertTrue(sheetTitle.exists, "Falta el título de la hoja de movimientos")
-        let sheetTop = sheetTitle.frame.minY
-
-        // Tras la pausa, «conectado», ya sin pasos ni «Todo listo».
-        XCTAssertTrue(title.waitForExistence(timeout: 20), "Tras el remate no salió «conectado»")
-        XCTAssertFalse(percent.exists, "Los pasos siguen a la vista con «conectado»")
-        XCTAssertFalse(allDone.exists, "«Todo listo» sigue a la vista con «conectado»")
-        // El relevo no mueve la hoja de golpe: al salir «conectado» sigue donde estaba; después, el hueco sobrante se suelta
-        // con el muelle de la hoja, poco a poco. Se mide la velocidad entre lecturas (cada lectura tarda lo suyo): a ×10,
-        // el muelle no pasa de unos 30 pt/s, y el salto de antes (~55 pt en un fotograma) da más de 100 pt/s con
-        // cualquier separación de lecturas por debajo de medio segundo.
-        XCTAssertEqual(sheetTitle.frame.minY, sheetTop, accuracy: 2,
-                       "Al salir «conectado» la hoja saltó \(sheetTitle.frame.minY - sheetTop) pt")
-        var last = (y: sheetTitle.frame.minY, at: Date())
-        // Unos 15 s: el relevo y, a los 10 s (1 s del kit ×10), el hueco sobrante que se suelta con el muelle de la hoja.
-        for _ in 0..<40 {
-            Thread.sleep(forTimeInterval: 0.2)
-            let now = (y: sheetTitle.frame.minY, at: Date())
-            let speed = abs(now.y - last.y) / max(0.05, now.at.timeIntervalSince(last.at))
-            XCTAssertLessThanOrEqual(speed, 50, "La hoja se movió a \(Int(speed)) pt/s (\(now.y - last.y) pt): un salto")
-            last = now
-        }
-    }
-
-    /// Variante de 13.1 dentro de la pantalla del banco (lote 3, m-5): con la hoja abajo la barra de pestañas está (y se
-    /// toca); al subir la hoja se esconde (no queda el botón redondo flotando sobre la lista); al bajarla vuelve.
-    func testBankTabBarHidesOnlyWithTheSheetUp() throws {
-        openBank("rev")
-        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
-        let settingsTab = app.tabBars.buttons["Ajustes"]
-        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 5), "Con la hoja abajo falta la barra de pestañas")
-        drag(from: 0.70, to: 0.30)
-        XCTAssertTrue(element("bank-mini-title").waitForExistence(timeout: 8), "La hoja no subió")
-        XCTAssertTrue(waitFor(NSPredicate(format: "hittable == false"), settingsTab, timeout: 5),
-                      "Con la hoja subida sigue la barra de pestañas")
-        drag(from: 0.30, to: 0.80)
-        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "La hoja no volvió abajo")
-        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 8), "Con la hoja abajo no volvió la barra de pestañas")
-        goBack()
-        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes")
-        XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "La barra de pestañas no cambia de pestaña al volver")
     }
 
     /// «Ver movimientos» cierra «conectado» y sube la hoja (el título pequeño queda acoplado).

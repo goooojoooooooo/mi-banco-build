@@ -67,8 +67,6 @@ struct RootView: View {
     /// Costuras de movimiento (F1): marcos que apuntan las vistas para el vuelo de tarjeta y el detalle
     /// (`LaunchAnchor` lo crea `AppShellView`, por encima del bloqueo y del telón).
     @State private var cardFlight = CardFlight()
-    /// C8 / 9.5: el banco abierto desde el abanico de Inicio, encima de Inicio (sin cambiar de pestaña).
-    @State private var bankOverHome: BankID?
     @State private var tabEntrance = TabEntrance()
     @State private var detailAmountFrames = DetailAmountFrames()
     /// T1: la pestaña de antes del último cambio, cuántos cambios ha habido y hacia dónde fue el último.
@@ -81,13 +79,12 @@ struct RootView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.motion) private var motion
     private var router: AlertRouter { AlertRouter.shared }
 
     var body: some View {
         let warnings = model.snapshot.warningInsightIDs
         let activeRevealToken = revealToken + onboardingRevealToken
-        tabsOrWelcome(activeRevealToken: activeRevealToken)
+        tabsOrWelcome(activeRevealToken: activeRevealToken, warnings: warnings)
         // Para las pantallas: la hoja única abierta y el estado de la carcasa (bloqueo, montaje por capas).
         .environment(\.singleSheetOpen, sheet != nil)
         .environment(\.shellReveal, ShellReveal(locked: isLocked, token: activeRevealToken))
@@ -284,8 +281,7 @@ struct RootView: View {
     }
 
     /// La bienvenida (primera vez) o las pestañas. Aparte de `body` para que el compilador pueda con él.
-    @ViewBuilder private func tabsOrWelcome(activeRevealToken: Int) -> some View {
-        let warnings = model.snapshot.warningInsightIDs
+    @ViewBuilder private func tabsOrWelcome(activeRevealToken: Int, warnings: [String]) -> some View {
         ZStack {
             if model.needsOnboarding {
                 OnboardingView(model: model, onFinish: completeOnboarding)
@@ -340,10 +336,6 @@ struct RootView: View {
                 .overlay(alignment: .bottom) {
                     TabBarCurtain(token: activeRevealToken)
                 }
-                // C8 / 9.5: el banco abierto desde el abanico va ENCIMA de Inicio (la pestaña marcada no cambia) y la
-                // tarjeta vuela hasta su cabecera.
-                .overlay { bankOverHomeLayer }
-                .overlay { CardFlightLayer(flight: cardFlight, blocked: flightBlocked) }
                 .transition(.opacity)
             }
         }
@@ -403,7 +395,6 @@ struct RootView: View {
         suppressBriefingForActivation = false
         speaker.stop()
         sheet = nil
-        bankOverHome = nil
         importing = false
         importKind = .backup
     }
@@ -543,6 +534,9 @@ struct RootView: View {
     /// «No es mío» desde el aviso dentro de la app. Si no se guarda, el aviso se queda (y lo dice): no se va como si se
     /// hubiera hecho.
     private func markNotMine(_ movement: UUID, banner id: Int) -> Bool {
+        #if DEBUG
+        if DemoMode.notMineFails { return false }
+        #endif
         do {
             try model.setFlaggedNotMine(true, for: movement)
         } catch {
@@ -553,39 +547,8 @@ struct RootView: View {
     }
 
     private func openBankSettings(_ bank: BankID) {
-        // 9.5: si se llega volando desde el abanico (hay un vuelo pedido hacia este banco), la pantalla del banco se
-        // abre encima de Inicio y la pestaña marcada no cambia. Desde cualquier otro sitio, en Ajustes como siempre.
-        if tab == .home, cardFlight.request?.bank == bank {
-            withAnimation(motion.reduce ? motion.fade : nil) { bankOverHome = bank }
-            return
-        }
         openBankRequest = bank
         tab = .settings
-    }
-
-    /// No se puede volar: bloqueo, fuera de primer plano o la hoja única abierta (la tarjeta se queda como aterrizada).
-    private var flightBlocked: Bool { isLocked || scenePhase != .active || sheet != nil }
-
-    /// La pantalla del banco encima de Inicio, con su propia pila de navegación y «Inicio» para volver.
-    @ViewBuilder private var bankOverHomeLayer: some View {
-        if let bank = bankOverHome {
-            NavigationStack {
-                BankLinkView(model: model, portfolio: portfolio, bank: bank, present: present, requestImport: startImport)
-                    .navigationBarBackButtonHidden()
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button {
-                                withAnimation(motion.fade) { bankOverHome = nil }
-                            } label: {
-                                Label("Inicio", systemImage: "chevron.left")
-                            }
-                            .accessibilityIdentifier("bank-over-home-back")
-                        }
-                    }
-            }
-            .background(Theme.canvas.ignoresSafeArea())
-            .transition(.opacity)
-        }
     }
 
     private func openInvestmentsSettings() {
@@ -980,7 +943,34 @@ private struct FadedTabContent: ViewModifier {
         content
             .tabContentEntrance()
             .environment(\.tabEntrance, entrance)
-            .overlay(alignment: .bottom) { TabBarFade() }
+            .overlay { UnderTabBarFade() }
+    }
+}
+
+/// I-3 (ronda 1): el negro con degradado SOLO detrás de la barra de cristal (la zona segura de abajo de la pestaña), no
+/// por encima: lo último de Gasto, Avisos y Ajustes, y el pie de sus pantallas empujadas, queda siempre entero por
+/// encima de la barra, y el cristal solo tiene negro detrás. Fijo, no se toca y no existe para VoiceOver (en DEBUG
+/// publica su marco, `tab-bar-fade`, para las pruebas).
+private struct UnderTabBarFade: View {
+    var body: some View {
+        GeometryReader { geo in
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                LinearGradient(stops: [.init(color: Theme.canvas.opacity(0), location: 0),
+                                       .init(color: Theme.canvas, location: 0.45)],
+                               startPoint: .top, endPoint: .bottom)
+                    .frame(height: geo.safeAreaInsets.bottom)
+                    #if DEBUG
+                    .overlay {
+                        Color.clear
+                            .accessibilityElement()
+                            .accessibilityIdentifier("tab-bar-fade")
+                    }
+                    #endif
+            }
+            .ignoresSafeArea(edges: .bottom)
+        }
+        .allowsHitTesting(false)
     }
 }
 
@@ -997,14 +987,22 @@ private struct TabBarCurtain: View {
     static let reveal = 0.3
 
     var body: some View {
-        // Negro opaco desde 45 pt por encima del borde de la barra: no asoma ni su canto (5.1).
-        LinearGradient(stops: [.init(color: .black.opacity(0), location: 0), .init(color: .black, location: 0.3)],
-                       startPoint: .top, endPoint: .bottom)
-            .frame(height: 150)
-            .ignoresSafeArea(edges: .bottom)
-            .opacity(covered ? 1 : 0)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+        // Negro opaco desde 45 pt por encima del borde de la barra HASTA el borde de la pantalla (I-4, ronda 1: antes
+        // se quedaba en el borde de la zona segura y asomaba el canto de la barra de cristal).
+        VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            LinearGradient(stops: [.init(color: .black.opacity(0), location: 0), .init(color: .black, location: 0.3)],
+                           startPoint: .top, endPoint: .bottom)
+                .frame(height: 150)
+            Color.black.frame(height: 80)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .ignoresSafeArea()
+        .opacity(covered ? 1 : 0)
+        // M-10: mientras tapa la barra, la barra no recibe toques.
+        .contentShape(Rectangle())
+        .allowsHitTesting(covered)
+        .accessibilityHidden(true)
             .onChange(of: token) { _, _ in
                 // La barra de pestañas cierra el montaje: tapada desde el primer fotograma y destapada la última. Con
                 // Reducir movimiento también (es un fundido, sin recorrido), con los tiempos de `\.motion`.
@@ -1036,9 +1034,19 @@ private struct TabBarCurtain: View {
 private struct DemoRootTasks: ViewModifier {
     @Binding var tab: AppTab
     @Binding var sheet: RootSheet?
+    @Environment(AppPreferences.self) private var preferences
 
     func body(content: Content) -> some View {
         content
+            .task {
+                // Ronda 1 (kit m-4), solo grabación: el ojo se cierra solo a los `s` s (`-MiBancoDemoCloseEyeAfter`),
+                // para grabar el cierre del ojo sobre una cifra que rueda desde ANTES del cambio.
+                guard let seconds = DemoMode.closeEyeAfterSeconds else { return }
+                LaunchProbe.shared.eyeClosesAt = Date().timeIntervalSince1970 + seconds
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled else { return }
+                withAnimation { preferences.privateMode = true }
+            }
             .task {
                 guard let seconds = DemoMode.tabSwitchSeconds else { return }
                 LaunchProbe.shared.tabSwitchAt = Date().timeIntervalSince1970 + seconds
@@ -1049,6 +1057,8 @@ private struct DemoRootTasks: ViewModifier {
             .task(id: sheet?.id) {
                 guard let seconds = DemoMode.autoCloseDetailSeconds, let current = sheet?.id,
                       current.hasPrefix("movement-") else { return }
+                // I-4 (ronda 1): cuándo se cerrará, para que la ráfaga empiece justo antes.
+                LaunchProbe.shared.detailCloseAt = Date().timeIntervalSince1970 + seconds
                 try? await Task.sleep(for: .seconds(seconds))
                 guard !Task.isCancelled, sheet?.id == current else { return }
                 sheet = nil

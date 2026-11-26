@@ -190,6 +190,9 @@ struct InAppBanner: View {
     private func notMine() {
         guard !onNotMine() else { return }
         errorTick += 1
+        #if DEBUG
+        LaunchProbe.shared.notMineFailures += 1
+        #endif
         AccessibilityNotification.Announcement("No se ha podido. Inténtalo otra vez.").post()
     }
 

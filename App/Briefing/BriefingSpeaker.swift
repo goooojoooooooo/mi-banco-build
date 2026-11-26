@@ -20,7 +20,9 @@ final class BriefingSpeaker {
     private(set) var currentLine: String?
     /// Lo que lee la voz ahora, con sus líneas (rangos del texto que lee: `SpokenBriefing.trimmed`).
     private var spoken = SpokenBriefing(text: "", lines: [])
-    private var interruptionObserver: (any NSObjectProtocol)?
+    /// m-7: se quitan en `deinit` (no aislado: por eso `nonisolated(unsafe)`; solo se escriben en `init`).
+    @ObservationIgnored nonisolated(unsafe) private var interruptionObserver: (any NSObjectProtocol)?
+    @ObservationIgnored nonisolated(unsafe) private var routeObserver: (any NSObjectProtocol)?
 
     private let synthesizer = AVSpeechSynthesizer()
     private let delegateProxy: DelegateProxy
@@ -41,6 +43,20 @@ final class BriefingSpeaker {
             guard began else { return }
             MainActor.assumeIsolated { self?.stop() }
         }
+        // I-6 (privacidad): si la salida pasa a ser menos privada (se desconectan los auriculares, se fuerza el
+        // altavoz), la voz que lee saldos se para y no vuelve sola. La regla está en Core (`AudioRouteChange`).
+        routeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+            guard AudioRouteChange(rawReason: raw).stopsSpeech else { return }
+            MainActor.assumeIsolated { self?.stop() }
+        }
+    }
+
+    deinit {
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
     }
 
     func toggle(_ text: String, target: Target = .briefing) {
@@ -79,6 +95,15 @@ final class BriefingSpeaker {
             // y que la voz va pasando por las líneas (1,6 s cada una, a la cámara lenta de las grabaciones) para poder
             // grabar y probar el resalte. En el iPhone manda el progreso real de la voz.
             let steps = spoken.lines
+            if let seconds = DemoMode.routeChangeSeconds {
+                // I-6, solo demo: a los `s` segundos se desconectan unos auriculares «de mentira».
+                Task {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    NotificationCenter.default.post(
+                        name: AVAudioSession.routeChangeNotification, object: nil,
+                        userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue])
+                }
+            }
             demoTimer = Task { [weak self] in
                 for line in steps {
                     guard let self, !Task.isCancelled, self.generation == token else { return }

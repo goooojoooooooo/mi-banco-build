@@ -36,6 +36,10 @@ struct LaunchSequence: View {
     @State private var finished = false
     /// El ancho del nombre que vuela, para que aterrice del tamaño del de la barra.
     @State private var nameWidth: CGFloat = 0
+    /// M-6 (ronda 1): adónde vuela la marca en el primer arranque, decidido UNA vez al montarse Inicio (o la
+    /// bienvenida): el marco de la marca de la bienvenida si B la apunta con `.launchWelcomeMark()`; si no, nil y la
+    /// marca se apaga sobre el negro. Nunca cambia de guion a mitad.
+    @State private var welcomeTarget: CGRect?
 
     private static let markSize: CGFloat = 96
     private static let nameSize: CGFloat = 15
@@ -62,9 +66,7 @@ struct LaunchSequence: View {
         .onAppear {
             // Con piezas, la marca y el nombre vuelan a la ranura de la barra de Inicio: mientras tanto la ranura no
             // dibuja los suyos (nunca dos marcas). Con solo fundido nada vuela y la ranura se queda como está.
-            if timeline.style == .pieces {
-                if noSlot { anchor?.flyingToWelcome = true } else { anchor?.flying = .markAndName }
-            }
+            if timeline.style == .pieces, !noSlot { anchor?.flying = .markAndName }
             #if DEBUG
             if let began = LaunchProbe.shared.appInitAt {
                 LaunchProbe.shared.mountedAfterMs = Int(((Date().timeIntervalSince1970 - began) * 1000).rounded())
@@ -84,7 +86,7 @@ struct LaunchSequence: View {
         let brand = noSlot ? nil : anchor?.brandFrame
         // 18.1: en el primer arranque, si la bienvenida apunta su marca, la del arranque vuela hasta ella y aterriza
         // encima (sin el nombre viajando ni las bandas: la bienvenida trae las suyas).
-        let welcome = noSlot && pieces ? anchor?.welcomeMarkFrame : nil
+        let welcome = noSlot && pieces ? welcomeTarget : nil
         let lands = pieces && (brand != nil || welcome != nil)
         let slot = brand ?? LaunchGeometry.fallbackSlot(topInset: topInset)
         let markSide = lands && welcome == nil ? anchor?.brandMarkSide : nil
@@ -114,7 +116,7 @@ struct LaunchSequence: View {
             LaunchSkyCanvas(frame: frame, center: center)
             LaunchMark(frame: frame, size: Self.markSize)
                 .scaleEffect(1 + (target.side / Self.markSize - 1) * flight)
-                .position(LaunchGeometry.riseThenSlide(center, target.center, flight))
+                .position(LaunchGeometry.lerp(center, target.center, flight))
                 // Con solo fundido (Sutil, Reducir movimiento) la marca grande nunca se ve más que el negro que tiene
                 // debajo: el guion la apaga ENTERA antes de que el negro deje ver Inicio y la marca de su barra (nunca dos).
                 .opacity(lands ? 1 : (pieces ? frame.mark * dissolve : min(frame.mark, frame.black)))
@@ -129,7 +131,7 @@ struct LaunchSequence: View {
                 // centrado; en la ranura no (el nombre de la barra es el mismo texto, con ese mismo hueco detrás).
                 .offset(x: tracking / 2 * (lands ? 1 - min(1, flight) : 1))
                 .scaleEffect(1 + (nameScale - 1) * min(1, flight))
-                .position(LaunchGeometry.riseThenSlide(nameHome, nameSlot.center, flight))
+                .position(LaunchGeometry.lerp(nameHome, nameSlot.center, flight))
                 // Sin ranura, el nombre se va apagando durante el vuelo.
                 // Hacia la bienvenida el nombre no viaja: se apaga en cuanto la marca despega.
                 .opacity(welcome != nil ? frame.name * Double(max(0, 1 - flight / 0.15))
@@ -170,6 +172,11 @@ struct LaunchSequence: View {
         guard await wait(until: skipped ?? timeline.assembleAt) else { return }
         if !assembled {
             assembled = true
+            // M-6: se decide aquí, antes del vuelo, y solo si la bienvenida ha apuntado su marca.
+            if noSlot, timeline.style == .pieces, let frame = anchor?.welcomeMarkFrame {
+                welcomeTarget = frame
+                anchor?.flyingToWelcome = true
+            }
             onAssemble()
         }
         guard await wait(until: skipped ?? timeline.interactiveAt) else { return }
@@ -229,7 +236,7 @@ struct LaunchExit: View {
             if timeline.exitDuration != nil {
                 GeometryReader { proxy in
                     LaunchStage(
-                        timeline: timeline, act: .exit(bands: false), start: start, finished: finished,
+                        timeline: timeline, act: .exit(bands: cold), start: start, finished: finished,
                         timeMultiplier: motion.timeMultiplier
                     ) { frame in
                         scene(frame, topInset: proxy.safeAreaInsets.top)
@@ -260,6 +267,9 @@ struct LaunchExit: View {
         .onChange(of: anchor?.brandFrame) { old, new in
             if let new { lastSlot = new } else if let old { lastSlot = old }
             if new == nil, landsOnSlot == true, !finished, slotLostAt == nil { slotLostAt = Date() }
+            // M-5 (ronda 1): si la ranura VUELVE antes de acabar, la marca vuelve a ir hacia ella entera (si no, se
+            // apagaría mientras la ranura sigue sin dibujar la suya: fotogramas sin ninguna marca).
+            if new != nil, !finished { slotLostAt = nil }
         }
         .onAppear {
             lastSlot = anchor?.brandFrame
@@ -301,7 +311,7 @@ struct LaunchExit: View {
             }
             AppMark(size: from.width)
                 .scaleEffect(1 + (target.side / max(from.width, 1) - 1) * flight)
-                .position(LaunchGeometry.riseThenSlide(home, target.center, flight))
+                .position(LaunchGeometry.lerp(home, target.center, flight))
                 // Con ranura llega entera hasta ella; sin ranura se deshace por el camino.
                 .opacity(lands ? lostOpacity : frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: false))
         }
@@ -347,14 +357,5 @@ enum LaunchGeometry {
 
     static func lerp(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {
         CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k)
-    }
-
-    /// Retoque 2 (el vuelo de la marca sin cruzar nada): primero SUBE y después se desliza. La altura llega a la de la
-    /// ranura hacia el 60 % del vuelo (y no se pasa); lo horizontal avanza con el vuelo entero y termina después. Así la
-    /// marca va por la franja vacía de arriba y no pasa por encima de la tarjeta ni del título.
-    static func riseThenSlide(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {
-        let up = min(1, max(0, k) / 0.6)
-        let rise = 1 - (1 - up) * (1 - up)
-        return CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * rise)
     }
 }

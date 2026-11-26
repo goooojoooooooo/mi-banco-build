@@ -21,6 +21,8 @@ struct MorphingButton: View {
     @State private var errorShown = false
     @State private var doneCount = 0
     @State private var failCount = 0
+    /// m-5: cada intento lleva su número; el aviso de fin de un intento viejo no llega si ya empezó otro.
+    @State private var attempt = 0
     @Environment(\.motion) private var motion
     /// Ancho máximo de la cápsula: crece con el tamaño de texto, pero el contenedor manda.
     @ScaledMetric(relativeTo: .body) private var width = 220.0
@@ -110,6 +112,8 @@ struct MorphingButton: View {
     }
 
     private func run() async {
+        attempt += 1
+        let mine = attempt
         errorShown = false
         withAnimation(motion.animation(.snap)) { phase = .loading }
         let began = Date()
@@ -137,7 +141,7 @@ struct MorphingButton: View {
             // al instante). Con Reducir movimiento no hay sacudida: lo que tarda el fundido.
             let settle = motion.reduce ? motion.fadeDuration : motion.pause(Self.shakeSeconds)
             try? await Task.sleep(for: .seconds(settle))
-            onFinish?(false)
+            if attempt == mine { onFinish?(false) }
             try? await Task.sleep(for: .seconds(max(0, motion.pause(2.5) - settle)))
             withAnimation(motion.fade) { errorShown = false }
         }

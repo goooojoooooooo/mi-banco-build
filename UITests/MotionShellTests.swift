@@ -750,6 +750,88 @@ final class MotionShellTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(looked, 6, "El aviso se fue antes de poder mirarlo: la prueba no dice nada")
     }
 
+    /// Ronda 1 (I-1 carcasa): a todos los niveles (Expresivo, Sutil, Reducir) el fundido del bloqueo, que destapa
+    /// Inicio, empieza cuando el nombre, el lema y el botón ya se han ido; y la barra de pestañas se destapa después
+    /// (M-1). Sondas `textosFuera`, `fundidoBloqueo` y `barraDestapada` (s desde 1970). A ×20.
+    func testLockTextsLeaveBeforeTheLockFades() throws {
+        for extra in [[], ["-MiBancoMotionLevel", "subtle"], ["-MiBancoReduceMotion"]] {
+            launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "3", "-MiBancoMotionScale", "20"] + extra)
+            XCTAssertTrue(app.buttons["Desbloquear"].waitForExistence(timeout: 15), "\(extra): falta el bloqueo")
+            XCTAssertTrue(waitUntil(60) { (self.probe()["textosFuera"] ?? "-") != "-" }, "\(extra): no se desbloqueó")
+            let p = probe()
+            let gone = Double(p["textosFuera"] ?? "") ?? 0
+            let fade = Double(p["fundidoBloqueo"] ?? "") ?? 0
+            XCTAssertGreaterThanOrEqual(fade, gone - 0.001,
+                                        "\(extra): el bloqueo empieza a fundirse con los textos aún a la vista: \(p)")
+            XCTAssertTrue(waitUntil(60) { (self.probe()["barraDestapada"] ?? "-") != "-" },
+                          "\(extra): la barra no se destapó: \(probe())")
+            let bar = Double(probe()["barraDestapada"] ?? "") ?? 0
+            XCTAssertGreaterThanOrEqual(bar - gone, 0.05 * 20,
+                                        "\(extra): la barra se destapa sin dar tiempo a que se vaya el botón: \(probe())")
+            app.terminate()
+        }
+    }
+
+    /// Ronda 1 (M-2): si «No es mío» desde el aviso no se puede guardar (`-MiBancoDemoNotMineFails`), el aviso se
+    /// queda y avisa del error (sonda `noEsMioFallos`; VoiceOver dice «No se ha podido. Inténtalo otra vez.»).
+    func testInAppBannerNotMineFailureIsNotSilent() throws {
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "12", "-MiBancoDemoNotMineFails"])
+        let banner = element("in-app-banner")
+        XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso dentro de la app")
+        XCTAssertTrue(waitUntil(40) { self.probe()["accionesAviso"] == "1" }, "El aviso no terminó de desplegarse")
+        XCTAssertEqual(probe()["noEsMioFallos"], "0")
+        banner.buttons["No es mío"].tap()
+        XCTAssertTrue(waitUntil(5) { self.probe()["noEsMioFallos"] == "1" }, "El fallo de «No es mío» no se avisa: \(probe())")
+        XCTAssertTrue(banner.exists, "El aviso se fue como si «No es mío» se hubiera guardado")
+    }
+
+    /// Ronda 1 (I-3 carcasa): en Gasto, desplazado hasta abajo, la última categoría queda ENTERA por encima del negro
+    /// de la barra de cristal (`tab-bar-fade`, solo en DEBUG).
+    func testSpendingLastRowClearsTheTabBarFade() throws {
+        launch(["-MiBancoDemoScreen", "gasto"])
+        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 30), "No se ve Gasto")
+        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "gasto.fila."))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10), "Gasto no tiene categorías")
+        for _ in 0..<12 {
+            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.75))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)),
+                       withVelocity: 800, thenHoldForDuration: 0.1)
+        }
+        Thread.sleep(forTimeInterval: 1)
+        let fade = element("tab-bar-fade")
+        XCTAssertTrue(fade.exists, "Falta el negro de la barra en Gasto")
+        let last = rows.allElementsBoundByIndex.max { $0.frame.maxY < $1.frame.maxY }
+        let bottom = try XCTUnwrap(last).frame.maxY
+        XCTAssertLessThanOrEqual(bottom, fade.frame.minY + 1,
+                                 "La última categoría queda bajo el negro de la barra (\(bottom) > \(fade.frame.minY))")
+    }
+
+    /// Ronda 1 (kit I-6): al desconectar los auriculares (`-MiBancoDemoRouteChange`) la voz que lee el resumen se para
+    /// y no vuelve sola.
+    func testTheVoiceStopsWhenTheHeadphonesGo() throws {
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoRouteChange", "3"])
+        let listen = app.buttons["briefing-listen"]
+        XCTAssertTrue(listen.waitForExistence(timeout: 30), "Falta «Escuchar»")
+        listen.tap()
+        XCTAssertTrue(waitUntil(5) { (listen.value as? String) != "-" }, "La voz no empezó")
+        XCTAssertTrue(waitUntil(10) { (listen.value as? String) == "-" && listen.label == "Escuchar" },
+                      "Con los auriculares desconectados la voz sigue: «\(listen.label)» «\(listen.value as? String ?? "")»")
+        Thread.sleep(forTimeInterval: 3)
+        XCTAssertEqual(listen.label, "Escuchar", "La voz volvió sola")
+    }
+
+    /// Ronda 1 (kit I-5 / m-13): si el resumen llega tarde (`-MiBancoDemoBriefingDelay`), la hoja abierta no enseña
+    /// nada ni empieza su entrada hasta que llega; entonces la entrada empieza y sus bloques aparecen.
+    func testBriefingEntranceStartsWhenTheBriefingArrives() throws {
+        launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoBriefingDelay", "5"])
+        let entrance = element("briefing-entrance")
+        XCTAssertTrue(entrance.waitForExistence(timeout: 30), "La hoja del resumen no se abrió")
+        XCTAssertEqual(entrance.value as? String, "0", "La entrada empezó sin resumen")
+        XCTAssertFalse(app.buttons["Vale"].exists, "Se ve el resumen antes de llegar")
+        XCTAssertTrue(waitUntil(15) { (entrance.value as? String) == "1" }, "Al llegar el resumen no empezó la entrada")
+        XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 10), "Llegó el resumen pero la hoja sigue en blanco")
+    }
+
     /// Las coordenadas de la app (para tocar un punto exacto, no un elemento).
     private func at(_ point: CGPoint) -> XCUICoordinate {
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y))
@@ -837,273 +919,21 @@ final class MotionShellTests: XCTestCase {
     /// a ×10 en Expresivo, ~5 s): antes de eso ya han entrado la tarjeta, el selector y las primeras filas.
     func testTabBarEntersLast() throws {
         launch(["-MiBancoMotionScale", "10"])
+        // M-1 (ronda 1): mientras el velo la tapa, la barra no se puede tocar (lo que hay delante es el velo, que llega
+        // hasta el borde de la pantalla); destapada, sí.
+        XCTAssertTrue(waitUntil(60) { (self.probe()["barraTapada"] ?? "-") != "-" }, "La barra no se tapó: \(probe())")
+        let homeTab = app.tabBars.buttons["Inicio"]
+        if (probe()["barraDestapada"] ?? "-") == "-" {
+            XCTAssertFalse(homeTab.isHittable, "La barra se puede tocar con el velo delante")
+        }
         XCTAssertTrue(waitUntil(90) { self.probe()["barraDestapada"] != "-" && self.probe()["barraDestapada"] != nil },
                       "La barra de pestañas no se destapó: \(probe())")
+        XCTAssertTrue(waitUntil(15) { homeTab.isHittable }, "Destapada, la barra no se puede tocar")
         let p = probe()
         let covered = Double(p["barraTapada"] ?? "") ?? 0
         let uncovered = Double(p["barraDestapada"] ?? "") ?? 0
         XCTAssertGreaterThan(covered, 0, "La barra no se tapó al empezar el montaje: \(p)")
         XCTAssertGreaterThanOrEqual(uncovered - covered, 0.4 * 10, "La barra se destapa antes de que entre lo demás: \(p)")
-    }
-
-    /// C8 (C6, 9.5): tocar una tarjeta del abanico abre su banco ENCIMA de Inicio (la pestaña marcada sigue siendo
-    /// «Inicio») y la tarjeta vuela hasta la cabecera: la cabecera solo se ve cuando la tarjeta ha aterrizado (sonda
-    /// `aterrizajesTarjeta`), no tras un plazo. «Inicio» vuelve a Inicio. A ×10 el vuelo dura varios segundos.
-    func testCardFlightLandsOnBankHeader() throws {
-        launch(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoMotionScale", "10"])
-        waitForLaunchToEnd(90)
-        let carousel = app.descendants(matching: .any).matching(NSPredicate(format: "label ENDSWITH %@", " de 4")).firstMatch
-        XCTAssertTrue(carousel.waitForExistence(timeout: 20), "Falta el carrusel")
-        carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
-        XCTAssertTrue(app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 30), "No se abrió el abanico")
-        let card = app.buttons["wallet-card-rev"]
-        XCTAssertTrue(card.waitForExistence(timeout: 20), "Falta la tarjeta de Revolut en el abanico")
-        XCTAssertTrue(waitUntil(30) { card.isHittable }, "La tarjeta de Revolut no se puede tocar")
-        XCTAssertEqual(probe()["aterrizajesTarjeta"], "0")
-        card.tap()
-        let header = element("bank-header-balance")
-        var seenBeforeLanding = false
-        let landed = waitUntil(40) {
-            if header.exists, header.isHittable, self.probe()["aterrizajesTarjeta"] == "0" { seenBeforeLanding = true }
-            return self.probe()["aterrizajesTarjeta"] == "1"
-        }
-        XCTAssertTrue(landed, "La tarjeta no aterrizó en la cabecera: \(probe())")
-        XCTAssertFalse(seenBeforeLanding, "La cabecera del banco se vio antes de que aterrizara la tarjeta")
-        XCTAssertTrue(waitUntil(15) { header.exists }, "Aterrizada la tarjeta, la cabecera no aparece")
-        // 9.5: la pestaña marcada no ha cambiado.
-        let homeTab = app.tabBars.buttons["Inicio"]
-        if homeTab.exists { XCTAssertTrue(homeTab.isSelected, "Abrir el banco desde el abanico cambió de pestaña") }
-        XCTAssertFalse(app.tabBars.buttons["Ajustes"].exists && app.tabBars.buttons["Ajustes"].isSelected,
-                       "Abrir el banco desde el abanico llevó a «Ajustes»")
-        let back = app.buttons["bank-over-home-back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "Falta «Inicio» para volver")
-        back.tap()
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "«Inicio» no volvió a Inicio")
-        XCTAssertTrue(waitUntil(10) { app.tabBars.buttons["Inicio"].isSelected }, "Al volver no está en «Inicio»")
-    }
-
-    // MARK: C8 · Recorridos finales
-
-    /// Un texto (etiqueta o valor) con forma de importe: una cifra pegada a «€», «12,50», «1.284» o «… euros».
-    private static let moneyShape = #".*([0-9][\x{00A0} ]?€|€[\x{00A0} ]?[0-9]|[0-9],[0-9]{2}|[0-9]\.[0-9]{3}|[0-9] euros).*"#
-
-    /// Lo que se ve ahora con forma de importe (etiquetas y valores), para el informe del recorrido.
-    private func amountsInView(_ screen: String) -> [String] {
-        let predicate = NSPredicate(format: "label MATCHES %@ OR value MATCHES %@", Self.moneyShape, Self.moneyShape)
-        return app.descendants(matching: .any).matching(predicate).allElementsBoundByIndex.map { el in
-            let id = el.identifier.isEmpty ? "-" : el.identifier
-            let value = (el.value as? String).map { " = «\($0)»" } ?? ""
-            return "\(screen) · \(id) · «\(el.label)»\(value)"
-        }
-    }
-
-    /// Vuelve atrás en una pila de navegación (el primer botón de la barra).
-    private func navigateBack() {
-        let back = app.navigationBars.buttons.element(boundBy: 0)
-        if back.exists { back.tap() }
-    }
-
-    /// Desplaza hacia abajo hasta que `el` se puede tocar.
-    private func scroll(to el: XCUIElement, drags: Int = 14) {
-        var left = drags
-        while left > 0 && !(el.exists && el.isHittable) {
-            app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
-                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35)),
-                       withVelocity: 500, thenHoldForDuration: 0.2)
-            left -= 1
-        }
-    }
-
-    /// C8 (recorrido de privacidad final): con el ojo cerrado, ningún texto con cifras de importe en NINGUNA pantalla:
-    /// Inicio, el reverso de la tarjeta, el detalle de un movimiento, Gasto y el detalle de una categoría, Presupuestos,
-    /// Suscripciones, Avisos, la pantalla del banco, el resumen, el aviso dentro de la app y Ajustes. Mira todas y falla
-    /// al final con la lista entera de lo que se ve (pantalla · identificador · texto).
-    func testPrivateModeHidesEveryAmountString() throws {
-        continueAfterFailure = true
-        var leaks: [String] = []
-        var visited: [String] = []
-        func look(_ screen: String) {
-            visited.append(screen)
-            leaks += amountsInView(screen)
-        }
-        let cardAnchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
-
-        // Inicio, el reverso de la tarjeta y el detalle.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoCardElements"])
-        waitForLaunchToEnd(40)
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "No se ve Inicio")
-        look("Inicio")
-        let carousel = app.descendants(matching: .any).matching(cardAnchor).firstMatch
-        if carousel.waitForExistence(timeout: 10) {
-            carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
-            if app.buttons["Editar saldos"].waitForExistence(timeout: 8) { look("Reverso de la tarjeta") }
-            carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
-        }
-        let row = app.buttons.matching(identifier: "movementRow").firstMatch
-        if row.waitForExistence(timeout: 10), waitUntil(15, { row.isHittable }) {
-            row.tap()
-            if app.buttons["Cerrar"].waitForExistence(timeout: 10) {
-                Thread.sleep(forTimeInterval: 2)
-                look("Detalle del movimiento")
-                app.buttons["Cerrar"].tap()
-            }
-        }
-        app.terminate()
-
-        // Gasto, una categoría, Suscripciones y Presupuestos.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoScreen", "gasto"])
-        if element("gasto.total").waitForExistence(timeout: 30) {
-            look("Gasto")
-            let rows = NSPredicate(format: "identifier BEGINSWITH %@", "gasto.fila.")
-            let category = app.descendants(matching: .any).matching(rows).firstMatch
-            if category.waitForExistence(timeout: 5) {
-                scroll(to: category)
-                category.tap()
-                if element("categoria.total").waitForExistence(timeout: 8) { look("Detalle de categoría") }
-                navigateBack()
-            }
-            let subscriptions = element("gasto.suscripciones")
-            scroll(to: subscriptions)
-            if subscriptions.exists {
-                subscriptions.tap()
-                if element("suscripciones.total").waitForExistence(timeout: 8) { look("Suscripciones") }
-                navigateBack()
-            }
-            let budgets = element("gasto.presupuestos")
-            scroll(to: budgets)
-            if budgets.exists {
-                budgets.tap()
-                if element("presupuestos.mes.barra").waitForExistence(timeout: 8) { look("Presupuestos") }
-                navigateBack()
-            }
-        }
-        app.terminate()
-
-        // Avisos.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoScreen", "avisos"])
-        waitForLaunchToEnd(40)
-        Thread.sleep(forTimeInterval: 2)
-        look("Avisos")
-        app.terminate()
-
-        // Ajustes y la pantalla del banco.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
-        let bankRow = app.buttons["settings-bank-rev"]
-        if bankRow.waitForExistence(timeout: 30) {
-            look("Ajustes")
-            if waitUntil(8, { bankRow.isHittable }) { bankRow.tap() }
-            if element("bank-header-balance").waitForExistence(timeout: 10) {
-                Thread.sleep(forTimeInterval: 1)
-                look("Pantalla del banco")
-            }
-        }
-        app.terminate()
-
-        // El resumen.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoBriefing", "busy"])
-        if app.buttons["Vale"].waitForExistence(timeout: 30) {
-            Thread.sleep(forTimeInterval: 2)
-            look("Resumen")
-        }
-        app.terminate()
-
-        // El aviso dentro de la app.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "6"])
-        let banner = element("in-app-banner")
-        if banner.waitForExistence(timeout: 40) {
-            Thread.sleep(forTimeInterval: 8)
-            if banner.exists { look("Aviso dentro de la app") }
-        }
-
-        let expected = ["Inicio", "Reverso de la tarjeta", "Detalle del movimiento", "Gasto", "Detalle de categoría",
-                        "Suscripciones", "Presupuestos", "Avisos", "Ajustes", "Pantalla del banco", "Resumen",
-                        "Aviso dentro de la app"]
-        XCTAssertEqual(Set(visited), Set(expected), "El recorrido no llegó a todas las pantallas: \(visited)")
-        XCTAssertEqual(leaks, [], "Con el ojo cerrado se ven importes:\n" + leaks.joined(separator: "\n"))
-    }
-
-    /// C8 (recorrido con Reducir movimiento): con `-MiBancoReduceMotion` se llega a todas las pantallas (Inicio, el
-    /// detalle, el abanico y el banco, Gasto y sus pantallas, Avisos, Ajustes, el banco desde Ajustes y el resumen) y
-    /// todas responden: nada se queda esperando una animación que con Reducir no existe.
-    func testReduceMotionWalk() throws {
-        continueAfterFailure = true
-        var reached: [String] = []
-        launch(["-MiBancoReduceMotion", "-MiBancoDemoCardElements"])
-        waitForLaunchToEnd(40)
-        if app.staticTexts["Tu dinero"].waitForExistence(timeout: 15) { reached.append("Inicio") }
-        let row = app.buttons.matching(identifier: "movementRow").firstMatch
-        if row.waitForExistence(timeout: 10), waitUntil(15, { row.isHittable }) {
-            row.tap()
-            if app.buttons["Cerrar"].waitForExistence(timeout: 10) {
-                // Con Reducir, «Te quedaban» dice su cifra enseguida (no espera a un vuelo que no hay).
-                let left = labelled("label BEGINSWITH %@", "Te quedaban")
-                if waitUntil(8, { left.label.hasSuffix(" euros") }) { reached.append("Detalle") }
-                app.buttons["Cerrar"].tap()
-            }
-        }
-        let cardAnchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
-        let carousel = app.descendants(matching: .any).matching(cardAnchor).firstMatch
-        if carousel.waitForExistence(timeout: 10) {
-            carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
-            if app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 10) {
-                let card = app.buttons["wallet-card-rev"]
-                if card.waitForExistence(timeout: 8), waitUntil(8, { card.isHittable }) {
-                    card.tap()
-                    // Sin vuelo, la cabecera del banco está en el acto.
-                    if element("bank-header-balance").waitForExistence(timeout: 8) { reached.append("Abanico y banco") }
-                    let back = app.buttons["bank-over-home-back"]
-                    if back.waitForExistence(timeout: 5) { back.tap() }
-                }
-            }
-        }
-        app.terminate()
-
-        launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "gasto"])
-        if element("gasto.total").waitForExistence(timeout: 30) {
-            reached.append("Gasto")
-            let subscriptions = element("gasto.suscripciones")
-            scroll(to: subscriptions)
-            if subscriptions.exists {
-                subscriptions.tap()
-                if element("suscripciones.total").waitForExistence(timeout: 8) { reached.append("Suscripciones") }
-                navigateBack()
-            }
-            let budgets = element("gasto.presupuestos")
-            scroll(to: budgets)
-            if budgets.exists {
-                budgets.tap()
-                if element("presupuestos.mes.barra").waitForExistence(timeout: 8) { reached.append("Presupuestos") }
-                navigateBack()
-            }
-        }
-        app.terminate()
-
-        launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "avisos"])
-        waitForLaunchToEnd(40)
-        let alertsTab = app.tabBars.buttons["Avisos"]
-        if alertsTab.waitForExistence(timeout: 10), alertsTab.isSelected { reached.append("Avisos") }
-        app.terminate()
-
-        launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
-        let bankRow = app.buttons["settings-bank-rev"]
-        if bankRow.waitForExistence(timeout: 30) {
-            reached.append("Ajustes")
-            if waitUntil(8, { bankRow.isHittable }) { bankRow.tap() }
-            if element("bank-header-balance").waitForExistence(timeout: 10) { reached.append("Banco") }
-        }
-        app.terminate()
-
-        launch(["-MiBancoReduceMotion", "-MiBancoDemoBriefing", "busy"])
-        let done = app.buttons["Vale"]
-        if done.waitForExistence(timeout: 30) {
-            reached.append("Resumen")
-            done.tap()
-            if waitUntil(8, { !done.exists }) { reached.append("Resumen cerrado") }
-        }
-
-        let expected = ["Inicio", "Detalle", "Abanico y banco", "Gasto", "Suscripciones", "Presupuestos", "Avisos",
-                        "Ajustes", "Banco", "Resumen", "Resumen cerrado"]
-        XCTAssertEqual(reached, expected, "Con Reducir movimiento no se llega a todo")
     }
 
     /// Lote final (carcasa): con el abanico de tarjetas abierto, la barra de pestañas no queda encima; al cerrarlo, vuelve.

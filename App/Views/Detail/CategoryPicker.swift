@@ -61,7 +61,25 @@ struct CategoryPickerRow: View {
         return "Volver a la categoría automática"
     }
 
-    private var fold: Animation { reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal }
+    /// I-3 (ronda 1): el pliegue va con `\.motion` (intensidad, cámara lenta y el Reducir de la app; con Reducir es un
+    /// fundido), y lo que entra o sale DENTRO de la rejilla se encadena a él con el mismo reloj.
+    private var fold: Animation { motion.animation(.row) }
+
+    /// Cuándo se VE acabado el pliegue (s): las filas de debajo ya no se mueven.
+    private var foldSettle: Double {
+        guard !motion.reduce else { return motion.fadeDuration }
+        return MotionMath.visibleSettle(
+            MotionMath.scaled(SpringToken.row.base, level: motion.level, timeMultiplier: motion.timeMultiplier))
+    }
+
+    /// Lo que aparece (la rejilla, «Quitar mi categoría…») entra cuando el pliegue ya ha hecho sitio, solo con opacidad;
+    /// lo que se va, se va en 80 ms, antes de que nada suba encima. Nunca dos textos superpuestos.
+    private var sequencedFade: AnyTransition {
+        guard !motion.reduce else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.animation(.easeOut(duration: motion.seconds(0.18)).delay(foldSettle)),
+            removal: .opacity.animation(.easeIn(duration: motion.seconds(0.08))))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -79,9 +97,7 @@ struct CategoryPickerRow: View {
                 picker
                     // m-2 (lote final): sin doble exposición. Al desplegar, la rejilla se funde cuando las filas de
                     // debajo ya han bajado; al plegar, se va en 80 ms, antes de que suban. Solo opacidad.
-                    .transition(reduceMotion ? .opacity : .asymmetric(
-                        insertion: .opacity.animation(.easeOut(duration: motion.seconds(0.18)).delay(motion.seconds(0.12))),
-                        removal: .opacity.animation(.easeIn(duration: motion.seconds(0.08)))))
+                    .transition(sequencedFade)
             }
             if failed {
                 SaveErrorText()
@@ -152,6 +168,7 @@ struct CategoryPickerRow: View {
                 }
                 .buttonStyle(.pressable)
                 .accessibilityIdentifier("category-automatic")
+                .transition(sequencedFade)
             }
             if let merchant = merchantName {
                 Toggle(isOn: $applyToMerchant) {

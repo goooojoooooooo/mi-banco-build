@@ -212,7 +212,9 @@ private struct AppShellView: View {
                         // Lote final: durante el arranque no se pide el aviso dentro de la app; a cámara lenta el
                         // arranque dura más de 4 s, así que el pago de demo espera a que acabe (con el bloqueo puesto
                         // el arranque no se ve y llega igual, debajo del bloqueo).
-                        while shell.showsLaunch, !Task.isCancelled {
+                        // M-8: con tope (el arranque siempre acaba; el tope es por si una prueba lo deja colgado).
+                        let limit = Date().addingTimeInterval(120)
+                        while shell.showsLaunch, !Task.isCancelled, Date() < limit {
                             try? await Task.sleep(for: .milliseconds(200))
                         }
                         model.demoSimulateArrival()

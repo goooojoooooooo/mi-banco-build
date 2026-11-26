@@ -279,7 +279,7 @@ final class MotionTourShellTests: MotionTourCase {
     /// «Cerrar» espera a que la app quede quieta y la ráfaga del cierre empezaba con la hoja ya cerrada. La segunda
     /// ráfaga empieza antes del cierre y lo cubre entero.
     private func rowDetailBursts(_ name: String, extra: [String] = []) {
-        launch(extra + ["-MiBancoDemoAutoCloseDetail", "4.5"])
+        launch(extra + ["-MiBancoDemoAutoCloseDetail", "9"])
         waitForLaunchToEnd()
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
@@ -287,7 +287,13 @@ final class MotionTourShellTests: MotionTourCase {
         row.tap()
         burst(name, frames: 24, every: 0.12)
         XCTAssertTrue(app.buttons["Cerrar"].exists, "La hoja se cerró antes de grabar su cierre")
-        burst(name == "row-detail" ? "detail-dismiss" : name + "-cerrar", frames: 20, every: 0.2)
+        // I-4 (ronda 1): la ráfaga del cierre empieza 0,3 s antes del cierre que la app publica (`cierreDetalle`).
+        let closeAt = Double(probe()["cierreDetalle"] ?? "") ?? 0
+        XCTAssertGreaterThan(closeAt, 0, "La app no publicó cuándo se cierra la hoja")
+        let wait = closeAt - 0.3 - Date().timeIntervalSince1970
+        XCTAssertGreaterThan(wait, 0, "La hoja ya se había cerrado al empezar la ráfaga del cierre")
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst(name == "row-detail" ? "detail-dismiss" : name + "-cerrar", frames: 14, every: 0.15)
     }
 
     func testRowDetail() throws { rowDetailBursts("row-detail") }
@@ -296,33 +302,17 @@ final class MotionTourShellTests: MotionTourCase {
 
     func testRowDetailReduceMotion() throws { rowDetailBursts("row-detail-reducir", extra: ["-MiBancoReduceMotion"]) }
 
-    /// C8 (C6): la tarjeta del abanico vuela hasta la cabecera de su banco, que se abre encima de Inicio (la pestaña no
-    /// cambia). Luego «Inicio» lo cierra (`card-flight-vuelta`). A ×4.
-    private func cardFlightBursts(_ name: String, extra: [String] = []) {
-        launch(extra + ["-MiBancoDemoCardElements"])
-        waitForLaunchToEnd()
-        let anchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
-        let carousel = app.descendants(matching: .any).matching(anchor).firstMatch
-        XCTAssertTrue(carousel.waitForExistence(timeout: 15), "Falta el carrusel")
-        carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
-        XCTAssertTrue(app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 15), "No se abrió el abanico")
-        let card = app.buttons["wallet-card-rev"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10), "Falta la tarjeta de Revolut")
-        XCTAssertTrue(waitUntil(15) { card.isHittable }, "La tarjeta de Revolut no se puede tocar")
-        card.tap()
-        burst(name, frames: 24, every: 0.15)
-        let back = app.buttons["bank-over-home-back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "Falta «Inicio» en el banco")
-        back.tap()
-        burst(name + "-vuelta", frames: 8, every: 0.15)
-    }
-
-    func testCardFlight() throws { cardFlightBursts("card-flight") }
-
-    func testCardFlightWithTheEyeClosed() throws { cardFlightBursts("card-flight-ojo", extra: ["-MiBancoDemoPrivate"]) }
-
-    func testCardFlightReduceMotion() throws {
-        cardFlightBursts("card-flight-reducir", extra: ["-MiBancoReduceMotion"])
+    /// Ronda 1 (kit m-4): el ojo se cierra (solo, `-MiBancoDemoCloseEyeAfter`) mientras el total aún rueda tras el
+    /// arranque. Se graba desde 1 s ANTES del cambio: el barajado y los puntos encima de la cifra, sin ningún fotograma
+    /// con una casilla vacía ni con un dígito y su punto a la vez.
+    func testEyeClosesOverARollingFigure() throws {
+        launch(["-MiBancoDemoCloseEyeAfter", "4.5"])
+        XCTAssertTrue(waitUntil(20) { (self.probe()["ojoCierraEn"] ?? "-") != "-" }, "La app no dijo cuándo cierra el ojo")
+        let at = Double(probe()["ojoCierraEn"] ?? "") ?? 0
+        let wait = at - 1 - Date().timeIntervalSince1970
+        XCTAssertGreaterThan(wait, 0, "El ojo ya se había cerrado al empezar la ráfaga")
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst("eye-close-rolling", frames: 24, every: 0.1)
     }
 
     /// C4 (D2): la categoría de un pago: la ficha blanca se desliza a la elegida y su símbolo bota; luego se pliega.

@@ -23,15 +23,10 @@ public struct StepPercent: Equatable, Sendable {
         case failed(Int)
     }
 
-    /// Segundos (del kit) en los que, al acabar bien, la cifra corre desde la que se veía hasta 100 (maqueta: el remate).
-    public static let finishSeconds = 0.25
-
     public let caps: [Int]
     /// Índice del paso en curso (0 = el primero).
     public private(set) var step = 0
     public private(set) var outcome = Outcome.running
-    /// Desde qué cifra corre hasta 100 al acabar bien: la que se veía (100 si no se dijo, es decir, de golpe).
-    public private(set) var finishFrom = 100
 
     /// `caps`: topes crecientes entre 1 y 99; si no lo son, se usan los aprobados.
     public init(caps: [Int] = StepPercent.defaultCaps) {
@@ -76,35 +71,6 @@ public struct StepPercent: Equatable, Sendable {
     public mutating func succeed() {
         guard isRunning else { return }
         outcome = .succeeded
-    }
-
-    /// El trabajo acabó bien y en pantalla se veía `shown`: la cifra corre de ahí a 100 en `finishSeconds` (ver
-    /// `drawn`). Es la cifra REAL que se veía, acotada a lo que el paso podía enseñar; nunca un paso inventado.
-    public mutating func succeed(shown: Int) {
-        guard isRunning else { return }
-        finishFrom = min(cap - 1, max(floor, shown))
-        outcome = .succeeded
-    }
-
-    /// Lo que se DIBUJA. `elapsed`: segundos (ya divididos por la cámara lenta) desde que empezó el paso en curso o, si
-    /// ya acabó bien, desde que acabó.
-    /// - En marcha: `value(elapsed:)`; con Reducir movimiento no cuenta y enseña el suelo del paso.
-    /// - Acabado bien: de `finishFrom` a 100 en `finishSeconds`, frenando, y 100 justo al final (con Reducir, 100).
-    /// - Fallo: la cifra congelada.
-    public func drawn(elapsed: Double, reduce: Bool) -> Int {
-        switch outcome {
-        case .failed(let frozen):
-            return frozen
-        case .running:
-            return reduce ? floor : value(elapsed: elapsed)
-        case .succeeded:
-            guard !reduce, finishFrom < 100 else { return 100 }
-            guard elapsed.isFinite else { return elapsed == .infinity ? 100 : finishFrom }
-            let x = min(1, max(0, elapsed / StepPercent.finishSeconds))
-            let eased = 1 - pow(1 - x, 3)
-            // Hacia abajo: 100 solo cuando el remate ha terminado (a la vez que el ✓ del último paso).
-            return min(100, finishFrom + Int((Double(100 - finishFrom) * eased).rounded(.down)))
-        }
     }
 
     /// El trabajo falló: la cifra se queda en `shown` (lo que se veía), acotada a lo que el paso podía enseñar.

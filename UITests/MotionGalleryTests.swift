@@ -293,11 +293,18 @@ final class MotionGalleryTests: XCTestCase {
         fail.tap()
         let error = app.staticTexts["No se ha podido. Inténtalo otra vez."]
         XCTAssertTrue(error.waitForExistence(timeout: 20), "No apareció el error")
-        let early = finished.label
-        Thread.sleep(forTimeInterval: 1)
-        XCTAssertFalse(early.hasSuffix("mal"), "Avisó del fallo en el mismo instante del error: «\(early)»")
-        XCTAssertFalse(finished.label.hasSuffix("mal"), "Avisó del fallo con la sacudida a medias: «\(finished.label)»")
-        XCTAssertTrue(waitUntil(15) { finished.label.hasSuffix("mal") }, "Tras el error no avisó: «\(finished.label)»")
+        // m-11 (ronda 1): con marcas de tiempo, sin `sleep`: cuánto pasa entre el error y el aviso de fin. A ×8 la
+        // sacudida dura 3,36 s; se exige al menos la mitad (con el simulador cargado no se pierde nada).
+        let errorAt = Date()
+        XCTAssertFalse(finished.label.hasSuffix("mal"), "Avisó del fallo en el mismo instante del error")
+        var finishedAt: Date?
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline, finishedAt == nil {
+            if finished.label.hasSuffix("mal") { finishedAt = Date() } else { Thread.sleep(forTimeInterval: 0.05) }
+        }
+        let done = try XCTUnwrap(finishedAt, "Tras el error no avisó: «\(finished.label)»")
+        XCTAssertGreaterThanOrEqual(done.timeIntervalSince(errorAt), 0.42 * 8 * 0.5,
+                                    "Avisó del fallo con la sacudida a medias (\(done.timeIntervalSince(errorAt)) s)")
     }
 
     /// K9: a tamaño normal el botón mide su alto de siempre (no se estira con el hueco).

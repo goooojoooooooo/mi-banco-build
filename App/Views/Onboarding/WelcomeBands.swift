@@ -32,11 +32,8 @@ struct WelcomeBands: View {
                         .animation(traceAnimation(index), value: traced)
                         // Y se ensancha hasta ser una banda tenue.
                         .scaleEffect(x: 1, y: widened ? Self.bandWidth : 1)
-                        .animation(widenAnimation(index), value: widened)
-                        // La luz baja ANTES de que la banda se ensanche del todo: una banda ancha nunca pasa por el
-                        // plateado casi blanco detrás del texto (ojo de diseño 18.3: como mucho ~55 % del brillo de antes).
                         .opacity(widened ? 0.16 : 1)
-                        .animation(dimAnimation(index), value: widened)
+                        .animation(widenAnimation(index), value: widened)
                         .rotationEffect(.degrees(-45))
                         .position(x: geo.size.width / 2, y: geo.size.height * Self.centers[index])
                 }
@@ -55,23 +52,13 @@ struct WelcomeBands: View {
         widened = true
     }
 
-    /// Las líneas salen en cuanto la bienvenida queda a la vista, sin pausa vacía (ojo de diseño 18.2).
-    private static let traceStart = 0.06
-    private static let widenStart = traceStart + 0.56
-
     private func traceAnimation(_ index: Int) -> Animation? {
         guard !motion.reduce else { return nil }
-        return .easeInOut(duration: motion.seconds(0.52)).delay(motion.seconds(Self.traceStart + 0.07 * Double(index)))
+        return .easeInOut(duration: motion.seconds(0.52)).delay(motion.seconds(0.30 + 0.07 * Double(index)))
     }
 
     private func widenAnimation(_ index: Int) -> Animation? {
         guard !motion.reduce else { return nil }
-        return .easeInOut(duration: motion.seconds(0.62)).delay(motion.seconds(Self.widenStart + 0.06 * Double(index)))
-    }
-
-    /// La luz se apaga en la primera mitad del ensanche, frenando: cuando la banda es ancha ya es tenue.
-    private func dimAnimation(_ index: Int) -> Animation? {
-        guard !motion.reduce else { return nil }
-        return .easeOut(duration: motion.seconds(0.34)).delay(motion.seconds(Self.widenStart + 0.06 * Double(index)))
+        return .easeInOut(duration: motion.seconds(0.62)).delay(motion.seconds(0.86 + 0.06 * Double(index)))
     }
 }

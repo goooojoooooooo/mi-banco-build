@@ -35,8 +35,19 @@ struct BriefingSheet: View {
     @FocusState private var questionFocused: Bool
     /// m-7: las barras de voz ocupan su sitio (`waveInLayout`) y se ven (`waveShown`); al parar, primero se apagan y,
     /// acabado el fundido, dejan el sitio.
+    /// I-5, solo demo (`-MiBancoDemoBriefingDelay`): el resumen aún no ha «llegado» a la hoja.
+    @State private var demoBriefingHeld: Bool = {
+        #if DEBUG
+        return DemoMode.briefingDelaySeconds != nil
+        #else
+        return false
+        #endif
+    }()
     @State private var waveInLayout = false
     @State private var waveShown = false
+
+    /// El resumen que enseña la hoja (en la demo, retenido mientras `-MiBancoDemoBriefingDelay` lo diga).
+    private var shownBriefing: Briefing? { demoBriefingHeld ? nil : briefingModel.briefing }
 
     private var demoKeepsVisible: Bool {
         #if DEBUG
@@ -50,7 +61,7 @@ struct BriefingSheet: View {
         ZStack {
             Theme.canvas.ignoresSafeArea()
 
-            if let briefing = briefingModel.briefing {
+            if let briefing = shownBriefing {
                 ScrollViewReader { proxy in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 20) {
@@ -127,7 +138,12 @@ struct BriefingSheet: View {
         }
         #if DEBUG
         // Para las pruebas (lote final): qué línea dibuja su resalte, dentro de la hoja (el fondo no se ve con ella).
-        .overlay(alignment: .topLeading) { DrawnLineProbe() }
+        .overlay(alignment: .topLeading) { DrawnLineProbe(entranceToken: entranceToken) }
+        .task {
+            guard let seconds = DemoMode.briefingDelaySeconds else { return }
+            try? await Task.sleep(for: .seconds(seconds))
+            demoBriefingHeld = false
+        }
         #endif
         // B1: la entrada se da por acabada cuando ha entrado el último bloque (o antes, con un toque).
         .task(id: entranceToken) { await finishEntranceLater(token: entranceToken) }
@@ -140,7 +156,7 @@ struct BriefingSheet: View {
         }
         // m-13: la entrada (y su reloj) empieza cuando HAY resumen: al abrir si ya está, o cuando llega. Antes contaba
         // desde que se abría la hoja y un resumen que llegaba tarde aparecía de golpe, sin entrada.
-        .onChange(of: briefingModel.briefing != nil, initial: true) { _, has in
+        .onChange(of: shownBriefing != nil, initial: true) { _, has in
             if has, entranceToken == 0 { startEntrance() }
         }
         .onDisappear {
@@ -801,15 +817,28 @@ extension AssistantTopic {
 /// apagan un poco; al callar, todas vuelven. Solo opacidad y color de fondo, con el fundido de `\.motion`. Con el ojo
 /// cerrado el resalte no añade nada que leer: la línea ya es su máscara.
 #if DEBUG
-/// Solo DEBUG: publica `LaunchProbe.drawnLine` dentro de la hoja (identificador `briefing-drawn-line`).
+/// Solo DEBUG: publica dentro de la hoja `LaunchProbe.drawnLine` (identificador `briefing-drawn-line`) y el número de
+/// la entrada en curso (`briefing-entrance`: 0 = aún no ha empezado).
+/// m-6: `briefing-drawn-line` es un SUSTITUTO de lo dibujado: lo escribe el modificador que pinta el resalte con su
+/// misma condición (`current == id`), no el píxel. Si el fondo dejara de pintarse (p. ej. el color a opacidad 0), esta
+/// sonda seguiría diciendo la línea: eso solo lo ve una hoja de capturas.
 private struct DrawnLineProbe: View {
+    let entranceToken: Int
+
     var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .accessibilityElement()
-            .accessibilityIdentifier("briefing-drawn-line")
-            .accessibilityValue(LaunchProbe.shared.drawnLine)
-            .allowsHitTesting(false)
+        ZStack {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("briefing-drawn-line")
+                .accessibilityValue(LaunchProbe.shared.drawnLine)
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("briefing-entrance")
+                .accessibilityValue(String(entranceToken))
+        }
+        .allowsHitTesting(false)
     }
 }
 #endif

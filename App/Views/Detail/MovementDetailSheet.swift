@@ -73,6 +73,8 @@ private struct DetailContent: View {
     /// nunca enseña su cifra final antes de contar.
     @State private var amountShown = false
     @State private var amountLanded = false
+    /// m-9: cuándo se posa el importe (s desde que se pide); lo cumple un `.task(id:)`, que se cancela con la hoja.
+    @State private var landingDue: Double?
     /// Lote final: los grupos de debajo del importe no entran mientras el importe vuela por encima de ellos (si vuela
     /// desde la fila); entran en cuanto se posa. Sin vuelo (o con Reducir movimiento), como siempre.
     private var groupsReleased: Bool { amountOrigin == nil || motion.reduce || amountLanded }
@@ -111,12 +113,12 @@ private struct DetailContent: View {
                         .foregroundStyle(Theme.label)
                         .multilineTextAlignment(.center)
                         .padding(.top, 12)
-                        .staggeredEntrance(0, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(0, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
                     Text("\(DateText.moment(movement.date, dayOnly: movement.dayOnly)) · \(movement.bank.displayName)")
                         .titan(.subtitle)
                         .foregroundStyle(Theme.label2)
                         .padding(.top, 3)
-                        .staggeredEntrance(1, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(1, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
                     // El importe rueda (`RollingAmount` ya oculta las cifras con el ojo cerrado y se encoge si no cabe).
                     RollingAmount(cents: movement.amountCents, style: .plain(sign: true))
                         .font(.system(size: amountSize, weight: .semibold))
@@ -194,20 +196,20 @@ private struct DetailContent: View {
                     }
                     OwnTransferRow(movement: movement, isOn: snapshot.ownTransfers.contains(movement.id), model: model)
                 }
-                .staggeredEntrance(2, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                .staggeredEntrance(2, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
 
                 .modifier(HeldUntilLanded(released: groupsReleased, index: 0))
 
                 if movement.kind == .payment, let key = merchantKey, let history = snapshot.histories[key] {
                     MerchantHistoryGroup(history: history, recent: snapshot.recentPayments[key] ?? [], current: movement.id)
-                        .staggeredEntrance(3, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(3, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
 
                         .modifier(HeldUntilLanded(released: groupsReleased, index: 1))
                 }
 
                 if editingNote || movement.note != nil {
                     noteGroup
-                        .staggeredEntrance(4, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(4, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
 
                         .modifier(HeldUntilLanded(released: groupsReleased, index: 2))
                         .transition(.opacity.combined(with: .move(edge: .top)))
@@ -227,13 +229,13 @@ private struct DetailContent: View {
                         }
                     }
                 }
-                .staggeredEntrance(5, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                .staggeredEntrance(5, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
 
                 .modifier(HeldUntilLanded(released: groupsReleased, index: 3))
 
                 SlideToConfirm(title: "Desliza para borrar el movimiento", action: onDelete)
                     .padding(.top, 6)
-                    .staggeredEntrance(6, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                    .staggeredEntrance(6, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
 
                     .modifier(HeldUntilLanded(released: groupsReleased, index: 4))
             }
@@ -270,6 +272,12 @@ private struct DetailContent: View {
         .onAppear(perform: landAmount)
         .task { await backstop() }
         .task(id: flightArmed) { await flightAfterPresentation() }
+        .task(id: landingDue) {
+            guard let due = landingDue else { return }
+            try? await Task.sleep(for: .seconds(due))
+            guard !Task.isCancelled else { return }
+            amountLanded = true
+        }
     }
 
     /// D1. El importe sale volando desde donde estaba en la fila (si se abrió desde una fila de Inicio y se conocen
@@ -296,24 +304,26 @@ private struct DetailContent: View {
             flyScale = start.scale
             amountShown = true
             withAnimation(motion.animation(.fly).delay(motion.seconds(0.05))) { flight = 1 }
-            landAfter(motion.seconds(0.05 + Self.flySettle))
+            landingDue = motion.seconds(0.05) + flightSettle
             return
         }
         withAnimation(motion.animation(.fly).delay(motion.seconds(0.3))) { amountShown = true }
-        landAfter(motion.seconds(0.3 + Self.flySettle))
+        // m-1: con Reducir es un fundido: se posa cuando acaba (no tras la espera del muelle).
+        landingDue = motion.seconds(0.3) + (motion.reduce ? motion.fadeDuration : flightSettle)
     }
 
-    /// Lo que tarda el muelle `fly` (0,50 s) en quedar a la vista posado, a nivel Equilibrado (s).
-    static let flySettle = 0.35
+    /// La entrada escalonada de las líneas del detalle: desde 0,15 s, 55 ms × 0,82ⁿ (la usan también los grupos que
+    /// esperan a que el importe se pose).
+    static let linesLead = 0.15
+    static let linesGap = 0.055
+    static let linesDecay = 0.82
 
-    /// Avisos/m-12: «Te quedaban» se destapa cuando el importe se ha posado, contado con una pausa que lee `\.motion`,
-    /// no con la `completion` de la animación: esa, con la hoja aún presentándose o la app cargada (batería en paralelo,
-    /// run 45806074775), llegaba al instante y «Te quedaban» decía su cifra con el importe aún volando.
-    private func landAfter(_ seconds: Double) {
-        Task { @MainActor in
-            try? await Task.sleep(for: .seconds(seconds))
-            amountLanded = true
-        }
+    /// I-1 (ronda 1): cuándo se VE posado el importe que vuela: la envolvente de su muelle `fly` (con la intensidad y la
+    /// cámara lenta) baja del 5 % (`MotionMath.visibleSettle`, ~0,28 s en Equilibrado). Antes no se suelta nada: la
+    /// garantía de m-12 sigue (es una pausa que lee `\.motion`, no una `completion`).
+    private var flightSettle: Double {
+        MotionMath.visibleSettle(
+            MotionMath.scaled(SpringToken.fly.base, level: motion.level, timeMultiplier: motion.timeMultiplier))
     }
 
     /// La espera del vuelo: la presentación de la hoja la lleva el sistema a su velocidad (no va a cámara lenta), así
@@ -511,11 +521,13 @@ private struct HeldUntilLanded: ViewModifier {
         // leen «Te quedaban» desde que se abre la hoja.
         content
             .mask { Color.black.opacity(visible ? 1 : 0) }
+            // I-2 (ronda 1): mientras espera no recibe toques (no se cambia nada que no se ve).
+            .allowsHitTesting(visible)
             .offset(y: visible ? 0 : motion.distance(16))
             .onAppear { if shown == nil { shown = released } }
             .onChange(of: released) { _, now in
                 guard now, shown != true else { return }
-                withAnimation(motion.animation(.enter).delay(motion.stagger(index, firstGap: 0.055, decay: 0.82))) {
+                withAnimation(motion.animation(.enter).delay(motion.stagger(index, firstGap: MovementDetailSheet.linesGap, decay: MovementDetailSheet.linesDecay))) {
                     shown = true
                 }
             }

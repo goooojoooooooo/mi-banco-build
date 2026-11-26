@@ -45,6 +45,9 @@ struct SettingsView: View {
     @State private var showConnectionGuide = false
     @FocusState private var focused: BankID?
     #if DEBUG
+    @State private var demoTimersArmed = false
+    #endif
+    #if DEBUG
     /// Demo (`-MiBancoDemoAlertsGuide`): abre la guía de avisos nada más aparecer Ajustes.
     @State private var demoOpensGuide = false
     #endif
@@ -197,6 +200,9 @@ struct SettingsView: View {
                     }
                     .toggleStyle(TitanToggleStyle())
                     .accessibilityIdentifier("settings-private-mode")
+                    #if DEBUG
+                    .onAppear { armDemoTimers() }
+                    #endif
                     .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Privacidad")
@@ -306,19 +312,9 @@ struct SettingsView: View {
             if on { releaseAmountFocus() }
         }
         #if DEBUG
-        // `-MiBancoDemoCloseEyeAfter <s>`: cierra el ojo solo, por el mismo camino que el interruptor (para grabar desde
-        // antes del cierre y para cerrarlo con un saldo en edición, con el teclado tapando el interruptor).
-        .task {
-            guard let seconds = DemoMode.closesEyeAfterSeconds else { return }
-            try? await Task.sleep(for: .seconds(seconds))
-            privacyBinding.wrappedValue = true
-        }
-        // `-MiBancoDemoFocusBalanceAfter <s>`: enfoca el saldo de Trade Republic, como un toque (para grabarlo desde antes).
-        .task {
-            guard let seconds = DemoMode.focusesBalanceAfterSeconds else { return }
-            try? await Task.sleep(for: .seconds(seconds))
-            focused = .tr
-        }
+        // `-MiBancoDemoCloseEyeAfter <s>` y `-MiBancoDemoFocusBalanceAfter <s>`: los segundos cuentan desde que el
+        // interruptor «Modo privado» aparece en pantalla (`armDemoTimers`), no desde que se abre Ajustes: así una prueba
+        // que se desplaza hasta él sabe cuándo empezar a grabar.
         #endif
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
@@ -350,6 +346,27 @@ struct SettingsView: View {
         case .expressive: "Expresivo"
         }
     }
+
+    #if DEBUG
+    /// Solo demo: arma, una vez, el cierre del ojo (`-MiBancoDemoCloseEyeAfter`, por el mismo camino que el interruptor)
+    /// y el foco del saldo de Trade Republic (`-MiBancoDemoFocusBalanceAfter`, como un toque), para grabarlos desde antes.
+    private func armDemoTimers() {
+        guard !demoTimersArmed else { return }
+        demoTimersArmed = true
+        if let seconds = DemoMode.closesEyeAfterSeconds {
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                privacyBinding.wrappedValue = true
+            }
+        }
+        if let seconds = DemoMode.focusesBalanceAfterSeconds {
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                focused = .tr
+            }
+        }
+    }
+    #endif
 
     /// Suelta el foco de un saldo en edición sin animación (ver `onChange(of: preferences.privateMode)`).
     private func releaseAmountFocus() {

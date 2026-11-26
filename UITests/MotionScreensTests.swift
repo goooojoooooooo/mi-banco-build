@@ -991,7 +991,7 @@ final class MotionScreensTests: XCTestCase {
     /// (`-MiBancoDemoCloseEyeAfter`). El campo tiene que soltar el foco y pasar a la máscara: ningún dígito dibujado y
     /// ningún importe con cifras en pantalla.
     private func closeTheEyeWhileEditingAndCheck(_ extra: [String]) {
-        let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoCloseEyeAfter", "18"] + extra)
+        let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoCloseEyeAfter", "12"] + extra)
         XCTAssertFalse(value(field).hasPrefix("importe oculto"), "El ojo se cerró antes de empezar a editar")
         field.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")

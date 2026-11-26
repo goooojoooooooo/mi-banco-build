@@ -295,16 +295,23 @@ private struct DetailContent: View {
             flyDelta = start.delta
             flyScale = start.scale
             amountShown = true
-            withAnimation(motion.animation(.fly).delay(motion.seconds(0.05)), completionCriteria: .logicallyComplete) {
-                flight = 1
-            } completion: {
-                amountLanded = true
-            }
+            withAnimation(motion.animation(.fly).delay(motion.seconds(0.05))) { flight = 1 }
+            landAfter(motion.seconds(0.05 + Self.flySettle))
             return
         }
-        withAnimation(motion.animation(.fly).delay(motion.seconds(0.3)), completionCriteria: .logicallyComplete) {
-            amountShown = true
-        } completion: {
+        withAnimation(motion.animation(.fly).delay(motion.seconds(0.3))) { amountShown = true }
+        landAfter(motion.seconds(0.3 + Self.flySettle))
+    }
+
+    /// Lo que tarda el muelle `fly` (0,50 s) en quedar a la vista posado, a nivel Equilibrado (s).
+    static let flySettle = 0.55
+
+    /// Avisos/m-12: «Te quedaban» se destapa cuando el importe se ha posado, contado con una pausa que lee `\.motion`,
+    /// no con la `completion` de la animación: esa, con la hoja aún presentándose o la app cargada (batería en paralelo,
+    /// run 45806074775), llegaba al instante y «Te quedaban» decía su cifra con el importe aún volando.
+    private func landAfter(_ seconds: Double) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
             amountLanded = true
         }
     }

@@ -165,7 +165,11 @@ struct KeypadAmountDisplay: View {
         // tamaño del importe). Que se teclea se ve por el latido de cada tecla (`KeyBeat`).
         // Sin nada tecleado, la misma máscara atenuada (como el «0 €» vacío): se distingue «vacío» de «tecleado».
         if hidden {
-            let kind: Kind = amount.eurosText.isEmpty && !amount.hasDecimal ? .placeholder : .digit
+            var empty = amount.eurosText.isEmpty && !amount.hasDecimal
+            #if DEBUG
+            if DemoMode.oldKeypadMask { empty = false }
+            #endif
+            let kind: Kind = empty ? .placeholder : .digit
             return (0..<3).map { Glyph(id: "h\($0)", text: "•", kind: kind) } + [Glyph(id: "e", text: "€", kind: .euro)]
         }
         var out: [Glyph] = []

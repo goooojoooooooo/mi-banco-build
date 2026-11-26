@@ -17,7 +17,11 @@ struct WeekBlock: View {
     /// entrada o con el ojo cerrado sale con su cifra (la máscara). Así, si el ojo se abre a mitad del montaje, la cifra
     /// aparece en el acto (barajado → cifra) y no se queda invisible esperando a una cuenta que no empezó.
     private var countsOnAssembly: Bool {
-        entrance.active && entrance.scope == .assembly && !preferences.privateMode
+        var eyeOpen = !preferences.privateMode
+        #if DEBUG
+        if DemoMode.oldWeekCount { eyeOpen = true }
+        #endif
+        return entrance.active && entrance.scope == .assembly && eyeOpen
     }
 
     var body: some View {
@@ -36,6 +40,12 @@ struct WeekBlock: View {
                     RollingAmount(cents: week.totalCents, countsUp: countsOnAssembly)
                         .titan(.week)
                         .id(card)
+                        #if DEBUG
+                        // Sonda: un importe que espera a contar con el ojo cerrado se quedaría invisible al abrirlo.
+                        .onChange(of: countsOnAssembly && preferences.privateMode, initial: true) { _, waitsHidden in
+                            if waitsHidden { HomeProbe.shared.weekCountsWhileHidden += 1 }
+                        }
+                        #endif
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Gastado en 7 días: \(spokenAmount(week.totalCents, hidden: hidden)). \(hidden ? "" : week.summary)")

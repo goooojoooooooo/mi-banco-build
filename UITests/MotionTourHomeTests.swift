@@ -339,6 +339,17 @@ final class MotionTourHomeTests: MotionTourCase {
         rowSwipe("-eye", extra: ["-MiBancoDemoPrivate"])
     }
 
+    /// Con el texto de accesibilidad más grande (fila apilada, el importe debajo del nombre): al abrirse, el importe se
+    /// apaga antes de que se lean las acciones.
+    func testRowSwipeLargestText() throws {
+        rowSwipe("-ax", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+    }
+
+    func testRowSwipeLargestTextEyeClosed() throws {
+        rowSwipe("-ax-eye", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
+                                    "-MiBancoDemoPrivate"])
+    }
+
     func testRowSwipeReduceMotion() throws {
         rowSwipe("-reduce", extra: ["-MiBancoReduceMotion"], frames: 6)
     }
@@ -390,6 +401,15 @@ final class MotionTourHomeTests: MotionTourCase {
     /// El camino de verdad: mantener el dedo sobre la tarjeta (se levanta a los 0,42 s y a los 0,92 s se abre el
     /// abanico). La pulsación bloquea la prueba 1,6 s, así que la ráfaga empieza con el abanico a medio abrir; después,
     /// «Cerrar»: las tarjetas vuelven bajo la tarjeta de la que salieron.
+    /// Abanico con Reducir movimiento, fotograma a fotograma: a cámara lenta ×8 y con capturas seguidas (~15 ms reales
+    /// entre fotogramas), para ver el paso de Inicio al abanico entero (ni un fotograma negro ni dos títulos).
+    func testWalletFanReduceMotionFine() throws {
+        launch(["-MiBancoDemoCardMoment", "fan", "-MiBancoReduceMotion"], scale: 8)
+        waitForHome()
+        segment("Todo").tap()
+        fastBurst("wallet-fan-reduce-fine", frames: 32, every: 0.05)
+    }
+
     func testWalletFanFromLongPress() throws {
         launch()
         waitForHome()
@@ -436,6 +456,8 @@ final class MotionTourHomeTests: MotionTourCase {
         launch(["-MiBancoDemoKeypadDelay", "0.8"] + extra)
         waitForHome()
         openMoveAmountStep()
+        // Con el ojo cerrado, primero el importe vacío (la máscara atenuada).
+        if extra.contains("-MiBancoDemoPrivate") { burst("keypad" + suffix + "-empty", frames: 3, every: 0.2) }
         for key in ["1", "2", "3"] {
             app.buttons[key].tap()
             Thread.sleep(forTimeInterval: 2.6)

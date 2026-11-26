@@ -29,6 +29,44 @@ import Testing
         #expect(!SharedPrivacy.masks(payload: "sí", shared: nil), "una carga que no es un booleano no cuenta")
     }
 
+    /// N-3: en la app, el ojo de la carga sale de la fuente de verdad, no de la copia: si la copia de la suite falta o
+    /// se quedó vieja, la carga sigue diciendo «cerrado» y la vista ampliada tapa las cifras igual.
+    @Test func theAppEyeComesFromTheSourceOfTruthNotFromTheCopy() throws {
+        let truthName = "SharedPrivacyTests-truth-\(UUID().uuidString)"
+        let copyName = "SharedPrivacyTests-copy-\(UUID().uuidString)"
+        let truth = try #require(UserDefaults(suiteName: truthName))
+        let copy = try #require(UserDefaults(suiteName: copyName))
+        defer {
+            truth.removePersistentDomain(forName: truthName)
+            copy.removePersistentDomain(forName: copyName)
+        }
+        truth.set(true, forKey: "privateMode") // así lo guarda AppPreferences (clave `privateModeKey`)
+        #expect(SharedPrivacy.key == "privateMode")
+        #expect(SharedPrivacy.appEye(from: truth))
+        // La copia nunca se escribió: la carga sola basta.
+        #expect(SharedPrivacy.masks(payload: SharedPrivacy.appEye(from: truth), shared: SharedPrivacy.read(from: copy)))
+        // La copia se quedó vieja («abierto»): la carga, de la fuente de verdad, manda igual.
+        SharedPrivacy.publish(false, to: copy)
+        #expect(SharedPrivacy.masks(payload: SharedPrivacy.appEye(from: truth), shared: SharedPrivacy.read(from: copy)))
+        truth.set(false, forKey: "privateMode")
+        #expect(!SharedPrivacy.appEye(from: truth))
+    }
+
+    /// N-4: la Live Activity acaba siempre con el ojo de ahora: se corrige si no coincide, y no se toca si coincide.
+    @Test func theLiveActivityEndsWithTheCurrentEye() {
+        #expect(SharedPrivacy.reconciled(current: false, eyeNow: true) == true)
+        #expect(SharedPrivacy.reconciled(current: nil, eyeNow: true) == true, "un estado viejo sin el campo se corrige")
+        #expect(SharedPrivacy.reconciled(current: true, eyeNow: false) == false)
+        #expect(SharedPrivacy.reconciled(current: true, eyeNow: true) == nil)
+        #expect(SharedPrivacy.reconciled(current: nil, eyeNow: false) == nil)
+        // Dos cambios rápidos en cualquier orden: lo que queda es el último ojo leído, no el orden de llegada.
+        var state: Bool? = nil
+        for eye in [true, false, true] {
+            if let next = SharedPrivacy.reconciled(current: state, eyeNow: eye) { state = next }
+        }
+        #expect(state == true)
+    }
+
     @Test func theSuiteIsTheAppGroup() {
         #expect(resolveAppGroupID(infoDictionary: [:]) == "group.com.mibanco.shared")
         #expect(resolveAppGroupID(infoDictionary: ["ALTAppGroups": ["group.x.y"]]) == "group.x.y")

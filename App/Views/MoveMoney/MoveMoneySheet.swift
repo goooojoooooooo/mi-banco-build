@@ -442,16 +442,6 @@ struct MoveMoneySheet: View {
                 // El importe, dígito a dígito; con el ojo cerrado, un punto por dígito (nunca la cifra bajo un desenfoque).
                 KeypadAmountDisplay(amount: amount, hidden: hidden, size: amountSize)
                     .frame(minHeight: amountSize * 1.25)
-                    // Las fichas de «Desde» no cambian antes que el importe: se apagan mientras entra el dígito
-                    // (0,1 s) y vuelven con la cifra nueva (0,15 s). Solo opacidad; la secuencia la marca la propia
-                    // animación (sin esperas).
-                    .onChange(of: amount.cents) { _, _ in
-                        withAnimation(.easeIn(duration: motion.seconds(0.1))) {
-                            chipsDimmed = true
-                        } completion: {
-                            chipCents = amount.cents
-                            withAnimation(.easeOut(duration: motion.seconds(0.15))) { chipsDimmed = false }
-                        }
                     }
 
                 VStack(alignment: .leading, spacing: 8) {
@@ -472,6 +462,24 @@ struct MoveMoneySheet: View {
                         .padding(.trailing, 24)
                     }
                     .scrollIndicators(.hidden)
+                    // Las fichas no cambian antes que el importe: se apagan mientras entra el dígito (0,1 s) y vuelven
+                    // con la cifra nueva (0,15 s). Solo opacidad; la secuencia la marca la propia animación (sin esperas).
+                    .onChange(of: amount.cents) { old, new in
+                        // Hasta el primer cambio las fichas siguen al importe; desde ahí, con el que tenían.
+                        if chipCents == nil { chipCents = old }
+                        #if DEBUG
+                        if DemoMode.oldChips { chipCents = new }
+                        // Sonda: ¿enseñan ya las fichas la cifra nueva en el mismo instante en que cambia el importe?
+                        if chipCents == new { HomeProbe.shared.chipsEarly += 1 }
+                        if DemoMode.oldChips { return }
+                        #endif
+                        withAnimation(.easeIn(duration: motion.seconds(0.1))) {
+                            chipsDimmed = true
+                        } completion: {
+                            chipCents = amount.cents
+                            withAnimation(.easeOut(duration: motion.seconds(0.15))) { chipsDimmed = false }
+                        }
+                    }
                     .overlay(alignment: .trailing) {
                         LinearGradient(
                             colors: [.clear, Theme.canvas],

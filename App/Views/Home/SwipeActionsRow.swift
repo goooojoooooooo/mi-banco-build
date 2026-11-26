@@ -36,6 +36,7 @@ struct SwipeActionsRow<Content: View>: View {
     }
 
     @Environment(\.motion) private var motion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var offset: CGFloat = 0
     @State private var dragBase: CGFloat = 0
     @State private var dragging = false
@@ -50,8 +51,18 @@ struct SwipeActionsRow<Content: View>: View {
         CGFloat(actions.count) * Self.actionWidth + CGFloat(max(actions.count - 1, 0)) * Self.actionGap + Self.edgeMargin
     }
     private var isOpen: Bool { offset <= -span + 8 }
-    /// Cuánto se aparta el contenido respecto a lo que entran las acciones.
-    private static var contentShare: CGFloat { 0.4 }
+    /// Cuánto se aparta el contenido respecto a lo que entran las acciones: el 40 % (el nombre sigue a la vista y las
+    /// acciones entran sobre el sitio del importe, que se apaga). Con tamaños de texto de accesibilidad la fila va apilada
+    /// (el nombre en varias líneas ocupa todo el ancho): ahí se aparta entera, como antes, para que las acciones no
+    /// caigan encima del nombre.
+    private var contentShare: CGFloat {
+        #if DEBUG
+        // Solo para probar la prueba (`-MiBancoDemoOldSwipe`): la fila de antes de este lote, siempre al 40 %.
+        if DemoMode.oldSwipe { return 0.4 }
+        if DemoMode.fullSwipe { return 1 }
+        #endif
+        return typeSize.isAccessibilitySize ? 1 : 0.4
+    }
 
     var body: some View {
         content
@@ -67,18 +78,13 @@ struct SwipeActionsRow<Content: View>: View {
             }
             // El contenido solo se aparta un 40 % de lo que se abre (el nombre sigue a la vista); las acciones entran por
             // la derecha, sobre el importe, al ritmo del dedo (1:1).
-            .offset(x: offset * Self.contentShare)
+            // El importe de la fila (donde esté: a la derecha, o debajo del nombre con texto grande) se apaga con la
+            // apertura (`swipeOpenOffset` → `SwipeAmountFade`): nunca se lee a la vez que las acciones.
+            .environment(\.swipeOpenOffset, offset)
+            .offset(x: offset * contentShare)
             // Lo que sale por la izquierda se desvanece en 20 pt (nunca letras cortadas a cuchillo). Cerrada, nada.
             // (Un degradado del negro del fondo por encima, fijo en el borde: sin máscara en cada fila.)
-            .overlay(alignment: .leading) { LeadingEdgeFade(amount: min(max(-offset * Self.contentShare / 12, 0), 1)) }
-            // El importe se tapa en cuanto empieza a abrirse (negro, con 32 pt fundidos a la izquierda), antes de que se
-            // lean las acciones: nunca el importe y «Nota» a la vez.
-            .overlay(alignment: .trailing) {
-                if offset < -0.5 {
-                    AmountCover(width: span + 56)
-                        .modifier(SwipeRevealOpacity(offset: offset, distance: 25))
-                }
-            }
+            .overlay(alignment: .leading) { LeadingEdgeFade(amount: min(max(-offset * contentShare / 12, 0), 1)) }
             .overlay(alignment: .trailing) {
                 // Las acciones solo existen mientras la fila está (algo) abierta: cerrada, no hay nada encima.
                 if offset < -0.5 {
@@ -171,13 +177,16 @@ struct SwipeActionsRow<Content: View>: View {
         let target: CGFloat = open ? -span : 0
         if motion.reduce {
             offset = target
-        } else if open, offset == 0 {
-            // Abierta desde cerrada sin dedo (desde fuera): primero se montan las acciones y lo que tapa el importe con la
+        } else if open, offset == 0, !dragging {
+            // Abierta desde cerrada sin dedo (desde fuera: la demo de las ráfagas): primero se montan las acciones con la
             // fila casi cerrada y, en el pase siguiente, se abre con su muelle. Así siguen la apertura fotograma a
-            // fotograma, como con el dedo (montadas ya abiertas, aparecerían de golpe sobre el importe).
+            // fotograma, como con el dedo (montadas ya abiertas, aparecerían de golpe). Si entretanto se cierra (o la
+            // abre el dedo), el paso siguiente no hace nada.
             offset = -1
             let spring = motion.animation(.snap)
+            let row = rowID
             Task { @MainActor in
+                guard openRow == row, offset == -1, !dragging else { return }
                 withAnimation(spring) { offset = target }
             }
         } else {
@@ -230,19 +239,47 @@ private struct SwipeRevealOpacity: ViewModifier, Animatable {
     }
 }
 
-/// Lo que tapa el importe de una fila abierta: negro del fondo, con sus 32 pt de la izquierda fundidos. No recibe toques.
-private struct AmountCover: View {
-    let width: CGFloat
+extension EnvironmentValues {
+    /// Cuánto está abierta (en pt, negativo hacia la izquierda) la fila deslizable que contiene esta vista; 0 = cerrada.
+    @Entry var swipeOpenOffset: CGFloat = 0
+}
 
-    var body: some View {
-        HStack(spacing: 0) {
-            LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .leading, endPoint: .trailing)
-                .frame(width: 32)
-            Theme.canvas
-        }
-        .frame(width: width)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+/// El importe de una fila deslizable: se apaga en los primeros 25 pt de apertura (antes de que se lean las acciones) y
+/// vuelve al cerrarse, siguiendo la apertura fotograma a fotograma (`Animatable`). Se apaga el importe entero, sea cifra o
+/// máscara: nunca una máscara transparente sobre una cifra.
+struct SwipeAmountFade: ViewModifier {
+    @Environment(\.swipeOpenOffset) private var offset
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        let fades = !DemoMode.oldSwipe
+        #else
+        let fades = true
+        #endif
+        content
+            .modifier(SwipeAmountOpacity(offset: fades ? offset : 0))
+    }
+}
+
+private struct SwipeAmountOpacity: ViewModifier, Animatable {
+    var offset: CGFloat
+
+    nonisolated var animatableData: CGFloat {
+        get { offset }
+        set { offset = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let shown = 1 - min(max(-offset / 25, 0), 1)
+        #if DEBUG
+        content
+            .opacity(shown)
+            .onChange(of: shown == 0, initial: false) { _, hidden in
+                if hidden { HomeProbe.shared.rowAmountHidden += 1 }
+            }
+        #else
+        content.opacity(shown)
+        #endif
     }
 }
 

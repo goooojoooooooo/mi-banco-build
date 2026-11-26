@@ -415,8 +415,12 @@ struct HomeView: View {
         // menor opacidad que de verdad recibe cualquier pieza de la lista hasta que la nueva ha entrado.
         HomeProbe.shared.listSwapFloor = 100
         #endif
-        let reduceFade = 0.22 * kit.timeMultiplier
-        let hold = kit.reduce ? reduceFade * 1.5 : 0
+        let reduceFade = kit.pause(ReduceCardSwap.fade)
+        var hold = kit.reduce ? reduceFade * 1.5 : 0
+        #if DEBUG
+        // Solo para probar la prueba (`-MiBancoDemoOldReduceSwap`): el cambio de antes, sin esperar a la tarjeta.
+        if DemoMode.oldReduceSwap { hold = 0 }
+        #endif
         let out = kit.reduce ? reduceFade * 0.5 : kit.seconds(0.12)
         withAnimation(.easeOut(duration: out).delay(hold)) {
             listHidden = true
@@ -440,7 +444,7 @@ struct HomeView: View {
         HomeProbe.shared.listEntrances += 1
         // Con Reducir movimiento: si en el instante del cambio la tarjeta también está fundida a 0, bajo el selector no
         // hay nada (el fotograma vacío de m-11).
-        if kit.reduce, motion.carouselFadedOut { HomeProbe.shared.blankSwaps += 1 }
+        if kit.reduce, motion.carouselHiddenNow { HomeProbe.shared.blankSwaps += 1 }
         #endif
         // Con Reducir movimiento la lista vieja ya ha esperado al fundido de la tarjeta (`showList`) y «Gastado en 7
         // días» se monta de nuevo con la tarjeta (`WeekBlock`, `.id`): la nueva puede entrar ya, sin dos cifras a la vez.

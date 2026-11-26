@@ -977,6 +977,7 @@ private struct UnderTabBarFade: View {
 private struct TabBarCurtain: View {
     let token: Int
     @State private var covered = false
+    @State private var mounted = false
     @State private var run = 0
     @Environment(\.motion) private var motion
 
@@ -989,16 +990,22 @@ private struct TabBarCurtain: View {
     var body: some View {
         // Negro opaco desde 45 pt por encima del borde de la barra HASTA el borde de la pantalla (I-4, ronda 1: antes
         // se quedaba en el borde de la zona segura y asomaba el canto de la barra de cristal).
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            LinearGradient(stops: [.init(color: .black.opacity(0), location: 0), .init(color: .black, location: 0.3)],
-                           startPoint: .top, endPoint: .bottom)
-                .frame(height: 150)
-            Color.black.frame(height: 80)
+        // Solo existe mientras tapa o se destapa (`mounted`): una capa a pantalla completa, aun transparente y sin
+        // toques, hace que la barra de cristal deje de contar como «tocable» para las pruebas (run 45840643996).
+        ZStack {
+            if mounted {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    LinearGradient(stops: [.init(color: .black.opacity(0), location: 0), .init(color: .black, location: 0.3)],
+                                   startPoint: .top, endPoint: .bottom)
+                        .frame(height: 150)
+                    Color.black.frame(height: 80)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+                .opacity(covered ? 1 : 0)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .ignoresSafeArea()
-        .opacity(covered ? 1 : 0)
         // M-10 (ronda 1): NO se puede bloquear así: la barra de cristal recibe los toques por encima de cualquier capa
         // de SwiftUI (run 45836401819: con el velo «tocable», la barra seguía tocándose y, en cambio, el velo a pantalla
         // completa estorbaba a lo de Inicio). El velo no recibe toques.
@@ -1007,6 +1014,7 @@ private struct TabBarCurtain: View {
             .onChange(of: token) { _, _ in
                 // La barra de pestañas cierra el montaje: tapada desde el primer fotograma y destapada la última. Con
                 // Reducir movimiento también (es un fundido, sin recorrido), con los tiempos de `\.motion`.
+                mounted = true
                 covered = true
                 run += 1
             }
@@ -1020,6 +1028,9 @@ private struct TabBarCurtain: View {
                 #if DEBUG
                 LaunchProbe.shared.tabBarUncoveredAt = Date().timeIntervalSince1970
                 #endif
+                try? await Task.sleep(for: .seconds(motion.reduce ? motion.fadeDuration : motion.seconds(Self.reveal)))
+                guard !Task.isCancelled, !covered else { return }
+                mounted = false
             }
             #if DEBUG
             .onChange(of: covered) { _, now in if now { LaunchProbe.shared.tabBarCoveredAt = Date().timeIntervalSince1970 } }

@@ -325,6 +325,11 @@ final class MotionTourShellTests: MotionTourCase {
         row.tap()
         let chip = element("category-chip")
         XCTAssertTrue(chip.waitForExistence(timeout: 8), "La primera fila no es un pago con categoría")
+        // Ronda 1 (I-2): los grupos de debajo del importe no reciben toques hasta que el importe se posa («Te quedaban»
+        // dice entonces su cifra): se espera a eso antes de tocar el chip.
+        let left = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Te quedaban")).firstMatch
+        XCTAssertTrue(waitUntil(20) { left.label.hasSuffix(" euros") }, "El importe no llegó a posarse")
+        Thread.sleep(forTimeInterval: 1)
         chip.tap()
         let tile = element("category-tile-ocio")
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "Falta la ficha Ocio")

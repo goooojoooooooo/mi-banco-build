@@ -65,6 +65,9 @@ import Testing
         #expect(!speechStops(.categoryChange, previous: [.speaker], current: [.speaker]))
         #expect(!speechStops(.routeConfigurationChange, previous: [.bluetooth], current: [.bluetooth]))
         #expect(speechStops(.oldDeviceUnavailable, previous: [.headphones], current: [.speaker]))
+        // N-12: de algo privado al altavoz, también con una razón que no es de las tres.
+        #expect(speechStops(.routeConfigurationChange, previous: [.headphones], current: [.speaker]))
+        #expect(speechStops(.categoryChange, previous: [.receiver], current: [.speaker]))
         #expect(AudioOutputKind.headphones.isPrivate && AudioOutputKind.receiver.isPrivate)
         #expect(!AudioOutputKind.bluetooth.isPrivate && !AudioOutputKind.speaker.isPrivate)
     }

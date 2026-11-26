@@ -758,12 +758,17 @@ final class MotionShellTests: XCTestCase {
             checkLockTextsLeaveFirst(extra)
         }
         // Ronda 2 (N-1): con el defecto devuelto (`-MiBancoDemoLockFadeWithoutDelay`) la comprobación FALLA.
-        XCTExpectFailure("Sin el retardo, el bloqueo empieza a fundirse con los textos a la vista", strict: true) {
-            checkLockTextsLeaveFirst(["-MiBancoDemoLockFadeWithoutDelay"], expectingTheDefect: true)
+        // N-7: solo vale el fallo del ORDEN de los fundidos (no «falta el bloqueo» ni otro cualquiera).
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = { issue in
+            issue.compactDescription.contains("el bloqueo empieza a fundirse con los textos aún a la vista")
+        }
+        XCTExpectFailure("Sin el retardo, el bloqueo empieza a fundirse con los textos a la vista", options: options) {
+            checkLockTextsLeaveFirst(["-MiBancoDemoLockFadeWithoutDelay"])
         }
     }
 
-    private func checkLockTextsLeaveFirst(_ extra: [String], expectingTheDefect: Bool = false) {
+    private func checkLockTextsLeaveFirst(_ extra: [String]) {
         do {
             launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "3", "-MiBancoMotionScale", "20"] + extra)
             XCTAssertTrue(app.buttons["Desbloquear"].waitForExistence(timeout: 15), "\(extra): falta el bloqueo")
@@ -845,6 +850,21 @@ final class MotionShellTests: XCTestCase {
         XCTAssertFalse(app.buttons["Vale"].exists, "Se ve el resumen antes de llegar")
         XCTAssertTrue(waitUntil(15) { (entrance.value as? String) == "1" }, "Al llegar el resumen no empezó la entrada")
         XCTAssertTrue(app.buttons["Vale"].waitForExistence(timeout: 10), "Llegó el resumen pero la hoja sigue en blanco")
+    }
+
+    /// N-9: si el velo de la barra desaparece a mitad del tapado (`-MiBancoDemoHideTabsDuringCurtain` quita las
+    /// pestañas 0,2 s), la barra no se queda «tapada»: luego tocar «Gasto» sí cambia de pestaña.
+    func testTabBarIsNotStuckCoveredWhenTheCurtainGoes() throws {
+        launch(["-MiBancoDemoHideTabsDuringCurtain"])
+        waitForLaunchToEnd(30)
+        XCTAssertTrue(waitUntil(15) { (self.probe()["barraDestapada"] ?? "-") != "-" || self.app.tabBars.buttons["Gasto"].isHittable },
+                      "La barra no llegó a estar a la vista")
+        Thread.sleep(forTimeInterval: 2)
+        let spendingTab = app.tabBars.buttons["Gasto"]
+        XCTAssertTrue(spendingTab.waitForExistence(timeout: 10), "Falta la pestaña «Gasto»")
+        spendingTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
+        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 10),
+                      "Tras quitarse el velo a mitad del tapado, la barra se traga los toques")
     }
 
     /// Las coordenadas de la app (para tocar un punto exacto, no un elemento).
@@ -941,13 +961,14 @@ final class MotionShellTests: XCTestCase {
         let homeTab = app.tabBars.buttons["Inicio"]
         // Ronda 2 (M-10 / M-1): con el velo delante, tocar «Gasto» no cambia de pestaña.
         let spendingTab = app.tabBars.buttons["Gasto"]
-        if (probe()["barraDestapada"] ?? "-") == "-", spendingTab.exists {
-            spendingTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
-            Thread.sleep(forTimeInterval: 0.5)
-            if (probe()["barraDestapada"] ?? "-") == "-" {
-                XCTAssertFalse(element("gasto.total").exists, "Con el velo delante, tocar «Gasto» cambió de pestaña")
-            }
-        }
+        // N-8: sin `if` que la salten: la barra tiene que seguir tapada antes y después del toque.
+        XCTAssertTrue(spendingTab.exists, "Falta la pestaña «Gasto»")
+        XCTAssertEqual(probe()["barraDestapada"] ?? "-", "-", "La barra ya se había destapado: el toque no prueba nada")
+        spendingTab.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).tap()
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(probe()["barraDestapada"] ?? "-", "-", "La barra se destapó durante el toque: no prueba nada")
+        XCTAssertFalse(element("gasto.total").exists, "Con el velo delante, tocar «Gasto» cambió de pestaña")
+        XCTAssertTrue(homeTab.isSelected, "Con el velo delante, la barra marca otra pestaña")
         XCTAssertTrue(waitUntil(90) { self.probe()["barraDestapada"] != "-" && self.probe()["barraDestapada"] != nil },
                       "La barra de pestañas no se destapó: \(probe())")
         XCTAssertTrue(waitUntil(15) { homeTab.isHittable }, "Destapada, la barra no se puede tocar")

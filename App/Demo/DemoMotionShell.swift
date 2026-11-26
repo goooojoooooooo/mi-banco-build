@@ -48,6 +48,9 @@ extension DemoMode {
     /// sus textos), solo para que la prueba demuestre que lo ve (ronda 2, N-1).
     static var lockFadeWithoutDelay: Bool { isActive && arguments.contains("-MiBancoDemoLockFadeWithoutDelay") }
 
+    /// `-MiBancoDemoHideTabsDuringCurtain`: las pestañas desaparecen 0,2 s a mitad del tapado de la barra (N-9).
+    static var hidesTabsDuringCurtain: Bool { isActive && arguments.contains("-MiBancoDemoHideTabsDuringCurtain") }
+
     /// `-MiBancoDemoNotMineFails`: «No es mío» desde el aviso dentro de la app no se guarda (M-2: el aviso se queda y lo
     /// dice).
     static var notMineFails: Bool { isActive && arguments.contains("-MiBancoDemoNotMineFails") }

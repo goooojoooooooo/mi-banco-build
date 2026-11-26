@@ -69,6 +69,9 @@ struct RootView: View {
     @State private var cardFlight = CardFlight()
     /// Alguna pantalla a la vista ha pedido que la barra de pestañas no se encoja (`.keepsTabBarExpanded()`).
     @State private var keepsTabBarExpanded = false
+    /// Solo demo (`-MiBancoDemoHideTabsDuringCurtain`, N-9): las pestañas desaparecen un momento mientras el velo tapa
+    /// la barra. Siempre `false` fuera de la demo.
+    @State private var demoHidesTabs = false
     /// C8 / 9.5: el banco abierto desde el abanico de Inicio, encima de Inicio (sin cambiar de pestaña).
     @State private var bankOverHome: BankID?
     /// Ronda 2 (M-10): el velo de la barra de pestañas la tapa ahora (la pestaña no se puede cambiar).
@@ -147,6 +150,17 @@ struct RootView: View {
                 scheduleBriefingCheck(delay: .milliseconds(600))
             }
         }
+        #if DEBUG
+        .onChange(of: revealToken + onboardingRevealToken) { _, _ in
+            guard DemoMode.hidesTabsDuringCurtain else { return }
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(150))
+                demoHidesTabs = true
+                try? await Task.sleep(for: .milliseconds(200))
+                demoHidesTabs = false
+            }
+        }
+        #endif
         .onChange(of: revealToken) { _, _ in
             guard !isLocked else { return }
             scheduleBriefingCheck(delay: reduceMotion ? .milliseconds(300) : .milliseconds(1_300))
@@ -293,6 +307,9 @@ struct RootView: View {
             if model.needsOnboarding {
                 OnboardingView(model: model, onFinish: completeOnboarding)
                     .transition(.opacity)
+            } else if demoHidesTabs {
+                // Solo demo (N-9): las pestañas se quitan un momento a mitad del tapado de la barra.
+                Color.clear
             } else {
                 // Ronda 2 (M-10): mientras el velo tapa la barra, tocar una pestaña no cambia de pestaña.
                 TabView(selection: Binding(get: { tab }, set: { new in if !tabBarCovered { tab = new } })) {
@@ -1059,6 +1076,9 @@ private struct TabBarCurtain: View {
         // completa estorbaba a lo de Inicio). El velo no recibe toques.
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+            // N-9: si el velo desaparece a mitad del tapado (su tarea se cancela), la barra no se queda «tapada» para
+            // siempre tragándose los toques.
+            .onDisappear { covered = false }
             .onChange(of: token) { _, _ in
                 // La barra de pestañas cierra el montaje: tapada desde el primer fotograma y destapada la última. Con
                 // Reducir movimiento también (es un fundido, sin recorrido), con los tiempos de `\.motion`.

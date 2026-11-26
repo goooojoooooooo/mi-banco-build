@@ -37,6 +37,19 @@ func maskedEURWhole(_ cents: Int, sign: Bool) -> String {
     AmountMask.wholeText(negative: cents < 0, showsPlus: sign && cents >= 0)
 }
 
+/// "−12,50 €" / "+1.450,00 €" (signo tipográfico, no guion). Vivía en `CountingAmount.swift`, que ya no existe (C8).
+func signedEUR(_ cents: Int) -> String {
+    (cents < 0 ? "−" : "+") + formatEUR(abs(cents))
+}
+
+/// "3.774,75 €" -> ("3.774", ",75 €"); en negativo, el signo va con los euros.
+func splitEUR(_ cents: Int) -> (main: String, small: String) {
+    let s = formatEUR(abs(cents))
+    let sign = cents < 0 ? "−" : ""
+    guard let i = s.lastIndex(of: ",") else { return (sign + s, "") }
+    return (sign + String(s[..<i]), String(s[i...]))
+}
+
 /// «+1.290 €» / «−310 €»: euros enteros con signo tipográfico.
 func signedEURWhole(_ cents: Int) -> String {
     // Lo que redondea a 0 € no lleva signo («0 €», nunca «−0 €» ni «+0 €»), como `formatEURWhole`.

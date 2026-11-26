@@ -329,7 +329,8 @@ final class MotionTourHomeTests: MotionTourCase {
             // segmentado se queda arriba, fijo).
             let row = app.buttons.matching(identifier: "movementRow").firstMatch
             let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-            for _ in 0..<8 where !(row.exists && row.isHittable) {
+            let bottom = app.windows.firstMatch.frame.maxY - 160
+            for _ in 0..<10 where !(row.exists && row.isHittable && row.frame.maxY < bottom) {
                 centre.press(forDuration: 0.1, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: -260)), withVelocity: 500,
                              thenHoldForDuration: 0.3)
             }

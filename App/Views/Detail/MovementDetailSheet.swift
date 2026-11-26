@@ -527,7 +527,7 @@ private struct HeldUntilLanded: ViewModifier {
             .onAppear { if shown == nil { shown = released } }
             .onChange(of: released) { _, now in
                 guard now, shown != true else { return }
-                withAnimation(motion.animation(.enter).delay(motion.stagger(index, firstGap: MovementDetailSheet.linesGap, decay: MovementDetailSheet.linesDecay))) {
+                withAnimation(motion.animation(.enter).delay(motion.stagger(index, firstGap: DetailContent.linesGap, decay: DetailContent.linesDecay))) {
                     shown = true
                 }
             }

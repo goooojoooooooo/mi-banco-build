@@ -774,9 +774,9 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso dentro de la app")
         let monthBefore = month.label
         XCTAssertTrue(waitUntil(40) { self.probe()["accionesAviso"] == "1" }, "El aviso no terminó de desplegarse")
-        // El marco del elemento incluye los 10 pt de margen a cada lado, que son transparentes (por ahí los toques SÍ
-        // deben pasar): la tarjeta es ese marco sin el margen (2 pt más, por el borde).
-        let bannerFrame = banner.frame.insetBy(dx: 12, dy: 2)
+        // El marco del elemento es la tarjeta. Se deja 5 pt dentro de su borde (un toque justo en el borde, x = 10 en
+        // run 45729245328, puede caer fuera de la tarjeta y entonces SÍ debe pasar a Gasto).
+        let bannerFrame = banner.frame.insetBy(dx: 5, dy: 2)
         let buttons = [banner.buttons["Añadir nota"].frame, banner.buttons["No es mío"].frame]
         let chevron = previous.frame
         let covered = stride(from: chevron.minX + 2, through: chevron.maxX - 2, by: 2)

@@ -221,6 +221,9 @@ struct RollingDigits: View {
             row(maskGlyphs(scrambleStep: scrambleStep), at: .infinity, blurAll: motion.richEffects ? 0.5 : 0)
         case .dots:
             row(maskGlyphs(), at: .infinity)
+                // Ronda 1 (m-4): los puntos entran de golpe aunque quien cierra el ojo lo anime (`run16`
+                // `eye-close-rolling` 6: con el fundido de quien llama hubo un fotograma con el importe vacío).
+                .transition(.identity)
         }
     }
 

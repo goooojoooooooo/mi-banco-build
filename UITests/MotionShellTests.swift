@@ -70,6 +70,13 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(waitUntil(timeout) { !self.element("launch-layer").exists }, "El arranque no terminó")
     }
 
+    /// Lo mismo para una pestaña que no es Inicio (`-MiBancoDemoScreen avisos`): allí «Tu dinero» no está montado, así
+    /// que solo se espera a que la capa del arranque se quite (la sonda `launch-probe` sí está: la publica la raíz).
+    private func waitForLaunchLayerToGo(_ timeout: TimeInterval = 20) {
+        XCTAssertTrue(element("launch-probe").waitForExistence(timeout: 15), "La app no arrancó")
+        XCTAssertTrue(waitUntil(timeout) { !self.element("launch-layer").exists }, "El arranque no terminó")
+    }
+
     /// Manda la app a segundo plano y la trae de vuelta, y comprueba CON LA PROPIA APP que el viaje ocurrió: su escena
     /// pasó por segundo plano (`fondos` sube) y ha vuelto a activa (`escena=activa`). Solo entonces sigue la prueba.
     ///
@@ -694,13 +701,19 @@ final class MotionShellTests: XCTestCase {
         let unlock = app.buttons["Desbloquear"]
         XCTAssertTrue(unlock.waitForExistence(timeout: 15), "Falta el bloqueo")
         var looks = 0
+        let watchStart = Date()
         while unlock.exists && looks < 120 {
             XCTAssertFalse(banner.exists, "Mirada \(looks): el aviso dentro de la app está con el bloqueo delante")
             looks += 1
             Thread.sleep(forTimeInterval: 0.2)
         }
         // El pago llega a los ~4 s del arranque; el bloqueo dura 18 s: se mira bastante rato con el bloqueo puesto.
-        XCTAssertGreaterThan(looks, 25, "El bloqueo se quitó antes de que llegara el pago: la prueba no dice nada")
+        // Choque (p2): se mide el TIEMPO mirado, no el número de miradas. Con el simulador cargado cada mirada (dos
+        // consultas + 0,2 s) tarda ~0,7 s y 18 s de bloqueo daban justo 25 miradas: la prueba fallaba sin que el bloqueo
+        // se hubiera quitado antes. Lo que pedía (más de 25 × 0,2 s = 5 s con el bloqueo delante) sigue igual.
+        let watched = Date().timeIntervalSince(watchStart)
+        XCTAssertGreaterThan(watched, 5, "El bloqueo se quitó antes de que llegara el pago (\(looks) miradas en "
+                             + String(format: "%.1f s", watched) + "): la prueba no dice nada")
         // Lote final: el pago llegó de verdad con el bloqueo delante (si no, la parte (a) no probaría nada).
         XCTAssertGreaterThanOrEqual(Int(probe()["llegadasBloqueo"] ?? "") ?? 0, 1,
                                     "El pago no llegó con el bloqueo delante: \(probe())")
@@ -1120,7 +1133,7 @@ final class MotionShellTests: XCTestCase {
 
         // Avisos.
         launch(["-MiBancoDemoPrivate", "-MiBancoDemoScreen", "avisos"])
-        waitForLaunchToEnd(40)
+        waitForLaunchLayerToGo(40)
         Thread.sleep(forTimeInterval: 2)
         look("Avisos")
         app.terminate()
@@ -1204,7 +1217,7 @@ final class MotionShellTests: XCTestCase {
         app.terminate()
 
         launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "avisos"])
-        waitForLaunchToEnd(40)
+        waitForLaunchLayerToGo(40)
         let alertsTab = app.tabBars.buttons["Avisos"]
         if alertsTab.waitForExistence(timeout: 10), alertsTab.isSelected { reached.append("Avisos") }
         app.terminate()

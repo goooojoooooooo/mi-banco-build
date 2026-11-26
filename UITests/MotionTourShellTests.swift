@@ -296,6 +296,35 @@ final class MotionTourShellTests: MotionTourCase {
 
     func testRowDetailReduceMotion() throws { rowDetailBursts("row-detail-reducir", extra: ["-MiBancoReduceMotion"]) }
 
+    /// C8 (C6): la tarjeta del abanico vuela hasta la cabecera de su banco, que se abre encima de Inicio (la pestaña no
+    /// cambia). Luego «Inicio» lo cierra (`card-flight-vuelta`). A ×4.
+    private func cardFlightBursts(_ name: String, extra: [String] = []) {
+        launch(extra + ["-MiBancoDemoCardElements"])
+        waitForLaunchToEnd()
+        let anchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
+        let carousel = app.descendants(matching: .any).matching(anchor).firstMatch
+        XCTAssertTrue(carousel.waitForExistence(timeout: 15), "Falta el carrusel")
+        carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
+        XCTAssertTrue(app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 15), "No se abrió el abanico")
+        let card = app.buttons["wallet-card-rev"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "Falta la tarjeta de Revolut")
+        XCTAssertTrue(waitUntil(15) { card.isHittable }, "La tarjeta de Revolut no se puede tocar")
+        card.tap()
+        burst(name, frames: 24, every: 0.15)
+        let back = app.buttons["bank-over-home-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "Falta «Inicio» en el banco")
+        back.tap()
+        burst(name + "-vuelta", frames: 8, every: 0.15)
+    }
+
+    func testCardFlight() throws { cardFlightBursts("card-flight") }
+
+    func testCardFlightWithTheEyeClosed() throws { cardFlightBursts("card-flight-ojo", extra: ["-MiBancoDemoPrivate"]) }
+
+    func testCardFlightReduceMotion() throws {
+        cardFlightBursts("card-flight-reducir", extra: ["-MiBancoReduceMotion"])
+    }
+
     /// C4 (D2): la categoría de un pago: la ficha blanca se desliza a la elegida y su símbolo bota; luego se pliega.
     func testCategoryPick() throws {
         launch()

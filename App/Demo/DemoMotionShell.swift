@@ -122,6 +122,8 @@ extension DemoMode {
     /// Lote final: cuándo se tapó y cuándo empezó a destaparse la barra de pestañas en el último montaje (s desde 1970).
     var tabBarCoveredAt: Double?
     var tabBarUncoveredAt: Double?
+    /// C8: cuántas tarjetas han aterrizado en la cabecera de su banco.
+    var cardLandings = 0
     /// Lote final: pagos llegados (`model.arrival`) y cuántos con el bloqueo delante.
     var arrivals = 0
     var arrivalsUnderLock = 0
@@ -155,7 +157,7 @@ extension DemoMode {
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
             "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "lineaDibujada=\(drawnLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
-            "llegadas=\(arrivals)",
+            "llegadas=\(arrivals)", "aterrizajesTarjeta=\(cardLandings)",
             "barraTapada=\(tabBarCoveredAt.map { String(format: "%.3f", $0) } ?? "-")",
             "barraDestapada=\(tabBarUncoveredAt.map { String(format: "%.3f", $0) } ?? "-")", "llegadasBloqueo=\(arrivalsUnderLock)",
             "ojoAviso=\(alertEye)", "ojoActividad=\(activityEye)",

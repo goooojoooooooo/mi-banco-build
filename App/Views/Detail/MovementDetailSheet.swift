@@ -304,7 +304,7 @@ private struct DetailContent: View {
     }
 
     /// Lo que tarda el muelle `fly` (0,50 s) en quedar a la vista posado, a nivel Equilibrado (s).
-    static let flySettle = 0.55
+    static let flySettle = 0.35
 
     /// Avisos/m-12: «Te quedaban» se destapa cuando el importe se ha posado, contado con una pausa que lee `\.motion`,
     /// no con la `completion` de la animación: esa, con la hoja aún presentándose o la app cargada (batería en paralelo,

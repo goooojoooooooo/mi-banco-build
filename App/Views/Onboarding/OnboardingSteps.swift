@@ -28,13 +28,13 @@ struct OnboardingBalancesStep: View {
                             .titan(.homeTitle)
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
-                            .risesIn(when: arrived, after: 0.50, rise: 22)
+                            .risesIn(when: arrived, after: 0.30, rise: 22)
 
                         Text("Escribe lo que tienes ahora en cada banco. \(AppIdentity.displayName) lo irá actualizando.")
                             .titan(.callout)
                             .foregroundStyle(Theme.label2)
                             .fixedSize(horizontal: false, vertical: true)
-                            .risesIn(when: arrived, after: 0.62, rise: 22)
+                            .risesIn(when: arrived, after: 0.42, rise: 22)
                     }
 
                     VStack(spacing: 0) {
@@ -48,7 +48,7 @@ struct OnboardingBalancesStep: View {
                         }
                     }
                     .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
-                    .risesIn(when: arrived, after: 0.74, rise: 22)
+                    .risesIn(when: arrived, after: 0.54, rise: 22)
                 }
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.top, 8)
@@ -70,7 +70,7 @@ struct OnboardingBalancesStep: View {
             .accessibilityIdentifier("onboarding-next-1")
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.bottom, Theme.Space.gutter)
-            .risesIn(when: arrived, after: 0.86, rise: 34, bounce: 0.28)
+            .risesIn(when: arrived, after: 0.66, rise: 34, bounce: 0.28)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }

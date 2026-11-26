@@ -178,7 +178,9 @@ private func drawLaunchBands(_ frame: LaunchFrame, center: CGPoint, in context: 
         path.move(to: from)
         path.addLine(to: CGPoint(x: from.x + (to.x - from.x) * drawn, y: from.y + (to.y - from.y) * drawn))
         var layer = context
-        layer.opacity = 0.75 * pow(1 - widen, 1.6)
+        // Retoque 2: las bandas solo se ven sobre el negro (nunca por encima de la tarjeta ni del título de Inicio que
+        // se enciende debajo) y, al ensancharse, como mucho a 0,35.
+        layer.opacity = min(0.75 * pow(1 - widen, 1.6), widen > 0 ? 0.35 : 0.75) * frame.black
         layer.stroke(
             path,
             with: .linearGradient(gradient, startPoint: .zero, endPoint: CGPoint(x: size.width, y: size.height)),

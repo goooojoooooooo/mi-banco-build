@@ -268,7 +268,8 @@ private struct RollingSentence: View {
                 }
                 // Lo que va pegado al importe (un punto, una coma) no se separa de él al saltar de línea.
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    RollingAmount(cents: split.cents)
+                    // Dentro de una frase: si el ojo se cierra con la cifra montada, la máscara solo ocupa lo que mide.
+                    RollingAmount(cents: split.cents, inline: true)
                     if !pieces.glue.isEmpty { Text(pieces.glue) }
                 }
                 ForEach(Array(pieces.after.enumerated()), id: \.offset) { _, word in
@@ -295,8 +296,12 @@ struct SentencePieces: Equatable {
     let after: [String]
 
     init(_ split: AmountSplit) {
-        let suffix = split.suffix
-        before = Self.words(split.prefix)
+        self.init(prefix: split.prefix, suffix: split.suffix)
+    }
+
+    /// Lo que va antes y después del importe (también para frases de euros enteros, como la previsión de Gasto).
+    init(prefix: String, suffix: String) {
+        before = Self.words(prefix)
         if let space = suffix.firstIndex(of: " ") {
             let cut = suffix.index(after: space)
             glue = String(suffix[..<cut])

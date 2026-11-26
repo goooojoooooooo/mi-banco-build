@@ -114,7 +114,7 @@ struct LaunchSequence: View {
             LaunchSkyCanvas(frame: frame, center: center)
             LaunchMark(frame: frame, size: Self.markSize)
                 .scaleEffect(1 + (target.side / Self.markSize - 1) * flight)
-                .position(LaunchGeometry.lerp(center, target.center, flight))
+                .position(LaunchGeometry.riseThenSlide(center, target.center, flight))
                 // Con solo fundido (Sutil, Reducir movimiento) la marca grande nunca se ve más que el negro que tiene
                 // debajo: el guion la apaga ENTERA antes de que el negro deje ver Inicio y la marca de su barra (nunca dos).
                 .opacity(lands ? 1 : (pieces ? frame.mark * dissolve : min(frame.mark, frame.black)))
@@ -129,7 +129,7 @@ struct LaunchSequence: View {
                 // centrado; en la ranura no (el nombre de la barra es el mismo texto, con ese mismo hueco detrás).
                 .offset(x: tracking / 2 * (lands ? 1 - min(1, flight) : 1))
                 .scaleEffect(1 + (nameScale - 1) * min(1, flight))
-                .position(LaunchGeometry.lerp(nameHome, nameSlot.center, flight))
+                .position(LaunchGeometry.riseThenSlide(nameHome, nameSlot.center, flight))
                 // Sin ranura, el nombre se va apagando durante el vuelo.
                 // Hacia la bienvenida el nombre no viaja: se apaga en cuanto la marca despega.
                 .opacity(welcome != nil ? frame.name * Double(max(0, 1 - flight / 0.15))
@@ -229,7 +229,7 @@ struct LaunchExit: View {
             if timeline.exitDuration != nil {
                 GeometryReader { proxy in
                     LaunchStage(
-                        timeline: timeline, act: .exit(bands: cold), start: start, finished: finished,
+                        timeline: timeline, act: .exit(bands: false), start: start, finished: finished,
                         timeMultiplier: motion.timeMultiplier
                     ) { frame in
                         scene(frame, topInset: proxy.safeAreaInsets.top)
@@ -301,7 +301,7 @@ struct LaunchExit: View {
             }
             AppMark(size: from.width)
                 .scaleEffect(1 + (target.side / max(from.width, 1) - 1) * flight)
-                .position(LaunchGeometry.lerp(home, target.center, flight))
+                .position(LaunchGeometry.riseThenSlide(home, target.center, flight))
                 // Con ranura llega entera hasta ella; sin ranura se deshace por el camino.
                 .opacity(lands ? lostOpacity : frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: false))
         }
@@ -347,5 +347,14 @@ enum LaunchGeometry {
 
     static func lerp(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {
         CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k)
+    }
+
+    /// Retoque 2 (el vuelo de la marca sin cruzar nada): primero SUBE y después se desliza. La altura llega a la de la
+    /// ranura hacia el 60 % del vuelo (y no se pasa); lo horizontal avanza con el vuelo entero y termina después. Así la
+    /// marca va por la franja vacía de arriba y no pasa por encima de la tarjeta ni del título.
+    static func riseThenSlide(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {
+        let up = min(1, max(0, k) / 0.6)
+        let rise = 1 - (1 - up) * (1 - up)
+        return CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * rise)
     }
 }

@@ -61,7 +61,7 @@ import Testing
         #expect(abs(t.stagger / t.base - RollTiming.count.stagger / RollTiming.count.base) < 1e-9)
     }
 
-    /// Ojo de diseño 2.1: al cerrar el ojo nunca queda solo «, €». Cada casilla enseña su punto o el dígito al aza
+    /// Ojo de diseño 2.1: al cerrar el ojo nunca queda solo «, €». Cada casilla enseña su punto o el dígito al azar
     /// del último fotograma del barajado, nunca nada.
     @Test func closingNeverLeavesAnEmptyCell() {
         let last = AmountMask.scrambledDigits(count: 5, step: 6, seed: 42)

@@ -28,7 +28,7 @@ public struct RollTiming: Equatable, Sendable {
     public init(base: Double, perColumn: Double, stagger: Double) {
         self.base = base
         self.perColumn = perColumn
-        self.stagger = stagge
+        self.stagger = stagger
     }
 
     /// Contar desde 0 (o de un importe a otro).
@@ -193,7 +193,7 @@ public enum DigitRoll {
 
     private static func mod10(_ x: Double) -> Double {
         let r = x.truncatingRemainder(dividingBy: 10)
-        return r < 0 ? r + 10 : 
+        return r < 0 ? r + 10 : r
     }
 }
 

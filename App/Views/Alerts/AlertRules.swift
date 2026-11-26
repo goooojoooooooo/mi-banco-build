@@ -14,9 +14,15 @@ struct AlertRules: View {
     @State private var errorTick = 0
 
     private var revealTransition: AnyTransition {
+        // La fila del umbral entra con su muelle; al irse se apaga deprisa (0,12 s), antes de que la regla de debajo
+        // suba a su sitio: nunca queda montada sobre ella (menor m-6).
         motion.reduce
             ? AnyTransition.opacity
-            : AnyTransition.opacity.combined(with: AnyTransition.offset(y: -10))
+            : AnyTransition.asymmetric(
+                // Entra un instante después de que las reglas de debajo empiecen a hacerle sitio.
+                insertion: AnyTransition.opacity.combined(with: AnyTransition.offset(y: -10))
+                    .animation(motion.animation(.row).delay(motion.seconds(0.08))),
+                removal: AnyTransition.opacity.animation(.easeOut(duration: motion.seconds(0.12))))
     }
 
     var body: some View {

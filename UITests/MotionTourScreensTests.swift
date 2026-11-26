@@ -455,7 +455,37 @@ final class MotionTourScreensTests: MotionTourCase {
 
     /// Con Reducir movimiento: el porcentaje salta de tope en tope con un fundido, los nodos se funden y el ✓ sigue.
     func testBankConnectedReduce() throws {
-        bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion"], frames: 22)
+        bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion"], frames: 28)
+    }
+
+    /// De cerca, el remate (ojo de diseño 14.1–14.3): el tercer paso en marcha, la conexión termina de verdad, la cifra
+    /// corre a 100 mientras el tercer nodo se rellena con su ✓ y la línea pasa a «Todo listo»; una pausa; los pasos, el
+    /// saldo y el estado se apagan del todo y solo entonces salta el ✓ de «imagin, conectado». Cada paso de la demo dura
+    /// 1,6 s: el éxito llega a los 4,8 s del toque; la ráfaga empieza a los 3 s y saca un fotograma cada 0,25 s (×4).
+    private func bankConnectFinish(_ name: String, extra: [String]) {
+        let row = bankRow("ima", ["-MiBancoDemoConnectScript", "-MiBancoDemoConnectStep", "1.6", "-MiBancoDemoConnectFill", "6"] + extra)
+        row.tap()
+        let renew = app.buttons["Renovar conexión"]
+        XCTAssertTrue(renew.waitForExistence(timeout: 10), "Falta «Renovar conexión»")
+        Thread.sleep(forTimeInterval: 6)
+        XCTAssertTrue(renew.isHittable, "«Renovar conexión» no se puede tocar")
+        renew.tap()
+        Thread.sleep(forTimeInterval: 3)
+        burst(name, frames: 32, every: 0.25)
+        XCTAssertTrue(element("bank-connected-title").waitForExistence(timeout: 15), "La ráfaga no llegó a «conectado»")
+    }
+
+    func testBankConnectFinish() throws {
+        bankConnectFinish("bank-connect-finish", extra: [])
+    }
+
+    func testBankConnectFinishEye() throws {
+        bankConnectFinish("bank-connect-finish-eye", extra: ["-MiBancoDemoPrivate"])
+    }
+
+    /// Con Reducir movimiento: 100 con un fundido (sin contar), el nodo se funde con su ✓, la misma pausa y el mismo orden.
+    func testBankConnectFinishReduce() throws {
+        bankConnectFinish("bank-connect-finish-reduce", extra: ["-MiBancoReduceMotion"])
     }
 
     /// Tras conectar, la lista se llena por primera vez: fichas grises con un brillo que las barre y, al llegar los
@@ -540,7 +570,7 @@ final class MotionTourScreensTests: MotionTourCase {
         Thread.sleep(forTimeInterval: 5)
         XCTAssertTrue(confirm.isHittable, "«Importar» no se puede tocar")
         confirm.tap()
-        burst("import-confirm", frames: 14, every: 0.2)
+        burst("import-confirm", frames: 20, every: 0.2)
         XCTAssertTrue(app.buttons["bank-import-statement"].waitForExistence(timeout: 10), "Tras importar no volvió al banco")
     }
 }

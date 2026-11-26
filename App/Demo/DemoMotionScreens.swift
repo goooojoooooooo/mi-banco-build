@@ -92,5 +92,20 @@ extension DemoMode {
               seconds.isFinite, seconds > 0 else { return nil }
         return min(seconds, 120)
     }
+
+    /// `-MiBancoDemoNoWelcomeMark`: quita el gancho `.launchWelcomeMark()` en la bienvenida para ver en rojo la prueba
+    /// del aterrizaje de la marca del primer arranque.
+    static var skipsWelcomeMarkHook: Bool { isActive && arguments.contains("-MiBancoDemoNoWelcomeMark") }
+
+    /// `-MiBancoDemoOldSubscriptionRoll`: deja los totales de Suscripciones con `length: nil` (`.brief`) en vez de
+    /// `.seconds(0.45)`, para ver en rojo la prueba de 16.2.
+    static var oldSubscriptionRoll: Bool { isActive && arguments.contains("-MiBancoDemoOldSubscriptionRoll") }
+
+    /// `-MiBancoDemoRollTiming`: expone la duración real (ms) calculada por `RollingDigits.roll` en Suscripciones.
+    static var exposesRollTiming: Bool { isActive && arguments.contains("-MiBancoDemoRollTiming") }
+
+    /// `-MiBancoDemoKeepFocusOnEyeClose`: no suelta el foco al cerrar el ojo en Ajustes, para ver en rojo la
+    /// comprobación del teclado de N-1.
+    static var keepsFocusOnEyeClose: Bool { isActive && arguments.contains("-MiBancoDemoKeepFocusOnEyeClose") }
 }
 #endif

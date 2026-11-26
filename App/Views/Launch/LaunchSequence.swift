@@ -176,6 +176,9 @@ struct LaunchSequence: View {
             if noSlot, timeline.style == .pieces, let frame = anchor?.welcomeMarkFrame {
                 welcomeTarget = frame
                 anchor?.flyingToWelcome = true
+                #if DEBUG
+                LaunchProbe.shared.welcomeLandings += 1
+                #endif
             }
             onAssemble()
         }

@@ -126,6 +126,8 @@ extension DemoMode {
     var refusedUnlocks = 0
     /// Veces que la marca que vuela tras desbloquear ha aterrizado en la ranura de Inicio (entera, hasta el final).
     var landings = 0
+    /// Veces que la marca del primer arranque ha apuntado a `.launchWelcomeMark()` para aterrizar en la bienvenida.
+    var welcomeLandings = 0
     /// Cuándo se creó la app (segundos desde 1970) y cuántos milisegundos pasaron hasta montarse la capa del arranque:
     /// lo que el arranque tarda en EMPEZAR, que la propia capa no puede medir.
     var appInitAt: Double?
@@ -195,7 +197,7 @@ extension DemoMode {
             "bloqueoPiezas=\(lockPlays)", "bloqueoQuieto=\(lockStatic)", "salidas=\(exits)", "montajes=\(reveals)",
             "marcaAntes=\(lockMarkBeforeLeaving)", "marcaAlIrse=\(lockMarkLeaving)",
             "fundido=\(lockFading ? 1 : 0)", "marcasDobles=\(doubleMarks)",
-            "ranura=\(brandFlying)", "aterrizajes=\(landings)", "rechazados=\(refusedUnlocks)",
+            "ranura=\(brandFlying)", "aterrizajes=\(landings)", "bienvenida=\(welcomeLandings)", "rechazados=\(refusedUnlocks)",
             "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",

@@ -374,6 +374,9 @@ struct SettingsView: View {
 
     /// Suelta el foco de un saldo en edición sin animación (ver `onChange(of: preferences.privateMode)`).
     private func releaseAmountFocus() {
+        #if DEBUG
+        if DemoMode.keepsFocusOnEyeClose { return }
+        #endif
         guard focused != nil else { return }
         var still = Transaction()
         still.disablesAnimations = true

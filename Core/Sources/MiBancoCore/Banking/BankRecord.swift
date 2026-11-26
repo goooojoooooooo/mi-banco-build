@@ -38,10 +38,14 @@ public struct BankRecord: Equatable, Sendable {
     public var legacyRefs: [String]
     /// Día en que el banco lo apuntó (`booking_date`, a mediodía), solo en los apuntados. `timing` prefiere el día del pago.
     public var bookedDay: Date?
+    /// true = el banco o el extracto dicen que es un pago a una persona (código de comercio de transferencia, tipo
+    /// «Transfer» de Revolut). Pasa a `Movement.personPayment`.
+    public var personPayment: Bool
 
     public init(ref: String, bank: BankID, amountCents: Int, timing: RecordTiming, status: BankStatus,
                 merchant: String? = nil, isShop: Bool = false, balanceAfterCents: Int? = nil,
-                excludedFromSpending: Bool = false, legacyRefs: [String] = [], bookedDay: Date? = nil) {
+                excludedFromSpending: Bool = false, legacyRefs: [String] = [], bookedDay: Date? = nil,
+                personPayment: Bool = false) {
         self.ref = ref
         self.bank = bank
         self.amountCents = amountCents
@@ -53,6 +57,7 @@ public struct BankRecord: Equatable, Sendable {
         self.excludedFromSpending = excludedFromSpending
         self.legacyRefs = legacyRefs
         self.bookedDay = bookedDay
+        self.personPayment = personPayment
     }
 }
 

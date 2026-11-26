@@ -12,14 +12,18 @@ public struct ParsedMovement: Equatable, Sendable {
     /// o es el título de un pago con tarjeta sin destinatario. Falso para ingresos, envíos ("a Laura"), "de Carlos"
     /// y sin comercio. Es la señal positiva que permite buscar su logo en internet.
     public let merchantIsShop: Bool
+    /// true solo si es un PAGO que el aviso dice que es un envío a alguien (Bizum, transferencia, «has enviado»): la
+    /// señal de pago a persona (`Movement.personPayment`), aunque el comercio guardado sea solo «Ana».
+    public let personPayment: Bool
 
     public init(kind: MovementKind, amountCents: Int, merchant: String?, reportedBalanceCents: Int? = nil,
-                merchantIsShop: Bool = false) {
+                merchantIsShop: Bool = false, personPayment: Bool = false) {
         self.kind = kind
         self.amountCents = amountCents
         self.merchant = merchant
         self.reportedBalanceCents = reportedBalanceCents
         self.merchantIsShop = merchantIsShop
+        self.personPayment = personPayment
     }
 }
 

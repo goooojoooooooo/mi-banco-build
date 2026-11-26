@@ -221,13 +221,13 @@ struct StepperProgress: View {
 private struct StepSpinner: View {
     @Environment(\.motion) private var motion
     @Environment(\.scenePhase) private var scenePhase
-    /// En la pantalla de un banco: con la hoja acoplada los pasos no se ven.
-    @Environment(BankHeaderScroll.self) private var bankScroll: BankHeaderScroll?
+    /// Quien monta los pasos dice si algo los tapa (p. ej. la hoja del banco acoplada encima).
+    @Environment(\.stepsCovered) private var covered
 
-    /// Se para con la app fuera de primer plano o con la hoja del banco tapando los pasos (menor m-1): una espera de
-    /// minutos con la hoja arriba no gasta ni un fotograma.
+    /// Se para con la app fuera de primer plano o con los pasos tapados (menor m-1): una espera de minutos con la hoja
+    /// arriba no gasta ni un fotograma.
     private var paused: Bool {
-        scenePhase != .active || (bankScroll?.progress ?? 0) > 0.95
+        scenePhase != .active || covered
     }
 
     var body: some View {
@@ -282,6 +282,9 @@ struct StepPercentText: View {
         return (0...min(frames, 3_000)).map { since.addingTimeInterval(Double($0) / 30) }
     }
 
+    /// Acabado bien sin remate que contar (`succeed()`): el 100 llega de una vez, a la vez que el ✓ del último nodo.
+    private var landsAtOnce: Bool { percent.outcome == .succeeded && percent.finishFrom >= 100 }
+
     /// Lo que se dibuja (Core decide: en marcha, remate, congelado; con Reducir, sin contar).
     private func shown(at date: Date) -> Int {
         percent.drawn(elapsed: date.timeIntervalSince(since) / stretch, reduce: motion.reduce)
@@ -297,11 +300,19 @@ struct StepPercentText: View {
                 .fontWeight(.semibold)
                 .monospacedDigit()
                 .foregroundStyle(Theme.label)
-                .contentTransition(motion.reduce ? .opacity : .identity)
-                .animation(motion.reduce ? motion.fade : nil, value: value)
+                .contentTransition(motion.reduce || landsAtOnce ? .opacity : .identity)
+                // Un 100 que llega sin cuenta (importar) entra con el mismo fundido que el relleno del último nodo.
+                .animation(motion.reduce ? motion.fade : (landsAtOnce ? .easeInOut(duration: motion.seconds(0.2)) : nil),
+                           value: value)
                 .accessibilityLabel("Paso \(stepNumber) de \(stepCount), \(value) por ciento")
                 .accessibilityAddTraits(.updatesFrequently)
                 .accessibilityIdentifier(identifier)
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Los pasos están tapados (no se ven): el arco del paso en curso se para. Lo pone quien los monta (la pantalla de un
+    /// banco, con la hoja acoplada); el componente no sabe nada de esa pantalla (menor m-7 del lote 3).
+    @Entry var stepsCovered = false
 }

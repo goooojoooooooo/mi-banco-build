@@ -54,6 +54,9 @@ struct MotionGallery: View {
     @State private var cents = 377475
     @State private var lifted = false
     @State private var burst = 0
+    /// Cuántas veces ha avisado un botón que se transforma de que terminó (`onFinish`), y con qué.
+    @State private var morphFinished = 0
+    @State private var morphLast = "-"
     @State private var sheenPhase: CGFloat = 0.3
     @State private var fraction = 0.45
     @State private var step = 0
@@ -357,13 +360,28 @@ struct MotionGallery: View {
 
     private var morphSection: some View {
         section("Botón que se transforma") {
-            MorphingButton(title: "Probar aviso", doneTitle: "Enviado") {
+            MorphingButton(title: "Probar aviso", doneTitle: "Enviado", action: {
                 try? await Task.sleep(for: .milliseconds(700))
                 return true
-            }
-            MorphingButton(title: "Probar fallo", doneTitle: "Enviado") {
+            }, onFinish: { ok in
+                morphFinished += 1
+                morphLast = ok ? "bien" : "mal"
+            })
+            MorphingButton(title: "Probar fallo", doneTitle: "Enviado", action: {
                 try? await Task.sleep(for: .milliseconds(500))
                 return false
+            }, onFinish: { ok in
+                morphFinished += 1
+                morphLast = ok ? "bien" : "mal"
+            })
+            Text("Terminados: \(morphFinished) · \(morphLast)")
+                .titan(.meta)
+                .foregroundStyle(Theme.label2)
+                .accessibilityIdentifier("gallery.morph.finished")
+            // Un título largo: mientras se encoge al círculo no se parte en más líneas.
+            MorphingButton(title: "Probar un aviso con un título largo", doneTitle: "Enviado") {
+                try? await Task.sleep(for: .milliseconds(900))
+                return true
             }
             // Un hueco alto con un `Spacer` hermano: el botón conserva su alto (K9).
             VStack(spacing: 0) {

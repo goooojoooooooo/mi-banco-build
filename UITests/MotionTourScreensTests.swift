@@ -456,6 +456,27 @@ final class MotionTourScreensTests: MotionTourCase {
     /// Con Reducir movimiento: el porcentaje salta de tope en tope con un fundido, los nodos se funden y el ✓ sigue.
     func testBankConnectedReduce() throws {
         bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion"], frames: 28)
+        // Y «Listo» con Reducir movimiento: «conectado» se va y vuelve la cabecera de siempre en el acto, sin recorrido
+        // de la hoja (lote de cierre).
+        let done = app.buttons["bank-connected-done"]
+        XCTAssertTrue(done.waitForExistence(timeout: 10), "Falta «Listo»")
+        Thread.sleep(forTimeInterval: 3)
+        done.tap()
+        burst("bank-connected-reduce-listo", frames: 12, every: 0.2)
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "«Listo» no volvió a la cabecera")
+    }
+
+    /// Cerrar el ojo con el interruptor de Ajustes, mirando los saldos (lote de cierre): ningún fotograma tras el toque
+    /// enseña una cifra; los saldos son la máscara en el acto.
+    func testSettingsEyeClose() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let toggle = element("settings-private-mode")
+        scrollDown(to: toggle)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8), "Falta el interruptor «Modo privado»")
+        Thread.sleep(forTimeInterval: 1)
+        toggle.tap()
+        burst("settings-eye-close", frames: 12, every: 0.1)
     }
 
     /// De cerca, el remate (ojo de diseño 14.1–14.3): el tercer paso en marcha, la conexión termina de verdad, la cifra

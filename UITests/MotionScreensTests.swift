@@ -918,7 +918,47 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 8), "Con la hoja abajo no volvió la barra de pestañas")
         goBack()
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes")
+        // Salir de la pantalla del banco con la hoja SUBIDA (barra escondida): en Ajustes la barra vuelve.
+        let row = app.buttons["settings-bank-rev"]
+        XCTAssertTrue(waitFor(hittable, row, timeout: 8), "La fila del banco no se puede tocar")
+        row.tap()
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
+        drag(from: 0.70, to: 0.30)
+        XCTAssertTrue(waitFor(NSPredicate(format: "hittable == false"), settingsTab, timeout: 5),
+                      "Con la hoja subida sigue la barra de pestañas")
+        goBack()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes con la hoja subida")
+        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 8), "Al salir con la hoja subida la barra de pestañas no volvió")
         XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "La barra de pestañas no cambia de pestaña al volver")
+    }
+
+    /// Cerrar el ojo desde Ajustes (lote de cierre, privacidad): en el mismo instante del toque, ningún campo de saldo
+    /// DIBUJA una cifra (la sonda «dibujado: …» lee el texto que se le da al campo) ni la dice, y no hay ningún importe
+    /// con cifras en pantalla. Antes el campo seguía conteniendo la cifra, pintada en transparente y apagándose con la
+    /// animación del interruptor. Caso de control: con el ojo abierto, el campo dibuja su cifra.
+    func testClosingTheEyeInSettingsMasksAtOnce() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoDrawnAmounts"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let toggle = element("settings-private-mode")
+        scrollDown(to: toggle)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8), "Falta el interruptor «Modo privado»")
+        let field = app.textFields["Saldo de Trade Republic"]
+        // Los saldos van justo encima del interruptor: si quedan fuera, se sube un poco sin perderlo de vista.
+        var nudges = 0
+        while !(field.exists && field.isHittable && toggle.isHittable) && nudges < 4 {
+            drag(from: 0.45, to: 0.60)
+            nudges += 1
+        }
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Falta el saldo de Trade Republic junto al interruptor")
+        XCTAssertTrue(toggle.isHittable, "El interruptor no se puede tocar con los saldos a la vista")
+        XCTAssertNotNil(value(field).range(of: "dibujado: .*[0-9]", options: .regularExpression),
+                        "Control: con el ojo abierto el campo no dibuja su cifra: \(value(field))")
+        toggle.tap()
+        let now = value(field)
+        XCTAssertTrue(now.hasPrefix("importe oculto"), "Tras cerrar el ojo el campo se sigue leyendo: \(now)")
+        XCTAssertNil(now.range(of: "dibujado: .*[0-9]", options: .regularExpression),
+                     "Tras cerrar el ojo el campo sigue dibujando una cifra: \(now)")
+        XCTAssertEqual(visibleAmounts(), [], "Tras cerrar el ojo en Ajustes se ven importes")
     }
 
     /// «Ver movimientos» cierra «conectado» y sube la hoja (el título pequeño queda acoplado).
@@ -1063,13 +1103,29 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(confirm.isEnabled)
         confirm.tap()
         let bank = app.buttons["bank-import-statement"]
+        // El tercer nodo («Paso 3: Importar») y el 100 cambian en la misma transacción (re-revisión del lote 3, m-13):
+        // si el nodo ya está hecho, el porcentaje leído DESPUÉS dice 100; y si dice 100, el nodo leído después está hecho.
+        let third = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Paso 3: Importar")).firstMatch
         var afterTap: [Int] = []
+        var alternate = false
         let leaving = Date().addingTimeInterval(25)
         while Date() < leaving, !bank.exists {
-            guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
-            XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")
-            XCTAssertGreaterThanOrEqual(now.percent, afterTap.last ?? 0, "El porcentaje bajó al importar")
-            afterTap.append(now.percent)
+            alternate.toggle()
+            if alternate {
+                guard third.exists else { continue }
+                let done = (third.value as? String) == "hecho"
+                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                if done { XCTAssertEqual(now.percent, 100, "El tercer paso salió hecho antes del 100: \(now)") }
+                afterTap.append(now.percent)
+            } else {
+                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")
+                XCTAssertGreaterThanOrEqual(now.percent, afterTap.last ?? 0, "El porcentaje bajó al importar")
+                if now.percent == 100, third.exists {
+                    XCTAssertEqual(third.value as? String, "hecho", "El 100 salió antes de que el tercer paso estuviera hecho")
+                }
+                afterTap.append(now.percent)
+            }
         }
         XCTAssertTrue(bank.waitForExistence(timeout: 8), "Tras importar no volvió a la pantalla del banco")
         XCTAssertTrue(afterTap.contains { $0 > 67 }, "Al importar el porcentaje no se movió de 67: \(afterTap)")

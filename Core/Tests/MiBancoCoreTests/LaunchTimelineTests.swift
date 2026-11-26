@@ -107,6 +107,16 @@ import Testing
                 #expect(brighter.isEmpty, "\(name): la marca se ve más que el negro en \(brighter.count) instantes")
                 #expect(doubled.isEmpty, "\(name): dos marcas a la vez en \(doubled.count) instantes, p. ej. \(doubled.prefix(2))")
             }
+            // Sin «fotograma en negro»: en ningún instante están a la vez casi apagadas la marca grande y Inicio (en
+            // Sutil, con la curva suave, la cola de la marca dejaba ~40 ms de negro casi total; run7, launch-sutil 5).
+            let fadeOutFrom = timeline.reduceMotion ? 0.24 : 0
+            var blank: [Double] = []
+            for t in stride(from: fadeOutFrom, through: timeline.duration, by: 0.001) {
+                let frame = timeline.frame(at: t)
+                if max(frame.mark, 1 - frame.black) < 0.1 { blank.append(t) }
+            }
+            // Como mucho un fotograma de 60 Hz (16,7 ms) en el que no se ve casi nada.
+            #expect(blank.count <= 18, "\(timeline.level) reducir=\(timeline.reduceMotion): \(blank.count) ms casi en negro")
             // Y el fundido sigue acabando: sin negro ni marca al final.
             #expect(timeline.frame(at: timeline.duration).black == 0)
             #expect(timeline.frame(at: timeline.duration).mark == 0)
@@ -155,9 +165,23 @@ import Testing
     }
 
     @Test func skipOnAFadeJumpsToTheReveal() {
-        // Con Reducir movimiento no hay vuelo: el salto va al momento en que Inicio empieza a verse.
-        #expect(near(reduced.time(elapsed: 0.1, skippedAt: 0.1), reduced.assembleAt))
+        // Con Reducir movimiento no hay vuelo: el salto va al momento en que Inicio empieza a verse (la marca grande ya
+        // se ha apagado: 0,24 + 0,12 s).
+        #expect(near(reduced.interactiveAt, 0.24 + 0.12))
+        #expect(near(reduced.time(elapsed: 0.1, skippedAt: 0.1), reduced.interactiveAt))
         #expect(reduced.finishesAt(skippedAt: 0.1) < reduced.duration)
+    }
+
+    /// Re-revisión del lote 2, nota 2: con solo fundido, los toques no pasan a Inicio mientras sigue bajo el negro
+    /// entero; justo cuando empieza a verse, sí.
+    @Test func aFadeLetsTouchesThroughOnlyOnceHomeShows() {
+        for timeline in [subtle, reduced, LaunchTimeline(level: .subtle, reduceMotion: true)] {
+            let before = timeline.frame(at: timeline.interactiveAt - 0.01)
+            #expect(before.black == 1, "\(timeline.level): Inicio toca bajo el negro entero")
+            let after = timeline.frame(at: timeline.interactiveAt + 0.02)
+            #expect(after.black < 1, "\(timeline.level): a la hora de tocar, Inicio aún no se ve")
+            #expect(timeline.interactiveAt < timeline.duration)
+        }
     }
 
     @Test func scriptTimeNeverGoesBackwards() {

@@ -118,19 +118,8 @@ private struct CountingWholeEuros: View {
 
     var body: some View {
         if let split = WholeEuroSplit(text) {
-            let pieces = SentencePieces(prefix: split.prefix, suffix: split.suffix)
-            ParagraphFlow {
-                ForEach(Array(pieces.before.enumerated()), id: \.offset) { _, word in
-                    Text(word)
-                }
-                // Lo que va pegado al importe (un punto, una coma) no se separa de él al saltar de línea.
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    RollingAmount(cents: split.euros * 100, style: .whole(sign: false), inline: true)
-                    if !pieces.glue.isEmpty { Text(pieces.glue) }
-                }
-                ForEach(Array(pieces.after.enumerated()), id: \.offset) { _, word in
-                    Text(word)
-                }
+            AmountSentence(pieces: SentencePieces(prefix: split.prefix, suffix: split.suffix)) {
+                RollingAmount(cents: split.euros * 100, style: .whole(sign: false), inline: true)
             }
         } else {
             Text(text)

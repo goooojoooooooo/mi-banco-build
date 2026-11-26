@@ -10,7 +10,11 @@ struct WeekBlock: View {
     let balance: BalanceInfo?
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.entrance) private var entrance
     @ScaledMetric(relativeTo: .caption) private var barArea: CGFloat = 40
+
+    /// Cuenta desde 0 solo dentro del montaje de Inicio; en un cambio de tarjeta (o fuera de una entrada) sale con su cifra.
+    private var countsOnAssembly: Bool { entrance.active && entrance.scope == .assembly }
 
     var body: some View {
         let hidden = preferences.privateMode
@@ -20,9 +24,14 @@ struct WeekBlock: View {
                     Text(card.bank.map { "Gastado en 7 días · \($0.shortName)" } ?? "Gastado en 7 días")
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
-                    // Rueda al cambiar de tarjeta o al llegar un movimiento; con el ojo cerrado dibuja «•••,•• €».
-                    RollingAmount(cents: week.totalCents)
+                    // Un importe por tarjeta (`.id(card)`): al cambiar de tarjeta se monta de nuevo y sale ya con el suyo,
+                    // con la lista (nunca enseña un instante la cifra de la otra tarjeta, ni rueda de una a otra, ni un
+                    // «0,00 €»). Al montarse Inicio (arranque o desbloqueo) cuenta desde 0 como las cifras de la tarjeta
+                    // (su fila aún está oculta mientras el kit espera para rodar). Llega un movimiento: rueda a la cifra
+                    // nueva. Con el ojo cerrado dibuja «•••,•• €».
+                    RollingAmount(cents: week.totalCents, countsUp: countsOnAssembly)
                         .titan(.week)
+                        .id(card)
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Gastado en 7 días: \(spokenAmount(week.totalCents, hidden: hidden)). \(hidden ? "" : week.summary)")
@@ -48,7 +57,7 @@ struct WeekBlock: View {
     @ViewBuilder
     private var footnote: some View {
         if card == .all, let pace {
-            PaceSentence(pace: pace)
+            PaceLineSwap(pace: pace)
         } else if card != .all {
             Text(balanceFootnote)
         }
@@ -64,6 +73,31 @@ struct WeekBlock: View {
         case .notice, .manual:
             return balance.estimated ? "Saldo estimado: corrígelo en Ajustes" : "Saldo exacto del último aviso"
         }
+    }
+}
+
+/// La frase del mes cuando cambia (llega un movimiento): no cambia de golpe antes que nada se mueva. Espera a que la
+/// fila nueva aterrice (0,2 s), se apaga en 0,1 s, cambia y vuelve en 0,1 s: nunca dos frases a la vez. Con Reducir
+/// movimiento, el mismo fundido sin espera. Solo cambia la opacidad.
+private struct PaceLineSwap: View {
+    let pace: PaceLine
+    @Environment(\.motion) private var motion
+    @State private var shown: PaceLine?
+    @State private var visible = true
+
+    var body: some View {
+        PaceSentence(pace: shown ?? pace)
+            .opacity(visible ? 1 : 0)
+            .onChange(of: pace) { _, new in
+                let wait = motion.reduce ? 0 : motion.seconds(0.2)
+                withAnimation(.easeIn(duration: motion.seconds(0.1)).delay(wait)) {
+                    visible = false
+                } completion: {
+                    shown = new
+                    withAnimation(.easeOut(duration: motion.seconds(0.1))) { visible = true }
+                }
+            }
+            .onAppear { shown = pace }
     }
 }
 

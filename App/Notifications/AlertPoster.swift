@@ -43,6 +43,12 @@ enum AlertPoster {
             info["monthCents"] = merchantMonth.totalThisMonthCents
         }
         if let todaySpentCents { info["todaySpent"] = todaySpentCents }
+        // I-2 (N1): el ojo de la app en el momento del aviso (clave nueva; las de arriba no cambian). La vista ampliada
+        // dibuja máscaras si esto o la suite compartida dicen ojo cerrado. El texto plegado (título y cuerpo) lo
+        // compone el sistema con `alertText` y NO cambia: decisión del dueño.
+        if let eye = SharedPrivacy.read(from: SharedPrivacy.suite(infoDictionary: Bundle.main.infoDictionary)) {
+            info[SharedPrivacy.key] = eye
+        }
         content.userInfo = info
         await add(content, id: m.id.uuidString)
     }

@@ -54,6 +54,8 @@ struct HomeEntrance: ViewModifier {
     static let animatedRows = 9
 
     let piece: Piece
+    /// La opacidad de la lista a la que pertenece la pieza (atenuada mientras cambia de tarjeta, ver `HomeView.listAlpha`).
+    var listOpacity: Double = 1
     @Environment(\.entrance) private var entrance
     @Environment(\.motion) private var motion
     @State private var landed = -1
@@ -94,12 +96,27 @@ struct HomeEntrance: ViewModifier {
     func body(content: Content) -> some View {
         let plan = plan
         let waiting = plan != nil && landed != entrance.token
+        // En un cambio de tarjeta la lista nueva no parte de invisible: sale de donde se quedó la vieja (atenuada, ver
+        // `HomeView.showList`), así la pantalla nunca se queda en negro entre las dos. Solo sube a su sitio.
+        // Una sola cifra: la que recibe `.opacity` es la misma que apunta la sonda de las pruebas (`DrawnOpacity`).
+        let drawn = listOpacity * (waiting ? opacityWhileWaiting : 1)
         content
-            .opacity(waiting ? 0 : 1)
+            .modifier(DrawnOpacity(value: drawn, measured: entrance.scope == .list && waiting))
             .scaleEffect(waiting && !motion.reduce ? (plan?.scale ?? 1) : 1)
             .offset(y: waiting ? motion.distance(plan?.rise ?? 0) : 0)
             .onAppear(perform: land)
             .onChange(of: entrance.token) { _, _ in land() }
+    }
+
+    /// La opacidad de la pieza mientras espera su turno: 0 en el montaje (y con Reducir movimiento), 1 en un cambio de
+    /// lista (la lista nueva solo sube a su sitio).
+    private var opacityWhileWaiting: Double {
+        var visible = entrance.scope == .list && !motion.reduce
+        #if DEBUG
+        // Solo para probar la prueba (`-MiBancoDemoListBlanks`): la regresión exacta, la lista nueva parte de invisible.
+        if DemoMode.listSwapBlanks { visible = false }
+        #endif
+        return visible ? 1 : 0
     }
 
     private func land() {
@@ -111,9 +128,63 @@ struct HomeEntrance: ViewModifier {
 }
 
 extension View {
-    /// Esta pieza entra por capas con Inicio (ver `HomeEntrance`).
-    func homeEntrance(_ piece: HomeEntrance.Piece) -> some View {
-        modifier(HomeEntrance(piece: piece))
+    /// Esta pieza entra por capas con Inicio (ver `HomeEntrance`). `listOpacity`: la opacidad de su lista.
+    func homeEntrance(_ piece: HomeEntrance.Piece, listOpacity: Double = 1) -> some View {
+        modifier(HomeEntrance(piece: piece, listOpacity: listOpacity))
+    }
+}
+
+/// Aplica la opacidad de una pieza de Inicio y, solo en DEBUG, apunta ESE MISMO valor en la sonda del cambio de lista
+/// (`fondoLista`, la menor de las piezas de la lista nueva mientras esperan su turno). Así la prueba ve lo que se dibuja:
+/// cambiar la opacidad de las piezas obliga a pasar por aquí.
+private struct DrawnOpacity: ViewModifier {
+    let value: Double
+    /// La pieza es de la lista nueva de un cambio de tarjeta y aún espera su turno.
+    let measured: Bool
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        content
+            .opacity(value)
+            .onChange(of: DrawnSample(value: value, measured: measured), initial: true) { _, sample in
+                guard sample.measured else { return }
+                HomeProbe.shared.listSwapFloor = min(HomeProbe.shared.listSwapFloor, Int((sample.value * 100).rounded()))
+            }
+        #else
+        content.opacity(value)
+        #endif
+    }
+}
+
+#if DEBUG
+private struct DrawnSample: Equatable {
+    let value: Double
+    let measured: Bool
+}
+#endif
+
+/// Un importe de la tarjeta que, al montarse Inicio (arranque o desbloqueo), vuelve a contar desde 0: el kit lo pone a 0
+/// y espera 0,15 s (× intensidad y cámara lenta) antes de rodar. Durante esa espera no se enseña: lo primero que se ve
+/// es la cifra ya rodando, nunca un «0,00 €» quieto. Fuera del montaje (o con Reducir movimiento, que no cuenta) no
+/// hace nada. Solo cambia la opacidad, con una sola secuencia de fotogramas clave por montaje.
+struct RollStartVeil: ViewModifier {
+    @Environment(\.entrance) private var entrance
+    @Environment(\.motion) private var motion
+
+    func body(content: Content) -> some View {
+        let veils = entrance.active && entrance.scope == .assembly && !motion.reduce
+        let start = veils ? 0.0 : 1.0
+        let wait = veils ? motion.seconds(0.15) : 0.001
+        let show = motion.seconds(0.05)
+        content.keyframeAnimator(initialValue: 1.0, trigger: entrance.token) { view, opacity in
+            view.opacity(opacity)
+        } keyframes: { _ in
+            KeyframeTrack {
+                MoveKeyframe(start)
+                LinearKeyframe(start, duration: wait)
+                LinearKeyframe(1.0, duration: show)
+            }
+        }
     }
 }
 
@@ -244,6 +315,14 @@ struct DrawnTextAuditProbe: View {
     var arrivalPulses = 0
     /// Cuántas veces ha entrado la lista escalonada por un cambio de tarjeta.
     var listEntrances = 0
+    /// Opacidad efectiva (en %) más baja con la que se dibujó una pieza de la lista nueva en el último cambio de lista
+    /// (opacidad de la lista × la de su entrada): nunca 0 con movimiento (la pantalla no se queda en negro entre las
+    /// dos listas). -1 = aún no ha habido cambio.
+    var listSwapFloor = -1
+    /// 1 mientras alguna fila está marcada como recién llegada (fondo y, si es un ingreso, ✓ verde).
+    var freshRows = 0
+    /// Llegadas anunciadas (aterricen o no).
+    var arrivalsAnnounced = 0
     /// Veces que se ha montado el ✓ del éxito (`SuccessMark`, solo «He visto salir») y el ✓ de «preparado»
     /// (`PreparedMark`, el paso «listo» de «Mover dinero»).
     var successMarks = 0
@@ -253,7 +332,7 @@ struct DrawnTextAuditProbe: View {
         [
             "montajes=\(assemblies)", "inclinacion=\(tiltRunning ? 1 : 0)", "tirones=\(refreshes)", "alDia=\(refreshesDone)",
             "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
-            "insignias=\(arrivalBadges)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)",
+            "insignias=\(arrivalBadges)", "nueva=\(freshRows)", "anunciadas=\(arrivalsAnnounced)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)",
             "exitos=\(successMarks)", "preparados=\(preparedMarks)",
         ].joined(separator: ";")
     }

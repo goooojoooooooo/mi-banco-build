@@ -122,22 +122,23 @@ struct CheckShape: Shape {
     }
 }
 
-/// Un ✓ que se dibuja en 0,35 s cuando aparece (con Reducir movimiento, aparece entero).
+/// Un ✓ que se dibuja en 0,35 s cuando aparece (con Reducir movimiento, aparece entero). Lee `\.motion`: obedece la
+/// intensidad, Reducir movimiento (también el forzado al grabar) y la cámara lenta.
 struct DrawnCheck: View {
     var lineWidth: CGFloat = 2.2
     var color: Color = Theme.label
     @State private var progress: CGFloat = 0
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
 
     var body: some View {
         CheckShape()
             .trim(from: 0, to: progress)
             .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round))
             .onAppear {
-                if reduceMotion {
+                if motion.reduce {
                     progress = 1
                 } else {
-                    withAnimation(.easeOut(duration: 0.35).delay(0.05)) { progress = 1 }
+                    withAnimation(.easeOut(duration: motion.seconds(0.35)).delay(motion.seconds(0.05))) { progress = 1 }
                 }
             }
             .accessibilityHidden(true)

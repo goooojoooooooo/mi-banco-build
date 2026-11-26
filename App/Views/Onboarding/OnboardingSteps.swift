@@ -14,7 +14,8 @@ struct OnboardingBalancesStep: View {
     @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.presentationGate) private var gate
+    /// El bloqueo, tal como lo da la carcasa (`RootView`).
+    @Environment(\.shellReveal) private var shell
     @State private var texts: [BankID: String] = [:]
     @State private var errors: [BankID: String] = [:]
     @FocusState private var focused: BankID?
@@ -75,8 +76,8 @@ struct OnboardingBalancesStep: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }
         }
-        .onChange(of: gate?.isLocked) { _, locked in
-            if locked == true { focused = nil }
+        .onChange(of: shell.locked) { _, locked in
+            if locked { focused = nil }
         }
     }
 
@@ -97,10 +98,10 @@ struct OnboardingBalancesStep: View {
                         .foregroundStyle(Theme.label)
                 }
                 if !stacked { Spacer(minLength: Theme.Space.small) }
-                TextField("0,00 €", text: binding(for: bank))
+                TextField("0,00 €", text: maskedFieldText(binding(for: bank), masked: masked))
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .maskedAmountField(masked, alignment: stacked ? .leading : .trailing)
+                    .maskedAmountField(masked)
                     .multilineTextAlignment(stacked ? .leading : .trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -112,7 +113,8 @@ struct OnboardingBalancesStep: View {
                         in: .rect(cornerRadius: Theme.Radius.field)
                     )
                     .accessibilityLabel("Saldo de \(bank.displayName)")
-                    .accessibilityValue(masked ? "importe oculto" : currentText)
+                    .accessibilityValue((masked ? "importe oculto" : currentText)
+                        + drawnAmountForTests(masked ? maskedFieldMask : currentText))
             }
             if let error = errors[bank] {
                 Text(error)

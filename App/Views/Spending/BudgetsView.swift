@@ -99,6 +99,8 @@ struct BudgetsView: View {
                         if let hint = hint(scope, snapshot: snapshot) {
                             Text(preferences.privateMode ? maskingAmounts(hint) : hint)
                                 .titan(.meta)
+                                .contentTransition(.identity)
+                                .privacySensitive()
                                 .foregroundStyle(Theme.label3)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityLabel(preferences.privateMode ? maskingAmounts(hint, with: "importe oculto") : hint)

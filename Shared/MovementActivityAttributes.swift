@@ -16,5 +16,8 @@ struct MovementActivityAttributes: ActivityAttributes {
         /// Titanio (añadido): dominio del logo del comercio si va dentro de la app. Opcional, así que un estado
         /// antiguo sin esta clave se sigue leyendo (nil = ficha del banco).
         var logoDomain: String? = nil
+        /// I-2: el ojo de la app estaba cerrado: la Live Activity dibuja máscaras («•••,•• €») y VoiceOver dice
+        /// «importe oculto». Opcional: un estado viejo sin esta clave se sigue leyendo (nil = abierto, como antes).
+        var hidden: Bool? = nil
     }
 }

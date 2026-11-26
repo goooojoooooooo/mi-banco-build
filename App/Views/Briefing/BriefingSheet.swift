@@ -18,14 +18,16 @@ struct BriefingSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(AppPreferences.self) private var preferences
 
-    @State private var revealedStage = 0
+    /// B1: cada entrada de la hoja estrena número; cada bloque entra solo (120 ms × 0,92ⁿ) y `entranceCompleted` llega
+    /// cuando ha entrado el último bloque (`finishEntranceLater`), o antes con un toque.
+    @State private var entranceToken = 0
     @State private var entranceCompleted = false
     /// true solo si el dueño tocó durante la entrada para terminarla al instante (corta también la cuenta de 0,9 s).
     @State private var userSkippedEntrance = false
-    @State private var entranceTask: Task<Void, Never>?
     @State private var questionDraft = ""
     @State private var askTask: Task<Void, Never>?
     @State private var feedbackTick = 0
@@ -52,7 +54,7 @@ struct BriefingSheet: View {
 
                             if !briefingModel.openingText.isEmpty {
                                 openingBlock
-                                    .modifier(BriefingReveal(visible: isVisible(stage: 1), reduceMotion: reduceMotion))
+                                    .modifier(BriefingReveal(stage: 1, completed: entranceCompleted, token: entranceToken))
                             }
 
                             BriefingLineView(
@@ -60,28 +62,27 @@ struct BriefingSheet: View {
                                 role: .sheetTitle,
                                 color: Theme.label
                             )
-                            .modifier(BriefingReveal(visible: isVisible(stage: 2), reduceMotion: reduceMotion))
+                            .modifier(SpokenHighlight(id: "headline", current: speaker.currentLine))
+                            .modifier(BriefingReveal(stage: 2, completed: entranceCompleted, token: entranceToken))
 
                             ForEach(Array(briefing.sections.enumerated()), id: \.element.id) { index, section in
                                 sectionCard(section)
-                                    .modifier(BriefingReveal(
-                                        visible: isVisible(stage: 3 + min(index, 5)),
-                                        reduceMotion: reduceMotion
-                                    ))
+                                    .modifier(BriefingReveal(stage: 3 + min(index, 5), completed: entranceCompleted, token: entranceToken))
                             }
 
                             if let tip = briefing.tip {
                                 tipCard(tip)
-                                    .modifier(BriefingReveal(visible: isVisible(stage: 8), reduceMotion: reduceMotion))
+                                    .modifier(SpokenHighlight(id: tip.id, current: speaker.currentLine))
+                                    .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
                             }
 
                             if !briefingModel.cards.isEmpty {
                                 interestCardsBlock
-                                    .modifier(BriefingReveal(visible: isVisible(stage: 8), reduceMotion: reduceMotion))
+                                    .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
                             }
 
                             askBlock(scrollProxy: proxy)
-                                .modifier(BriefingReveal(visible: isVisible(stage: 8), reduceMotion: reduceMotion))
+                                .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
                         }
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.top, 20)
@@ -120,6 +121,8 @@ struct BriefingSheet: View {
                     .accessibilityHidden(true)
             }
         }
+        // B1: la entrada se da por acabada cuando ha entrado el último bloque (o antes, con un toque).
+        .task(id: entranceToken) { await finishEntranceLater(token: entranceToken) }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .sensoryFeedback(Haptics.detent, trigger: feedbackTick)
@@ -129,7 +132,6 @@ struct BriefingSheet: View {
             startEntrance()
         }
         .onDisappear {
-            entranceTask?.cancel()
             askTask?.cancel()
             speaker.stop()
             briefingModel.setSheetVisible(false)
@@ -140,6 +142,10 @@ struct BriefingSheet: View {
                 speaker.stop()
             }
         }
+        #if DEBUG
+        // Para las pruebas (B2): qué línea suena.
+        .onChange(of: speaker.currentLine, initial: true) { _, line in LaunchProbe.shared.spokenLine = line ?? "-" }
+        #endif
     }
 
     // MARK: - Cabecera
@@ -178,6 +184,10 @@ struct BriefingSheet: View {
                 .buttonStyle(.pressable)
                 .accessibilityLabel(speakingBriefing ? "Parar" : "Escuchar")
                 .accessibilityIdentifier("briefing-listen")
+                #if DEBUG
+                // Solo DEBUG, para las pruebas (B2): qué línea suena (el fondo de la hoja no se ve con ella delante).
+                .accessibilityValue(DemoMode.isActive ? (speaker.currentLine ?? "-") : "")
+                #endif
 
                 Button {
                     speaker.stop()
@@ -199,7 +209,7 @@ struct BriefingSheet: View {
                 .titan(.largeTitle)
                 .foregroundStyle(Theme.label)
                 .accessibilityAddTraits(.isHeader)
-                .modifier(BriefingReveal(visible: isVisible(stage: 1), reduceMotion: reduceMotion))
+                .modifier(BriefingReveal(stage: 1, completed: entranceCompleted, token: entranceToken))
         }
     }
 
@@ -239,14 +249,18 @@ struct BriefingSheet: View {
     @ViewBuilder
     private func briefingRow(_ line: BriefingLine, idPrefix: String) -> some View {
         let isHeroTotal = idPrefix == "briefing-line" && line.id == "money-total"
+        // B2: la línea que suena ahora (solo en el resumen, no en las respuestas): se resalta y su importe rueda otra vez
+        // desde 0 mientras se lee (con el ojo cerrado no hay cifra que rodar: `BriefingLineView` dibuja la máscara).
+        let spokenNow = idPrefix == "briefing-line" && speaker.currentLine == line.id
         let content = HStack(alignment: .center, spacing: 10) {
             BriefingLineView(
                 parts: line.parts,
                 role: .row,
                 color: Theme.label,
-                countsFirstAmount: isHeroTotal,
-                snapCountImmediately: userSkippedEntrance
+                countsFirstAmount: isHeroTotal || spokenNow,
+                snapCountImmediately: userSkippedEntrance && !spokenNow
             )
+            .id(spokenNow ? "leyendo-\(line.id)" : line.id)
             .frame(maxWidth: .infinity, alignment: .leading)
 
             if line.action != nil {
@@ -260,6 +274,7 @@ struct BriefingSheet: View {
         .padding(.vertical, 13)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
+        .modifier(SpokenHighlight(id: line.id, current: idPrefix == "briefing-line" ? speaker.currentLine : nil))
 
         if let action = line.action {
             Button {
@@ -582,6 +597,15 @@ struct BriefingSheet: View {
 
     private var bottomDoneBar: some View {
         VStack(spacing: 0) {
+            // B2: mientras Onyx lee en voz alta, las 28 barras van encima de «Vale», DENTRO de la barra de abajo: la
+            // lista reserva su alto (m-7: antes flotaban encima de «Lo que viene» y del borde de la fila siguiente).
+            if speaker.activeTarget == .briefing {
+                VoiceWave(speaking: true)
+                    .frame(maxWidth: .infinity)
+                    .padding(.bottom, 10)
+                    // Solo las barras se funden; el alto de la barra de abajo cambia de golpe (nada de maquetación animada).
+                    .transition(.opacity.animation(motion.fade))
+            }
             Button {
                 speaker.stop()
                 dismiss()
@@ -616,55 +640,44 @@ struct BriefingSheet: View {
 
     // MARK: - Interacción y entrada
 
-    private func isVisible(stage: Int) -> Bool {
-        entranceCompleted || revealedStage >= stage
-    }
-
+    /// B1: los bloques entran uno detrás de otro, desde 0,12 s, 120 ms × 0,92ⁿ (prototipo `briefHTML`), subiendo
+    /// 20 pt con el muelle `enter`; lo lee cada bloque (`BriefingReveal`), sin `Task.sleep`. Con Reducir movimiento,
+    /// todos se funden a la vez. La entrada se da por acabada al final de su propio reloj (o con un toque).
     private func startEntrance() {
         userSkippedEntrance = false
-        if reduceMotion {
-            withAnimation(.easeOut(duration: 0.2)) {
-                revealedStage = 8
-                entranceCompleted = true
-            }
-            return
-        }
-        revealedStage = 0
         entranceCompleted = false
-        entranceTask?.cancel()
-        entranceTask = Task {
-            withAnimation(Theme.Motion.assemble) { revealedStage = 1 }
-            try? await Task.sleep(for: .milliseconds(80))
-            guard !Task.isCancelled, !entranceCompleted else { return }
-            withAnimation(Theme.Motion.assemble) { revealedStage = 2 }
-            for step in 3...8 {
-                try? await Task.sleep(for: .milliseconds(70))
-                guard !Task.isCancelled, !entranceCompleted else { return }
-                withAnimation(Theme.Motion.assemble) { revealedStage = step }
-            }
-            entranceCompleted = true
-        }
+        entranceToken += 1
+    }
+
+    /// La entrada se da por acabada cuando ha entrado el último bloque: su espera lee `\.motion` (intensidad,
+    /// Reducir movimiento y cámara lenta). Un toque la acaba antes.
+    private func finishEntranceLater(token: Int) async {
+        guard token > 0 else { return }
+        let total = motion.reduce ? motion.pause(0.25) : motion.seconds(0.12) + motion.stagger(7, firstGap: 0.12, decay: 0.92)
+            + motion.seconds(0.5)
+        try? await Task.sleep(for: .seconds(total))
+        guard !Task.isCancelled, entranceToken == token else { return }
+        entranceCompleted = true
     }
 
     private func completeEntrance() {
         guard !entranceCompleted else { return }
-        entranceTask?.cancel()
         userSkippedEntrance = true
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.quick) {
-            revealedStage = 8
+        withAnimation(motion.animation(.snap)) {
             entranceCompleted = true
         }
     }
 
     private func toggleBriefingSpeech(_ briefing: Briefing) {
         guard let input = briefingModel.input else { return }
-        let text = spokenBriefing(
+        // El mismo texto de siempre, con dónde está cada línea dentro de él (B2: resaltar la que suena).
+        let spoken = spokenBriefingLines(
             briefing,
             input: input,
             privateMode: preferences.privateMode,
             calendar: DateText.madridCalendar
         )
-        speaker.toggle(text, target: .briefing)
+        speaker.toggle(spoken, target: .briefing)
     }
 
     private func submitQuestion(scrollProxy: ScrollViewProxy) {
@@ -704,14 +717,29 @@ struct BriefingSheet: View {
     }
 }
 
+/// B1: un bloque del resumen. Entra en su turno (`stage` 1…8: desde 0,12 s, 120 ms × 0,92ⁿ), sube 20 pt con el muelle
+/// `enter` y aparece; con Reducir movimiento solo se funde. Con la entrada acabada (o saltada con un toque), está.
 private struct BriefingReveal: ViewModifier {
-    let visible: Bool
-    let reduceMotion: Bool
+    let stage: Int
+    let completed: Bool
+    let token: Int
+    @Environment(\.motion) private var motion
+    @State private var landed = -1
+
+    private var visible: Bool { completed || token == 0 || landed == token }
 
     func body(content: Content) -> some View {
         content
             .opacity(visible ? 1 : 0)
-            .offset(y: (visible || reduceMotion) ? 0 : 12)
+            .offset(y: visible || motion.reduce ? 0 : motion.distance(20))
+            .onAppear(perform: land)
+            .onChange(of: token) { _, _ in land() }
+    }
+
+    private func land() {
+        let token = token
+        let delay = motion.reduce ? 0 : motion.seconds(0.12) + motion.stagger(max(stage - 1, 0), firstGap: 0.12, decay: 0.92)
+        withAnimation(motion.animation(.enter).delay(delay)) { landed = token }
     }
 }
 
@@ -736,5 +764,26 @@ extension AssistantTopic {
         case .spendingPace: "Cómo vas este mes frente al mes anterior"
         case .portfolioMover: "Qué ha subido o bajado más en tu cartera (sin consejos)"
         }
+    }
+}
+
+/// B2: mientras Onyx lee en voz alta, la línea que suena va resaltada (un fondo suave) y las demás del resumen se
+/// apagan un poco; al callar, todas vuelven. Solo opacidad y color de fondo, con el fundido de `\.motion`. Con el ojo
+/// cerrado el resalte no añade nada que leer: la línea ya es su máscara.
+private struct SpokenHighlight: ViewModifier {
+    let id: String
+    let current: String?
+    @Environment(\.motion) private var motion
+
+    func body(content: Content) -> some View {
+        let isCurrent = current == id
+        content
+            .opacity(current == nil || isCurrent ? 1 : 0.45)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.raised.opacity(isCurrent ? 1 : 0))
+                    .padding(-6))
+            .animation(motion.fade, value: current)
+            .accessibilityAddTraits(isCurrent ? .isSelected : [])
     }
 }

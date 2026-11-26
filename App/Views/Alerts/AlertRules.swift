@@ -316,10 +316,10 @@ private struct ThresholdRow: View {
                     SavedCheck()
                         .transition(.opacity)
                 }
-                TextField("100,00 €", text: textBinding)
+                TextField("100,00 €", text: maskedFieldText(textBinding, masked: masked))
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .maskedAmountField(masked, alignment: .trailing)
+                    .maskedAmountField(masked)
                     .multilineTextAlignment(.trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -330,7 +330,7 @@ private struct ThresholdRow: View {
                     .background(Theme.fieldFill.opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                     .animation(motion.calmAnimation(.pressIn), value: focused)
                     .accessibilityLabel(title)
-                    .accessibilityValue(masked ? "importe oculto" : text)
+                    .accessibilityValue((masked ? "importe oculto" : text) + drawnAmountForTests(masked ? maskedFieldMask : text))
             }
             if let problem {
                 Text(problem)

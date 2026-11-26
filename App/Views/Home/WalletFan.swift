@@ -27,41 +27,50 @@ struct WalletFan: View {
 
     @Environment(\.motion) private var motion
     @Environment(\.cardFlight) private var flight
+    /// Inicio ya está tapado por el negro (primer tiempo de la apertura).
+    @State private var dark = false
     @State private var fanned = false
+    /// «Tus tarjetas» a la vista (entra cuando Inicio ya no se ve: nunca dos cabeceras a la vez).
+    @State private var headerIn = false
     @State private var picked: AccountCard?
     @State private var closing = false
     @State private var pickTick = 0
 
     private static let cardHeight: CGFloat = 168
-    private static let headerHeight: CGFloat = 92
+    /// Lo que mide de verdad la cabecera («Tus tarjetas», la ayuda y la X), medida con el tamaño de texto de ahora.
+    @State private var headerContent: CGFloat = 0
+    /// Alto reservado para la cabecera: 92 pt, o lo que mida si es más (texto muy grande): la primera tarjeta nunca la tapa.
+    private var headerHeight: CGFloat { max(92, headerContent + 12) }
 
     var body: some View {
         GeometryReader { geo in
             let frame = geo.frame(in: .global)
             let count = max(cards.count, 1)
-            let room = geo.size.height - Self.headerHeight - Self.cardHeight - 20
+            let room = geo.size.height - headerHeight - Self.cardHeight - 20
             let step: CGFloat = count > 1 ? min(78, max(40, room / CGFloat(count - 1))) : 0
             // Donde está la tarjeta levantada, en las coordenadas de esta capa.
             let startY: CGFloat = (request.origin?.minY ?? frame.minY + 150) - frame.minY
             ZStack(alignment: .top) {
                 // Negro del todo: Inicio no se transparenta bajo el título ni entre las tarjetas.
                 Color.black
-                    .opacity(fanned ? 1 : 0)
+                    .opacity(dark ? 1 : 0)
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture(perform: close)
                     .accessibilityHidden(true)
                 header
-                    .opacity(fanned && picked == nil ? 1 : 0)
+                    .opacity(headerIn && picked == nil ? 1 : 0)
+                    .offset(y: headerIn ? 0 : motion.distance(6))
                 ForEach(Array(cards.enumerated()), id: \.element) { index, card in
-                    FanCard(card: card, cents: cents(for: card), action: { pick(card) })
+                    FanCard(card: card, cents: cents(for: card), labelDelay: labelDelay(index, step: step),
+                            fanned: fanned, action: { pick(card) })
                         .frame(height: Self.cardHeight)
                         .padding(.horizontal, 28)
                         .modifier(FlightSource(card: card))
                         .modifier(FanPlacement(
                             index: index, fanned: fanned,
                             state: picked == nil ? .fanned : (picked == card ? .chosen : .dropped),
-                            startY: startY, slotY: Self.headerHeight + CGFloat(index) * step))
+                            startY: startY, slotY: headerHeight + CGFloat(index) * step))
                         .zIndex(Double(index))
                         .disabled(picked != nil || closing)
                 }
@@ -75,13 +84,45 @@ struct WalletFan: View {
             HomeProbe.shared.fanOpen = true
             HomeProbe.shared.fanOpenings += 1
             #endif
-            withAnimation(motion.calmAnimation(.snap)) { fanned = true }
+            open()
         }
         .onDisappear {
             #if DEBUG
             HomeProbe.shared.fanOpen = false
             #endif
         }
+    }
+
+    /// En dos tiempos, sin doble exposición: primero el negro tapa Inicio (cabecera, título, ojo y la tarjeta grande con
+    /// su total) en 0,10 s; solo entonces las tarjetas salen de debajo y «Tus tarjetas» entra (0,15 s, subiendo 6 pt).
+    private func open() {
+        // Con Reducir movimiento, dos fundidos que se solapan: el abanico empieza cuando el negro ya tapa la mayor
+        // parte de Inicio (nunca dos cabeceras legibles a la vez) y antes de que acabe (nunca un fotograma en negro).
+        if motion.reduce {
+            withAnimation(motion.fade) { dark = true }
+            withAnimation(motion.fade.delay(motion.pause(0.12))) {
+                fanned = true
+                headerIn = true
+            }
+            return
+        }
+        let first: Animation = motion.reduce ? motion.fade : .easeOut(duration: motion.seconds(0.10))
+        withAnimation(first) {
+            dark = true
+        } completion: {
+            guard !closing, picked == nil else { return }
+            withAnimation(motion.calmAnimation(.snap)) { fanned = true }
+            withAnimation(motion.reduce ? motion.fade : .easeOut(duration: motion.seconds(0.15))) { headerIn = true }
+        }
+    }
+
+    /// Cuándo aparecen el nombre y el saldo de la tarjeta `index`: cuando su franja ya se ha separado unos 30 pt de la
+    /// de detrás (su escalón de 60 ms más lo que tarda el muelle en abrir ese tramo). Antes, solo la tarjeta: los textos
+    /// de varias tarjetas nunca se ven montados unos sobre otros.
+    private func labelDelay(_ index: Int, step: CGFloat) -> Double {
+        guard !motion.reduce else { return 0 }
+        let share = step > 6 ? min(1, (30 - 6) / (step - 6)) : 1
+        return motion.stagger(index, firstGap: 0.06, decay: 1) + motion.seconds(0.30 * share)
     }
 
     private var header: some View {
@@ -110,7 +151,9 @@ struct WalletFan: View {
         }
         .padding(.horizontal, 28)
         .padding(.top, 8)
-        .frame(height: Self.headerHeight, alignment: .top)
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerContent = $0 }
+        .frame(height: headerHeight, alignment: .top)
     }
 
     private func cents(for card: AccountCard) -> Int? {
@@ -147,7 +190,11 @@ struct WalletFan: View {
     private func close() {
         guard !closing, picked == nil else { return }
         closing = true
-        withAnimation(motion.calmAnimation(.snap)) { fanned = false }
+        withAnimation(motion.calmAnimation(.snap)) {
+            fanned = false
+            headerIn = false
+            dark = false
+        }
         let wait = motion.seconds(motion.reduce ? 0.22 : 0.34)
         Task {
             try? await Task.sleep(for: .seconds(wait))
@@ -183,6 +230,16 @@ private struct FanPlacement: ViewModifier {
 
     @Environment(\.motion) private var motion
     @State private var placed = false
+    /// Opaca desde el primer momento (cada tarjeta tapa a la de detrás: nunca se transparentan los textos de varias).
+    @State private var visible = false
+
+    /// El muelle de apertura: el `snap` del nivel con poco rebote (≈ 0,12): el abanico llega a su sitio sin abrirse de
+    /// más y volver.
+    private var openSpring: Animation {
+        guard !motion.reduce else { return motion.fade }
+        let spec = MotionMath.scaled(SpringToken.snap.base, level: motion.level, timeMultiplier: motion.timeMultiplier)
+        return .spring(response: spec.response, dampingFraction: max(spec.dampingFraction, 0.88))
+    }
 
     func body(content: Content) -> some View {
         let reduce = motion.reduce
@@ -195,17 +252,27 @@ private struct FanPlacement: ViewModifier {
             .rotation3DEffect(.degrees(lean), axis: (x: 1, y: 0, z: 0), anchor: .top, perspective: 0.5)
             .scaleEffect(scale, anchor: .top)
             .offset(y: y)
-            .opacity(placed ? (dropped ? 0.2 : 1) : 0)
+            .opacity(visible ? (dropped ? 0.2 : 1) : 0)
             .onAppear { place(fanned) }
             .onChange(of: fanned) { _, now in place(now) }
     }
 
     private func place(_ now: Bool) {
         guard now != placed else { return }
-        // Al abrir, cada tarjeta con su escalón; al recoger, todas a la vez.
-        let delay = now ? motion.stagger(index, firstGap: 0.06, decay: 1) : 0
-        let spring = now ? motion.animation(.snap) : motion.calmAnimation(.snap)
-        withAnimation(spring.delay(delay)) { placed = now }
+        if now {
+            // Aparece en un instante (opaca) y se abre con su escalón.
+            // Con Reducir movimiento, cuando el negro ya tapa casi todo Inicio (ver `WalletFan.open`).
+            let appear: Animation = motion.reduce
+                ? motion.fade.delay(motion.pause(0.12)) : .linear(duration: motion.seconds(0.05))
+            withAnimation(appear) { visible = true }
+            withAnimation(openSpring.delay(motion.stagger(index, firstGap: 0.06, decay: 1))) { placed = true }
+        } else {
+            // Al recoger, todas a la vez, apagándose mientras vuelven.
+            withAnimation(motion.calmAnimation(.snap)) {
+                placed = false
+                visible = false
+            }
+        }
     }
 }
 
@@ -213,9 +280,14 @@ private struct FanPlacement: ViewModifier {
 private struct FanCard: View {
     let card: AccountCard
     let cents: Int?
+    /// Cuándo aparecen su nombre y su saldo tras empezar a abrirse (ver `WalletFan.labelDelay`).
+    let labelDelay: Double
+    let fanned: Bool
     let action: () -> Void
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.motion) private var motion
+    @State private var labelShown = false
 
     var body: some View {
         Button(action: action) {
@@ -238,6 +310,7 @@ private struct FanCard: View {
                     }
                 }
                 .frame(minHeight: 34)
+                .opacity(labelShown ? 1 : 0)
                 Spacer(minLength: 0)
             }
             .foregroundStyle(Theme.label)
@@ -248,6 +321,10 @@ private struct FanCard: View {
             .contentShape(.rect(cornerRadius: Theme.Radius.card))
         }
         .buttonStyle(.pressable)
+        .onChange(of: fanned, initial: true) { _, now in
+            guard now, !labelShown else { return }
+            withAnimation(.easeOut(duration: motion.seconds(0.12)).delay(labelDelay)) { labelShown = true }
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(card.spokenName), \(cents.map { spokenAmount($0, hidden: preferences.privateMode) } ?? "sin saldo")")
         .accessibilityAddTraits(.isButton)

@@ -13,7 +13,7 @@ struct AlertsView: View {
 
     /// El movimiento del kit: intensidad, cámara lenta y Reducir movimiento (el del sistema o el forzado para grabar).
     @Environment(\.motion) private var motion
-    /// El cambio de pestaña que anuncia `RootView` (cuando lo haga): repite la entrada igual que `isVisible`.
+    /// El cambio de pestaña que anuncia `RootView`: juega la entrada.
     @Environment(\.tabEntrance) private var tabEntrance
     /// Al entrar en la pestaña, los avisos llegan uno tras otro desde la derecha.
     @State private var entrance = Entrance()
@@ -27,10 +27,10 @@ struct AlertsView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         if insights.isEmpty {
                             AlertsEmptyState()
-                                .motionEntrance(0)
+                                .tabGroupEntrance(0)
                         } else {
                             GroupHeader("Novedades")
-                                .motionEntrance(0)
+                                .tabGroupEntrance(0)
                             VStack(spacing: 0) {
                                 ForEach(Array(insights.enumerated()), id: \.element.id) { index, insight in
                                     InsightRow(insight: insight, isLast: index == insights.count - 1, onOpen: onOpen)
@@ -54,7 +54,7 @@ struct AlertsView: View {
                             onMorningRuleChanged: onMorningRuleChanged
                         )
                             .id(AlertsAnchor.rules)
-                            .motionEntrance(min(1 + insights.count, 8))
+                            .tabGroupEntrance(min(1 + insights.count, 8))
 
                         Text("Todo se calcula en tu iPhone con tus movimientos. Nada sale del teléfono.")
                             .titan(.meta)
@@ -82,11 +82,10 @@ struct AlertsView: View {
             }
         }
         .environment(\.entrance, entrance)
-        .onChange(of: isVisible) { _, visible in
-            if visible { playEntrance() }
-        }
-        .onChange(of: tabEntrance.token) { _, _ in
-            if isVisible, !tabEntrance.suppressed { playEntrance() }
+        // Al elegir la pestaña (`tabEntrance` de `RootView`, no `isVisible`): los grupos entran con el kit
+        // (`.tabGroupEntrance`) y los avisos, además, desde 40 pt a la derecha uno tras otro (S6).
+        .onChange(of: tabEntrance) { _, now in
+            if !now.suppressed, now.token > 0 { playEntrance() }
         }
     }
 
@@ -163,6 +162,8 @@ private struct InsightRow: View {
                 if let detail = insight.detail {
                     Text(preferences.privateMode ? maskingAmounts(detail) : detail)
                         .titan(.subtitle)
+                        .contentTransition(.identity)
+                        .privacySensitive()
                         .foregroundStyle(Theme.label3)
                         .fixedSize(horizontal: false, vertical: true)
                         .contentTransition(.opacity)
@@ -261,20 +262,9 @@ private struct RollingSentence: View {
             // Ninguna cifra montada: un texto normal con la máscara del kit en el sitio del importe.
             Text(masked)
         } else if let split = AmountSplit(text) {
-            let pieces = SentencePieces(split)
-            ParagraphFlow {
-                ForEach(Array(pieces.before.enumerated()), id: \.offset) { _, word in
-                    Text(word)
-                }
-                // Lo que va pegado al importe (un punto, una coma) no se separa de él al saltar de línea.
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    // Dentro de una frase: si el ojo se cierra con la cifra montada, la máscara solo ocupa lo que mide.
-                    RollingAmount(cents: split.cents, inline: true)
-                    if !pieces.glue.isEmpty { Text(pieces.glue) }
-                }
-                ForEach(Array(pieces.after.enumerated()), id: \.offset) { _, word in
-                    Text(word)
-                }
+            AmountSentence(pieces: SentencePieces(split)) {
+                // Dentro de una frase: si el ojo se cierra con la cifra montada, la máscara solo ocupa lo que mide.
+                RollingAmount(cents: split.cents, inline: true)
             }
         } else {
             Text(text)
@@ -285,6 +275,29 @@ private struct RollingSentence: View {
     private var masked: String {
         guard let split = AmountSplit(text) else { return maskingAmounts(text) }
         return maskingAmounts(split.prefix) + maskedEUR(split.cents, sign: false) + maskingAmounts(split.suffix)
+    }
+}
+
+/// Una frase con un importe dentro, colocada como un párrafo (`ParagraphFlow`): las palabras de antes, el importe con lo
+/// que va pegado a él (un punto, una coma: no se separa al saltar de línea) y las palabras de después. La usan los
+/// avisos y la previsión de Gasto (una sola vista para las dos, menor m-8 del lote 3).
+struct AmountSentence<Amount: View>: View {
+    let pieces: SentencePieces
+    @ViewBuilder let amount: Amount
+
+    var body: some View {
+        ParagraphFlow {
+            ForEach(Array(pieces.before.enumerated()), id: \.offset) { _, word in
+                Text(word)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                amount
+                if !pieces.glue.isEmpty { Text(pieces.glue) }
+            }
+            ForEach(Array(pieces.after.enumerated()), id: \.offset) { _, word in
+                Text(word)
+            }
+        }
     }
 }
 

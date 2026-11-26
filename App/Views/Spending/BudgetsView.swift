@@ -71,6 +71,15 @@ struct BudgetsView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }
         }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            guard on, focused != nil else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { focused = nil }
+        }
         .onDisappear { for scope in dirty { commit(scope) } }
         .sensoryFeedback(.success, trigger: saveTick)
         .sensoryFeedback(.error, trigger: errorTick)
@@ -99,6 +108,8 @@ struct BudgetsView: View {
                         if let hint = hint(scope, snapshot: snapshot) {
                             Text(preferences.privateMode ? maskingAmounts(hint) : hint)
                                 .titan(.meta)
+                                .contentTransition(.identity)
+                                .privacySensitive()
                                 .foregroundStyle(Theme.label3)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .accessibilityLabel(preferences.privateMode ? maskingAmounts(hint, with: "importe oculto") : hint)

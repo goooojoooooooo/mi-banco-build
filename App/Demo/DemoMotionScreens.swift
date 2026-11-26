@@ -63,5 +63,34 @@ extension DemoMode {
     /// `-MiBancoDemoImportSlow`: los pasos de «Importar extracto» duran 8 s cada uno (en vez de 0,35 s), para poder
     /// verlos desde una prueba de toque (que tarda unos segundos en empezar a mirar).
     static var slowsImportSteps: Bool { isActive && arguments.contains("-MiBancoDemoImportSlow") }
+
+    /// `-MiBancoDemoRegressMaskedField`: SOLO para demostrar que la prueba de privacidad falla con el defecto de antes: el
+    /// campo de importe enmascarado vuelve a llevar la cifra real dentro, pintada en transparente.
+    static var regressesMaskedField: Bool { isActive && arguments.contains("-MiBancoDemoRegressMaskedField") }
+
+    /// `-MiBancoDemoCloseEyeAfter <s>`:    /// `-MiBancoDemoCloseEyeAfter <s>`: Ajustes cierra el ojo solo (como el interruptor) a los segundos dados (reales).
+    /// Para grabar desde ANTES del cierre (un fotograma de control con las cifras) y para cerrar el ojo con un saldo en
+    /// edición sin tocar nada (el teclado taparía el interruptor).
+    static var closesEyeAfterSeconds: Double? {
+        guard isActive, let raw = value(after: "-MiBancoDemoCloseEyeAfter"), let seconds = Double(raw), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
+
+    /// `-MiBancoDemoFocusBalanceAfter <s>`: Ajustes enfoca el saldo de Trade Republic solo, a los segundos dados (reales),
+    /// como si se tocara. Para grabar desde ANTES del toque lo que enseña el campo al editarlo con el ojo cerrado.
+    static var focusesBalanceAfterSeconds: Double? {
+        guard isActive, let raw = value(after: "-MiBancoDemoFocusBalanceAfter"), let seconds = Double(raw),
+              seconds.isFinite, seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
+
+    /// `-MiBancoDemoConnectedDoneAfter <s>`: en la pantalla de un banco, «banco conectado» se cierra solo (como «Listo»)
+    /// a los segundos dados (reales) desde que aparece. Para grabar desde ANTES del cierre.
+    static var connectedDoneAfterSeconds: Double? {
+        guard isActive, let raw = value(after: "-MiBancoDemoConnectedDoneAfter"), let seconds = Double(raw),
+              seconds.isFinite, seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
 }
 #endif

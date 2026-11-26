@@ -31,6 +31,8 @@ struct MorphingButton: View {
     @State private var idleTitleWidth: CGFloat?
 
     private static let minHeight: CGFloat = 52
+    /// Lo que dura la sacudida del error (s, sin cámara lenta).
+    private static let shakeSeconds = 0.42
 
     private var isCircle: Bool { phase != .idle && !motion.reduce }
 
@@ -51,12 +53,14 @@ struct MorphingButton: View {
         .keyframeAnimator(initialValue: 0.0, trigger: motion.reduce ? 0 : failCount) { content, x in
             content.offset(x: x)
         } keyframes: { _ in
+            // La sacudida dura `shakeSeconds` (con la cámara lenta de las grabaciones).
+            let m = motion.pause(1)
             KeyframeTrack {
-                LinearKeyframe(6.0, duration: 0.06)
-                LinearKeyframe(-6.0, duration: 0.10)
-                LinearKeyframe(6.0, duration: 0.10)
-                LinearKeyframe(-6.0, duration: 0.10)
-                LinearKeyframe(0.0, duration: 0.06)
+                LinearKeyframe(6.0, duration: 0.06 * m)
+                LinearKeyframe(-6.0, duration: 0.10 * m)
+                LinearKeyframe(6.0, duration: 0.10 * m)
+                LinearKeyframe(-6.0, duration: 0.10 * m)
+                LinearKeyframe(0.0, duration: 0.06 * m)
             }
         }
         .sensoryFeedback(Haptics.success, trigger: doneCount)
@@ -128,8 +132,13 @@ struct MorphingButton: View {
             withAnimation(motion.animation(.snap)) { phase = .idle }
             failCount += 1
             withAnimation(motion.fade) { errorShown = true }
+            // m-10: avisa cuando ha TERMINADO de reaccionar (la sacudida acabada y la cápsula de vuelta), no en el mismo
+            // instante del fallo. Una pausa, no la `completion` de una animación (en una vista que no se dibuja acaba
+            // al instante). Con Reducir movimiento no hay sacudida: lo que tarda el fundido.
+            let settle = motion.reduce ? motion.fadeDuration : motion.pause(Self.shakeSeconds)
+            try? await Task.sleep(for: .seconds(settle))
             onFinish?(false)
-            try? await Task.sleep(for: .seconds(motion.pause(2.5)))
+            try? await Task.sleep(for: .seconds(max(0, motion.pause(2.5) - settle)))
             withAnimation(motion.fade) { errorShown = false }
         }
     }

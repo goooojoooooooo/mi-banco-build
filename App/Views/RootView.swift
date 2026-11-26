@@ -115,12 +115,18 @@ struct RootView: View {
                                      openBudgetsRequest: $openBudgetsRequest)
                             .tabContentEntrance()
                             .environment(\.tabEntrance, entrance(for: .spending))
+                            // Lote final: el mismo negro con degradado que Inicio bajo la barra de cristal (lo de debajo
+                            // se funde en negro en vez de cortarse bajo el cristal).
+                            .overlay(alignment: .bottom) { TabBarFade() }
                     }
                     Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
                         AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
                                    onMorningRuleChanged: rescheduleMorningReminder)
                             .tabContentEntrance()
                             .environment(\.tabEntrance, entrance(for: .alerts))
+                            // Lote final: el mismo negro con degradado que Inicio bajo la barra de cristal (lo de debajo
+                            // se funde en negro en vez de cortarse bajo el cristal).
+                            .overlay(alignment: .bottom) { TabBarFade() }
                     }
                     .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
                     Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
@@ -135,6 +141,9 @@ struct RootView: View {
                         }
                         .tabContentEntrance()
                         .environment(\.tabEntrance, entrance(for: .settings))
+                            // Lote final: el mismo negro con degradado que Inicio bajo la barra de cristal (lo de debajo
+                            // se funde en negro en vez de cortarse bajo el cristal).
+                            .overlay(alignment: .bottom) { TabBarFade() }
                     }
                 }
                 .modifier(MinimizesTabBarOnScroll())
@@ -160,8 +169,14 @@ struct RootView: View {
                         openDetail(arrival.id)
                     },
                     onNotMine: {
-                        try? model.setFlaggedNotMine(true, for: arrival.id)
+                        // Si no se guarda, el aviso se queda (y lo dice): no se va como si se hubiera hecho.
+                        do {
+                            try model.setFlaggedNotMine(true, for: arrival.id)
+                        } catch {
+                            return false
+                        }
                         dismissBanner(id)
+                        return true
                     },
                     onFinished: { dismissBanner(id) })
                     .id(id)
@@ -304,6 +319,13 @@ struct RootView: View {
         // C6: un movimiento que llega con la app delante y en OTRA pestaña (en Inicio ya lo cuenta Inicio), sin la hoja
         // abierta: se pide el aviso. La carcasa decide si se puede enseñar (nunca con el bloqueo ni fuera de primer plano).
         .onChange(of: model.arrival) { _, arrival in
+            #if DEBUG
+            // Para las pruebas: cuántos pagos han llegado y cuántos con el bloqueo delante.
+            if arrival != nil {
+                LaunchProbe.shared.arrivals += 1
+                if isLocked { LaunchProbe.shared.arrivalsUnderLock += 1 }
+            }
+            #endif
             guard let arrival, tab != .home, sheet == nil, !isLocked, scenePhase == .active else { return }
             bannerArrival = arrival
             requestBanner()
@@ -331,6 +353,16 @@ struct RootView: View {
             try? await Task.sleep(for: .seconds(seconds))
             guard !Task.isCancelled else { return }
             tab = .spending
+        }
+        // m-4 (lote final), solo demo de grabación: la hoja del movimiento se cierra sola a los `s` segundos de abrirse
+        // (`-MiBancoDemoAutoCloseDetail`), para grabar el cierre desde ANTES (un toque de la prueba espera a que la app
+        // quede quieta y la ráfaga empezaba con la hoja ya cerrada).
+        .task(id: sheet?.id) {
+            guard let seconds = DemoMode.autoCloseDetailSeconds, let current = sheet?.id,
+                  current.hasPrefix("movement-") else { return }
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled, sheet?.id == current else { return }
+            sheet = nil
         }
         #endif
         // Costuras de movimiento (F1): por fuera de todo, para que también las vean la hoja única y las capas.
@@ -920,23 +952,43 @@ private struct MinimizesTabBarOnScroll: ViewModifier {
 private struct TabBarCurtain: View {
     let token: Int
     @State private var covered = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var run = 0
+    @Environment(\.motion) private var motion
+
+    /// Cuándo empieza a destaparse la barra tras empezar el montaje (s a nivel Equilibrado): después de la tarjeta, el
+    /// selector y las dos primeras filas, y ≥ 0,15 s después de que se haya ido el botón del bloqueo (ojo de diseño
+    /// 3.2, 4.4, 5.1). Y lo que tarda en destaparse.
+    static let lead = 0.45
+    static let reveal = 0.3
 
     var body: some View {
+        // Negro opaco desde 45 pt por encima del borde de la barra: no asoma ni su canto (5.1).
         LinearGradient(stops: [.init(color: .black.opacity(0), location: 0), .init(color: .black, location: 0.3)],
                        startPoint: .top, endPoint: .bottom)
-            .frame(height: 120)
+            .frame(height: 150)
             .ignoresSafeArea(edges: .bottom)
             .opacity(covered ? 1 : 0)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
             .onChange(of: token) { _, _ in
-                guard !reduceMotion else { return }
+                // La barra de pestañas cierra el montaje: tapada desde el primer fotograma y destapada la última. Con
+                // Reducir movimiento también (es un fundido, sin recorrido), con los tiempos de `\.motion`.
                 covered = true
-                Task {
-                    try? await Task.sleep(for: .milliseconds(600))
-                    withAnimation(.easeOut(duration: 0.35)) { covered = false }
-                }
+                run += 1
             }
+            .task(id: run) {
+                guard run > 0 else { return }
+                try? await Task.sleep(for: .seconds(motion.reduce ? motion.fadeDuration : motion.seconds(Self.lead)))
+                guard !Task.isCancelled else { return }
+                withAnimation(motion.reduce ? motion.fade : .easeOut(duration: motion.seconds(Self.reveal))) {
+                    covered = false
+                }
+                #if DEBUG
+                LaunchProbe.shared.tabBarUncoveredAt = Date().timeIntervalSince1970
+                #endif
+            }
+            #if DEBUG
+            .onChange(of: covered) { _, now in if now { LaunchProbe.shared.tabBarCoveredAt = Date().timeIntervalSince1970 } }
+            #endif
     }
 }

@@ -103,6 +103,19 @@ public struct SpokenBriefing: Equatable, Sendable {
     public func line(at offset: Int) -> String? {
         lines.first { $0.range.contains(offset) }?.id
     }
+
+    /// Lo que lee de verdad la voz: el texto sin los espacios del principio y del final, con los rangos corregidos (el
+    /// motor da posiciones del texto que lee). Una línea que quedara fuera se recorta al texto.
+    public func trimmed() -> SpokenBriefing {
+        let lead = text.utf16.count - text.drop(while: { $0.isWhitespace }).utf16.count
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let count = body.utf16.count
+        let shifted = lines.compactMap { line -> Line? in
+            let lower = max(0, line.range.lowerBound - lead), upper = min(count, line.range.upperBound - lead)
+            return lower < upper ? Line(id: line.id, range: lower..<upper) : nil
+        }
+        return SpokenBriefing(text: body, lines: shifted)
+    }
 }
 
 public func spokenBriefingLines(_ briefing: Briefing, input: BriefingInput, privateMode: Bool, calendar: Calendar) -> SpokenBriefing {

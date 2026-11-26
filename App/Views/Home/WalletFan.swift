@@ -1,6 +1,13 @@
 import SwiftUI
 import MiBancoCore
 
+/// Con Reducir movimiento, solo fundidos, y en dos tiempos que apenas se tocan (s, a velocidad real): el negro tapa
+/// Inicio en 0,16 s (`easeOut`) y el abanico empieza a los 0,13 s, cuando Inicio ya está por debajo del 4 %; cuando el
+/// abanico llega al 20 % (~0,15 s) Inicio está por debajo del 0,5 %. Ni dos títulos legibles a la vez ni un fotograma
+/// en negro (el solape de los dos es de ~10 ms).
+private let fanReduceDark = 0.16
+private let fanReduceDelay = 0.13
+
 /// De dónde sale el abanico: el marco en pantalla de la tarjeta levantada (o `nil` si no se conoce).
 struct WalletFanRequest: Equatable {
     var origin: CGRect?
@@ -99,8 +106,8 @@ struct WalletFan: View {
         // Con Reducir movimiento, dos fundidos que se solapan: el abanico empieza cuando el negro ya tapa la mayor
         // parte de Inicio (nunca dos cabeceras legibles a la vez) y antes de que acabe (nunca un fotograma en negro).
         if motion.reduce {
-            withAnimation(motion.fade) { dark = true }
-            withAnimation(motion.fade.delay(motion.pause(0.12))) {
+            withAnimation(.easeOut(duration: motion.pause(fanReduceDark))) { dark = true }
+            withAnimation(motion.fade.delay(motion.pause(fanReduceDelay))) {
                 fanned = true
                 headerIn = true
             }
@@ -263,7 +270,7 @@ private struct FanPlacement: ViewModifier {
             // Aparece en un instante (opaca) y se abre con su escalón.
             // Con Reducir movimiento, cuando el negro ya tapa casi todo Inicio (ver `WalletFan.open`).
             let appear: Animation = motion.reduce
-                ? motion.fade.delay(motion.pause(0.12)) : .linear(duration: motion.seconds(0.05))
+                ? motion.fade.delay(motion.pause(fanReduceDelay)) : .linear(duration: motion.seconds(0.05))
             withAnimation(appear) { visible = true }
             withAnimation(openSpring.delay(motion.stagger(index, firstGap: 0.06, decay: 1))) { placed = true }
         } else {

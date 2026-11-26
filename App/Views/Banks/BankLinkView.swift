@@ -171,6 +171,9 @@ struct BankLinkView: View {
             guard !motion.reduce else { return }
             try? await Task.sleep(for: .seconds(motion.seconds(1.0)))
             guard run == finishRun, progress.showsSuccess else { return }
+            // EXCEPCIÓN DECLARADA a «solo transformación, opacidad y color»: soltar el hueco anima el alto de la cabecera
+            // (maquetación). Es un único muelle de la hoja, acotado a este momento, sin bucle y nunca con Reducir
+            // movimiento (aceptado en la re-revisión del lote 3).
             withAnimation(motion.animation(.sheet)) { reservedHeight = 0 }
         }
     }
@@ -220,10 +223,21 @@ struct BankLinkView: View {
     }
 
     private func dismissSuccess() {
-        finishRun += 1
-        clearing = false
-        reservedHeight = 0
-        progress.dismissSuccess()
+        let close = {
+            finishRun += 1
+            clearing = false
+            reservedHeight = 0
+            progress.dismissSuccess()
+        }
+        // Con Reducir movimiento cerrar «conectado» no tiene recorrido: el cambio de alto (y lo que entra) es en el acto,
+        // sin la animación de la cabecera (lote de cierre, re-revisión del lote 3).
+        if motion.reduce {
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still, close)
+        } else {
+            close()
+        }
     }
 
     #if DEBUG
@@ -326,6 +340,16 @@ struct BankLinkView: View {
             }
         }
         .onChange(of: stage) { _, new in stageChanged(to: new) }
+        #if DEBUG
+        // `-MiBancoDemoConnectedDoneAfter <s>`: «conectado» se cierra solo, como con «Listo» (para grabar desde antes).
+        .onChange(of: progress.showsSuccess) { _, shown in
+            guard shown, let seconds = DemoMode.connectedDoneAfterSeconds else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if progress.showsSuccess { dismissSuccess() }
+            }
+        }
+        #endif
         .sensoryFeedback(Haptics.error, trigger: errorTick)
         .onAppear {
             #if DEBUG

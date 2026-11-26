@@ -6,6 +6,8 @@ public enum BankingConstants {
     public static let callbackScheme = "mibanco"
     public static let country = "ES"
     public static let maxPages = 50
+    public static let maxResponseBytes = 10 * 1024 * 1024
+    public static let jwtLifetime: TimeInterval = enableBankingDefaultJWTLifetime
 }
 
 public enum TransactionStrategy: String, Sendable {
@@ -24,7 +26,7 @@ public struct TransactionFetch: Equatable, Sendable {
     }
 }
 
-/// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 3600 s.
+/// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 300 s.
 public struct EnableBankingClient: Sendable {
     private let transport: any HTTPTransport
     private let signer: any JWTSigner
@@ -132,7 +134,7 @@ public struct EnableBankingClient: Sendable {
     ) async throws -> Data {
         let token: String
         do {
-            token = try enableBankingJWT(appID: appID, now: now(), lifetime: 3600, signer: signer)
+            token = try enableBankingJWT(appID: appID, now: now(), lifetime: BankingConstants.jwtLifetime, signer: signer)
         } catch {
             // La firma falla cuando la clave guardada no sirve.
             throw BankingClientError.api(.keyRejected, code: nil)

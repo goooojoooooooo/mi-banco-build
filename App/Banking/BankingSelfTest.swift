@@ -38,7 +38,7 @@ enum BankingSelfTest {
         let parts = jwt.split(separator: ".", omittingEmptySubsequences: false)
         guard parts.count == 3 else { return failure("jwt") }
         let input = String(parts[0]) + "." + String(parts[1])
-        guard input == enableBankingJWTSigningInput(appID: appID, now: now, lifetime: 3600),
+        guard input == enableBankingJWTSigningInput(appID: appID, now: now, lifetime: BankingConstants.jwtLifetime),
               let signature = base64URLDecode(String(parts[2])) else { return failure("jwt") }
         let signedInput = Data(input.utf8)
         guard SecKeyVerifySignature(
@@ -66,6 +66,53 @@ enum BankingSelfTest {
             }
             try KeychainVault.delete(.appID, service: testService)
             guard try KeychainVault.data(for: .appID, service: testService) == nil else { return failure("llavero (borrado sin efecto)") }
+
+            // 5b. Migración automática de clave privada heredada (generic password -> kSecClassKey) y firma directa.
+            try KeychainVault.deleteAll(service: testService)
+            try KeychainVault.set(back, for: .privateKey, service: testService)
+            guard KeychainVault.hasPrivateKey(service: testService) else {
+                try? KeychainVault.deleteAll(service: testService)
+                return failure("llavero (clave heredada ausente)")
+            }
+            guard let migratedKey = try KeychainVault.loadPrivateKey(service: testService) else {
+                try? KeychainVault.deleteAll(service: testService)
+                return failure("llavero (migracion a kSecClassKey)")
+            }
+            // El elemento heredado debe desaparecer tras migrar a kSecClassKey.
+            guard try KeychainVault.data(for: .privateKey, service: testService) == nil else {
+                try? KeychainVault.deleteAll(service: testService)
+                return failure("llavero (heredado sin borrar)")
+            }
+            let migratedSigner = RSASigner(key: migratedKey)
+            guard let migratedJWT = try? enableBankingJWT(appID: appID, now: now, signer: migratedSigner) else {
+                try? KeychainVault.deleteAll(service: testService)
+                return failure("firma (clave migrada)")
+            }
+            let migratedParts = migratedJWT.split(separator: ".", omittingEmptySubsequences: false)
+            guard migratedParts.count == 3,
+                  let migratedSig = base64URLDecode(String(migratedParts[2])),
+                  SecKeyVerifySignature(
+                      publicKey, .rsaSignatureMessagePKCS1v15SHA256,
+                      Data((String(migratedParts[0]) + "." + String(migratedParts[1])).utf8) as CFData,
+                      migratedSig as CFData, &error)
+            else {
+                try? KeychainVault.deleteAll(service: testService)
+                return failure("verificacion (clave migrada)")
+            }
+
+            // 5c. Guardado directo de kSecClassKey, sustitución y borrado completo.
+            try KeychainVault.savePrivateKey(pkcs1DER: back, service: testService)
+            guard let reloadedKey = try KeychainVault.loadPrivateKey(service: testService),
+                  let reloadedJWT = try? enableBankingJWT(appID: appID, now: now, signer: RSASigner(key: reloadedKey)),
+                  reloadedJWT.split(separator: ".").count == 3
+            else {
+                try? KeychainVault.deleteAll(service: testService)
+                return failure("llavero (recarga kSecClassKey)")
+            }
+            try KeychainVault.deleteAll(service: testService)
+            guard !KeychainVault.hasPrivateKey(service: testService) else {
+                return failure("llavero (deleteAll no borro kSecClassKey)")
+            }
         } catch {
             try? KeychainVault.deleteAll(service: testService)
             // El código del sistema (OSStatus) no es secreto y dice por qué falla el Llavero.

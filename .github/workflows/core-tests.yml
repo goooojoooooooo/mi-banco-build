@@ -1,11 +1,16 @@
 name: core-tests
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: ubuntu-latest
-    container: swift:6.4
+    container: swift:6.4@sha256:e0f67c4120502628d4ced5058df25d334332e21501ae1a0797fd0c0a96486e79
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Sin runners macOS de GitHub (R43)
         run: |
           if grep -nE '^[[:space:]]*runs-on:[[:space:]]*macos' .github/workflows/*.yml; then

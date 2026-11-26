@@ -28,9 +28,11 @@ struct MoveRequest: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Traspasos preparados que esperan confirmación del banco. Solo guarda `PendingMove` (nunca IBAN, teléfono ni nombre).
+/// Traspasos preparados que esperan confirmación del banco. Solo guarda `PendingMove` (nunca IBAN, teléfono ni nombre)
+/// en el almacén protegido (`pending-moves.json`); migra una vez desde `UserDefaults.standard` si hubiera datos previos.
 enum PendingMoves {
-    private static let storageKey = "pendingMoves"
+    private static let legacyStorageKey = "pendingMoves"
+    private static var store: PendingMovesStore { SharedStore.makePendingMovesStore() }
 
     #if DEBUG
     private final class DemoBox: @unchecked Sendable {
@@ -63,10 +65,11 @@ enum PendingMoves {
         #if DEBUG
         if DemoMode.isActive { return demo.all() }
         #endif
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else {
-            return []
-        }
-        return decodePendingMoves(data)
+        let defaults = UserDefaults.standard
+        return store.migrateLegacy(
+            readLegacy: { defaults.data(forKey: legacyStorageKey) },
+            clearLegacy: { defaults.removeObject(forKey: legacyStorageKey) }
+        )
     }
 
     static func add(_ move: PendingMove) {
@@ -89,10 +92,11 @@ enum PendingMoves {
             return
         }
         #endif
-        if moves.isEmpty {
-            UserDefaults.standard.removeObject(forKey: storageKey)
-        } else if let data = try? JSONEncoder().encode(moves) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+        do {
+            try store.save(moves)
+            UserDefaults.standard.removeObject(forKey: legacyStorageKey)
+        } catch {
+            // Si el disco falla al guardar, no se borra la clave heredada si aún existiera.
         }
     }
 }

@@ -23,11 +23,13 @@ enum LiveActivityController {
         typealias Composed = (text: (title: String, body: String), content: ActivityContent<MovementActivityAttributes.ContentState>)
         func compose(_ hidden: Bool) -> Composed {
             let text = alertText(for: movement, balance: balance, estimated: estimated, hidden: hidden)
+            let money = LiveActivityMoneyFields.composed(
+                balance: balance, amountCents: movement.amountCents, total: total, hidden: hidden)
             let state = MovementActivityAttributes.ContentState(
-                bank: movement.bank.rawValue, balanceCents: balance, estimated: estimated,
-                lastAmountCents: movement.amountCents, merchant: movement.merchant, kind: movement.kind.rawValue,
-                totalCents: total, title: text.title, logoDomain: movement.logoDomain,
-                hidden: hidden)
+                bank: movement.bank.rawValue, balanceCents: money.balanceCents, estimated: estimated,
+                lastAmountCents: money.lastAmountCents, merchant: movement.merchant, kind: movement.kind.rawValue,
+                totalCents: money.totalCents, title: text.title, logoDomain: movement.logoDomain,
+                hidden: hidden, hasBalance: money.hasBalance)
             return (text, ActivityContent(state: state, staleDate: staleDate))
         }
         var hidden = Self.eyeClosed
@@ -62,16 +64,34 @@ enum LiveActivityController {
     }
 
     /// Corrección del saldo sin movimiento nuevo (p. ej. un aviso duplicado que trae el saldo del banco):
-    /// actualiza en silencio, sin alerta ni sonido, y sin alargar la caducidad.
+    /// actualiza en silencio, sin alerta ni sonido, y sin alargar la caducidad. Con el ojo cerrado, nunca guarda cifras.
     static func updateBalance(bank: BankID, balance: Int?, estimated: Bool, total: Int?) async {
+        let hidden = Self.eyeClosed
         for activity in live {
             var state = activity.content.state
-            if state.bank == bank.rawValue {
-                state.balanceCents = balance
-                state.estimated = estimated
+            if hidden {
+                if state.bank == bank.rawValue {
+                    state.estimated = estimated
+                }
+                let redacted = LiveActivityMoneyFields.redactedForClosedEye(
+                    balanceCents: state.bank == bank.rawValue ? balance : state.balanceCents,
+                    hasBalance: state.bank == bank.rawValue ? (balance != nil) : state.hasBalance
+                )
+                state.balanceCents = redacted.balanceCents
+                state.lastAmountCents = redacted.lastAmountCents
+                state.totalCents = redacted.totalCents
+                state.hasBalance = redacted.hasBalance
+                state.hidden = true
+                if let title = title(of: state, hidden: true) { state.title = title }
+            } else {
+                if state.bank == bank.rawValue {
+                    state.balanceCents = balance
+                    state.estimated = estimated
+                    state.hasBalance = nil
+                }
+                state.totalCents = total
+                state.hidden = false
             }
-            state.totalCents = total
-            state.hidden = Self.eyeClosed
             guard state != activity.content.state else { continue }
             await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
         }
@@ -81,7 +101,9 @@ enum LiveActivityController {
     static func endTest(merchant: String, amountCents: Int) async {
         for activity in Live.activities {
             let state = activity.content.state
-            if state.merchant == merchant && state.lastAmountCents == amountCents {
+            let matchesAmount = state.lastAmountCents == amountCents
+                || (state.lastAmountCents == nil && state.hidden == true)
+            if state.merchant == merchant && matchesAmount {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
         }
@@ -91,23 +113,37 @@ enum LiveActivityController {
     static var eyeClosed: Bool { AlertPoster.eyeClosed }
 
     /// M-2: el título del estado con el ojo `hidden` (el mismo texto que el aviso), recompuesto desde el propio estado.
-    /// nil si el estado no se puede leer como movimiento (entonces se deja como está).
+    /// nil si el estado no se puede leer como movimiento o si con ojo abierto ya no quedan cifras en el estado.
     private static func title(of state: MovementActivityAttributes.ContentState, hidden: Bool) -> String? {
         guard let bank = BankID(rawValue: state.bank), let kind = MovementKind(rawValue: state.kind) else { return nil }
-        let movement = Movement(bank: bank, amountCents: state.lastAmountCents, merchant: state.merchant, kind: kind,
+        if !hidden, state.lastAmountCents == nil { return nil }
+        let amount = state.lastAmountCents ?? (kind == .payment ? -1 : 1)
+        let movement = Movement(bank: bank, amountCents: amount, merchant: state.merchant, kind: kind,
                                 source: .notification, date: .now)
         return alertText(for: movement, balance: state.balanceCents, estimated: state.estimated, hidden: hidden).title
     }
 
     /// I-2: el ojo ha cambiado: la Live Activity que esté en pantalla pasa a máscaras (o vuelve a cifras) en silencio,
-    /// sin alerta ni sonido y sin alargar su caducidad. N-4: siempre con el ojo de AHORA (leído aquí, no el del momento
-    /// en que se pidió): dos cambios rápidos, o un `show` a medias, acaban con el ojo vigente.
+    /// sin alerta ni sonido y sin alargar su caducidad. Al cerrar el ojo borra también las cifras del estado (SEC-06).
+    /// N-4: siempre con el ojo de AHORA (leído aquí, no el del momento en que se pidió).
     static func syncEye() async {
         for activity in live {
             var state = activity.content.state
-            guard let hidden = SharedPrivacy.reconciled(current: state.hidden, eyeNow: eyeClosed) else { continue }
+            let eyeNow = eyeClosed
+            let needsScrub = eyeNow && (state.balanceCents != nil || state.lastAmountCents != nil || state.totalCents != nil)
+            let reconciled = SharedPrivacy.reconciled(current: state.hidden, eyeNow: eyeNow)
+            guard reconciled != nil || needsScrub else { continue }
+            let hidden = reconciled ?? eyeNow
             state.hidden = hidden
-            // M-2: el título sigue al ojo (al abrirlo vuelve «Has pagado…»; al cerrarlo, «Pago en…»).
+            if hidden {
+                let redacted = LiveActivityMoneyFields.redactedForClosedEye(
+                    balanceCents: state.balanceCents, hasBalance: state.hasBalance)
+                state.balanceCents = redacted.balanceCents
+                state.lastAmountCents = redacted.lastAmountCents
+                state.totalCents = redacted.totalCents
+                state.hasBalance = redacted.hasBalance
+            }
+            // M-2: el título sigue al ojo (al abrirlo vuelve «Has pagado…» si hay cifra; al cerrarlo, «Pago en…»).
             if let title = title(of: state, hidden: hidden) { state.title = title }
             await activity.update(ActivityContent(state: state, staleDate: activity.content.staleDate))
         }

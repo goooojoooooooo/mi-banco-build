@@ -24,6 +24,10 @@ enum SharedStore {
         AssistantPreferencesStore(directory: resolved.directory)
     }
 
+    static func makePendingMovesStore() -> PendingMovesStore {
+        PendingMovesStore(directory: resolved.directory)
+    }
+
     /// Prueba los grupos posibles en orden y se queda con el primero que el sistema concede.
     /// Si ninguno existe, usa la carpeta privada de la app a propósito: en el Plan 1 solo la app lee el libro.
     private static func resolve() -> (directory: URL, location: Location) {
@@ -60,12 +64,9 @@ enum SharedStore {
         return teams.first
     }
 
-    /// Una sola vez: si el grupo no tiene libro pero la carpeta privada sí, se copia. Nunca se pisa un libro del grupo.
+    /// Una sola vez: migra los ficheros heredados de la carpeta privada al grupo y borra el origen huérfano
+    /// solo tras comprobar que el destino quedó escrito y se puede leer. Nunca se pisa un fichero válido del grupo.
     private static func migrateIfNeeded(to groupDirectory: URL) {
-        let fileManager = FileManager.default
-        let target = groupDirectory.appendingPathComponent("ledger.json")
-        let legacy = URL.applicationSupportDirectory.appendingPathComponent("ledger.json")
-        guard !fileManager.fileExists(atPath: target.path), fileManager.fileExists(atPath: legacy.path) else { return }
-        try? fileManager.copyItem(at: legacy, to: target)
+        migrateLegacyStoreFiles(from: URL.applicationSupportDirectory, to: groupDirectory)
     }
 }

@@ -10,6 +10,9 @@ on:
       runner:
         description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
+        type: choice
+        options:
+          - namespace-profile-onyx
         default: "namespace-profile-onyx"
 permissions:
   contents: read
@@ -18,7 +21,7 @@ jobs:
     runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Elegir Xcode con runtime de iOS (el mas nuevo; si no, Xcode 16.4)
         run: |
           ls -d /Applications/Xcode*.app
@@ -35,7 +38,8 @@ jobs:
           sudo xcode-select -s "$CHOSEN"
           echo "DEVELOPER_DIR=$CHOSEN/Contents/Developer" >> "$GITHUB_ENV"
           xcodebuild -version
-      - run: brew install xcodegen && xcodegen
+      - name: Generar proyecto Xcode (XcodeGen 2.49.0 verificado)
+        run: bash .github/scripts/install_xcodegen.sh
       - name: Crear y arrancar el simulador
         timeout-minutes: 12
         run: |
@@ -174,7 +178,7 @@ jobs:
           shot motion-galeria-filas-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage filas -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           shot motion-galeria-pasos-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage pasos -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           ls -l out
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: capturas

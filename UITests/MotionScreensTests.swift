@@ -918,7 +918,195 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 8), "Con la hoja abajo no volvió la barra de pestañas")
         goBack()
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes")
+        // Salir de la pantalla del banco con la hoja SUBIDA (barra escondida): en Ajustes la barra vuelve.
+        let row = app.buttons["settings-bank-rev"]
+        XCTAssertTrue(waitFor(hittable, row, timeout: 8), "La fila del banco no se puede tocar")
+        row.tap()
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 10), "No se abrió la pantalla del banco")
+        drag(from: 0.70, to: 0.30)
+        XCTAssertTrue(waitFor(NSPredicate(format: "hittable == false"), settingsTab, timeout: 5),
+                      "Con la hoja subida sigue la barra de pestañas")
+        goBack()
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 8), "No se volvió a Ajustes con la hoja subida")
+        XCTAssertTrue(waitFor(hittable, settingsTab, timeout: 8), "Al salir con la hoja subida la barra de pestañas no volvió")
         XCTAssertTrue(selectTab("Gasto", until: element("gasto.total")), "La barra de pestañas no cambia de pestaña al volver")
+    }
+
+    // MARK: - Privacidad de los campos de importe (lote de cierre, ronda 1: I-1, I-2, I-3)
+
+    /// Lo DIBUJADO por un campo o texto con importe (sonda DEBUG «; dibujado: …», con `-MiBancoDemoDrawnAmounts`): ¿trae una
+    /// cifra?
+    private func drawsDigits(_ value: String) -> Bool {
+        value.range(of: "dibujado: .*[0-9]", options: .regularExpression) != nil
+    }
+
+    /// Ajustes con el saldo de Trade Republic (un campo que se edita) y el interruptor «Modo privado» a la vista.
+    private func settingsWithBalanceAndEye(_ extra: [String]) -> (field: XCUIElement, toggle: XCUIElement) {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoDrawnAmounts"] + extra)
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let toggle = element("settings-private-mode")
+        scrollDown(to: toggle)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8), "Falta el interruptor «Modo privado»")
+        let field = app.textFields["Saldo de Trade Republic"]
+        // Los saldos van justo encima del interruptor: si quedan fuera, se sube un poco sin perderlo de vista.
+        var nudges = 0
+        while !(field.exists && field.isHittable && toggle.isHittable) && nudges < 4 {
+            drag(from: 0.45, to: 0.60)
+            nudges += 1
+        }
+        XCTAssertTrue(field.waitForExistence(timeout: 5), "Falta el saldo de Trade Republic junto al interruptor")
+        return (field, toggle)
+    }
+
+    /// Cuerpo común de I-1: con el ojo abierto el campo dibuja su cifra (control); tras cerrar el ojo con el interruptor
+    /// el campo se lee «importe oculto» y lo que DIBUJA (el mismo texto que recibe el campo: el componente
+    /// `MaskedAmountTextField` apunta a la sonda esa misma variable) no trae ninguna cifra. Lo que se ve en los fotogramas
+    /// justo después del toque lo enseña la ráfaga `settings-eye-close`, grabada desde antes del cierre.
+    private func closeTheEyeInSettingsAndCheckTheFields(_ extra: [String]) {
+        let (field, toggle) = settingsWithBalanceAndEye(extra)
+        XCTAssertTrue(toggle.isHittable, "El interruptor no se puede tocar con los saldos a la vista")
+        XCTAssertTrue(drawsDigits(value(field)), "Control: con el ojo abierto el campo no dibuja su cifra: \(value(field))")
+        toggle.tap()
+        let now = value(field)
+        XCTAssertTrue(now.hasPrefix("importe oculto"), "Tras cerrar el ojo el campo se sigue leyendo: \(now)")
+        XCTAssertFalse(drawsDigits(now), "Tras cerrar el ojo el campo sigue dibujando una cifra: \(now)")
+        XCTAssertEqual(visibleAmounts(), [], "Tras cerrar el ojo en Ajustes se ven importes")
+    }
+
+    /// I-1: cerrar el ojo desde Ajustes deja los campos de saldo con la máscara DENTRO (ninguna cifra dibujada).
+    func testClosingTheEyeInSettingsMasksTheFields() throws {
+        closeTheEyeInSettingsAndCheckTheFields([])
+    }
+
+    /// I-1, la prueba de la prueba: con el defecto de antes devuelto (`-MiBancoDemoRegressMaskedField`: la cifra real
+    /// dentro del campo, pintada en transparente) el MISMO cuerpo tiene que fallar.
+    func testClosingTheEyeInSettingsCatchesTheTransparentDigits() throws {
+        XCTExpectFailure("Con la cifra real en transparente la prueba de privacidad tiene que fallar") {
+            closeTheEyeInSettingsAndCheckTheFields(["-MiBancoDemoRegressMaskedField"])
+        }
+    }
+
+    /// Cuerpo común de I-3: se edita el saldo de Trade Republic (con el ojo abierto, el campo enseña su cifra) y, sin
+    /// tocar nada (el teclado taparía el interruptor), Ajustes cierra el ojo por el mismo camino que el interruptor
+    /// (`-MiBancoDemoCloseEyeAfter`). El campo tiene que soltar el foco y pasar a la máscara: ningún dígito dibujado y
+    /// ningún importe con cifras en pantalla.
+    private func closeTheEyeWhileEditingAndCheck(_ extra: [String]) {
+        let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoCloseEyeAfter", "12"] + extra)
+        XCTAssertFalse(value(field).hasPrefix("importe oculto"), "El ojo se cerró antes de empezar a editar")
+        field.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
+        XCTAssertTrue(drawsDigits(value(field)), "Control: editando, el campo no enseña su cifra: \(value(field))")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 25),
+                      "Al cerrarse el ojo, el saldo en edición sigue enseñando su cifra: \(value(field))")
+        XCTAssertFalse(drawsDigits(value(field)), "Con el ojo cerrado el campo dibuja una cifra: \(value(field))")
+        XCTAssertEqual(visibleAmounts(), [], "Con el ojo cerrado se ven importes en Ajustes")
+    }
+
+    /// I-3: cerrar el ojo con un saldo en edición suelta el foco y deja la máscara.
+    func testClosingTheEyeWhileEditingMasksTheBalance() throws {
+        closeTheEyeWhileEditingAndCheck([])
+    }
+
+    // MARK: - Editar con el ojo cerrado (decisión del dueño: la cifra guardada no se enseña NUNCA)
+
+    /// Lo DIBUJADO por el campo está vacío (la sonda «; dibujado: » sin nada detrás).
+    private func drawsNothing(_ value: String) -> Bool {
+        value.range(of: "dibujado: $", options: .regularExpression) != nil
+    }
+
+    /// (1)(2)(3) Ajustes: con el ojo cerrado, tocar el saldo lo abre VACÍO (ni la cifra guardada ni ningún importe en
+    /// pantalla); salir sin teclear conserva el saldo (se ve al abrir el ojo); teclear uno nuevo lo guarda y, al salir,
+    /// queda enmascarado.
+    func testEditingABalanceWithTheEyeClosedNeverShowsTheStoredFigure() throws {
+        let (field, toggle) = settingsWithBalanceAndEye([])
+        XCTAssertTrue(drawsDigits(value(field)), "Control: con el ojo abierto el campo no dibuja su cifra: \(value(field))")
+        let stored = value(field).components(separatedBy: "; dibujado: ").last ?? ""
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "No se cerró el ojo")
+
+        // (1) Tocar el campo con el ojo cerrado: se abre vacío.
+        field.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
+        XCTAssertTrue(drawsNothing(value(field)), "Al editar con el ojo cerrado el campo no se abre vacío: \(value(field))")
+        XCTAssertTrue(value(field).hasPrefix("importe oculto"), "Al editar con el ojo cerrado se lee el saldo: \(value(field))")
+        XCTAssertEqual(visibleAmounts(), [], "Al editar con el ojo cerrado se ven importes")
+
+        // (2) Salir sin teclear: al abrir el ojo, el saldo de antes sigue ahí.
+        field.typeText("\n")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "Al salir sin teclear el campo no vuelve a la máscara: \(value(field))")
+        XCTAssertTrue(waitFor(hittable, toggle, timeout: 5), "El interruptor no se puede tocar")
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "dibujado: " + stored), field, timeout: 5),
+                      "Entrar y salir sin teclear cambió el saldo (antes «\(stored)»): \(value(field))")
+
+        // (3) Teclear uno nuevo con el ojo cerrado: se guarda y queda enmascarado al salir.
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "No se cerró el ojo otra vez")
+        field.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
+        field.typeText("512,34")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "dibujado: 512,34"), field, timeout: 5),
+                      "Lo que se teclea no se ve mientras se teclea: \(value(field))")
+        field.typeText("\n")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "Al salir el saldo nuevo no queda enmascarado: \(value(field))")
+        XCTAssertFalse(drawsDigits(value(field)), "Al salir el campo dibuja una cifra: \(value(field))")
+        XCTAssertTrue(waitFor(hittable, toggle, timeout: 5), "El interruptor no se puede tocar")
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "512,34"), field, timeout: 5),
+                      "El saldo tecleado con el ojo cerrado no se guardó: \(value(field))")
+    }
+
+    /// (4) Un umbral de Avisos y un límite de Presupuestos: con el ojo cerrado se abren vacíos, sin ningún importe en
+    /// pantalla; lo tecleado se ve mientras se teclea y, al salir, queda enmascarado.
+    private func editHiddenAmount(_ field: XCUIElement, typing: String, what: String) {
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "\(what): no se enfocó (no hay teclado)")
+        XCTAssertTrue(drawsNothing(value(field)), "\(what): con el ojo cerrado no se abre vacío: \(value(field))")
+        XCTAssertEqual(visibleAmounts(), [], "\(what): al editar con el ojo cerrado se ven importes")
+        field.typeText(typing)
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "dibujado: " + typing), field, timeout: 5),
+                      "\(what): lo tecleado no se ve: \(value(field))")
+        field.typeText("\n")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "\(what): al salir no queda enmascarado: \(value(field))")
+        XCTAssertFalse(drawsDigits(value(field)), "\(what): al salir dibuja una cifra: \(value(field))")
+    }
+
+    func testEditingThresholdsAndLimitsWithTheEyeClosed() throws {
+        continueAfterFailure = true
+        launch(["-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules", "-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"])
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 20), "No se ve Avisos")
+        let threshold = app.textFields["Avisar por debajo de"]
+        scrollDown(to: threshold)
+        XCTAssertTrue(threshold.waitForExistence(timeout: 8), "Falta el umbral de «Saldo bajo»")
+        editHiddenAmount(threshold, typing: "75", what: "Umbral de Avisos")
+
+        app.terminate()
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoBudgets", "-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"])
+        let limit = app.textFields["presupuestos.mes"]
+        XCTAssertTrue(limit.waitForExistence(timeout: 20), "No se ve Presupuestos")
+        editHiddenAmount(limit, typing: "650", what: "Límite de Presupuestos")
+    }
+
+    /// I-2: la pantalla de una categoría con el ojo cerrado: la comparación con el mes anterior es la máscara (no un
+    /// desenfoque sobre el texto real) y no hay ningún importe con cifras en pantalla.
+    func testPrivateModeHidesAmountsInCategoryDetail() throws {
+        continueAfterFailure = true
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoCategory", "compras", "-MiBancoDemoPrivate",
+                "-MiBancoDemoDrawnAmounts"])
+        let total = element("categoria.total")
+        XCTAssertTrue(total.waitForExistence(timeout: 20), "No se abrió la categoría")
+        XCTAssertTrue(total.label.hasSuffix("importe oculto"), "El total de la categoría se lee: \(total.label)")
+        let comparison = element("categoria.comparacion")
+        XCTAssertTrue(comparison.waitForExistence(timeout: 5), "La categoría no trae la comparación con el mes anterior")
+        XCTAssertNil(comparison.label.range(of: "[0-9]", options: .regularExpression),
+                     "La comparación se lee con el ojo cerrado: \(comparison.label)")
+        XCTAssertFalse(drawsDigits(value(comparison)), "La comparación dibuja cifras con el ojo cerrado: \(value(comparison))")
+        XCTAssertEqual(visibleAmounts(), [], "La categoría enseña importes con el ojo cerrado")
     }
 
     /// «Ver movimientos» cierra «conectado» y sube la hoja (el título pequeño queda acoplado).
@@ -1063,13 +1251,29 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(confirm.isEnabled)
         confirm.tap()
         let bank = app.buttons["bank-import-statement"]
+        // El tercer nodo («Paso 3: Importar») y el 100 cambian en la misma transacción (re-revisión del lote 3, m-13):
+        // si el nodo ya está hecho, el porcentaje leído DESPUÉS dice 100; y si dice 100, el nodo leído después está hecho.
+        let third = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Paso 3: Importar")).firstMatch
         var afterTap: [Int] = []
+        var alternate = false
         let leaving = Date().addingTimeInterval(25)
         while Date() < leaving, !bank.exists {
-            guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
-            XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")
-            XCTAssertGreaterThanOrEqual(now.percent, afterTap.last ?? 0, "El porcentaje bajó al importar")
-            afterTap.append(now.percent)
+            alternate.toggle()
+            if alternate {
+                guard third.exists else { continue }
+                let done = (third.value as? String) == "hecho"
+                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                if done { XCTAssertEqual(now.percent, 100, "El tercer paso salió hecho antes del 100: \(now)") }
+                afterTap.append(now.percent)
+            } else {
+                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")
+                XCTAssertGreaterThanOrEqual(now.percent, afterTap.last ?? 0, "El porcentaje bajó al importar")
+                if now.percent == 100, third.exists {
+                    XCTAssertEqual(third.value as? String, "hecho", "El 100 salió antes de que el tercer paso estuviera hecho")
+                }
+                afterTap.append(now.percent)
+            }
         }
         XCTAssertTrue(bank.waitForExistence(timeout: 8), "Tras importar no volvió a la pantalla del banco")
         XCTAssertTrue(afterTap.contains { $0 > 67 }, "Al importar el porcentaje no se movió de 67: \(afterTap)")

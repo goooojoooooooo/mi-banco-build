@@ -83,7 +83,10 @@ struct AccountBookStore {
         guard let data = try? JSONEncoder().encode(book) else {
             throw KeychainError.encoding
         }
-        let update: [CFString: Any] = [kSecValueData: data]
+        let update: [CFString: Any] = [
+            kSecValueData: data,
+            kSecAttrAccessible: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
         var status = SecItemUpdate(baseQuery() as CFDictionary, update as CFDictionary)
         if status == errSecItemNotFound {
             var attributes = baseQuery()

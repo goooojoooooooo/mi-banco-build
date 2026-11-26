@@ -18,6 +18,80 @@ public struct DigitColumn: Equatable, Sendable {
     }
 }
 
+/// El ritmo de una rodada: cuánto dura la primera columna (`base`), cuánto más cada columna siguiente (`perColumn`) y
+/// cuánto se retrasa su salida (`stagger`). La última columna se asienta en `total(digitCount:)`.
+public struct RollTiming: Equatable, Sendable {
+    public var base: Double
+    public var perColumn: Double
+    public var stagger: Double
+
+    public init(base: Double, perColumn: Double, stagger: Double) {
+        self.base = base
+        self.perColumn = perColumn
+        self.stagger = stagger
+    }
+
+    /// Contar desde 0 (o de un importe a otro).
+    public static let count = RollTiming(base: 0.56, perColumn: 0.038, stagger: 0.022)
+    /// Abrir el ojo: del barajado a la cifra real.
+    public static let reveal = RollTiming(base: 0.38, perColumn: 0.03, stagger: 0.014)
+
+    /// Segundos hasta que la última de `digitCount` columnas queda quieta.
+    public func total(digitCount: Int) -> Double {
+        base + Double(max(0, digitCount - 1)) * (perColumn + stagger)
+    }
+
+    /// Todo multiplicado por `factor` (la intensidad, la cámara lenta de las grabaciones).
+    public func scaled(_ factor: Double) -> RollTiming {
+        RollTiming(base: base * factor, perColumn: perColumn * factor, stagger: stagger * factor)
+    }
+
+    /// Con la misma forma, dura exactamente `seconds` con `digitCount` columnas. Con 0 (o menos), nada rueda: la cifra
+    /// queda puesta en el acto.
+    public func lasting(_ seconds: Double, digitCount: Int) -> RollTiming {
+        guard seconds > 0 else { return RollTiming(base: 0, perColumn: 0, stagger: 0) }
+        let natural = total(digitCount: digitCount)
+        guard natural > 0 else { return self }
+        return scaled(seconds / natural)
+    }
+
+    /// Como mucho `seconds`: si dura más, se acorta entero (misma forma); si no, se queda como está.
+    public func capped(at seconds: Double, digitCount: Int) -> RollTiming {
+        total(digitCount: digitCount) > seconds ? lasting(seconds, digitCount: digitCount) : self
+    }
+}
+
+/// Cuánto rueda una cifra (sin la cámara lenta de las grabaciones, que se aplica después).
+/// - `lead`: la cifra protagonista. Su ritmo con la intensidad, pero quieta del todo en ≤ 0,8 s a cualquier nivel.
+/// - `brief`: las cifras pequeñas (saldos, «Gastado en 7 días», totales de cabecera): ≤ 0,45 s, para que el
+///   protagonista sea uno solo.
+/// - `seconds(s)`: quien necesite otra duración (p. ej. Suscripciones): dura exactamente `s` × la intensidad (nunca
+///   más de `s`).
+public enum RollLength: Equatable, Sendable {
+    case lead
+    case brief
+    case seconds(Double)
+
+    public static let leadLimit = 0.8
+    public static let briefLimit = 0.45
+
+    /// La duración por defecto de un importe: la cifra protagonista (`hero`) es `.lead`; las demás, `.brief`.
+    public static func `default`(isHero: Bool) -> RollLength { isHero ? .lead : .brief }
+
+    /// El ritmo de `timing` para `digitCount` columnas a la intensidad `level`.
+    public func timing(_ timing: RollTiming, digitCount: Int, level: MotionLevel) -> RollTiming {
+        let paced = timing.scaled(level.timeScale)
+        switch self {
+        case .lead:
+            return paced.capped(at: Self.leadLimit, digitCount: digitCount)
+        case .brief:
+            return paced.capped(at: Self.briefLimit, digitCount: digitCount)
+        case .seconds(let s):
+            return timing.lasting(s * min(1, level.timeScale), digitCount: digitCount)
+        }
+    }
+}
+
 /// Las cuentas del cuentakilómetros (sin SwiftUI, para probarlas en Linux).
 public enum DigitRoll {
     /// Columnas de izquierda a derecha (`place` = potencia de 10). Cada una rueda hacia el dígito nuevo en el sentido
@@ -145,5 +219,13 @@ public enum AmountMask {
             x ^= x >> 29
             return i == 0 ? 1 + Int(x % 9) : Int(x % 10)
         }
+    }
+
+    /// Al cerrar el ojo, los puntos salen encima del último fotograma del barajado, columna a columna: cada casilla
+    /// enseña su punto si ya ha salido (`popped`) y, si no, el dígito al azar del último paso del barajado. Nunca hay
+    /// una casilla vacía (el «, €» suelto de antes) ni un dígito del importe. nil = punto.
+    public static func closingCells(count: Int, popped: Int, seed: Int, lastStep: Int = 6) -> [Int?] {
+        let random = scrambledDigits(count: count, step: lastStep, seed: seed)
+        return random.enumerated().map { index, digit in index < popped ? nil : digit }
     }
 }

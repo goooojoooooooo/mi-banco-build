@@ -70,8 +70,10 @@ enum BankingCredentials {
         #endif
         guard isValidApplicationID(appID) else { throw BankingCredentialsError.invalidAppID }
         do {
-            try KeychainVault.set(pkcs1DER, for: .privateKey)
+            try KeychainVault.savePrivateKey(pkcs1DER: pkcs1DER)
             try KeychainVault.set(Data(appID.lowercased().utf8), for: .appID)
+        } catch is RSASignerError {
+            throw BankingCredentialsError.invalidKey
         } catch let error as KeychainError {
             throw BankingCredentialsError.keychain(error)
         }
@@ -82,7 +84,7 @@ enum BankingCredentials {
         if DemoMode.isActive { return DemoMode.banksConnected }
         #endif
         guard let id = try? KeychainVault.data(for: .appID), !id.isEmpty,
-              let key = try? KeychainVault.data(for: .privateKey), !key.isEmpty else { return false }
+              KeychainVault.hasPrivateKey() else { return false }
         return true
     }
 
@@ -91,11 +93,11 @@ enum BankingCredentials {
         if DemoMode.isActive { throw BankingCredentialsError.demo }
         #endif
         guard let idData = try KeychainVault.data(for: .appID), let appID = String(data: idData, encoding: .utf8),
-              let der = try KeychainVault.data(for: .privateKey) else {
+              let key = try KeychainVault.loadPrivateKey() else {
             throw BankingCredentialsError.invalidKey
         }
         return EnableBankingClient(
-            transport: URLSessionTransport(), signer: try RSASigner(pkcs1DER: der), appID: appID,
+            transport: URLSessionTransport(), signer: RSASigner(key: key), appID: appID,
             now: { Date() })
     }
 

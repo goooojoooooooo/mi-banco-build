@@ -135,6 +135,8 @@ struct MovementRowView: View {
                     // apunta el marco (no cambia el diseño ni los toques) y se lee al tocar la fila, nunca al dibujar.
                     .detailAmountSource(id: movement.id)
                     .modifier(IncomeArrivalCheck(active: isFresh && movement.amountCents > 0))
+                    // En una fila deslizada se apaga con la apertura (ver `SwipeAmountFade`); fuera de ella, nada.
+                    .modifier(SwipeAmountFade())
                     .padding(.leading, stacked ? tileSize + 14 : 0)
             }
             .padding(.horizontal, Theme.Space.gutter)

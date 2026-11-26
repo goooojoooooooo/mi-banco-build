@@ -76,7 +76,7 @@ struct SwipeActionsRow<Content: View>: View {
             .overlay(alignment: .trailing) {
                 if offset < -0.5 {
                     AmountCover(width: span + 56)
-                        .opacity(min(max(-offset / 25, 0), 1))
+                        .modifier(SwipeRevealOpacity(offset: offset, distance: 25))
                 }
             }
             .overlay(alignment: .trailing) {
@@ -100,7 +100,6 @@ struct SwipeActionsRow<Content: View>: View {
     }
 
     private var buttons: some View {
-        let reveal: CGFloat = min(max(-offset / 70, 0), 1)
         let open = isOpen
         // Cápsulas redondeadas como el resto de la app, las dos sobre el mismo gris titanio; «No es mío» solo con el
         // texto en ámbar (sin fondo marrón).
@@ -130,7 +129,7 @@ struct SwipeActionsRow<Content: View>: View {
         .padding(.trailing, Self.edgeMargin)
         // Si el muelle se pasa un poco, las acciones se estiran con la fila: nunca queda un hueco negro entre las dos.
         .frame(width: max(span, -offset))
-        .opacity(reveal)
+        .modifier(SwipeRevealOpacity(offset: offset, distance: 70))
         .allowsHitTesting(open)
         .accessibilityHidden(!open)
     }
@@ -202,6 +201,23 @@ private struct LeadingEdgeFade: View {
             .opacity(amount)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+}
+
+/// La opacidad de lo que aparece al abrir la fila, según lo abierta que está EN CADA FOTOGRAMA: sigue al desplazamiento
+/// interpolado también cuando la fila se abre o se cierra con su muelle (no salta al valor final de la animación).
+/// Llega al 100 % tras `distance` pt de apertura.
+private struct SwipeRevealOpacity: ViewModifier, Animatable {
+    var offset: CGFloat
+    let distance: CGFloat
+
+    nonisolated var animatableData: CGFloat {
+        get { offset }
+        set { offset = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        content.opacity(min(max(-offset / distance, 0), 1))
     }
 }
 

@@ -19,7 +19,7 @@ import Testing
 
     @Test func movementUserInfoOmitsAllMoneyWhenEyeClosed() {
         let movement = sampleMovement(amountCents: -4590, kind: .payment, merchant: "Mercadona")
-        let month = MerchantHistory(countThisMonth: 3, totalThisMonthCents: 12_345, lastVisit: nil)
+        let month = MerchantHistory(countThisMonth: 3, totalThisMonthCents: 12_345, countAllTime: 5, firstDate: nil)
         let info = movementNotificationUserInfo(
             movement: movement,
             balances: ["rev": 32_770, "ima": 100_000],
@@ -52,7 +52,7 @@ import Testing
 
     @Test func movementUserInfoKeepsExactMoneyWhenEyeOpen() {
         let movement = sampleMovement(amountCents: 3500, kind: .income, merchant: "Nómina")
-        let month = MerchantHistory(countThisMonth: 2, totalThisMonthCents: 7000, lastVisit: nil)
+        let month = MerchantHistory(countThisMonth: 2, totalThisMonthCents: 7000, countAllTime: 4, firstDate: nil)
         let info = movementNotificationUserInfo(
             movement: movement,
             balances: ["rev": 80_000],

@@ -71,19 +71,18 @@ struct SwipeActionsRow<Content: View>: View {
             // Lo que sale por la izquierda se desvanece en 20 pt (nunca letras cortadas a cuchillo). Cerrada, nada.
             // (Un degradado del negro del fondo por encima, fijo en el borde: sin máscara en cada fila.)
             .overlay(alignment: .leading) { LeadingEdgeFade(amount: min(max(-offset * Self.contentShare / 12, 0), 1)) }
+            // El importe se tapa en cuanto empieza a abrirse (negro, con 32 pt fundidos a la izquierda), antes de que se
+            // lean las acciones: nunca el importe y «Nota» a la vez.
+            .overlay(alignment: .trailing) {
+                if offset < -0.5 {
+                    AmountCover(width: span + 56)
+                        .opacity(min(max(-offset / 25, 0), 1))
+                }
+            }
             .overlay(alignment: .trailing) {
                 // Las acciones solo existen mientras la fila está (algo) abierta: cerrada, no hay nada encima.
                 if offset < -0.5 {
                     buttons
-                        // Sobre el importe: fondo negro, con 32 pt fundidos a la izquierda (sin corte a cuchillo).
-                        .background(Theme.canvas)
-                        .background(alignment: .leading) {
-                            LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .leading,
-                                           endPoint: .trailing)
-                                .frame(width: 32)
-                                .offset(x: -32)
-                                .allowsHitTesting(false)
-                        }
                         .offset(x: max(0, span + offset))
                 }
             }
@@ -203,6 +202,22 @@ private struct LeadingEdgeFade: View {
             .opacity(amount)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+}
+
+/// Lo que tapa el importe de una fila abierta: negro del fondo, con sus 32 pt de la izquierda fundidos. No recibe toques.
+private struct AmountCover: View {
+    let width: CGFloat
+
+    var body: some View {
+        HStack(spacing: 0) {
+            LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 32)
+            Theme.canvas
+        }
+        .frame(width: width)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 

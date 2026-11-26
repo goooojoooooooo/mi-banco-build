@@ -33,10 +33,6 @@ struct BriefingSheet: View {
     @State private var feedbackTick = 0
     @State private var errorTick = 0
     @FocusState private var questionFocused: Bool
-    /// m-7: las barras de voz ocupan su sitio (`waveInLayout`) y se ven (`waveShown`); al parar, primero se apagan y,
-    /// acabado el fundido, dejan el sitio.
-    @State private var waveInLayout = false
-    @State private var waveShown = false
 
     private var demoKeepsVisible: Bool {
         #if DEBUG
@@ -125,10 +121,6 @@ struct BriefingSheet: View {
                     .accessibilityHidden(true)
             }
         }
-        #if DEBUG
-        // Para las pruebas (lote final): qué línea dibuja su resalte, dentro de la hoja (el fondo no se ve con ella).
-        .overlay(alignment: .topLeading) { DrawnLineProbe() }
-        #endif
         // B1: la entrada se da por acabada cuando ha entrado el último bloque (o antes, con un toque).
         .task(id: entranceToken) { await finishEntranceLater(token: entranceToken) }
         .presentationDetents([.large])
@@ -137,11 +129,7 @@ struct BriefingSheet: View {
         .sensoryFeedback(Haptics.error, trigger: errorTick)
         .onAppear {
             briefingModel.setSheetVisible(true)
-        }
-        // m-13: la entrada (y su reloj) empieza cuando HAY resumen: al abrir si ya está, o cuando llega. Antes contaba
-        // desde que se abría la hoja y un resumen que llegaba tarde aparecía de golpe, sin entrada.
-        .onChange(of: briefingModel.briefing != nil, initial: true) { _, has in
-            if has, entranceToken == 0 { startEntrance() }
+            startEntrance()
         }
         .onDisappear {
             askTask?.cancel()
@@ -153,20 +141,6 @@ struct BriefingSheet: View {
                 questionFocused = false
                 speaker.stop()
             }
-        }
-        .onChange(of: speaker.activeTarget == .briefing) { _, speaking in
-            if speaking {
-                waveInLayout = true
-                withAnimation(motion.fade) { waveShown = true }
-            } else {
-                withAnimation(motion.fade) { waveShown = false }
-            }
-        }
-        .task(id: waveShown) {
-            guard !waveShown, waveInLayout else { return }
-            try? await Task.sleep(for: .seconds(motion.fadeDuration))
-            guard !Task.isCancelled, !waveShown else { return }
-            waveInLayout = false
         }
         #if DEBUG
         // Para las pruebas (B2): qué línea suena.
@@ -625,14 +599,12 @@ struct BriefingSheet: View {
         VStack(spacing: 0) {
             // B2: mientras Onyx lee en voz alta, las 28 barras van encima de «Vale», DENTRO de la barra de abajo: la
             // lista reserva su alto (m-7: antes flotaban encima de «Lo que viene» y del borde de la fila siguiente).
-            if waveInLayout {
+            if speaker.activeTarget == .briefing {
                 VoiceWave(speaking: true)
                     .frame(maxWidth: .infinity)
                     .padding(.bottom, 10)
-                    // Solo las barras se funden. m-7 (lote final): al parar se apagan EN SU SITIO y solo después la barra
-                    // de abajo recupera su alto, de golpe: nunca se ven a medio apagar encima de la fila de arriba.
-                    .opacity(waveShown ? 1 : 0)
-                    .transition(.identity)
+                    // Solo las barras se funden; el alto de la barra de abajo cambia de golpe (nada de maquetación animada).
+                    .transition(.opacity.animation(motion.fade))
             }
             Button {
                 speaker.stop()
@@ -754,8 +726,7 @@ private struct BriefingReveal: ViewModifier {
     @Environment(\.motion) private var motion
     @State private var landed = -1
 
-    /// Con `token` 0 la entrada aún no ha empezado (no hay resumen): nada se ve hasta que empieza.
-    private var visible: Bool { completed || landed == token }
+    private var visible: Bool { completed || token == 0 || landed == token }
 
     func body(content: Content) -> some View {
         content
@@ -767,7 +738,6 @@ private struct BriefingReveal: ViewModifier {
 
     private func land() {
         let token = token
-        guard token > 0 else { return }
         let delay = motion.reduce ? 0 : motion.seconds(0.12) + motion.stagger(max(stage - 1, 0), firstGap: 0.12, decay: 0.92)
         withAnimation(motion.animation(.enter).delay(delay)) { landed = token }
     }
@@ -800,20 +770,6 @@ extension AssistantTopic {
 /// B2: mientras Onyx lee en voz alta, la línea que suena va resaltada (un fondo suave) y las demás del resumen se
 /// apagan un poco; al callar, todas vuelven. Solo opacidad y color de fondo, con el fundido de `\.motion`. Con el ojo
 /// cerrado el resalte no añade nada que leer: la línea ya es su máscara.
-#if DEBUG
-/// Solo DEBUG: publica `LaunchProbe.drawnLine` dentro de la hoja (identificador `briefing-drawn-line`).
-private struct DrawnLineProbe: View {
-    var body: some View {
-        Color.clear
-            .frame(width: 1, height: 1)
-            .accessibilityElement()
-            .accessibilityIdentifier("briefing-drawn-line")
-            .accessibilityValue(LaunchProbe.shared.drawnLine)
-            .allowsHitTesting(false)
-    }
-}
-#endif
-
 private struct SpokenHighlight: ViewModifier {
     let id: String
     let current: String?
@@ -829,15 +785,5 @@ private struct SpokenHighlight: ViewModifier {
                     .padding(-6))
             .animation(motion.fade, value: current)
             .accessibilityAddTraits(isCurrent ? .isSelected : [])
-            #if DEBUG
-            // Para las pruebas (lote final): qué línea DIBUJA ahora su resalte (la vista que lo pinta, no el modelo).
-            .onChange(of: isCurrent, initial: true) { _, now in
-                if now {
-                    LaunchProbe.shared.drawnLine = id
-                } else if LaunchProbe.shared.drawnLine == id {
-                    LaunchProbe.shared.drawnLine = "-"
-                }
-            }
-            #endif
     }
 }

@@ -437,8 +437,8 @@ final class BriefingUITests: XCTestCase {
 
         XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), element("briefing-done"), timeout: 8),
                       "U34: tocar la fila no cerró el resumen")
-        // Necesidad cruzada 13.1 (cambio mínimo por decisión del controlador): con la pantalla del banco abierta la
-        // barra de pestañas no se ve (línea B), así que no se espera a ella; la aserción final es la misma.
+        XCTAssertTrue(waitFor(NSPredicate(format: "selected == true"), app.tabBars.buttons["Ajustes"], timeout: 8),
+                      "U34: tocar la fila no llevó a Ajustes")
         XCTAssertTrue(app.buttons["bank-import-statement"].waitForExistence(timeout: 10),
                       "U34: tocar la fila no abrió la pantalla de Revolut")
     }

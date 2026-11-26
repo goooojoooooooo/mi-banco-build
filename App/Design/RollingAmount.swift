@@ -57,16 +57,6 @@ struct RollingAmount: View {
     /// dejaría un blanco en mitad de la frase). A cambio, la frase se recoloca al abrir y cerrar el ojo. En una fila o
     /// una columna de importes se deja en `false`: la máscara ocupa el mismo hueco que la cifra y nada salta.
     var inline = false
-    /// Cuánto rueda: nil = según el estilo (la cifra protagonista, `.lead`, quieta en ≤ 0,8 s; las demás, `.brief`,
-    /// 0,45 s). Quien necesite otra duración pasa `.seconds(s)`.
-    var length: RollLength? = nil
-
-    /// La espera entre volver a 0 y empezar a contar cuando Inicio se vuelve a montar por capas (sin escalar).
-    static let recountWait = 0.15
-
-    /// Esa espera con la intensidad y la cámara lenta del movimiento (quien imite la cuenta, p. ej. un velo que se
-    /// quita cuando empieza a rodar, usa esta y no un 0,15 propio).
-    static func recountDelay(_ motion: MotionContext) -> Double { motion.seconds(recountWait) }
 
     /// Opcional: sin preferencias (una vista previa, una hoja o ventana que no las recibe) no se cierra la app, y el ojo
     /// se lee de lo guardado y se observa en vivo: si el dueño lo cierra desde otro sitio, este importe se oculta al
@@ -82,8 +72,7 @@ struct RollingAmount: View {
         RollingDigits(
             cents: cents, style: style, hidden: preferences?.privateMode ?? storedPrivateMode, countsUp: countsUp,
             revealed: revealed, motion: motion,
-            restartToken: entrance.token, restartsOnToken: entrance.active && entrance.scope == .assembly, inline: inline,
-            length: length)
+            restartToken: entrance.token, restartsOnToken: entrance.active && entrance.scope == .assembly, inline: inline)
     }
 }
 
@@ -109,13 +98,11 @@ struct RollingDigits: View {
     var restartsOnToken: Bool
     /// Dentro de una frase: oculto, ocupa solo lo que mide la máscara (ver `RollingAmount.inline`).
     var inline: Bool
-    /// Cuánto rueda (ver `RollingAmount.length`).
-    var length: RollLength?
 
     init(
         cents: Int, style: AmountStyle, hidden: Bool, countsUp: Bool = true, revealed: Bool = true,
         motion: MotionContext = MotionContext(), restartToken: Int = 0, restartsOnToken: Bool = false,
-        inline: Bool = false, length: RollLength? = nil
+        inline: Bool = false
     ) {
         self.cents = cents
         self.style = style
@@ -126,7 +113,6 @@ struct RollingDigits: View {
         self.restartToken = restartToken
         self.restartsOnToken = restartsOnToken
         self.inline = inline
-        self.length = length
         // Con el modo privado puesto desde el principio, el primer fotograma ya son puntos (nunca cifras).
         _reveal = State(initialValue: AmountReveal(cents: cents, hidden: hidden))
         _popped = State(initialValue: hidden ? Self.dotCount(style) : 0)
@@ -226,32 +212,23 @@ struct RollingDigits: View {
 
     /// Con Reducir movimiento: sale la cifra vieja en la primera mitad del fundido y entra la nueva en la segunda.
     static func sequentialFade(_ motion: MotionContext) -> AnyTransition {
-        let half = MotionContext.fadeSeconds / 2 * max(motion.timeMultiplier, 0.01)
+        let half = 0.11 * max(motion.timeMultiplier, 0.01)
         return .asymmetric(
             insertion: .opacity.animation(.easeOut(duration: half).delay(half)),
             removal: .opacity.animation(.easeIn(duration: half)))
     }
 
     #if DEBUG
-    /// Lo dibujado ahora: la cifra, los dígitos al azar del barajado o la máscara. m-5: mientras las columnas ruedan,
-    /// lo que se ve en cada fotograma no se publica (cambia 60 veces por segundo); se publica la cifra de LLEGADA con
-    /// «→» delante, para que ninguna prueba la tome por la cifra que se ve quieta.
+    /// Lo dibujado ahora: la cifra (su valor de llegada), los dígitos al azar del barajado o la máscara.
     private var drawnTextForTests: String {
         switch drawnNow {
         case .real:
             let parts = texts(of: shownValue)
-            return (rolling ? "→" : "") + parts.main + parts.small
+            return parts.main + parts.small
         case .scramble:
             return String(maskGlyphs(scrambleStep: scrambleStep).map { g in g.fixed.map { Character(String(Int($0))) } ?? g.char })
         case .dots:
-            // Cada casilla de la máscara: su dígito al azar si aún no ha salido el punto tras el barajado, el punto si
-            // ya se ve y un espacio si no se dibuja nada (para que una prueba vea un hueco).
-            let cells = closingCells
-            return String(maskGlyphs().map { g -> Character in
-                guard let dot = g.dot else { return g.char }
-                if let digit = cells[dot] { return Character(String(digit)) }
-                return dotVisible(dot) ? g.char : " "
-            })
+            return String(maskGlyphs().map(\.char))
         }
     }
     #endif
@@ -391,12 +368,6 @@ struct RollingDigits: View {
                         .cellFont(font(g.small))
                         .cellStyle(glyphStyle(g.small))
                         .opacity(usesPlan ? visibility[d] : 1)
-                } else if let dot = g.dot, let digit = closingCells[dot] {
-                    // Cerrando el ojo: el punto aún no ha salido y su casilla sigue con el dígito al azar del último
-                    // fotograma del barajado (nunca vacía: sin el «, €» suelto).
-                    DigitCell(position: Double(digit), blur: 0, blurRadius: blurRadius(g.small))
-                        .cellFont(font(g.small))
-                        .cellStyle(glyphStyle(g.small))
                 } else if let dot = g.dot {
                     // La máscara es el «•» de la propia tipografía, en la fuente de su celda (grande en euros, pequeña
                     // en céntimos), con el avance del propio glifo.
@@ -423,15 +394,6 @@ struct RollingDigits: View {
     /// celda dice «€» (las pantallas comprueban que en modo privado no queda ni un «€» a la vista de las pruebas).
     private func cellLabel(_ char: Character) -> String {
         hidden ? "importe oculto" : String(char)
-    }
-
-    /// Por cada punto de la máscara, el dígito al azar que aún ocupa su casilla mientras los puntos salen tras el
-    /// barajado (nil = ya es un punto). Fuera de ese momento, todo nil.
-    private var closingCells: [Int?] {
-        guard reveal.drawn == .dots, scrambleStep == 6, popped < dotCount else {
-            return Array(repeating: nil, count: dotCount)
-        }
-        return AmountMask.closingCells(count: dotCount, popped: popped, seed: seed)
     }
 
     private func dotVisible(_ index: Int) -> Bool {
@@ -510,13 +472,13 @@ struct RollingDigits: View {
         }
     }
 
-    /// Dos pasos: primero 0 (la capa aún está oculta) y, tras `RollingAmount.recountDelay` (0,15 s con la intensidad y
-    /// la cámara lenta), la cuenta.
+    /// Dos pasos: primero 0 (la capa aún está oculta) y, tras 0,15 s, la cuenta (como `CountingAmount`). La espera
+    /// sigue la intensidad y la cámara lenta, como el resto del montaje.
     private func recount() {
         guard restartsOnToken, countsUp, revealed, !hidden, !motion.reduce else { return }
         value = 0
         plan = []
-        roll(to: cents, from: 0, positions: nil, delay: RollingAmount.recountDelay(motion))
+        roll(to: cents, from: 0, positions: nil, delay: motion.seconds(0.15))
     }
 
     /// Dónde está ahora cada tira (con decimales si va rodando), para seguir desde ahí.
@@ -526,15 +488,9 @@ struct RollingDigits: View {
         return plan.map { DigitRoll.position($0, at: t, overshoot: overshoot) }
     }
 
-    /// Cuánto rueda este importe: lo pedido o, si nada, según el estilo.
-    private var rollLength: RollLength {
-        if let length { return length }
-        if case .hero = style { return .lead }
-        return .brief
-    }
-
     private func roll(
-        to new: Int, from old: Int, positions: [Double]?, delay: Double = 0, timing: RollTiming = .count
+        to new: Int, from old: Int, positions: [Double]?, delay: Double = 0,
+        base: Double = 0.56, perColumn: Double = 0.038, stagger: Double = 0.022
     ) {
         let n = digitCount(new)
         var aligned: [Double]?
@@ -542,11 +498,9 @@ struct RollingDigits: View {
             // Alineado a la derecha: las columnas nuevas de la izquierda empiezan en 0.
             aligned = Array(repeating: 0, count: max(0, n - positions.count)) + Array(positions.suffix(n))
         }
-        // La intensidad va dentro de `RollLength` (con su tope); aquí solo la cámara lenta de las grabaciones.
-        let paced = rollLength.timing(timing, digitCount: n, level: motion.level).scaled(max(motion.timeMultiplier, 0.01))
         plan = DigitRoll.columns(
             from: rollUnits(old), to: rollUnits(new), digitCount: n, startingAt: aligned,
-            base: paced.base, perColumn: paced.perColumn, stagger: paced.stagger)
+            base: motion.seconds(base), perColumn: motion.seconds(perColumn), stagger: motion.seconds(stagger))
         value = new
         planStart = Date().addingTimeInterval(delay)
         rolling = true
@@ -580,7 +534,6 @@ struct RollingDigits: View {
             startScramble(generation)
         case .showDots:
             rolling = false
-            scrambleStep = 0
             withAnimation(motion.fade) { popped = dotCount }
         }
     }
@@ -612,7 +565,7 @@ struct RollingDigits: View {
                 // El número que dicen los dígitos barajados, en la unidad de `roll` (céntimos; en euros enteros son euros).
                 let shown = random.reduce(0) { $0 * 10 + $1 }
                 let from = style.isWhole ? shown * 100 : shown
-                roll(to: target, from: from, positions: random.map(Double.init), timing: .reveal)
+                roll(to: target, from: from, positions: random.map(Double.init), base: 0.38, perColumn: 0.03, stagger: 0.014)
             default:
                 break
             }

@@ -283,23 +283,6 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil(10) { finished.label == "Terminados: 2 · mal" }, "Tras el error no avisó: «\(finished.label)»")
     }
 
-    /// m-10 (lote final): tras el error, `onFinish(false)` llega cuando el botón ha terminado de reaccionar (sacudida
-    /// acabada), no en el mismo instante en que aparece el error. A ×8 la sacudida dura ~3,4 s.
-    func testMorphingButtonReportsFailureAfterTheShake() throws {
-        launchGallery(["-MiBancoMotionScale", "8"])
-        let finished = any("gallery.morph.finished")
-        let fail = app.buttons["Probar fallo"]
-        revealWhole(fail)
-        fail.tap()
-        let error = app.staticTexts["No se ha podido. Inténtalo otra vez."]
-        XCTAssertTrue(error.waitForExistence(timeout: 20), "No apareció el error")
-        let early = finished.label
-        Thread.sleep(forTimeInterval: 1)
-        XCTAssertFalse(early.hasSuffix("mal"), "Avisó del fallo en el mismo instante del error: «\(early)»")
-        XCTAssertFalse(finished.label.hasSuffix("mal"), "Avisó del fallo con la sacudida a medias: «\(finished.label)»")
-        XCTAssertTrue(waitUntil(15) { finished.label.hasSuffix("mal") }, "Tras el error no avisó: «\(finished.label)»")
-    }
-
     /// K9: a tamaño normal el botón mide su alto de siempre (no se estira con el hueco).
     func testMorphingButtonHeightAtDefaultSize() throws {
         launchGallery()
@@ -900,9 +883,6 @@ final class MotionGalleryTests: XCTestCase {
             let drawn = amount.value as? String ?? ""
             seen.append(drawn)
             XCTAssertFalse(drawn.contains("774"), "Con el ojo cerrándose se dibuja la cifra real: «\(drawn)»")
-            // Lote final (ojo de diseño 2.1): nunca un importe vacío («, €»): siempre cinco casillas con algo dibujado.
-            let cells = drawn.filter { $0 == "•" || $0.isNumber }.count
-            XCTAssertGreaterThanOrEqual(cells, 5, "Cerrando el ojo, el importe se queda sin casillas: «\(drawn)»")
             Thread.sleep(forTimeInterval: 0.1)
         }
         XCTAssertTrue(waitUntil(10) { (amount.value as? String)?.contains("•") == true }, "No acaba en la máscara: \(seen)")

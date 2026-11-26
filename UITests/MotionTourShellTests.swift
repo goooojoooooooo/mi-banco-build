@@ -275,19 +275,18 @@ final class MotionTourShellTests: MotionTourCase {
     /// C4 (D1): fila → detalle a ×4, desde el toque: el importe sale de la fila y vuela con un arco a su sitio; las
     /// líneas entran desde 0,15 s; «Te quedaban» rueda cuando el importe se posa; las barras del historial crecen 40 ms
     /// una detrás de otra. Luego se cierra (`detail-dismiss`).
-    /// m-4 (lote final): la hoja se cierra SOLA a los 4,5 s de abrirse (`-MiBancoDemoAutoCloseDetail`): un toque en
-    /// «Cerrar» espera a que la app quede quieta y la ráfaga del cierre empezaba con la hoja ya cerrada. La segunda
-    /// ráfaga empieza antes del cierre y lo cubre entero.
     private func rowDetailBursts(_ name: String, extra: [String] = []) {
-        launch(extra + ["-MiBancoDemoAutoCloseDetail", "4.5"])
+        launch(extra)
         waitForLaunchToEnd()
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
         XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
         row.tap()
         burst(name, frames: 24, every: 0.12)
-        XCTAssertTrue(app.buttons["Cerrar"].exists, "La hoja se cerró antes de grabar su cierre")
-        burst(name == "row-detail" ? "detail-dismiss" : name + "-cerrar", frames: 20, every: 0.2)
+        let close = app.buttons["Cerrar"]
+        XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja")
+        close.tap()
+        burst(name == "row-detail" ? "detail-dismiss" : name + "-cerrar", frames: 8, every: 0.15)
     }
 
     func testRowDetail() throws { rowDetailBursts("row-detail") }

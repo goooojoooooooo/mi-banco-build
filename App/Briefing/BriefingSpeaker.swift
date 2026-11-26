@@ -18,9 +18,7 @@ final class BriefingSpeaker {
     /// progreso REAL de la voz (`willSpeakRangeOfSpeechString`). nil cuando no suena ninguna línea (el saludo, entre
     /// frases o callada). Con el modo privado no hay líneas (la voz no lee ninguna).
     private(set) var currentLine: String?
-    /// Lo que lee la voz ahora, con sus líneas (rangos del texto que lee: `SpokenBriefing.trimmed`).
-    private var spoken = SpokenBriefing(text: "", lines: [])
-    private var interruptionObserver: (any NSObjectProtocol)?
+    private var lines: [SpokenBriefing.Line] = []
 
     private let synthesizer = AVSpeechSynthesizer()
     private let delegateProxy: DelegateProxy
@@ -31,16 +29,6 @@ final class BriefingSpeaker {
         let proxy = DelegateProxy()
         self.delegateProxy = proxy
         synthesizer.delegate = proxy
-        // m-9: una llamada, Siri o una alarma interrumpe el audio: la lectura se para del todo (botón y resalte
-        // incluidos), en vez de quedarse «leyendo» sin sonido.
-        interruptionObserver = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
-                .flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .began
-            guard began else { return }
-            MainActor.assumeIsolated { self?.stop() }
-        }
     }
 
     func toggle(_ text: String, target: Target = .briefing) {
@@ -61,8 +49,8 @@ final class BriefingSpeaker {
     }
 
     func speak(_ text: String, target: Target = .briefing, lines: [SpokenBriefing.Line] = []) {
-        let spoken = SpokenBriefing(text: text, lines: lines).trimmed()
-        guard !spoken.text.isEmpty else {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
             stop()
             return
         }
@@ -70,15 +58,17 @@ final class BriefingSpeaker {
         generation += 1
         let token = generation
         activeTarget = target
-        // La voz lee el texto recortado; los rangos de las líneas son de ese texto (`SpokenBriefing.trimmed`).
-        self.spoken = spoken
+        // Los rangos son del texto entero; si se recorta por delante, se corrigen (en la práctica no hay nada que
+        // recortar: el texto empieza por el saludo).
+        let shift = text.utf16.count - text.drop(while: { $0.isWhitespace }).utf16.count
+        self.lines = lines.map { .init(id: $0.id, range: ($0.range.lowerBound - shift)..<($0.range.upperBound - shift)) }
 
         #if DEBUG
         if DemoMode.isActive {
             // En el simulador de CI no hay salida de audio fiable: simulamos una lectura activa hasta «Parar» o cierre,
             // y que la voz va pasando por las líneas (1,6 s cada una, a la cámara lenta de las grabaciones) para poder
             // grabar y probar el resalte. En el iPhone manda el progreso real de la voz.
-            let steps = spoken.lines
+            let steps = self.lines
             demoTimer = Task { [weak self] in
                 for line in steps {
                     guard let self, !Task.isCancelled, self.generation == token else { return }
@@ -98,7 +88,7 @@ final class BriefingSpeaker {
         try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? session.setActive(true)
 
-        let utterance = AVSpeechUtterance(string: spoken.text)
+        let utterance = AVSpeechUtterance(string: trimmed)
         utterance.voice = Self.preferredVoice()
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
 
@@ -112,7 +102,7 @@ final class BriefingSpeaker {
         } progress: { [weak self] location in
             Task { @MainActor [weak self] in
                 guard let self, self.generation == token else { return }
-                let now = self.spoken.line(at: location)
+                let now = self.lines.first { $0.range.contains(location) }?.id
                 if now != self.currentLine { self.currentLine = now }
             }
         }

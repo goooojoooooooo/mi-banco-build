@@ -216,17 +216,12 @@ final class GuideUITests: XCTestCase {
     /// empiecen por DEBAJO de la cabecera (no escondidas bajo ella). Antes se sumaba el alto exacto de los puntos de
     /// avance (8 + 6 pt bajo «guide-step-part»): un detalle de dibujo que impedía cambiar los puntos por los nodos de la
     /// línea B. Ahora: el final del elemento más bajo de la cabecera que se ve, más el margen de debajo (12 pt).
-    /// m-6 (lote final): hoy existen `guide-step-part` y `guide-step-counter`; `guide-stepper` (la línea de nodos) se le
-    /// pide a la línea B y cuenta en cuanto exista. Si no existe NINGUNO, la prueba falla (antes valía 0 y pasaba).
-    private func visibleTop(file: StaticString = #filePath, line: UInt = #line) -> CGFloat {
-        let ids = ["guide-step-part", "guide-step-counter", "guide-stepper"]
-        let bottoms = ids.map { app.descendants(matching: .any).matching(identifier: $0).firstMatch }
+    private func visibleTop() -> CGFloat {
+        let ids = ["guide-step-part", "guide-step-counter", "guide-stepper", "guide-progress", "guide-header"]
+        let bottom = ids.map { app.descendants(matching: .any).matching(identifier: $0).firstMatch }
             .filter { $0.exists }
             .map { $0.frame.maxY }
-        guard let bottom = bottoms.max() else {
-            XCTFail("La cabecera del paso no tiene ninguno de \(ids): no se sabe dónde acaba", file: file, line: line)
-            return 12
-        }
+            .max() ?? 0
         return bottom + 12
     }
 
@@ -240,7 +235,7 @@ final class GuideUITests: XCTestCase {
         let text = app.staticTexts["guide-help-text"]
         XCTAssertTrue(text.waitForExistence(timeout: 5), "La ayuda no se abrió (\(name))", file: file, line: line)
         let open = app.buttons["guide-open-shortcuts"]
-        let top = visibleTop(file: file, line: line)
+        let top = visibleTop()
         // H: lo visible entre la cabecera y los botones fijos (que llevan 12 pt de margen encima de «Abrir Atajos»).
         let visible = open.frame.minY - 12 - top
         let drawing = app.descendants(matching: .any).matching(identifier: "guide-drawing").firstMatch

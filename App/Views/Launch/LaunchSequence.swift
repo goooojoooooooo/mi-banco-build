@@ -62,9 +62,7 @@ struct LaunchSequence: View {
         .onAppear {
             // Con piezas, la marca y el nombre vuelan a la ranura de la barra de Inicio: mientras tanto la ranura no
             // dibuja los suyos (nunca dos marcas). Con solo fundido nada vuela y la ranura se queda como está.
-            if timeline.style == .pieces {
-                if noSlot { anchor?.flyingToWelcome = true } else { anchor?.flying = .markAndName }
-            }
+            if timeline.style == .pieces { anchor?.flying = .markAndName }
             #if DEBUG
             if let began = LaunchProbe.shared.appInitAt {
                 LaunchProbe.shared.mountedAfterMs = Int(((Date().timeIntervalSince1970 - began) * 1000).rounded())
@@ -82,27 +80,19 @@ struct LaunchSequence: View {
         // Con la ranura de Inicio a la vista, la marca y el nombre ATERRIZAN en ella, enteros, y en ese instante la
         // capa se quita y la ranura dibuja los suyos en el mismo sitio. Sin ranura, se deshacen por el camino.
         let brand = noSlot ? nil : anchor?.brandFrame
-        // 18.1: en el primer arranque, si la bienvenida apunta su marca, la del arranque vuela hasta ella y aterriza
-        // encima (sin el nombre viajando ni las bandas: la bienvenida trae las suyas).
-        let welcome = noSlot && pieces ? anchor?.welcomeMarkFrame : nil
-        let lands = pieces && (brand != nil || welcome != nil)
+        let lands = pieces && brand != nil
         let slot = brand ?? LaunchGeometry.fallbackSlot(topInset: topInset)
-        let markSide = lands && welcome == nil ? anchor?.brandMarkSide : nil
-        // Sin ranura ni marca de bienvenida: nada vuela; la marca se apaga mientras el negro va de 1 a 0,5 y el negro,
-        // ya sin marca encima, se aclara de 0,5 a 0 (en el tiempo del guion: lo mismo dura).
-        let flight = noSlot && welcome == nil ? 0 : CGFloat(frame.flight)
+        let markSide = lands ? anchor?.brandMarkSide : nil
+        // Sin ranura (bienvenida): nada vuela; la marca se apaga mientras el negro va de 1 a 0,5 y el negro, ya sin
+        // marca encima, se aclara de 0,5 a 0 (en el tiempo del guion: lo mismo dura).
+        let flight = noSlot ? 0 : CGFloat(frame.flight)
         let held = LaunchGeometry.heldForWelcome(black: frame.black, mark: frame.mark)
         var frame = frame
-        if noSlot, welcome == nil {
+        if noSlot {
             frame.black = held.black
             frame.mark = held.mark
         }
-        if welcome != nil {
-            frame.bandDraw = []
-            frame.bandWiden = []
-        }
-        let target = welcome.map { (center: CGPoint(x: $0.midX, y: $0.midY), side: min($0.width, $0.height)) }
-            ?? LaunchGeometry.markTarget(in: slot, markSide: markSide)
+        let target = LaunchGeometry.markTarget(in: slot, markSide: markSide)
         let nameHome = CGPoint(x: center.x, y: center.y + Self.markSize / 2 + 28)
         let tracking = CGFloat(0.42 - 0.24 * frame.name) * Self.nameSize
         let dissolve = LaunchGeometry.landingOpacity(flight: flight, hasSlot: false)
@@ -131,9 +121,7 @@ struct LaunchSequence: View {
                 .scaleEffect(1 + (nameScale - 1) * min(1, flight))
                 .position(LaunchGeometry.lerp(nameHome, nameSlot.center, flight))
                 // Sin ranura, el nombre se va apagando durante el vuelo.
-                // Hacia la bienvenida el nombre no viaja: se apaga en cuanto la marca despega.
-                .opacity(welcome != nil ? frame.name * Double(max(0, 1 - flight / 0.15))
-                         : (lands ? frame.name : frame.name * frame.mark * Double(max(0, 1 - flight / 0.7))))
+                .opacity(lands ? frame.name : frame.name * frame.mark * Double(max(0, 1 - flight / 0.7)))
             if !frame.joined {
                 LaunchHalvesCanvas(
                     frame: frame, center: center, markSize: Self.markSize, distanceScale: motion.level.distanceScale)
@@ -183,7 +171,6 @@ struct LaunchSequence: View {
         // dos marcas ni uno sin ninguna.
         finished = true
         anchor?.flying = nil
-        anchor?.flyingToWelcome = false
         onFinish()
     }
 
@@ -217,11 +204,6 @@ struct LaunchExit: View {
     @State private var landsOnSlot: Bool?
     /// El vuelo ha terminado: el reloj se para aquí mismo (además de quitarse la capa).
     @State private var finished = false
-    /// Lote final: la ranura a la que iba desapareció a mitad del vuelo (otra pestaña): cuándo, y dónde estaba. La
-    /// marca sigue hacia ese último sitio y se apaga en `lostFade` s; nunca desaparece de un fotograma a otro.
-    @State private var slotLostAt: Date?
-    @State private var lastSlot: CGRect?
-    static let lostFade = 0.15
 
     var body: some View {
         let timeline = LaunchTimeline(motion)
@@ -245,24 +227,13 @@ struct LaunchExit: View {
             let seconds = (timeline.exitDuration ?? 0) * max(motion.timeMultiplier, 0.01)
             if seconds > 0 { try? await Task.sleep(for: .seconds(seconds), tolerance: LaunchClock.tolerance) }
             guard !Task.isCancelled else { return }
-            // Si la ranura se perdió por el camino, la capa espera a que la marca termine de apagarse.
-            if let lost = slotLostAt {
-                let left = motion.seconds(Self.lostFade) - Date().timeIntervalSince(lost)
-                if left > 0 { try? await Task.sleep(for: .seconds(left)) }
-                guard !Task.isCancelled else { return }
-            }
             // En la misma actualización: el reloj se para en su último fotograma (la marca exactamente en la ranura),
             // la ranura de la barra vuelve a dibujar la suya y esta capa se quita.
             finished = true
             anchor?.flying = nil
             onFinish()
         }
-        .onChange(of: anchor?.brandFrame) { old, new in
-            if let new { lastSlot = new } else if let old { lastSlot = old }
-            if new == nil, landsOnSlot == true, !finished, slotLostAt == nil { slotLostAt = Date() }
-        }
         .onAppear {
-            lastSlot = anchor?.brandFrame
             if timeline.exitDuration != nil {
                 let lands = anchor?.brandFrame != nil
                 landsOnSlot = lands
@@ -286,11 +257,10 @@ struct LaunchExit: View {
 
     private func scene(_ frame: LaunchFrame, topInset: CGFloat) -> some View {
         let home = CGPoint(x: from.midX, y: from.midY)
-        // Si la ranura desaparece a mitad del vuelo (otra pestaña), la marca sigue hacia donde estaba y se apaga en
-        // `lostFade` s (lote final: antes se iba de golpe, en un fotograma).
-        let brand = anchor?.brandFrame ?? (slotLostAt != nil ? lastSlot : nil)
+        let brand = anchor?.brandFrame
+        // m-7: si la ranura desaparece a mitad del vuelo (otra pestaña), la marca ya no aterriza: se deshace por el
+        // camino en vez de quedarse entera donde estaba.
         let lands = (landsOnSlot ?? true) && brand != nil
-        let lostOpacity = slotLostAt.map { max(0, 1 - Date().timeIntervalSince($0) / max(motion.seconds(Self.lostFade), 0.01)) } ?? 1
         let slot = brand ?? (cold ? LaunchGeometry.fallbackSlot(topInset: topInset) : from)
         let flight = CGFloat(frame.flight)
         let target = LaunchGeometry.markTarget(in: slot, markSide: lands && brand != nil ? anchor?.brandMarkSide : nil)
@@ -303,7 +273,7 @@ struct LaunchExit: View {
                 .scaleEffect(1 + (target.side / max(from.width, 1) - 1) * flight)
                 .position(LaunchGeometry.lerp(home, target.center, flight))
                 // Con ranura llega entera hasta ella; sin ranura se deshace por el camino.
-                .opacity(lands ? lostOpacity : frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: false))
+                .opacity(lands ? 1 : frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: false))
         }
         .accessibilityHidden(true)
     }

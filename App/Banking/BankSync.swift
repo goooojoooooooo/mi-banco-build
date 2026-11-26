@@ -10,6 +10,12 @@ extension Notification.Name {
     static let ledgerDidSyncFromBank = Notification.Name("com.mibanco.ledgerDidSyncFromBank")
 }
 
+enum SyncOutcome: Equatable, Sendable {
+    case skipped(SkipReason)
+    case updated(added: Int)
+    case failed(SyncProblem)
+}
+
 /// Estado para la pantalla de bancos (más adelante). Este código no presenta nada.
 @MainActor @Observable
 final class BankSyncStatus {

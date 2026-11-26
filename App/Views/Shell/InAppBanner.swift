@@ -5,8 +5,8 @@ import MiBancoCore
 ///
 /// Cae desde 160 pt por encima con el muelle `release`; a los 0,95 s se despliega hacia abajo (se destapa, recortado
 /// desde arriba: no cambia el tamaño de nada) y enseña «Te quedan», que rueda, y dos acciones; a los 3,4 s se recoge y
-/// a los 3,65 s sube y se va. Con Reducir movimiento: aparece con un fundido, se despliega a los 0,9 s sin moverse y
-/// se funde a los 3,2 s. Los tiempos son pausas de la interfaz (`motion.pause`: siguen la cámara lenta de las
+/// a los 3,65 s sube y se va. Con Reducir movimiento: aparece entero (desplegado) con un fundido, sin cortina ni
+/// recorrido, y se funde a los 3,2 s. Al aparecer, VoiceOver lo anuncia (lo mismo que dice su cabecera). Los tiempos son pausas de la interfaz (`motion.pause`: siguen la cámara lenta de las
 /// grabaciones).
 ///
 /// NUNCA es una hoja: va dentro de `RootView`, que está debajo del bloqueo y de la tapa; existe solo mientras
@@ -17,11 +17,15 @@ struct InAppBanner: View {
     /// «Te quedan»: el saldo de esa cuenta tras el movimiento (nil si no se conoce: entonces no se despliega esa línea).
     let left: Int?
     let onOpen: () -> Void
-    let onNotMine: () -> Void
+    /// «No es mío»: true si se ha guardado (el aviso se va). Si falla, el aviso se queda, vibra el error y VoiceOver
+    /// lo dice: nunca falla en silencio.
+    let onNotMine: () -> Bool
     let onFinished: () -> Void
 
     @Environment(\.motion) private var motion
+    @Environment(AppPreferences.self) private var preferences: AppPreferences?
     @State private var dropped = false
+    @State private var errorTick = 0
     @State private var open: CGFloat = 0
     /// N-2: los botones de abajo reciben toques solo cuando el despliegue ha TERMINADO (y dejan de recibirlos en cuanto
     /// empieza a recogerse): nunca se toca lo que la máscara aún tapa.
@@ -40,7 +44,7 @@ struct InAppBanner: View {
                 details(left: left)
                     .opacity(Double(min(1, open * 1.4)))
                     // m-1: sus botones solo se tocan desplegado del todo (al recogerse, nada que no se ve recibe toques).
-                    .allowsHitTesting(open > 0.99) // PROVOCADO: como antes de N-2
+                    .allowsHitTesting(actionsLive)
             }
         }
         .padding(14)
@@ -52,7 +56,8 @@ struct InAppBanner: View {
         // de debajo. Lo que la máscara tapa, no (la forma de toque se desplaza con la máscara).
         .background(alignment: .top) {
             Color.clear
-                .allowsHitTesting(false) // PROVOCADO: sin el bloqueo de toques de N-1
+                .contentShape(shape.offset(y: -hiddenBottom))
+                .onTapGesture {}
                 .accessibilityHidden(true)
         }
         .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
@@ -66,13 +71,15 @@ struct InAppBanner: View {
         .offset(y: dropped || motion.reduce ? 0 : -160)
         .opacity(motion.reduce ? (dropped ? 1 : 0) : 1)
         .task { await run() }
+        .sensoryFeedback(Haptics.error, trigger: errorTick)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("in-app-banner")
     }
 
     /// Lo que queda tapado por abajo: todo lo que no es la cabecera, menos lo ya desplegado.
     private var hiddenBottom: CGFloat {
-        guard fullHeight > 0 else { return 0 }
+        // Con Reducir movimiento no hay cortina: el aviso aparece entero y solo se funde.
+        guard fullHeight > 0, !motion.reduce else { return 0 }
         let extra = max(0, fullHeight - headHeight - 28)
         return extra * (1 - min(max(open, 0), 1))
     }
@@ -113,7 +120,7 @@ struct InAppBanner: View {
             .titan(.option)
             HStack(spacing: 8) {
                 bannerAction("Añadir nota", action: onOpen)
-                bannerAction("No es mío", tint: Theme.warning, action: onNotMine)
+                bannerAction("No es mío", tint: Theme.warning, action: notMine)
             }
         }
     }
@@ -136,12 +143,17 @@ struct InAppBanner: View {
     /// esperas son pausas de la interfaz que leen `\.motion` (cámara lenta de las grabaciones incluida); si el aviso
     /// se quita antes (bloqueo, segundo plano, toque), la tarea se cancela con él.
     private func run() async {
+        announce()
         if motion.reduce {
-            withAnimation(motion.fade) { dropped = true }
-            guard await pause(0.9) else { return }
+            // Entero y de una vez: el fundido del aviso es el único cambio (sin cortina que se abre).
             leftRevealed = true
-            withAnimation(motion.fade, completionCriteria: .logicallyComplete) { open = 1 } completion: { setActions(true) }
-            guard await pause(2.3) else { return }
+            withAnimation(motion.fade) {
+                dropped = true
+                open = 1
+            }
+            guard await pause(MotionContext.fadeSeconds) else { return }
+            setActions(true)
+            guard await pause(3.2 - MotionContext.fadeSeconds) else { return }
             setActions(false)
             withAnimation(motion.fade) { dropped = false }
             guard await pause(0.22) else { return }
@@ -165,6 +177,20 @@ struct InAppBanner: View {
         withAnimation(.easeIn(duration: motion.pause(0.4))) { dropped = false }
         guard await pause(0.4) else { return }
         onFinished()
+    }
+
+    /// VoiceOver dice que ha llegado (el título, el banco y el importe, o «importe oculto» con el ojo cerrado).
+    private func announce() {
+        let hidden = preferences?.privateMode ?? AppPreferences.storedPrivateMode
+        let amount = spokenAmount(arrival.amountCents, hidden: hidden)
+        AccessibilityNotification.Announcement("\(arrival.title), \(arrival.bank.displayName), \(amount)").post()
+    }
+
+    /// «No es mío»: si no se ha podido guardar, el aviso se queda y lo dice (vibración de error y VoiceOver).
+    private func notMine() {
+        guard !onNotMine() else { return }
+        errorTick += 1
+        AccessibilityNotification.Announcement("No se ha podido. Inténtalo otra vez.").post()
     }
 
     private func setActions(_ live: Bool) {

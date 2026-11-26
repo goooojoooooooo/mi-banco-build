@@ -167,7 +167,7 @@ private struct AppShellView: View {
                     // escena no está activa se quita de golpe y lo releva la tapa (`ShellState.lockExitOnUnlock`).
                     // En el arranque en frío monta las piezas sobre su propia marca; en un re-bloqueo, la marca está quieta.
                     LockView(locked: unlockBinding, playsLaunch: shell.lockPlaysLaunch,
-                             leaveOnUnlock: lockLeave, fadeStarted: lockFadeStarted)
+                             leaveOnUnlock: lockLeave, fadeStarted: { lockFadeStarted($0, keepsItsMark: $1) })
                         .transition(transition(of: .lock))
                         .zIndex(ShellState.zIndex(of: .lock))
                 } else if layers.contains(.launch) {
@@ -305,7 +305,10 @@ private struct AppShellView: View {
             // La marca de la barra de Inicio se esconde mientras vuela la del arranque (`LaunchAnchor.flying`, que ponen
             // y quitan las propias capas que vuelan). Respaldo: sin ninguna de esas capas, nunca se queda escondida.
             .onChange(of: layers.contains(.launch) || layers.contains(.exit)) { _, flying in
-                if !flying { launchAnchor.flying = nil }
+                if !flying {
+                    launchAnchor.flying = nil
+                    launchAnchor.flyingToWelcome = false
+                }
             }
             #if DEBUG
             .onChange(of: launchAnchor.flying) { _, flying in
@@ -383,7 +386,10 @@ private struct AppShellView: View {
     /// Lo avisa el bloqueo justo después de desbloquear: su fundido dura `seconds` (0 si se quitó de golpe). Cuando
     /// acaba, `ShellState` devuelve los toques a Inicio. El aviso de fin va SIEMPRE, se funda o no, para que Inicio no
     /// pueda quedarse sin toques.
-    private func lockFadeStarted(_ seconds: Double) {
+    private func lockFadeStarted(_ seconds: Double, keepsItsMark: Bool) {
+        // Una sola marca en cada fotograma, a todos los niveles: si el bloqueo se va con su marca dibujada, la ranura de
+        // Inicio no se dibuja mientras se funde (lo decide `ShellState.hidesBrandSlot`, en esta misma actualización).
+        shell.apply(.lockKeepsItsMark(keepsItsMark))
         #if DEBUG
         LaunchProbe.shared.lockFading = shell.lockFading
         // Para las pruebas: el bloqueo se funde dibujando su marca, nada la esconde en la ranura de Inicio (ni la marca

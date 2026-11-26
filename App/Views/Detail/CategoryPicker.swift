@@ -77,7 +77,11 @@ struct CategoryPickerRow: View {
 
             if expanded {
                 picker
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                    // m-2 (lote final): sin doble exposición. Al desplegar, la rejilla se funde cuando las filas de
+                    // debajo ya han bajado; al plegar, se va en 80 ms, antes de que suban. Solo opacidad.
+                    .transition(reduceMotion ? .opacity : .asymmetric(
+                        insertion: .opacity.animation(.easeOut(duration: motion.seconds(0.18)).delay(motion.seconds(0.12))),
+                        removal: .opacity.animation(.easeIn(duration: motion.seconds(0.08)))))
             }
             if failed {
                 SaveErrorText()

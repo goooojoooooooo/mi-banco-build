@@ -249,6 +249,8 @@ struct HomeView: View {
                               onPick: pickFromFan, onClose: { self.fan = nil })
                 }
             }
+            // Línea C (lote final, carcasa): con el abanico abierto la barra de pestañas no queda encima de él.
+            .toolbar(fan == nil ? .automatic : .hidden, for: .tabBar)
             #if DEBUG
             .overlay(alignment: .topLeading) {
                 VStack(spacing: 0) {

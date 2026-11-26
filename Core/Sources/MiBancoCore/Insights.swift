@@ -201,7 +201,7 @@ private func budgetInsight(_ status: BudgetStatus, exceeded: Bool, date: Date, m
     let title: String
     let detail: String
     if exceeded {
-        title = "Te has pasado del presupuesto \(label) (\(status.percent) %)" // PROVOCADO: una cifra en el titulo
+        title = "Te has pasado del presupuesto \(label)"
         detail = "Llevas \(formatEUR(status.spentCents)) de \(formatEUR(status.limitCents))"
     } else {
         title = "Llevas el \(status.percent)\u{00A0}% de tu presupuesto \(label)"

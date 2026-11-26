@@ -635,10 +635,17 @@ final class MotionShellTests: XCTestCase {
         listen.tap()
         XCTAssertTrue(waitUntil(8) { (listen.value as? String) == "headline" },
                       "La primera línea leída no es la frase principal: «\(listen.value as? String ?? "nil")»")
+        // Lote final: lo DIBUJADO (la vista que pinta el resalte), no solo el modelo.
+        XCTAssertTrue(waitUntil(5) { (self.element("briefing-drawn-line").value as? String) == "headline" },
+                      "La frase principal suena pero no se dibuja resaltada")
         XCTAssertTrue(waitUntil(8) { let v = listen.value as? String ?? "-"; return v != "headline" && v != "-" },
                       "La línea resaltada no avanza con la voz: «\(listen.value as? String ?? "nil")»")
+        let next = listen.value as? String ?? "-"
+        XCTAssertTrue(waitUntil(5) { (self.element("briefing-drawn-line").value as? String) == next || (self.element("briefing-drawn-line").value as? String) == listen.value as? String },
+                      "La línea que suena («\(next)») no es la que se dibuja resaltada")
         listen.tap()
         XCTAssertTrue(waitUntil(5) { (listen.value as? String) == "-" }, "Al parar sigue resaltada una línea")
+        XCTAssertTrue(waitUntil(5) { (self.element("briefing-drawn-line").value as? String) == "-" }, "Al parar sigue dibujado un resalte")
         app.terminate()
 
         launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoPrivate"])
@@ -648,6 +655,7 @@ final class MotionShellTests: XCTestCase {
         let sheet = app.scrollViews["briefing-scroll"]
         for pass in 0..<6 {
             XCTAssertEqual(privateListen.value as? String, "-", "Pasada \(pass): con el ojo cerrado se resalta una línea")
+            XCTAssertEqual((element("briefing-drawn-line").value as? String), "-", "Pasada \(pass): con el ojo cerrado se dibuja un resalte")
             let leaks = sheet.descendants(matching: .any)
                 .matching(NSPredicate(format: "label MATCHES %@", #".*(\d,\d{2}|\d\.\d{3}|\d\s*€|\d\s*euros).*"#)).count
             XCTAssertEqual(leaks, 0, "Pasada \(pass): con el ojo cerrado la hoja enseña cifras mientras habla")
@@ -693,6 +701,9 @@ final class MotionShellTests: XCTestCase {
         }
         // El pago llega a los ~4 s del arranque; el bloqueo dura 18 s: se mira bastante rato con el bloqueo puesto.
         XCTAssertGreaterThan(looks, 25, "El bloqueo se quitó antes de que llegara el pago: la prueba no dice nada")
+        // Lote final: el pago llegó de verdad con el bloqueo delante (si no, la parte (a) no probaría nada).
+        XCTAssertGreaterThanOrEqual(Int(probe()["llegadasBloqueo"] ?? "") ?? 0, 1,
+                                    "El pago no llegó con el bloqueo delante: \(probe())")
         XCTAssertTrue(waitUntil(30) { !unlock.exists }, "El bloqueo de demo no se quitó")
         for look in 0..<15 {
             XCTAssertFalse(banner.exists, "Mirada \(look): el aviso pedido con el bloqueo apareció al desbloquear")
@@ -816,6 +827,39 @@ final class MotionShellTests: XCTestCase {
         XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "cerrado" }, "La copia no cambió: \(probe())")
         XCTAssertEqual(probe()["ojoAviso"], "abierto", "Con el ojo abierto un aviso saldría sin cifras: \(probe())")
         XCTAssertEqual(probe()["ojoActividad"], "abierto", "La Live Activity no sigue al ojo abierto: \(probe())")
+    }
+
+    /// Lote final (ojo de diseño 4.4, 5.1): la barra de pestañas cierra el montaje de Inicio. Se tapa en el mismo
+    /// instante en que empieza el montaje y no empieza a destaparse hasta ~0,45 s después (× intensidad × cámara lenta;
+    /// a ×10 en Expresivo, ~5 s): antes de eso ya han entrado la tarjeta, el selector y las primeras filas.
+    func testTabBarEntersLast() throws {
+        launch(["-MiBancoMotionScale", "10"])
+        XCTAssertTrue(waitUntil(90) { self.probe()["barraDestapada"] != "-" && self.probe()["barraDestapada"] != nil },
+                      "La barra de pestañas no se destapó: \(probe())")
+        let p = probe()
+        let covered = Double(p["barraTapada"] ?? "") ?? 0
+        let uncovered = Double(p["barraDestapada"] ?? "") ?? 0
+        XCTAssertGreaterThan(covered, 0, "La barra no se tapó al empezar el montaje: \(p)")
+        XCTAssertGreaterThanOrEqual(uncovered - covered, 0.4 * 10, "La barra se destapa antes de que entre lo demás: \(p)")
+    }
+
+    /// Lote final (carcasa): con el abanico de tarjetas abierto, la barra de pestañas no queda encima; al cerrarlo, vuelve.
+    func testTabBarHidesOverTheFan() throws {
+        launch(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes"])
+        waitForLaunchToEnd(30)
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 10), "Falta la barra de pestañas")
+        XCTAssertTrue(waitUntil(10) { tabBar.isHittable }, "La barra de pestañas no se ve en Inicio")
+        let carousel = app.descendants(matching: .any).matching(NSPredicate(format: "label ENDSWITH %@", " de 4")).firstMatch
+        XCTAssertTrue(carousel.waitForExistence(timeout: 10), "Falta el carrusel")
+        carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
+        XCTAssertTrue(app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 8), "No se abrió el abanico")
+        XCTAssertTrue(waitUntil(5) { !tabBar.exists || !tabBar.isHittable },
+                      "La barra de pestañas sigue encima del abanico (\(tabBar.frame))")
+        let close = app.buttons["wallet-fan-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 5), "Falta «Cerrar» en el abanico")
+        close.tap()
+        XCTAssertTrue(waitUntil(8) { tabBar.exists && tabBar.isHittable }, "Al cerrar el abanico no vuelve la barra")
     }
 
     /// C4 (D1, decisión del dueño): «Te quedaban» empieza oculto y solo dice su cifra cuando el importe de arriba se ha

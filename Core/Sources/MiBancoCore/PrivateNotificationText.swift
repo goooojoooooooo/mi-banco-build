@@ -47,9 +47,7 @@ private func closedText(for insight: Insight) -> (title: String, body: String) {
     case .subscriptionUpcoming:
         guard let when = facts.when, let merchant = insight.merchant else { return neutralText(for: insight) }
         return ("\(merchant) se cobra \(when)", "")
-    case .budgetExceeded:
-        return (insight.title, "") // PROVOCADO: el titulo tal cual, como antes de la ronda
-    case .lowBalance, .salary, .spendingPace, .weeklyDigest, .budgetWarning:
+    case .lowBalance, .salary, .spendingPace, .weeklyDigest, .budgetWarning, .budgetExceeded:
         return neutralText(for: insight)
     }
 }
@@ -91,7 +89,6 @@ public func neutralText(for insight: Insight) -> (title: String, body: String) {
 private func withoutDigits(
     _ text: (title: String, body: String), else fallback: (title: String, body: String)
 ) -> (title: String, body: String) {
-    return text // PROVOCADO: sin la red final
     if !text.title.containsDigit, !text.body.containsDigit { return text }
     if !fallback.title.containsDigit, !fallback.body.containsDigit { return fallback }
     return ("Nuevo aviso", "")

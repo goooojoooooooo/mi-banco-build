@@ -73,6 +73,9 @@ private struct DetailContent: View {
     /// nunca enseña su cifra final antes de contar.
     @State private var amountShown = false
     @State private var amountLanded = false
+    /// Lote final: los grupos de debajo del importe no entran mientras el importe vuela por encima de ellos (si vuela
+    /// desde la fila); entran en cuanto se posa. Sin vuelo (o con Reducir movimiento), como siempre.
+    private var groupsReleased: Bool { amountOrigin == nil || motion.reduce || amountLanded }
     /// D1: el vuelo del importe desde la fila (0 = donde estaba en la fila, 1 = en su sitio), desde dónde sale y a qué
     /// escala, y dónde está su sitio en la pantalla (se mide; solo se lee al empezar el vuelo).
     // Empieza en 0: sin origen (y con el desplazamiento a cero) es la identidad; con origen, el vuelo es un cambio de 0 a 1
@@ -193,14 +196,20 @@ private struct DetailContent: View {
                 }
                 .staggeredEntrance(2, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
 
+                .modifier(HeldUntilLanded(released: groupsReleased, index: 0))
+
                 if movement.kind == .payment, let key = merchantKey, let history = snapshot.histories[key] {
                     MerchantHistoryGroup(history: history, recent: snapshot.recentPayments[key] ?? [], current: movement.id)
                         .staggeredEntrance(3, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+
+                        .modifier(HeldUntilLanded(released: groupsReleased, index: 1))
                 }
 
                 if editingNote || movement.note != nil {
                     noteGroup
                         .staggeredEntrance(4, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+
+                        .modifier(HeldUntilLanded(released: groupsReleased, index: 2))
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
@@ -220,9 +229,13 @@ private struct DetailContent: View {
                 }
                 .staggeredEntrance(5, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
 
+                .modifier(HeldUntilLanded(released: groupsReleased, index: 3))
+
                 SlideToConfirm(title: "Desliza para borrar el movimiento", action: onDelete)
                     .padding(.top, 6)
                     .staggeredEntrance(6, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+
+                    .modifier(HeldUntilLanded(released: groupsReleased, index: 4))
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 32)
@@ -474,5 +487,30 @@ private struct DetailAction: View {
                 Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 54)
             }
         }
+    }
+}
+
+/// Lote final: un grupo del detalle que espera a que el importe se pose (`released`) para entrar: sube 16 pt y aparece
+/// con el muelle `enter`, escalonado (55 ms × 0,82ⁿ). Si ya estaba suelto al aparecer, está desde el principio.
+private struct HeldUntilLanded: ViewModifier {
+    let released: Bool
+    let index: Int
+    @Environment(\.motion) private var motion
+    @State private var shown: Bool?
+
+    func body(content: Content) -> some View {
+        let visible = shown ?? released
+        // Se tapa con una máscara (no con `opacity`): mientras espera sigue a la vista de VoiceOver y de las pruebas, que
+        // leen «Te quedaban» desde que se abre la hoja.
+        content
+            .mask { Color.black.opacity(visible ? 1 : 0) }
+            .offset(y: visible ? 0 : motion.distance(16))
+            .onAppear { if shown == nil { shown = released } }
+            .onChange(of: released) { _, now in
+                guard now, shown != true else { return }
+                withAnimation(motion.animation(.enter).delay(motion.stagger(index, firstGap: 0.055, decay: 0.82))) {
+                    shown = true
+                }
+            }
     }
 }

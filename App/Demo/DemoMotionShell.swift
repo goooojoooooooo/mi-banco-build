@@ -20,6 +20,14 @@ extension DemoMode {
     /// al azar del barajado o máscara), para las pruebas de privacidad. Sin la bandera no cambia nada.
     static var exposesDrawnText: Bool { isActive && arguments.contains("-MiBancoDrawnText") }
 
+    /// `-MiBancoDemoAutoCloseDetail <s>`: la hoja del movimiento se cierra sola a los `s` segundos reales de abrirse
+    /// (para grabar su cierre desde antes; m-4). Como mucho 60 s.
+    static var autoCloseDetailSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoAutoCloseDetail").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
     /// `-MiBancoDemoSharedEyeOpposite`: la copia del ojo en la suite compartida (de la demo) dice lo contrario del ojo
     /// (N-3: los avisos y la Live Activity no deben leerla).
     static var writesOppositeSharedEye: Bool { isActive && arguments.contains("-MiBancoDemoSharedEyeOpposite") }
@@ -104,11 +112,19 @@ extension DemoMode {
     var sharedEye = "-"
     /// B2: la línea del resumen que suena ahora («-» si ninguna).
     var spokenLine = "-"
+    /// Lote final: la línea del resumen que DIBUJA su resalte ahora («-» si ninguna).
+    var drawnLine = "-"
     /// N-3: el ojo con el que se compondría ahora un aviso (texto y carga) y la Live Activity («cerrado»/«abierto»).
     var alertEye = "-"
     var activityEye = "-"
     /// N-2: los botones del aviso dentro de la app reciben toques («1») o no («0»).
     var bannerActions = "0"
+    /// Lote final: cuándo se tapó y cuándo empezó a destaparse la barra de pestañas en el último montaje (s desde 1970).
+    var tabBarCoveredAt: Double?
+    var tabBarUncoveredAt: Double?
+    /// Lote final: pagos llegados (`model.arrival`) y cuántos con el bloqueo delante.
+    var arrivals = 0
+    var arrivalsUnderLock = 0
     /// N-2: el aviso se está desplegando (empezó y aún no ha terminado).
     var bannerUnfolding = false
     /// Cuándo cambia sola de pestaña la demo (`-MiBancoDemoTabSwitch`), en segundos desde 1970.
@@ -138,7 +154,10 @@ extension DemoMode {
             "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
-            "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
+            "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "lineaDibujada=\(drawnLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
+            "llegadas=\(arrivals)",
+            "barraTapada=\(tabBarCoveredAt.map { String(format: "%.3f", $0) } ?? "-")",
+            "barraDestapada=\(tabBarUncoveredAt.map { String(format: "%.3f", $0) } ?? "-")", "llegadasBloqueo=\(arrivalsUnderLock)",
             "ojoAviso=\(alertEye)", "ojoActividad=\(activityEye)",
             "cambioPestana=\(tabSwitchAt.map { String(format: "%.3f", $0) } ?? "-")",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",

@@ -61,7 +61,13 @@ struct MotionContext: Equatable, Sendable {
     }
 
     /// Fundido tranquilo (Reducir movimiento).
-    var fade: Animation { .easeOut(duration: 0.22 * timeMultiplier) }
+    var fade: Animation { .easeOut(duration: fadeDuration) }
+
+    /// Lo que dura el fundido del kit a velocidad normal (s).
+    static let fadeSeconds = 0.22
+
+    /// Lo que dura `fade` (s), con la cámara lenta de las grabaciones: quien espere a que acabe un fundido usa esto.
+    var fadeDuration: Double { Self.fadeSeconds * timeMultiplier }
 
     /// La vuelta de un botón al soltarlo (0,3 s), a la cámara lenta de las grabaciones.
     var pressOut: Animation { .easeOut(duration: 0.3 * timeMultiplier) }

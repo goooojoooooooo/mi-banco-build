@@ -84,9 +84,9 @@ struct StepperProgress: View {
                         .foregroundStyle(Theme.label)
                         .fixedSize(horizontal: false, vertical: true)
                         .id(caption)
-                        .transition(motion.reduce
-                            ? .opacity
-                            : .asymmetric(insertion: .opacity.combined(with: .offset(y: motion.distance(8))), removal: .opacity))
+                        // En dos tiempos (ojo de diseño 14.4): la línea vieja se va en 0,1 s y solo entonces entra la nueva
+                        // (0,15 s, subiendo 8 pt); nunca se leen las dos una encima de otra.
+                        .transition(captionTransition)
                         .accessibilityIdentifier(identifier.map { "\($0)-caption" } ?? "")
                 }
             }
@@ -97,6 +97,18 @@ struct StepperProgress: View {
                                 stepCount: steps.count, identifier: identifier.map { "\($0)-percent" } ?? "")
             }
         }
+    }
+
+    private var captionTransition: AnyTransition {
+        let leave = motion.seconds(0.10)
+        if motion.reduce {
+            return .asymmetric(insertion: .opacity.animation(motion.fade.delay(leave)),
+                               removal: .opacity.animation(.easeOut(duration: leave)))
+        }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .offset(y: motion.distance(8)))
+                .animation(.easeOut(duration: motion.seconds(0.15)).delay(leave)),
+            removal: .opacity.animation(.easeOut(duration: leave)))
     }
 
     private func link(filled: Bool) -> some View {
@@ -208,12 +220,21 @@ struct StepperProgress: View {
 /// Reducir movimiento, el arco se queda quieto.
 private struct StepSpinner: View {
     @Environment(\.motion) private var motion
+    @Environment(\.scenePhase) private var scenePhase
+    /// Quien monta los pasos dice si algo los tapa (p. ej. la hoja del banco acoplada encima).
+    @Environment(\.stepsCovered) private var covered
+
+    /// Se para con la app fuera de primer plano o con los pasos tapados (menor m-1): una espera de minutos con la hoja
+    /// arriba no gasta ni un fotograma.
+    private var paused: Bool {
+        scenePhase != .active || covered
+    }
 
     var body: some View {
         if motion.reduce {
             arc
         } else {
-            TimelineView(.animation) { context in
+            TimelineView(.animation(minimumInterval: nil, paused: paused)) { context in
                 let degrees = context.date.timeIntervalSinceReferenceDate * 420 / (motion.level.timeScale * motion.timeMultiplier)
                 arc.rotationEffect(.degrees(degrees.truncatingRemainder(dividingBy: 360)))
             }
@@ -229,10 +250,11 @@ private struct StepSpinner: View {
     }
 }
 
-/// «45 %»: el porcentaje de `StepPercent` contado desde `since` (cuando empezó el paso en curso). Se redibuja con una
-/// agenda FINITA de instantes (30 por segundo durante lo que tarda en asentarse); después, nada se mueve hasta que cambie
-/// el paso. Con Reducir movimiento no cuenta: enseña el suelo del paso y cambia con un fundido. Para VoiceOver y las
-/// pruebas: «Paso 2 de 3, 45 por ciento».
+/// «45 %»: el porcentaje de `StepPercent` contado desde `since` (cuando empezó el paso en curso o, si ya acabó bien,
+/// cuando acabó: entonces corre hasta 100 en 0,25 s, el remate). Se redibuja con una agenda FINITA de instantes (30 por
+/// segundo durante lo que tarda en asentarse); después, nada se mueve hasta que cambie el paso. Con Reducir movimiento
+/// no cuenta: enseña el suelo del paso (o 100) y cambia con un fundido. A 17 pt con cifras de ancho fijo: es el dato
+/// protagonista de la espera (ojo de diseño 14.6). Para VoiceOver y las pruebas: «Paso 2 de 3, 45 por ciento».
 struct StepPercentText: View {
     let percent: StepPercent
     let since: Date
@@ -246,17 +268,26 @@ struct StepPercentText: View {
     /// Lo que estira el tiempo: la intensidad y la cámara lenta.
     private var stretch: Double { max(0.05, motion.level.timeScale * motion.timeMultiplier) }
 
-    /// Los instantes en los que la cifra puede cambiar: 30 por segundo durante 3,2 s (a tiempo del kit) desde `since`.
+    /// Los instantes en los que la cifra puede cambiar: 30 por segundo durante 3,2 s (a tiempo del kit) desde `since`
+    /// mientras el paso sigue; durante el remate, lo que dura (0,25 s del kit).
     private var schedule: [Date] {
-        guard percent.isRunning, !motion.reduce else { return [since] }
-        let frames = Int((3.2 * stretch * 30).rounded(.up))
+        guard !motion.reduce else { return [since] }
+        let seconds: Double
+        switch percent.outcome {
+        case .running: seconds = 3.2
+        case .succeeded where percent.finishFrom < 100: seconds = StepPercent.finishSeconds + 0.05
+        case .succeeded, .failed: return [since]
+        }
+        let frames = Int((seconds * stretch * 30).rounded(.up))
         return (0...min(frames, 3_000)).map { since.addingTimeInterval(Double($0) / 30) }
     }
 
+    /// Acabado bien sin remate que contar (`succeed()`): el 100 llega de una vez, a la vez que el ✓ del último nodo.
+    private var landsAtOnce: Bool { percent.outcome == .succeeded && percent.finishFrom >= 100 }
+
+    /// Lo que se dibuja (Core decide: en marcha, remate, congelado; con Reducir, sin contar).
     private func shown(at date: Date) -> Int {
-        guard percent.isRunning else { return percent.value(elapsed: 0) }
-        if motion.reduce { return percent.floor }
-        return percent.value(elapsed: date.timeIntervalSince(since) / stretch)
+        percent.drawn(elapsed: date.timeIntervalSince(since) / stretch, reduce: motion.reduce)
     }
 
     var body: some View {
@@ -265,15 +296,24 @@ struct StepPercentText: View {
             // con la hora de verdad.
             let value = shown(at: max(context.date, Date()))
             Text("\(value)\u{00A0}%")
-                .titan(.subtitle)
+                .titan(.row)
                 .fontWeight(.semibold)
                 .monospacedDigit()
                 .foregroundStyle(Theme.label)
-                .contentTransition(motion.reduce ? .opacity : .identity)
-                .animation(motion.reduce ? motion.fade : nil, value: value)
+                .contentTransition(motion.reduce ? .opacity : (landsAtOnce ? .numericText(value: Double(value)) : .identity))
+                // Un 100 que llega sin cuenta (importar) cambia cifra a cifra (nunca dos números montados, como el «185»
+                // de un fundido cruzado) en los mismos 0,2 s que el relleno del último nodo.
+                .animation(motion.reduce ? motion.fade : (landsAtOnce ? .easeInOut(duration: motion.seconds(0.2)) : nil),
+                           value: value)
                 .accessibilityLabel("Paso \(stepNumber) de \(stepCount), \(value) por ciento")
                 .accessibilityAddTraits(.updatesFrequently)
                 .accessibilityIdentifier(identifier)
         }
     }
+}
+
+extension EnvironmentValues {
+    /// Los pasos están tapados (no se ven): el arco del paso en curso se para. Lo pone quien los monta (la pantalla de un
+    /// banco, con la hoja acoplada); el componente no sabe nada de esa pantalla (menor m-7 del lote 3).
+    @Entry var stepsCovered = false
 }

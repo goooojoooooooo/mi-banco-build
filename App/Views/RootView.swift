@@ -67,6 +67,10 @@ struct RootView: View {
     /// Costuras de movimiento (F1): marcos que apuntan las vistas para el vuelo de tarjeta y el detalle
     /// (`LaunchAnchor` lo crea `AppShellView`, por encima del bloqueo y del telón).
     @State private var cardFlight = CardFlight()
+    /// Alguna pantalla a la vista ha pedido que la barra de pestañas no se encoja (`.keepsTabBarExpanded()`).
+    @State private var keepsTabBarExpanded = false
+    /// C8 / 9.5: el banco abierto desde el abanico de Inicio, encima de Inicio (sin cambiar de pestaña).
+    @State private var bankOverHome: BankID?
     /// Ronda 2 (M-10): el velo de la barra de pestañas la tapa ahora (la pestaña no se puede cambiar).
     @State private var tabBarCovered = false
     @State private var tabEntrance = TabEntrance()
@@ -81,6 +85,7 @@ struct RootView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.motion) private var motion
     private var router: AlertRouter { AlertRouter.shared }
 
     var body: some View {
@@ -317,7 +322,7 @@ struct RootView: View {
                             .modifier(FadedTabContent(entrance: entrance(for: .spending)))
                     }
                     Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
-                        AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
+                        AlertsView(model: model, onOpen: { openDetail($0) },
                                    onMorningRuleChanged: rescheduleMorningReminder)
                             .modifier(FadedTabContent(entrance: entrance(for: .alerts)))
                     }
@@ -335,10 +340,16 @@ struct RootView: View {
                         .modifier(FadedTabContent(entrance: entrance(for: .settings)))
                     }
                 }
-                .modifier(MinimizesTabBarOnScroll())
+                .modifier(MinimizesTabBarOnScroll(enabled: !keepsTabBarExpanded))
+                // Para Pantallas (16.1): una pantalla empujada puede pedir que la barra no se encoja al desplazar.
+                .onPreferenceChange(KeepsTabBarExpandedKey.self) { keepsTabBarExpanded = $0 }
                 .overlay(alignment: .bottom) {
                     TabBarCurtain(token: activeRevealToken, covered: $tabBarCovered)
                 }
+                // C8 / 9.5: el banco abierto desde el abanico va ENCIMA de Inicio (la pestaña marcada no cambia) y la
+                // tarjeta vuela hasta su cabecera.
+                .overlay { bankOverHomeLayer }
+                .overlay { CardFlightLayer(flight: cardFlight, blocked: flightBlocked) }
                 .transition(.opacity)
             }
         }
@@ -398,6 +409,7 @@ struct RootView: View {
         suppressBriefingForActivation = false
         speaker.stop()
         sheet = nil
+        bankOverHome = nil
         importing = false
         importKind = .backup
     }
@@ -550,8 +562,39 @@ struct RootView: View {
     }
 
     private func openBankSettings(_ bank: BankID) {
+        // 9.5: si se llega volando desde el abanico (hay un vuelo pedido hacia este banco), la pantalla del banco se
+        // abre encima de Inicio y la pestaña marcada no cambia. Desde cualquier otro sitio, en Ajustes como siempre.
+        if tab == .home, cardFlight.request?.bank == bank {
+            withAnimation(motion.reduce ? motion.fade : nil) { bankOverHome = bank }
+            return
+        }
         openBankRequest = bank
         tab = .settings
+    }
+
+    /// No se puede volar: bloqueo, fuera de primer plano o la hoja única abierta (la tarjeta se queda como aterrizada).
+    private var flightBlocked: Bool { isLocked || scenePhase != .active || sheet != nil }
+
+    /// La pantalla del banco encima de Inicio, con su propia pila de navegación y «Inicio» para volver.
+    @ViewBuilder private var bankOverHomeLayer: some View {
+        if let bank = bankOverHome {
+            NavigationStack {
+                BankLinkView(model: model, portfolio: portfolio, bank: bank, present: present, requestImport: startImport)
+                    .navigationBarBackButtonHidden()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                withAnimation(motion.fade) { bankOverHome = nil }
+                            } label: {
+                                Label("Inicio", systemImage: "chevron.left")
+                            }
+                            .accessibilityIdentifier("bank-over-home-back")
+                        }
+                    }
+            }
+            .background(Theme.canvas.ignoresSafeArea())
+            .transition(.opacity)
+        }
     }
 
     private func openInvestmentsSettings() {
@@ -926,9 +969,11 @@ private struct ZoomFromRow: ViewModifier {
 
 /// iOS 26+: la barra de cristal se recoge al bajar la lista y vuelve al subir.
 private struct MinimizesTabBarOnScroll: ViewModifier {
+    var enabled = true
+
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.tabBarMinimizeBehavior(.onScrollDown)
+            content.tabBarMinimizeBehavior(enabled ? .onScrollDown : .never)
         } else {
             content
         }
@@ -1081,3 +1126,17 @@ private struct DemoRootTasks: ViewModifier {
     }
 }
 #endif
+
+/// Para Pantallas (16.1 de Suscripciones): una pantalla empujada que pide que la barra de pestañas no se encoja al
+/// desplazar mientras está a la vista. `RootView` la recoge con `onPreferenceChange`.
+struct KeepsTabBarExpandedKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) { value = value || nextValue() }
+}
+
+extension View {
+    /// La barra de pestañas no se encoge al desplazar mientras esta pantalla está a la vista.
+    func keepsTabBarExpanded(_ keeps: Bool = true) -> some View {
+        preference(key: KeepsTabBarExpandedKey.self, value: keeps)
+    }
+}

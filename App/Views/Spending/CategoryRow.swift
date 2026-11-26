@@ -83,8 +83,10 @@ private struct SpendBar: View {
     let index: Int
 
     var body: some View {
+        // Las categorías empiezan a los 0,6 s: terminan después de la línea del gráfico (0,02 + 0,9 s), en el orden de
+        // lectura total → gráfico → presupuesto → categorías (ojo de diseño 15.1, menor m-10 del lote 3).
         FillBar(fraction: fraction, warnAt: nil, label: name,
-                delay: 0.2 + MotionMath.staggerDelays(count: index + 1, firstGap: 0.048, decay: 0.86)[index])
+                delay: 0.6 + MotionMath.staggerDelays(count: index + 1, firstGap: 0.048, decay: 0.86)[index])
             .overlay {
                 if let previous {
                     GeometryReader { geo in

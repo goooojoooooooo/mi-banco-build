@@ -24,7 +24,6 @@ struct SettingsView: View {
     @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// El movimiento tal como lo ve el kit: la fila «Animaciones» dice el nivel que de verdad está en uso.
     @Environment(\.motion) private var motion
     /// El cambio de pestaña que anuncia RootView (cuando lo haga): repite la entrada de las filas de Bancos.
@@ -45,6 +44,9 @@ struct SettingsView: View {
     @State private var pushedBank: BankID?
     @State private var showConnectionGuide = false
     @FocusState private var focused: BankID?
+    #if DEBUG
+    @State private var demoTimersArmed = false
+    #endif
     #if DEBUG
     /// Demo (`-MiBancoDemoAlertsGuide`): abre la guía de avisos nada más aparecer Ajustes.
     @State private var demoOpensGuide = false
@@ -193,11 +195,8 @@ struct SettingsView: View {
                     }
                     .toggleStyle(TitanToggleStyle())
                     .listRowBackground(Theme.grouped)
-                    Toggle(isOn: privacyBinding) {
-                        OptionLabel(title: "Modo privado", detail: "Oculta los importes en toda la app", systemImage: "eye.slash")
-                    }
-                    .toggleStyle(TitanToggleStyle())
-                    .listRowBackground(Theme.grouped)
+                    privacyToggle
+                        .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Privacidad")
                 } footer: {
@@ -299,6 +298,14 @@ struct SettingsView: View {
         .onChange(of: gate?.isLocked) { _, locked in
             if locked == true { focused = nil }
         }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            if on { releaseAmountFocus() }
+        }
+        // (Demo: `-MiBancoDemoCloseEyeAfter` y `-MiBancoDemoFocusBalanceAfter` cuentan desde que aparece el interruptor
+        // «Modo privado», ver `armDemoTimers`.)
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
         .sensoryFeedback(.success, trigger: saveCount)
@@ -330,14 +337,59 @@ struct SettingsView: View {
         }
     }
 
+    /// «Modo privado» (aparte: dentro de la lista, el `#if DEBUG` hacía que el compilador no pudiera con la expresión).
+    private var privacyToggle: some View {
+        let toggle = Toggle(isOn: privacyBinding) {
+            OptionLabel(title: "Modo privado", detail: "Oculta los importes en toda la app", systemImage: "eye.slash")
+        }
+        .toggleStyle(TitanToggleStyle())
+        .accessibilityIdentifier("settings-private-mode")
+        #if DEBUG
+        return toggle.onAppear { armDemoTimers() }
+        #else
+        return toggle
+        #endif
+    }
+
+    #if DEBUG
+    /// Solo demo: arma, una vez, el cierre del ojo (`-MiBancoDemoCloseEyeAfter`, por el mismo camino que el interruptor)
+    /// y el foco del saldo de Trade Republic (`-MiBancoDemoFocusBalanceAfter`, como un toque), para grabarlos desde antes.
+    private func armDemoTimers() {
+        guard !demoTimersArmed else { return }
+        demoTimersArmed = true
+        if let seconds = DemoMode.closesEyeAfterSeconds {
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                privacyBinding.wrappedValue = true
+            }
+        }
+        if let seconds = DemoMode.focusesBalanceAfterSeconds {
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                focused = .tr
+            }
+        }
+    }
+    #endif
+
+    /// Suelta el foco de un saldo en edición sin animación (ver `onChange(of: preferences.privateMode)`).
+    private func releaseAmountFocus() {
+        guard focused != nil else { return }
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { focused = nil }
+    }
+
     private var motionLevelBinding: Binding<MotionLevel> {
         Binding(get: { preferences.motionLevel }, set: { preferences.motionLevel = $0 })
     }
 
-    /// El interruptor y el ojo de Inicio son el mismo estado, con la misma animación.
+    /// El interruptor y el ojo de Inicio son el mismo estado. Cerrar el ojo NO se anima (como en Inicio): las cifras se
+    /// cambian por la máscara en el acto, sin ningún fotograma con un dígito apagándose. Abrirlo, un fundido corto.
     private var privacyBinding: Binding<Bool> {
         Binding(get: { preferences.privateMode }, set: { on in
-            withAnimation(reduceMotion ? nil : Theme.Motion.privacy) { preferences.privateMode = on }
+            if on { releaseAmountFocus() }
+            withAnimation(on || motion.reduce ? nil : motion.fade) { preferences.privateMode = on }
         })
     }
 
@@ -416,7 +468,7 @@ struct SettingsView: View {
             return
         }
         guard let cents = parseBalanceInput(text) else {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[bank] = "Escribe un importe como 340,20" }
+            withAnimation(motion.fade) { errors[bank] = "Escribe un importe como 340,20" }
             errorCount += 1
             return
         }
@@ -431,7 +483,7 @@ struct SettingsView: View {
             refresh(bank)
             flashSaved(bank)
         } catch {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[bank] = "No se pudo guardar. Inténtalo de nuevo." }
+            withAnimation(motion.fade) { errors[bank] = "No se pudo guardar. Inténtalo de nuevo." }
             errorCount += 1
         }
     }
@@ -451,6 +503,7 @@ struct SettingsView: View {
 /// Fila de saldo: logo, nombre, estado según origen real (banco conectado, extracto, aviso o a mano; R25) y el campo
 /// (solo lectura si el banco está conectado). Para VoiceOver, el campo editable es "Saldo de Revolut".
 private struct BalanceRow: View {
+    @Environment(\.motion) private var motion
     let bank: BankID
     let info: BalanceInfo?
     var link: BankLinkInfo? = nil
@@ -498,17 +551,15 @@ private struct BalanceRow: View {
                         .accessibilityLabel("Saldo de \(bank.displayName): \(spoken)")
                 } else {
                     let isEditing = focused.wrappedValue == bank
-                    // Con el ojo cerrado (y sin editar) el saldo no se dibuja: en su sitio va la máscara del kit.
-                    let masked = hidden && !isEditing && !text.isEmpty
+                    // Con el ojo cerrado el saldo guardado no se dibuja nunca (ni al editarlo): `MaskedAmountTextField`.
                     HStack(spacing: 8) {
                         if saved {
                             SavedCheck()
                                 .transition(.opacity)
                         }
-                        TextField("0,00 €", text: $text)
+                        MaskedAmountTextField(placeholder: "0,00 €", text: $text, hidden: hidden, editing: isEditing)
                             .titan(.option)
                             .fontWeight(.semibold)
-                            .maskedAmountField(masked, alignment: stacked ? .leading : .trailing)
                             .multilineTextAlignment(stacked ? .leading : .trailing)
                             .keyboardType(.numbersAndPunctuation)
                             .submitLabel(.done)
@@ -517,9 +568,8 @@ private struct BalanceRow: View {
                             .padding(.horizontal, 10)
                             .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
                             .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                            .animation(Theme.Motion.quick, value: isEditing)
+                            .animation(motion.fade, value: isEditing)
                             .accessibilityLabel("Saldo de \(bank.displayName)")
-                            .accessibilityValue(masked ? "importe oculto" : text)
                     }
                 }
             }
@@ -592,39 +642,6 @@ struct SavedCheck: View {
             }
             .onAppear { landed += 1 }
             .accessibilityLabel("Guardado")
-    }
-}
-
-/// Un campo de importe con el ojo cerrado: el texto del campo no se dibuja (transparente) y encima va la máscara del
-/// kit, así que no hay ninguna cifra en pantalla, ni tapada. Al editar (o con el ojo abierto) es el campo de siempre.
-private struct MaskedAmountField: ViewModifier {
-    let masked: Bool
-    let alignment: Alignment
-
-    func body(content: Content) -> some View {
-        content
-            .foregroundStyle(masked ? Color.clear : Theme.label)
-            .overlay(alignment: alignment) {
-                if masked {
-                    Text(maskedEUR(0, sign: false))
-                        .titan(.option)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .allowsHitTesting(false)
-                        .accessibilityLabel("importe oculto")
-                        .accessibilityHidden(true)
-                }
-            }
-            .privacySensitive()
-    }
-}
-
-extension View {
-    /// Ver MaskedAmountField. Va justo después del estilo de letra del campo (hereda su letra).
-    func maskedAmountField(_ masked: Bool, alignment: Alignment) -> some View {
-        modifier(MaskedAmountField(masked: masked, alignment: alignment))
     }
 }
 

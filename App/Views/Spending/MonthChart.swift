@@ -126,7 +126,7 @@ struct MonthChart: View {
                     MonthLine(points: points)
                         .trim(from: 0, to: on ? 1 : 0)
                         .stroke(Theme.label, style: StrokeStyle(lineWidth: 2, lineCap: .round, lineJoin: .round))
-                        .animation(draws(.easeInOut(duration: motion.seconds(0.9)).delay(motion.seconds(0.12))), value: on)
+                        .animation(draws(.easeInOut(duration: motion.seconds(0.9)).delay(motion.seconds(0.02))), value: on)
                     // El anillo: espera a que la línea llegue (1 s), aparece al 80 % y se abre de 4 a 14 pt de radio.
                     Circle()
                         .stroke(Theme.label, lineWidth: 1.2)

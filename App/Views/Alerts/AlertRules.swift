@@ -14,9 +14,15 @@ struct AlertRules: View {
     @State private var errorTick = 0
 
     private var revealTransition: AnyTransition {
+        // La fila del umbral entra con su muelle; al irse se apaga deprisa (0,12 s), antes de que la regla de debajo
+        // suba a su sitio: nunca queda montada sobre ella (menor m-6).
         motion.reduce
             ? AnyTransition.opacity
-            : AnyTransition.opacity.combined(with: AnyTransition.offset(y: -10))
+            : AnyTransition.asymmetric(
+                // Entra un instante después de que las reglas de debajo empiecen a hacerle sitio.
+                insertion: AnyTransition.opacity.combined(with: AnyTransition.offset(y: -10))
+                    .animation(motion.animation(.row).delay(motion.seconds(0.08))),
+                removal: AnyTransition.opacity.animation(.easeOut(duration: motion.seconds(0.12))))
     }
 
     var body: some View {
@@ -296,9 +302,6 @@ private struct ThresholdRow: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
 
-    /// Con el ojo cerrado (y sin editar) el umbral no se dibuja: en su sitio va la máscara del kit.
-    private var masked: Bool { preferences.privateMode && !focused && !text.isEmpty }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.tight) {
             HStack(spacing: Theme.Space.row) {
@@ -310,10 +313,9 @@ private struct ThresholdRow: View {
                     SavedCheck()
                         .transition(.opacity)
                 }
-                TextField("100,00 €", text: textBinding)
+                MaskedAmountTextField(placeholder: "100,00 €", text: textBinding, hidden: preferences.privateMode, editing: focused)
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .maskedAmountField(masked, alignment: .trailing)
                     .multilineTextAlignment(.trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -324,7 +326,6 @@ private struct ThresholdRow: View {
                     .background(Theme.fieldFill.opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                     .animation(motion.calmAnimation(.pressIn), value: focused)
                     .accessibilityLabel(title)
-                    .accessibilityValue(masked ? "importe oculto" : text)
             }
             if let problem {
                 Text(problem)
@@ -352,6 +353,15 @@ private struct ThresholdRow: View {
         }
         .onChange(of: gate?.isLocked) { _, locked in
             if locked == true { focused = false }
+        }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            guard on, focused else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { focused = false }
         }
         .sensoryFeedback(.success, trigger: saveTick)
         .sensoryFeedback(.error, trigger: errorTick)

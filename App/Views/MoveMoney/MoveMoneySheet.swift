@@ -442,7 +442,6 @@ struct MoveMoneySheet: View {
                 // El importe, dígito a dígito; con el ojo cerrado, un punto por dígito (nunca la cifra bajo un desenfoque).
                 KeypadAmountDisplay(amount: amount, hidden: hidden, size: amountSize)
                     .frame(minHeight: amountSize * 1.25)
-                    }
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Desde")

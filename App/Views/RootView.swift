@@ -84,63 +84,7 @@ struct RootView: View {
     var body: some View {
         let warnings = model.snapshot.warningInsightIDs
         let activeRevealToken = revealToken + onboardingRevealToken
-        ZStack {
-            if model.needsOnboarding {
-                OnboardingView(model: model, onFinish: completeOnboarding)
-                    .transition(.opacity)
-            } else {
-                TabView(selection: $tab) {
-                    Tab("Inicio", systemImage: "house", value: AppTab.home) {
-                        HomeView(model: model, portfolio: portfolio, accountBook: accountBook,
-                                 isVisible: tab == .home && !isLocked,
-                                 revealToken: activeRevealToken, zoom: zoom,
-                                 detailOpen: sheet != nil,
-                                 openDetail: { openDetail($0, zooms: true) },
-                                 openPosition: openPosition,
-                                 openMoveMoney: openMoveMoney,
-                                 openBriefing: openManualBriefing,
-                                 shareText: shareText,
-                                 openSettings: openSettings,
-                                 openBankSettings: openBankSettings,
-                                 openInvestmentsSettings: openInvestmentsSettings,
-                                 openAccounts: openAccounts,
-                                 selectCardRequest: $selectHomeCard)
-                            .id(restoreToken)
-                            .tabContentEntrance()
-                            .environment(\.tabEntrance, entrance(for: .home))
-                    }
-                    Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
-                        SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
-                                     openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
-                                     openBudgetsRequest: $openBudgetsRequest)
-                            .modifier(FadedTabContent(entrance: entrance(for: .spending)))
-                    }
-                    Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
-                        AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
-                                   onMorningRuleChanged: rescheduleMorningReminder)
-                            .modifier(FadedTabContent(entrance: entrance(for: .alerts)))
-                    }
-                    .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
-                    Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
-                        SettingsScrollHost(scrollRequest: $settingsScroll) {
-                            SettingsView(model: model, portfolio: portfolio, accountBook: accountBook, briefing: briefing,
-                                         focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
-                                         openBankRequest: $openBankRequest,
-                                         present: present,
-                                         requestImport: startImport,
-                                         importBackup: { startImport(.backup) },
-                                         importTradeRepublic: { startImport(.tradeRepublic) })
-                        }
-                        .modifier(FadedTabContent(entrance: entrance(for: .settings)))
-                    }
-                }
-                .modifier(MinimizesTabBarOnScroll())
-                .overlay(alignment: .bottom) {
-                    TabBarCurtain(token: activeRevealToken)
-                }
-                .transition(.opacity)
-            }
-        }
+        tabsOrWelcome(activeRevealToken: activeRevealToken)
         // Para las pantallas: la hoja única abierta y el estado de la carcasa (bloqueo, montaje por capas).
         .environment(\.singleSheetOpen, sheet != nil)
         .environment(\.shellReveal, ShellReveal(locked: isLocked, token: activeRevealToken))
@@ -165,61 +109,7 @@ struct RootView: View {
         .environment(\.presentationGate, gate)
         // La única hoja de la app. Se cierra al bloquear y en cuanto la app deja de estar activa (selector de apps,
         // segundo plano): nunca queda encima del bloqueo ni en la captura del selector, y no se vuelve a abrir sola.
-        .sheet(item: $sheet, onDismiss: deletePending) { item in
-            switch item {
-            case .movement(let route):
-                MovementDetailSheet(model: model, id: route.id, amountOrigin: route.amountOrigin) { id in
-                    pendingDelete = id
-                    detail = nil
-                }
-                .modifier(ZoomFromRow(route: route, namespace: zoom))
-            case .position(let instrument):
-                PositionDetailSheet(portfolio: portfolio, instrument: instrument)
-            case .moveMoney(let request):
-                MoveMoneySheet(model: model, accountBook: accountBook, request: request)
-            case .briefing:
-                BriefingSheet(
-                    model: model,
-                    portfolio: portfolio,
-                    accountBook: accountBook,
-                    briefingModel: briefing,
-                    speaker: speaker,
-                    onAction: handleBriefingAction
-                )
-            case .share(let share):
-                ShareSheet(item: share, onFinish: { sheet = nil })
-                    .ignoresSafeArea()
-                    .presentationDetents([.medium, .large])
-                    .onDisappear { if let url = share.fileURL { BackupService.remove(url) } }
-            case .restore(let preview):
-                RestoreConfirmView(preview: preview, restore: { try restoreBackup(preview.file) }, finished: finishRestore)
-            case .confirmDisconnect(let bank):
-                BankConfirmSheet(
-                    title: "Desconectar \(bank.displayName)",
-                    message: "Se dejan de leer sus movimientos. Lo que ya tienes se queda.",
-                    confirmTitle: "Desconectar",
-                    onConfirm: {
-                        sheet = nil
-                        Task { await BankConnector.shared.disconnect(bank) }
-                    },
-                    onCancel: { sheet = nil }
-                )
-            case .confirmForget:
-                BankConfirmSheet(
-                    title: "Olvidar clave y conexiones",
-                    message: "Se borran la clave de Enable Banking y las sesiones de este iPhone. Tus movimientos se quedan.",
-                    confirmTitle: "Olvidar clave y conexiones",
-                    onConfirm: {
-                        sheet = nil
-                        Task {
-                            await BankingCredentials.forgetEverything()
-                            model.reload()
-                        }
-                    },
-                    onCancel: { sheet = nil }
-                )
-            }
-        }
+        .sheet(item: $sheet, onDismiss: deletePending) { item in sheetContent(item) }
         // Único selector de archivos de la app: se cierra como la hoja (nunca queda encima del bloqueo).
         .fileImporter(isPresented: $importing, allowedContentTypes: allowedImportTypes) { result in
             handleImport(result)
@@ -325,29 +215,131 @@ struct RootView: View {
         .onAppear(perform: applyRoute)
         #if DEBUG
         .onAppear(perform: applyDemoTab)
-        .task {
-            // Solo demo de grabación: cambia sola a Gasto para grabar la entrada de la pestaña desde antes del cambio.
-            guard let seconds = DemoMode.tabSwitchSeconds else { return }
-            LaunchProbe.shared.tabSwitchAt = Date().timeIntervalSince1970 + seconds
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled else { return }
-            tab = .spending
-        }
-        // m-4 (lote final), solo demo de grabación: la hoja del movimiento se cierra sola a los `s` segundos de abrirse
-        // (`-MiBancoDemoAutoCloseDetail`), para grabar el cierre desde ANTES (un toque de la prueba espera a que la app
-        // quede quieta y la ráfaga empezaba con la hoja ya cerrada).
-        .task(id: sheet?.id) {
-            guard let seconds = DemoMode.autoCloseDetailSeconds, let current = sheet?.id,
-                  current.hasPrefix("movement-") else { return }
-            try? await Task.sleep(for: .seconds(seconds))
-            guard !Task.isCancelled, sheet?.id == current else { return }
-            sheet = nil
-        }
+        .modifier(DemoRootTasks(tab: $tab, sheet: $sheet))
         #endif
         // Costuras de movimiento (F1): por fuera de todo, para que también las vean la hoja única y las capas.
         .environment(\.cardFlight, cardFlight)
         .environment(\.tabEntrance, tabEntrance)
         .environment(\.detailAmountFrames, detailAmountFrames)
+    }
+
+    /// El contenido de la hoja única. Aparte de `body` para que el compilador pueda con él.
+    @ViewBuilder private func sheetContent(_ item: RootSheet) -> some View {
+        switch item {
+        case .movement(let route):
+            MovementDetailSheet(model: model, id: route.id, amountOrigin: route.amountOrigin) { id in
+                pendingDelete = id
+                detail = nil
+            }
+            .modifier(ZoomFromRow(route: route, namespace: zoom))
+        case .position(let instrument):
+            PositionDetailSheet(portfolio: portfolio, instrument: instrument)
+        case .moveMoney(let request):
+            MoveMoneySheet(model: model, accountBook: accountBook, request: request)
+        case .briefing:
+            BriefingSheet(
+                model: model,
+                portfolio: portfolio,
+                accountBook: accountBook,
+                briefingModel: briefing,
+                speaker: speaker,
+                onAction: handleBriefingAction
+            )
+        case .share(let share):
+            ShareSheet(item: share, onFinish: { sheet = nil })
+                .ignoresSafeArea()
+                .presentationDetents([.medium, .large])
+                .onDisappear { if let url = share.fileURL { BackupService.remove(url) } }
+        case .restore(let preview):
+            RestoreConfirmView(preview: preview, restore: { try restoreBackup(preview.file) }, finished: finishRestore)
+        case .confirmDisconnect(let bank):
+            BankConfirmSheet(
+                title: "Desconectar \(bank.displayName)",
+                message: "Se dejan de leer sus movimientos. Lo que ya tienes se queda.",
+                confirmTitle: "Desconectar",
+                onConfirm: {
+                    sheet = nil
+                    Task { await BankConnector.shared.disconnect(bank) }
+                },
+                onCancel: { sheet = nil }
+            )
+        case .confirmForget:
+            BankConfirmSheet(
+                title: "Olvidar clave y conexiones",
+                message: "Se borran la clave de Enable Banking y las sesiones de este iPhone. Tus movimientos se quedan.",
+                confirmTitle: "Olvidar clave y conexiones",
+                onConfirm: {
+                    sheet = nil
+                    Task {
+                        await BankingCredentials.forgetEverything()
+                        model.reload()
+                    }
+                },
+                onCancel: { sheet = nil }
+            )
+        }
+    }
+
+    /// La bienvenida (primera vez) o las pestañas. Aparte de `body` para que el compilador pueda con él.
+    @ViewBuilder private func tabsOrWelcome(activeRevealToken: Int) -> some View {
+        let warnings = model.snapshot.warningInsightIDs
+        ZStack {
+            if model.needsOnboarding {
+                OnboardingView(model: model, onFinish: completeOnboarding)
+                    .transition(.opacity)
+            } else {
+                TabView(selection: $tab) {
+                    Tab("Inicio", systemImage: "house", value: AppTab.home) {
+                        HomeView(model: model, portfolio: portfolio, accountBook: accountBook,
+                                 isVisible: tab == .home && !isLocked,
+                                 revealToken: activeRevealToken, zoom: zoom,
+                                 detailOpen: sheet != nil,
+                                 openDetail: { openDetail($0, zooms: true) },
+                                 openPosition: openPosition,
+                                 openMoveMoney: openMoveMoney,
+                                 openBriefing: openManualBriefing,
+                                 shareText: shareText,
+                                 openSettings: openSettings,
+                                 openBankSettings: openBankSettings,
+                                 openInvestmentsSettings: openInvestmentsSettings,
+                                 openAccounts: openAccounts,
+                                 selectCardRequest: $selectHomeCard)
+                            .id(restoreToken)
+                            .tabContentEntrance()
+                            .environment(\.tabEntrance, entrance(for: .home))
+                    }
+                    Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
+                        SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
+                                     openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
+                                     openBudgetsRequest: $openBudgetsRequest)
+                            .modifier(FadedTabContent(entrance: entrance(for: .spending)))
+                    }
+                    Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
+                        AlertsView(model: model, isVisible: tab == .alerts && !isLocked, onOpen: { openDetail($0) },
+                                   onMorningRuleChanged: rescheduleMorningReminder)
+                            .modifier(FadedTabContent(entrance: entrance(for: .alerts)))
+                    }
+                    .badge(tab == .alerts ? 0 : seen.unseenCount(of: warnings))
+                    Tab("Ajustes", systemImage: "gearshape", value: AppTab.settings) {
+                        SettingsScrollHost(scrollRequest: $settingsScroll) {
+                            SettingsView(model: model, portfolio: portfolio, accountBook: accountBook, briefing: briefing,
+                                         focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
+                                         openBankRequest: $openBankRequest,
+                                         present: present,
+                                         requestImport: startImport,
+                                         importBackup: { startImport(.backup) },
+                                         importTradeRepublic: { startImport(.tradeRepublic) })
+                        }
+                        .modifier(FadedTabContent(entrance: entrance(for: .settings)))
+                    }
+                }
+                .modifier(MinimizesTabBarOnScroll())
+                .overlay(alignment: .bottom) {
+                    TabBarCurtain(token: activeRevealToken)
+                }
+                .transition(.opacity)
+            }
+        }
     }
 
     /// T1: la entrada de cada pestaña. La elegida lleva un `token` nuevo DESDE el instante en que se elige (se calcula
@@ -996,3 +988,32 @@ private struct TabBarCurtain: View {
             #endif
     }
 }
+
+#if DEBUG
+/// Solo demo de grabación: (1) cambia sola a Gasto (`-MiBancoDemoTabSwitch`) para grabar la entrada de la pestaña desde
+/// antes del cambio; (2) m-4 (lote final): la hoja del movimiento se cierra sola a los `s` segundos de abrirse
+/// (`-MiBancoDemoAutoCloseDetail`), para grabar el cierre desde ANTES (un toque de la prueba espera a que la app quede
+/// quieta y la ráfaga empezaba con la hoja ya cerrada).
+private struct DemoRootTasks: ViewModifier {
+    @Binding var tab: AppTab
+    @Binding var sheet: RootSheet?
+
+    func body(content: Content) -> some View {
+        content
+            .task {
+                guard let seconds = DemoMode.tabSwitchSeconds else { return }
+                LaunchProbe.shared.tabSwitchAt = Date().timeIntervalSince1970 + seconds
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled else { return }
+                tab = .spending
+            }
+            .task(id: sheet?.id) {
+                guard let seconds = DemoMode.autoCloseDetailSeconds, let current = sheet?.id,
+                      current.hasPrefix("movement-") else { return }
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled, sheet?.id == current else { return }
+                sheet = nil
+            }
+    }
+}
+#endif

@@ -107,9 +107,10 @@ public func keywordCategory(for merchant: String) -> SpendingCategory? {
 }
 
 /// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, el directorio,
-/// las suscripciones, las palabras clave, una persona (solo con prueba, ver `isPersonPayment`) y por último sin
-/// categoría. Un comercio que no se conoce NO es una persona: el bar del barrio cuyo nombre en la tarjeta es el de su
-/// dueño va a «Sin categoría» hasta que el dueño lo elija.
+/// las suscripciones, una persona (solo con prueba, ver `isPersonPayment`), las palabras clave del local y por último
+/// sin categoría. La persona va antes que las palabras clave: «Bizum a Juan Horno» es un amigo, no una panadería. Un
+/// comercio que no se conoce NO es una persona: el bar del barrio cuyo nombre en la tarjeta es el de su dueño va a «Sin
+/// categoría» hasta que el dueño lo elija.
 public func spendingCategory(of movement: Movement, overrides: [String: SpendingCategory],
                              subscriptionKeys: Set<String>) -> SpendingCategory? {
     guard movement.kind == .payment else { return nil }
@@ -121,9 +122,9 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
         if let domain = merchantDomain(for: merchant, isShop: movement.isShop),
            let fromDirectory = directoryCategory(forDomain: domain) { return fromDirectory }
         if subscriptionKeys.contains(key) { return .suscripciones }
-        if let byWord = keywordCategory(for: merchant) { return byWord }
     }
     if isPersonPayment(movement) { return .personas }
+    if !key.isEmpty, let byWord = keywordCategory(for: merchant) { return byWord }
     return .sinCategoria
 }
 
@@ -152,13 +153,14 @@ private func saysPersonPayment(_ text: String?) -> Bool {
     return words.contains { personPaymentWords.contains($0) } || containsRun(words, ["envio", "a"])
 }
 
-/// true si hay prueba de que el pago fue a una persona: no es una compra en tienda (`isShop`) y el texto del aviso o del
-/// banco lo dice («Bizum a Ana», «Transferencia a Laura», «TRANSF A FAVOR DE…», «Traspaso a ahorro», «Envío a Lucía»).
-/// Se mira también el nombre que dio el banco al enlazar (`bankMerchant`): el aviso puede traer solo «Ana».
-/// Un nombre a secas («Manuel García») no prueba nada.
+/// true si hay prueba de que el pago fue a una persona: no es una compra en tienda (`isShop`) y, o bien una fuente lo
+/// marcó (`personPayment`: aviso de envío, código de transferencia del banco, «Transfer» de Revolut), o bien el texto
+/// del aviso o del banco lo dice («Bizum a Ana», «Transferencia a Laura», «TRANSF A FAVOR DE…», «Traspaso a ahorro»,
+/// «Envío a Lucía»). Se mira también el nombre que dio el banco al enlazar (`bankMerchant`). Un nombre a secas
+/// («Manuel García») no prueba nada.
 public func isPersonPayment(_ movement: Movement) -> Bool {
     guard movement.kind == .payment, !movement.isShop else { return false }
-    return saysPersonPayment(movement.merchant) || saysPersonPayment(movement.bankMerchant)
+    return movement.personPayment == true || saysPersonPayment(movement.merchant) || saysPersonPayment(movement.bankMerchant)
 }
 
 /// true si el texto del comercio es un concepto genérico («Bizum a Ana», «Transferencia enviada», «Recibo»): palabra

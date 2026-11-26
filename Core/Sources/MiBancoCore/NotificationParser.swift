@@ -150,5 +150,5 @@ public func parseNotification(bank: BankID, title: String?, subtitle: String?, b
     }
 
     return .movement(ParsedMovement(kind: kind, amountCents: pay.cents, merchant: merchant, reportedBalanceCents: balance,
-                                    merchantIsShop: isShop))
+                                    merchantIsShop: isShop, personPayment: kind == .payment && isTransfer))
 }

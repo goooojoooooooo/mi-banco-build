@@ -65,6 +65,8 @@ public struct BankRecord: Equatable, Sendable {
 public enum RecordChannel: Sendable { case bank, statement }
 
 let nonShopMCC: Set<String> = ["4829", "6010", "6011", "6012", "6051", "6540"]
+/// Códigos de comercio de un envío de dinero (4829: transferencia; 6540: envío o recarga de dinero): señal de pago a persona.
+let transferMCC: Set<String> = ["4829", "6540"]
 
 /// "2026-11-18" (o "2026-11-18T10:00:00...") -> ese día al mediodía en `calendar`; nil si no es una fecha válida.
 func noonOfDay(_ text: String, calendar: Calendar) -> (day: String, date: Date)? {
@@ -131,6 +133,9 @@ public func bankRecords(from transactions: [EBTransaction], bank: BankID, calend
             isShop = merchant.map { merchantDomain(for: $0) != nil } ?? false
         }
 
+        // La API no da el tipo de operación (no hay `bank_transaction_code` en el modelo): solo el código de comercio.
+        let personPayment = isDebit && t.merchantCategoryCode.map { transferMCC.contains($0) } == true
+
         var ref = (t.entryReference?.isEmpty == false ? t.entryReference : nil)
             ?? (t.transactionID?.isEmpty == false ? t.transactionID : nil)
         if ref == nil {
@@ -143,7 +148,8 @@ public func bankRecords(from transactions: [EBTransaction], bank: BankID, calend
         out.append(BankRecord(
             ref: ref ?? "", bank: bank, amountCents: cents, timing: timing, status: status, merchant: merchant,
             isShop: isShop, balanceAfterCents: t.balanceAfterTransaction?.euroCents,
-            bookedDay: status == .booked ? t.bookingDate.flatMap { noonOfDay($0, calendar: calendar)?.date } : nil))
+            bookedDay: status == .booked ? t.bookingDate.flatMap { noonOfDay($0, calendar: calendar)?.date } : nil,
+            personPayment: personPayment))
     }
     return out
 }

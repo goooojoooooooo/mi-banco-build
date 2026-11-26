@@ -69,11 +69,15 @@ func parseRevolutStatement(_ table: CSVTable, calendar: Calendar) throws -> Pars
         // La clave de la versión anterior (texto de las celdas), para reconocer filas ya importadas con ella.
         let legacyKey = [table.cell(row, started), table.cell(row, amount), text].joined(separator: "|")
         let legacyRef = "r|" + fnv1aHex(legacyKey) + "|" + String(legacyCounter.next(legacyKey))
+        let isShop = typeText.contains("card payment") || typeText.contains("pago con tarjeta")
+        // Un envío: tipo «Transfer»/«Transferencia» o descripción «To Ana» (lo que Revolut escribe al enviar a alguien).
+        let saysTransfer = typeText.contains("transfer") || normalizeHeader(text).hasPrefix("to ")
         records.append(BankRecord(
             ref: ref, bank: .rev, amountCents: cents, timing: .exact(startedAt), status: .booked,
             merchant: name.isEmpty ? nil : name,
-            isShop: typeText.contains("card payment") || typeText.contains("pago con tarjeta"),
-            legacyRefs: legacyRef == ref ? [] : [legacyRef]))
+            isShop: isShop,
+            legacyRefs: legacyRef == ref ? [] : [legacyRef],
+            personPayment: cents < 0 && !isShop && saysTransfer))
 
         if let b = parseStatementDecimal(table.cell(row, balance)) {
             let doneAt = parseStatementTimestamp(table.cell(row, completed), calendar: calendar) ?? startedAt

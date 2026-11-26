@@ -581,12 +581,14 @@ public struct Ledger: Sendable {
             setMerchantKeepingCategory(richerMerchant(captured: parsed.merchant, bank: bankName), at: i)
             state.movements[i].bankMerchant = bankName
             state.movements[i].isShop = state.movements[i].isShop || parsed.merchantIsShop
+            if parsed.personPayment { state.movements[i].personPayment = true }
             return .merged(state.movements[i])
         }
 
         // date == now y balance solo suma date > setAt: no se cuenta dos veces.
         let movement = Movement(bank: bank, amountCents: signed, merchant: parsed.merchant, kind: parsed.kind, source: source,
-                                date: now, fingerprint: fingerprint, isShop: parsed.merchantIsShop)
+                                date: now, fingerprint: fingerprint, isShop: parsed.merchantIsShop,
+                                personPayment: parsed.personPayment ? true : nil)
         state.movements.append(movement)
         return .stored(movement)
     }

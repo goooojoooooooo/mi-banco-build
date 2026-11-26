@@ -182,7 +182,7 @@ private struct CardFlightEffect: ViewModifier, Animatable {
     let to: CGRect
     let distance: CGFloat
 
-    var animatableData: CGFloat {
+    nonisolated var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }

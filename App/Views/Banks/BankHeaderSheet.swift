@@ -30,10 +30,24 @@ enum BankHeaderMath {
     /// ven a la vez el saldo grande y el del título pequeño.
     static let miniStart: CGFloat = 0.70
 
-    /// La cabecera se apaga mientras la hoja sube y ha desaparecido en p = 0,62.
-    static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - unit(p) / headerGone) }
-    /// Las acciones rápidas se apagan antes que el resto.
-    static func actionsOpacity(_ p: CGFloat) -> CGFloat { unit(1 - 1.7 * unit(p)) }
+    /// Hasta aquí la cabecera (y con ella «Actualizar ahora») sigue entera: con un toque de desplazamiento nada parece
+    /// desactivado (ojo de diseño 13.3). Las acciones van DENTRO de la capa de la cabecera, así que su opacidad dibujada
+    /// es el producto de las dos curvas: por eso las dos esperan al 25 % (lote 3, I-2).
+    static let holdUntil: CGFloat = 0.25
+
+    /// Con la hoja subida más de un 5 % la barra de pestañas se esconde (13.1, variante del lote 3 m-5).
+    static func hidesTabBar(_ p: CGFloat) -> Bool { unit(p) > 0.05 }
+
+    /// La cabecera sigue entera hasta p = 0,25, se apaga mientras la hoja sube y ha desaparecido en p = 0,62.
+    static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - (unit(p) - holdUntil) / (headerGone - holdUntil)) }
+    /// Las acciones rápidas, enteras hasta el 25 % del recorrido y fuera en p = 0,55, antes que el resto de la cabecera.
+    static func actionsOpacity(_ p: CGFloat) -> CGFloat { unit(1 - (unit(p) - holdUntil) / 0.30) }
+    /// Lo que se ve de verdad de las acciones (la capa de la cabecera por su propio apagado).
+    static func actionsDrawn(_ p: CGFloat) -> CGFloat { headerOpacity(p) * actionsOpacity(p) }
+    /// Las acciones solo se tocan mientras se ven de verdad (menor m-11).
+    static func actionsTouchable(_ p: CGFloat) -> Bool { actionsDrawn(p) > 0.3 }
+    /// El asa de la hoja se apaga en el último 10 % del recorrido: acoplada no sirve de nada (13.4).
+    static func handleOpacity(_ p: CGFloat) -> CGFloat { unit((1 - unit(p)) / 0.1) }
     /// Esquinas de la hoja: 30 pt hasta p = 0,82 y de ahí a 0.
     static func cornerRadius(_ p: CGFloat) -> CGFloat { 30 * (1 - unit((unit(p) - 0.82) / 0.18)) }
     /// El título pequeño («Banco · saldo») entra entre p = 0,7 y 1.
@@ -49,8 +63,12 @@ enum BankHeaderMath {
 
     /// Al soltar a medio camino: dónde se asienta la hoja (lo desplazado), abajo (0) o acoplada (`dock`), la más cercana;
     /// `nil` si ya está en uno de los dos (o más allá: leyendo los movimientos, o tirando hacia abajo).
+    static let settleTolerance: CGFloat = 2
+
     static func settleTarget(offset: CGFloat, dock: CGFloat) -> CGFloat? {
-        guard offset.isFinite, dock > 1, offset > 0.5, offset < dock - 0.5 else { return nil }
+        // 2 pt de tolerancia: el aterrizaje de `scrollTo(id:)` puede quedar a una fracción de punto del borde exacto y
+        // eso no debe pedir otro asentamiento (nota diferida 2 de la re-revisión).
+        guard offset.isFinite, dock > 1, offset > settleTolerance, offset < dock - settleTolerance else { return nil }
         return offset < dock / 2 ? 0 : dock
     }
 }
@@ -75,6 +93,10 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
     @Environment(\.motion) private var motion
     @State private var entered = false
     @State private var position = ScrollPosition(edge: .top)
+    /// El desplazamiento está quieto (ni dedo ni inercia).
+    @State private var scrollIdle = true
+    /// La hoja ha subido: la barra de pestañas se esconde.
+    @State private var tabBarHidden = false
 
     private static var sheetID: String { "bank-sheet" }
 
@@ -92,6 +114,9 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
         .scrollPosition($position)
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, new in
             scroll.offset = new
+            // Solo cambia al cruzar el umbral: no se redibuja la pantalla en cada paso del dedo.
+            let hide = BankHeaderMath.hidesTabBar(scroll.progress)
+            if hide != tabBarHidden { tabBarHidden = hide }
         }
         .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height - $0.contentInsets.top - $0.contentInsets.bottom } action: { _, new in
             scroll.viewport = max(0, new)
@@ -99,7 +124,13 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
         .accessibilityIdentifier("bank-screen-scroll")
         // Al soltar a medio camino, la hoja nunca se queda entre medias: se asienta abajo o acoplada.
         .onScrollPhaseChange { _, new in
+            scrollIdle = new == .idle
             if new == .idle { settle() }
+        }
+        // Si la cabecera cambia de alto con la hoja parada (pasos → «conectado»), la hoja puede quedar entre medias sin
+        // que el desplazamiento cambie de fase: se asienta también entonces (nota diferida 3).
+        .onChange(of: scroll.dock) { _, _ in
+            if scrollIdle { settle() }
         }
         .background { BankHeaderBackdrop() }
         .overlay(alignment: .top) {
@@ -121,6 +152,10 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
             }
         }
         .toolbarBackground(.hidden, for: .navigationBar)
+        // Con la hoja subida, sin barra de pestañas: encogida al desplazar quedaba un botón redondo con el engranaje
+        // flotando sobre la lista (ojo de diseño 13.1). Con la hoja abajo la barra sigue ahí (y se puede cambiar de
+        // pestaña como siempre).
+        .toolbarVisibility(tabBarHidden ? .hidden : .automatic, for: .tabBar)
         .environment(scroll)
         .onChange(of: scroll.dockRequests) { _, _ in
             // Hasta el borde de arriba de la hoja, mida lo que mida la cabecera en ese momento.
@@ -184,8 +219,9 @@ private struct BankHeaderLayer<Content: View>: View {
             // dibuja: la cabecera se corta ahí, con un borde suave de hasta 16 pt por debajo, nunca por encima.
             .mask(alignment: .top) {
                 VStack(spacing: 0) {
+                    // Un degradado de hasta 24 pt (nunca un corte a cuchillo bajo la flecha de volver, 13.2).
                     LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
-                        .frame(height: min(16, y))
+                        .frame(height: min(24, 2 * y))
                     Rectangle()
                         .frame(height: 4000)
                 }
@@ -300,7 +336,8 @@ private struct BankMiniTitle: View {
                     .lineLimit(1)
                 if let balanceCents {
                     Text(hidden ? maskedEUR(balanceCents, sign: false) : formatEUR(balanceCents).replacingOccurrences(of: "-", with: "\u{2212}"))
-                        .titan(.caption)
+                        // Un punto más (13 pt): se lee de un vistazo (ojo de diseño 13.4).
+                        .titan(.meta)
                         .foregroundStyle(Theme.label2)
                         .lineLimit(1)
                         .contentTransition(.identity)
@@ -354,11 +391,25 @@ private struct FadesWithBankHeader: ViewModifier {
     @Environment(BankHeaderScroll.self) private var scroll: BankHeaderScroll?
 
     func body(content: Content) -> some View {
-        content.opacity(BankHeaderMath.actionsOpacity(scroll?.progress ?? 0))
+        let p = scroll?.progress ?? 0
+        content
+            .opacity(BankHeaderMath.actionsOpacity(p))
+            .allowsHitTesting(BankHeaderMath.actionsTouchable(p))
+    }
+}
+
+/// El asa de la hoja: se apaga al acoplarse.
+private struct FadesNearDock: ViewModifier {
+    @Environment(BankHeaderScroll.self) private var scroll: BankHeaderScroll?
+
+    func body(content: Content) -> some View {
+        content.opacity(BankHeaderMath.handleOpacity(scroll?.progress ?? 0))
     }
 }
 
 extension View {
     /// Dentro de la cabecera de `BankHeaderSheet`: esta pieza se apaga antes que el resto al subir la hoja.
     func fadesWithBankHeader() -> some View { modifier(FadesWithBankHeader()) }
+    /// Dentro de la hoja de `BankHeaderSheet`: se apaga en el último 10 % del recorrido (el asa).
+    func fadesNearDock() -> some View { modifier(FadesNearDock()) }
 }

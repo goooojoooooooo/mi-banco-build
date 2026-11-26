@@ -67,6 +67,8 @@ struct RootView: View {
     /// Costuras de movimiento (F1): marcos que apuntan las vistas para el vuelo de tarjeta y el detalle
     /// (`LaunchAnchor` lo crea `AppShellView`, por encima del bloqueo y del telón).
     @State private var cardFlight = CardFlight()
+    /// C8 / 9.5: el banco abierto desde el abanico de Inicio, encima de Inicio (sin cambiar de pestaña).
+    @State private var bankOverHome: BankID?
     @State private var tabEntrance = TabEntrance()
     @State private var detailAmountFrames = DetailAmountFrames()
     /// T1: la pestaña de antes del último cambio, cuántos cambios ha habido y hacia dónde fue el último.
@@ -79,6 +81,7 @@ struct RootView: View {
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.motion) private var motion
     private var router: AlertRouter { AlertRouter.shared }
 
     var body: some View {
@@ -336,6 +339,10 @@ struct RootView: View {
                 .overlay(alignment: .bottom) {
                     TabBarCurtain(token: activeRevealToken)
                 }
+                // C8 / 9.5: el banco abierto desde el abanico va ENCIMA de Inicio (la pestaña marcada no cambia) y la
+                // tarjeta vuela hasta su cabecera.
+                .overlay { bankOverHomeLayer }
+                .overlay { CardFlightLayer(flight: cardFlight, blocked: flightBlocked) }
                 .transition(.opacity)
             }
         }
@@ -395,6 +402,7 @@ struct RootView: View {
         suppressBriefingForActivation = false
         speaker.stop()
         sheet = nil
+        bankOverHome = nil
         importing = false
         importKind = .backup
     }
@@ -547,8 +555,39 @@ struct RootView: View {
     }
 
     private func openBankSettings(_ bank: BankID) {
+        // 9.5: si se llega volando desde el abanico (hay un vuelo pedido hacia este banco), la pantalla del banco se
+        // abre encima de Inicio y la pestaña marcada no cambia. Desde cualquier otro sitio, en Ajustes como siempre.
+        if tab == .home, cardFlight.request?.bank == bank {
+            withAnimation(motion.reduce ? motion.fade : nil) { bankOverHome = bank }
+            return
+        }
         openBankRequest = bank
         tab = .settings
+    }
+
+    /// No se puede volar: bloqueo, fuera de primer plano o la hoja única abierta (la tarjeta se queda como aterrizada).
+    private var flightBlocked: Bool { isLocked || scenePhase != .active || sheet != nil }
+
+    /// La pantalla del banco encima de Inicio, con su propia pila de navegación y «Inicio» para volver.
+    @ViewBuilder private var bankOverHomeLayer: some View {
+        if let bank = bankOverHome {
+            NavigationStack {
+                BankLinkView(model: model, portfolio: portfolio, bank: bank, present: present, requestImport: startImport)
+                    .navigationBarBackButtonHidden()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                withAnimation(motion.fade) { bankOverHome = nil }
+                            } label: {
+                                Label("Inicio", systemImage: "chevron.left")
+                            }
+                            .accessibilityIdentifier("bank-over-home-back")
+                        }
+                    }
+            }
+            .background(Theme.canvas.ignoresSafeArea())
+            .transition(.opacity)
+        }
     }
 
     private func openInvestmentsSettings() {

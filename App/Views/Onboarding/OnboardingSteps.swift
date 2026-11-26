@@ -79,6 +79,15 @@ struct OnboardingBalancesStep: View {
         .onChange(of: shell.locked) { _, locked in
             if locked { focused = nil }
         }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            guard on, focused != nil else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { focused = nil }
+        }
     }
 
     private func balanceRow(for bank: BankID) -> some View {
@@ -98,10 +107,9 @@ struct OnboardingBalancesStep: View {
                         .foregroundStyle(Theme.label)
                 }
                 if !stacked { Spacer(minLength: Theme.Space.small) }
-                TextField("0,00 €", text: maskedFieldText(binding(for: bank), masked: masked))
+                MaskedAmountTextField(placeholder: "0,00 €", text: binding(for: bank), masked: masked)
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .maskedAmountField(masked)
                     .multilineTextAlignment(stacked ? .leading : .trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -113,8 +121,7 @@ struct OnboardingBalancesStep: View {
                         in: .rect(cornerRadius: Theme.Radius.field)
                     )
                     .accessibilityLabel("Saldo de \(bank.displayName)")
-                    .accessibilityValue((masked ? "importe oculto" : currentText)
-                        + drawnAmountForTests(masked ? maskedFieldMask : currentText))
+
             }
             if let error = errors[bank] {
                 Text(error)

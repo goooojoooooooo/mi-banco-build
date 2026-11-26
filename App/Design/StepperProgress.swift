@@ -300,8 +300,9 @@ struct StepPercentText: View {
                 .fontWeight(.semibold)
                 .monospacedDigit()
                 .foregroundStyle(Theme.label)
-                .contentTransition(motion.reduce || landsAtOnce ? .opacity : .identity)
-                // Un 100 que llega sin cuenta (importar) entra con el mismo fundido que el relleno del último nodo.
+                .contentTransition(motion.reduce ? .opacity : (landsAtOnce ? .numericText(value: Double(value)) : .identity))
+                // Un 100 que llega sin cuenta (importar) cambia cifra a cifra (nunca dos números montados, como el «185»
+                // de un fundido cruzado) en los mismos 0,2 s que el relleno del último nodo.
                 .animation(motion.reduce ? motion.fade : (landsAtOnce ? .easeInOut(duration: motion.seconds(0.2)) : nil),
                            value: value)
                 .accessibilityLabel("Paso \(stepNumber) de \(stepCount), \(value) por ciento")

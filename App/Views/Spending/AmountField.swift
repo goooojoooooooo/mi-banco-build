@@ -26,11 +26,9 @@ struct AmountField<ID: Hashable>: View {
                     .accessibilityLabel("Guardado")
             }
             // Con el ojo cerrado (y sin editar) el campo contiene la máscara del kit, no el límite.
-            let shown = maskedFieldText($text, masked: masked)
-            TextField(placeholder, text: shown)
+            MaskedAmountTextField(placeholder: placeholder, text: $text, masked: masked)
                 .titan(.option)
                 .fontWeight(.semibold)
-                .maskedAmountField(masked)
                 .multilineTextAlignment(stacked ? .leading : .trailing)
                 .keyboardType(.numbersAndPunctuation)
                 .submitLabel(.done)
@@ -42,9 +40,6 @@ struct AmountField<ID: Hashable>: View {
                             in: .rect(cornerRadius: Theme.Radius.field))
                 .animation(motion.fade, value: focused.wrappedValue == id)
                 .accessibilityLabel(label)
-                // Con el modo privado, VoiceOver no lee el límite (solo mientras no se edita y hay algo escrito).
-                // La prueba lee lo que el campo DIBUJA: el mismo texto que se le da (menor m-11 del lote 3).
-                .accessibilityValue((masked ? "importe oculto" : text) + drawnAmountForTests(shown.wrappedValue))
                 .accessibilityIdentifier(identifier)
         }
         .contentShape(Rectangle())

@@ -299,6 +299,21 @@ struct SettingsView: View {
         .onChange(of: gate?.isLocked) { _, locked in
             if locked == true { focused = nil }
         }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            if on { releaseAmountFocus() }
+        }
+        #if DEBUG
+        // `-MiBancoDemoCloseEyeAfter <s>`: cierra el ojo solo, por el mismo camino que el interruptor (para grabar desde
+        // antes del cierre y para cerrarlo con un saldo en edición, con el teclado tapando el interruptor).
+        .task {
+            guard let seconds = DemoMode.closesEyeAfterSeconds else { return }
+            try? await Task.sleep(for: .seconds(seconds))
+            privacyBinding.wrappedValue = true
+        }
+        #endif
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
         .sensoryFeedback(.success, trigger: saveCount)
@@ -330,6 +345,18 @@ struct SettingsView: View {
         }
     }
 
+    /// Suelta el foco de un saldo en edición sin animación (ver `onChange(of: preferences.privateMode)`).
+    private func releaseAmountFocus() {
+        #if DEBUG
+        // Solo para demostrar que la prueba falla con el defecto de antes (`-MiBancoDemoRegressEyeFocus`).
+        if DemoMode.isActive, DemoMode.regressesEyeFocus { return }
+        #endif
+        guard focused != nil else { return }
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { focused = nil }
+    }
+
     private var motionLevelBinding: Binding<MotionLevel> {
         Binding(get: { preferences.motionLevel }, set: { preferences.motionLevel = $0 })
     }
@@ -338,6 +365,7 @@ struct SettingsView: View {
     /// cambian por la máscara en el acto, sin ningún fotograma con un dígito apagándose. Abrirlo, un fundido corto.
     private var privacyBinding: Binding<Bool> {
         Binding(get: { preferences.privateMode }, set: { on in
+            if on { releaseAmountFocus() }
             withAnimation(on || motion.reduce ? nil : motion.fade) { preferences.privateMode = on }
         })
     }
@@ -507,10 +535,9 @@ private struct BalanceRow: View {
                             SavedCheck()
                                 .transition(.opacity)
                         }
-                        TextField("0,00 €", text: maskedFieldText($text, masked: masked))
+                        MaskedAmountTextField(placeholder: "0,00 €", text: $text, masked: masked)
                             .titan(.option)
                             .fontWeight(.semibold)
-                            .maskedAmountField(masked)
                             .multilineTextAlignment(stacked ? .leading : .trailing)
                             .keyboardType(.numbersAndPunctuation)
                             .submitLabel(.done)
@@ -521,8 +548,6 @@ private struct BalanceRow: View {
                             .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                             .animation(motion.fade, value: isEditing)
                             .accessibilityLabel("Saldo de \(bank.displayName)")
-                            .accessibilityValue((masked ? "importe oculto" : text)
-                                + drawnAmountForTests(masked ? maskedFieldMask : text))
                     }
                 }
             }
@@ -595,46 +620,6 @@ struct SavedCheck: View {
             }
             .onAppear { landed += 1 }
             .accessibilityLabel("Guardado")
-    }
-}
-
-/// Lo que enseña un campo de importe con el ojo cerrado y sin editar: la máscara del kit.
-let maskedFieldMask = maskedEUR(0, sign: false)
-
-/// El texto de un campo de importe: con el ojo cerrado (y sin editar) el campo CONTIENE la máscara, no la cifra; la cifra
-/// no se monta ni se pinta en transparente (lote de cierre, privacidad). Escribir en el campo enmascarado no hace nada:
-/// al tocarlo se enfoca, deja de estar enmascarado y vuelve a ser el texto de verdad.
-func maskedFieldText(_ text: Binding<String>, masked: Bool) -> Binding<String> {
-    masked ? Binding(get: { maskedFieldMask }, set: { _ in }) : text
-}
-
-/// Solo en la demo con `-MiBancoDemoDrawnAmounts`: lo que el campo DIBUJA («; dibujado: •••,•• €»), leído del mismo texto
-/// que se le da al campo, para que una prueba pueda fallar si con el ojo cerrado se dibuja una cifra. En la app, nada.
-func drawnAmountForTests(_ drawn: String) -> String {
-    #if DEBUG
-    if DemoMode.isActive, DemoMode.exposesDrawnAmounts { return "; dibujado: " + drawn }
-    #endif
-    return ""
-}
-
-/// Un campo de importe que puede ir enmascarado (ver `maskedFieldText`): el cambio de cifra a máscara (y al revés) es en
-/// el acto, sin transición de contenido ni animación, y el campo es sensible para las capturas del sistema.
-private struct MaskedAmountField: ViewModifier {
-    let masked: Bool
-
-    func body(content: Content) -> some View {
-        content
-            .foregroundStyle(Theme.label)
-            .contentTransition(.identity)
-            .animation(nil, value: masked)
-            .privacySensitive()
-    }
-}
-
-extension View {
-    /// Ver MaskedAmountField. Va justo después del estilo de letra del campo.
-    func maskedAmountField(_ masked: Bool) -> some View {
-        modifier(MaskedAmountField(masked: masked))
     }
 }
 

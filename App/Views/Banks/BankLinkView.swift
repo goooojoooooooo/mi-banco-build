@@ -340,6 +340,16 @@ struct BankLinkView: View {
             }
         }
         .onChange(of: stage) { _, new in stageChanged(to: new) }
+        #if DEBUG
+        // `-MiBancoDemoConnectedDoneAfter <s>`: «conectado» se cierra solo, como con «Listo» (para grabar desde antes).
+        .onChange(of: progress.showsSuccess) { _, shown in
+            guard shown, let seconds = DemoMode.connectedDoneAfterSeconds else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if progress.showsSuccess { dismissSuccess() }
+            }
+        }
+        #endif
         .sensoryFeedback(Haptics.error, trigger: errorTick)
         .onAppear {
             #if DEBUG

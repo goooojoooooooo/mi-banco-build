@@ -316,10 +316,9 @@ private struct ThresholdRow: View {
                     SavedCheck()
                         .transition(.opacity)
                 }
-                TextField("100,00 €", text: maskedFieldText(textBinding, masked: masked))
+                MaskedAmountTextField(placeholder: "100,00 €", text: textBinding, masked: masked)
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .maskedAmountField(masked)
                     .multilineTextAlignment(.trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -330,7 +329,6 @@ private struct ThresholdRow: View {
                     .background(Theme.fieldFill.opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                     .animation(motion.calmAnimation(.pressIn), value: focused)
                     .accessibilityLabel(title)
-                    .accessibilityValue((masked ? "importe oculto" : text) + drawnAmountForTests(masked ? maskedFieldMask : text))
             }
             if let problem {
                 Text(problem)
@@ -358,6 +356,15 @@ private struct ThresholdRow: View {
         }
         .onChange(of: gate?.isLocked) { _, locked in
             if locked == true { focused = false }
+        }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            guard on, focused else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { focused = false }
         }
         .sensoryFeedback(.success, trigger: saveTick)
         .sensoryFeedback(.error, trigger: errorTick)

@@ -311,9 +311,10 @@ struct ImportStatementView: View {
             return false
         }
         // Guardado de verdad: en UNA transacción el porcentaje pasa a 100, el tercer nodo se marca hecho y el botón pasa a
-        // su ✓; el 100 entra con el mismo fundido de 0,2 s que el relleno del nodo (`StepPercentText`), así que el 100 y
-        // los dos ✓ se ven a la vez (menor m-5 del lote 2, m-13 del lote 3 y su re-revisión: contar hasta 100 dejaba
-        // siempre una de las dos cosas por delante). Aquí no hay cuenta hasta 100: guardar es instantáneo.
+        // su ✓; el 100 cambia en los mismos 0,2 s que el relleno del nodo (`StepPercentText`), así que el 100 y el ✓ del
+        // tercer nodo se ven a la vez; el ✓ del botón llega con su propio salto, un instante después (menor m-5 del lote 2,
+        // m-13 del lote 3 y su re-revisión: contar hasta 100 dejaba siempre una de las dos cosas por delante). Aquí no hay
+        // cuenta hasta 100: guardar es instantáneo.
         withAnimation(motion.calmAnimation(.row)) {
             steps.succeed()
             importing = false

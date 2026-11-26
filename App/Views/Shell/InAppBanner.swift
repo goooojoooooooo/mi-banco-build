@@ -23,6 +23,9 @@ struct InAppBanner: View {
     @Environment(\.motion) private var motion
     @State private var dropped = false
     @State private var open: CGFloat = 0
+    /// N-2: los botones de abajo reciben toques solo cuando el despliegue ha TERMINADO (y dejan de recibirlos en cuanto
+    /// empieza a recogerse): nunca se toca lo que la máscara aún tapa.
+    @State private var actionsLive = false
     @State private var leftRevealed = false
     @State private var headHeight: CGFloat = 0
     @State private var fullHeight: CGFloat = 0
@@ -37,7 +40,7 @@ struct InAppBanner: View {
                 details(left: left)
                     .opacity(Double(min(1, open * 1.4)))
                     // m-1: sus botones solo se tocan desplegado del todo (al recogerse, nada que no se ve recibe toques).
-                    .allowsHitTesting(open > 0.99)
+                    .allowsHitTesting(actionsLive)
             }
         }
         .padding(14)
@@ -45,6 +48,14 @@ struct InAppBanner: View {
         // m-1: el fondo no recibe toques (al caer, su parte tapada por la máscara se tragaba los de debajo); solo los
         // botones los reciben, y los de abajo solo desplegados del todo.
         .background { shape.fill(Theme.raised).allowsHitTesting(false) }
+        // N-1: lo que SE VE del aviso (relleno, hueco, «Te quedan») para los toques sin hacer nada: no llegan a la fila
+        // de debajo. Lo que la máscara tapa, no (la forma de toque se desplaza con la máscara).
+        .background(alignment: .top) {
+            Color.clear
+                .contentShape(shape.offset(y: -hiddenBottom))
+                .onTapGesture {}
+                .accessibilityHidden(true)
+        }
         .overlay(shape.strokeBorder(.white.opacity(0.08), lineWidth: 0.5))
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
         // Se destapa de arriba abajo: la máscara (con las esquinas del aviso) se desplaza; el aviso no cambia de tamaño.
@@ -130,8 +141,9 @@ struct InAppBanner: View {
             withAnimation(motion.fade) { dropped = true }
             guard await pause(0.9) else { return }
             leftRevealed = true
-            withAnimation(motion.fade) { open = 1 }
+            withAnimation(motion.fade, completionCriteria: .logicallyComplete) { open = 1 } completion: { setActions(true) }
             guard await pause(2.3) else { return }
+            setActions(false)
             withAnimation(motion.fade) { dropped = false }
             guard await pause(0.22) else { return }
             onFinished()
@@ -140,13 +152,29 @@ struct InAppBanner: View {
         withAnimation(motion.animation(.release)) { dropped = true }
         guard await pause(0.95) else { return }
         leftRevealed = true
-        withAnimation(motion.animation(.snap)) { open = 1 }
+        #if DEBUG
+        // Para las pruebas: el despliegue ha EMPEZADO (la máscara aún tapa los botones).
+        LaunchProbe.shared.bannerUnfolding = true
+        #endif
+        withAnimation(motion.animation(.snap), completionCriteria: .logicallyComplete) { open = 1 } completion: {
+            setActions(true)
+        }
         guard await pause(2.45) else { return }
+        setActions(false)
         withAnimation(.easeIn(duration: motion.pause(0.32))) { open = 0 }
         guard await pause(0.25) else { return }
         withAnimation(.easeIn(duration: motion.pause(0.4))) { dropped = false }
         guard await pause(0.4) else { return }
         onFinished()
+    }
+
+    private func setActions(_ live: Bool) {
+        // Solo se encienden si sigue desplegado (un final tardío del despliegue no los enciende ya recogiéndose).
+        actionsLive = live && open > 0.99
+        #if DEBUG
+        LaunchProbe.shared.bannerActions = actionsLive ? "1" : "0"
+        LaunchProbe.shared.bannerUnfolding = false
+        #endif
     }
 
     /// Una pausa de la interfaz (a la cámara lenta de las grabaciones); false si la tarea se canceló.

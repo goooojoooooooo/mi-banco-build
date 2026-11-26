@@ -455,28 +455,46 @@ final class MotionTourScreensTests: MotionTourCase {
 
     /// Con Reducir movimiento: el porcentaje salta de tope en tope con un fundido, los nodos se funden y el ✓ sigue.
     func testBankConnectedReduce() throws {
-        bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion"], frames: 28)
+        // «conectado» se cierra solo (como con «Listo») 8 s después de aparecer: la segunda ráfaga empieza ANTES de ese
+        // cierre y lo graba entero (lote de cierre, ronda 1, m-2).
+        bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion", "-MiBancoDemoConnectedDoneAfter", "8"], frames: 28)
         // Y «Listo» con Reducir movimiento: «conectado» se va y vuelve la cabecera de siempre en el acto, sin recorrido
-        // de la hoja (lote de cierre).
-        let done = app.buttons["bank-connected-done"]
-        XCTAssertTrue(done.waitForExistence(timeout: 10), "Falta «Listo»")
-        Thread.sleep(forTimeInterval: 3)
-        done.tap()
-        burst("bank-connected-reduce-listo", frames: 12, every: 0.2)
+        // de la hoja.
+        burst("bank-connected-reduce-listo", frames: 20, every: 0.5)
         XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "«Listo» no volvió a la cabecera")
     }
 
     /// Cerrar el ojo con el interruptor de Ajustes, mirando los saldos (lote de cierre): ningún fotograma tras el toque
     /// enseña una cifra; los saldos son la máscara en el acto.
     func testSettingsEyeClose() throws {
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
+        // El ojo se cierra solo, por el mismo camino que el interruptor, a los 10 s de abrir Ajustes; la ráfaga empieza
+        // a los ~7 s: los primeros fotogramas son el control (cifras a la vista) y después el cierre, fotograma a
+        // fotograma (lote de cierre, ronda 1, m-2: antes empezaba después del toque).
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoCloseEyeAfter", "10"])
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let opened = Date()
         let toggle = element("settings-private-mode")
         scrollDown(to: toggle)
         XCTAssertTrue(toggle.waitForExistence(timeout: 8), "Falta el interruptor «Modo privado»")
-        Thread.sleep(forTimeInterval: 1)
-        toggle.tap()
-        burst("settings-eye-close", frames: 12, every: 0.1)
+        let wait = 7 - Date().timeIntervalSince(opened)
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst("settings-eye-close", frames: 24, every: 0.25)
+    }
+
+    /// La pantalla de una categoría con el ojo cerrado (lote de cierre, ronda 1, I-2): total y comparación con máscara.
+    func testCategoryDetailEye() throws {
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoCategory", "compras", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(element("categoria.total").waitForExistence(timeout: 20), "No se abrió la categoría")
+        burst("category-detail-eye", frames: 12, every: 0.25)
+    }
+
+    /// La entrada de la pestaña Gasto (lote de cierre, ronda 1, m-5): se ensaya con Avisos y, ya en Inicio, se toca Gasto.
+    func testSpendingTabEntrance() throws {
+        launch([], scale: 10)
+        rehearse(tab: "Avisos", until: app.navigationBars["Avisos"])
+        press(tab: "Gasto")
+        burst("spending-tab-entrance", frames: 16, every: 0.3)
+        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 10), "La ráfaga no es de Gasto")
     }
 
     /// De cerca, el remate (ojo de diseño 14.1–14.3): el tercer paso en marcha, la conexión termina de verdad, la cifra

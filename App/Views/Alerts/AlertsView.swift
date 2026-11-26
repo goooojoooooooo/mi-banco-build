@@ -166,7 +166,6 @@ private struct InsightRow: View {
                         .privacySensitive()
                         .foregroundStyle(Theme.label3)
                         .fixedSize(horizontal: false, vertical: true)
-                        .contentTransition(.opacity)
                 }
             }
             Spacer(minLength: 8)

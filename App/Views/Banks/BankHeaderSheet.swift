@@ -38,7 +38,10 @@ enum BankHeaderMath {
     /// Con la hoja subida más de un 5 % la barra de pestañas se esconde (13.1, variante del lote 3 m-5).
     /// Con histéresis (lote de cierre): se esconde al pasar del 5 % y no vuelve hasta bajar del 2 %, así un dedo quieto
     /// justo en el umbral no la hace parpadear.
-    static func hidesTabBar(_ p: CGFloat, hiddenNow: Bool) -> Bool { unit(p) > (hiddenNow ? 0.02 : 0.05) }
+    /// La regla vive en Core (`BankTabBarRule`, con sus pruebas).
+    static func hidesTabBar(_ p: CGFloat, hiddenNow: Bool) -> Bool {
+        BankTabBarRule.hides(progress: Double(p), hiddenNow: hiddenNow)
+    }
 
     /// La cabecera sigue entera hasta p = 0,25, se apaga mientras la hoja sube y ha desaparecido en p = 0,62.
     static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - (unit(p) - holdUntil) / (headerGone - holdUntil)) }

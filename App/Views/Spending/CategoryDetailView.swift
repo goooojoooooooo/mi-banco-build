@@ -47,10 +47,18 @@ struct CategoryDetailView: View {
                         .motionEntrance(1)
 
                     if let comparison = header?.comparison {
-                        Text(comparison)
+                        // Con el ojo cerrado, la máscara del kit en el sitio de cada importe (nunca el texto real bajo un
+                        // desenfoque; lote de cierre, ronda 1, I-2); el cambio es en el acto.
+                        let hidden = preferences.privateMode
+                        // Es una variación en porcentaje («+12 % frente a octubre»): con el ojo cerrado se tapa toda cifra.
+                        let shown = hidden ? maskingAmounts(comparison, everyNumber: true) : comparison
+                        Text(shown)
                             .titan(.callout)
                             .foregroundStyle(Theme.label2)
-                            .privateAmount(radius: 6)
+                            .contentTransition(.identity)
+                            .privacySensitive()
+                            .accessibilityLabel(hidden ? maskingAmounts(comparison, with: "importe oculto", everyNumber: true) : comparison)
+                            .accessibilityValue(drawnAmountForTests(shown))
                             .padding(.top, 4)
                             .accessibilityIdentifier("categoria.comparacion")
                             .motionEntrance(2)

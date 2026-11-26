@@ -22,10 +22,8 @@ struct SpendingView: View {
     @State private var path: [SpendingRoute] = []
     /// La hoja única de `RootView` está abierta y tapa Gasto: sus barras no avisan (necesidad del lote 2, ya en el kit).
     @Environment(\.singleSheetOpen) private var singleSheetOpen
-    /// El cambio de pestaña que anuncia `RootView`: los grupos entran con `.tabGroupEntrance` del kit.
+    /// El cambio de pestaña que anuncia `RootView`: juega la entrada de Gasto.
     @Environment(\.tabEntrance) private var tabEntrance
-    /// Entradas de pestaña jugadas (solo para la sonda de la demo).
-    @State private var tabEntrancesPlayed = 0
 
     var body: some View {
         let snapshot = model.snapshot
@@ -53,7 +51,6 @@ struct SpendingView: View {
                             SpendingSentences(comparison: content.comparison, forecast: content.forecast)
                                 .padding(.horizontal, Theme.Space.gutter)
                                 .padding(.top, 8)
-                                .tabGroupEntrance(2)
                                 .motionEntrance(2, listIndex: 0)
 
                             // El gráfico del mes: se dibuja solo al entrar y al cambiar de mes (nada que dibujar sin gasto).
@@ -61,7 +58,6 @@ struct SpendingView: View {
                                 MonthChart(series: content.series, title: content.title, previousTitle: content.previousTitle)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 14)
-                                    .tabGroupEntrance(2)
                                     .motionEntrance(2, listIndex: 0)
                             }
 
@@ -71,7 +67,6 @@ struct SpendingView: View {
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 14)
                                     .accessibilityIdentifier("gasto.presupuestoMes")
-                                    .tabGroupEntrance(2)
                                     .motionEntrance(2, listIndex: 0)
                             }
 
@@ -82,7 +77,6 @@ struct SpendingView: View {
                                 .padding(.top, Theme.Space.section)
                                 .padding(.bottom, 6)
                                 .accessibilityAddTraits(.isHeader)
-                                .tabGroupEntrance(3)
                                 .motionEntrance(3, listIndex: 0)
 
                             if !content.rows.isEmpty {
@@ -92,7 +86,6 @@ struct SpendingView: View {
                                     .fixedSize(horizontal: false, vertical: true)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.bottom, 4)
-                                    .tabGroupEntrance(3)
                                     .motionEntrance(3, listIndex: 0)
                                     .accessibilityHidden(true)
                                     .accessibilityIdentifier("gasto.marca")
@@ -104,7 +97,6 @@ struct SpendingView: View {
                                     .foregroundStyle(Theme.label2)
                                     .padding(.horizontal, Theme.Space.gutter)
                                     .padding(.top, 8)
-                                    .tabGroupEntrance(4)
                                     .motionEntrance(4, listIndex: 1)
                                     .accessibilityIdentifier("gasto.vacio")
                             } else {
@@ -113,7 +105,6 @@ struct SpendingView: View {
                                         CategoryRow(row: row, index: i, markName: content.markName)
                                     }
                                     .buttonStyle(.row)
-                                    .tabGroupEntrance(4 + i)
                                     .motionEntrance(4 + i, listIndex: 1 + i)
                                 }
                             }
@@ -123,7 +114,6 @@ struct SpendingView: View {
 
                         SpendingLinkRows(links: snapshot.spendingLinks)
                             .padding(.top, Theme.Space.section)
-                            .tabGroupEntrance(5)
                             .motionEntrance(5, listIndex: 3)
                     }
                     #if DEBUG
@@ -134,7 +124,7 @@ struct SpendingView: View {
                             .frame(width: 1, height: 1)
                             .accessibilityElement()
                             .accessibilityLabel("Entradas de Gasto")
-                            .accessibilityValue("\(entrance.token + tabEntrancesPlayed)")
+                            .accessibilityValue("\(entrance.token)")
                             .accessibilityIdentifier("gasto.entradas")
                     }
                     #endif
@@ -197,11 +187,13 @@ struct SpendingView: View {
             openBudgetsRequest = false
             path = [.budgets]
         }
-        // La entrada de la pestaña la juega el kit (`.tabGroupEntrance`, al cambiar `tabEntrance`); aquí solo se cuenta
-        // para la sonda de la demo. Con Reducir movimiento no hay entrada.
+        // Al elegir la pestaña (`tabEntrance` de `RootView`, no `isVisible`): el selector de mes y el total entran con la
+        // entrada del kit (`.tabGroupEntrance`); lo que cambia con el mes, con la propia (`motionEntrance`), que es la
+        // misma que repite el cambio de mes. Cada pieza lleva UNA sola entrada: un cambio de mes en mitad de la entrada
+        // de la pestaña la sustituye, nunca suma dos subidas (lote de cierre, ronda 1, m-5).
         .onChange(of: tabEntrance) { _, now in
             guard !now.suppressed, now.token > 0, !motion.reduce else { return }
-            tabEntrancesPlayed += 1
+            begin(.assembly)
         }
     }
 

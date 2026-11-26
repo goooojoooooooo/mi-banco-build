@@ -128,7 +128,8 @@ struct CategoryPickerRow: View {
                     .symbolEffect(.bounce, value: motion.reduce ? 0 : selectTick)
                 Text(current.displayName)
                     .fontWeight(.medium)
-                    .contentTransition(.opacity)
+                    // Ronda 2 (I-3): el nombre cambia de una vez (un fundido cruzado dejaba «Ocio» encima de «Supermercado»).
+                    .contentTransition(.identity)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.label3)

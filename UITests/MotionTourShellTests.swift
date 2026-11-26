@@ -339,7 +339,8 @@ final class MotionTourShellTests: MotionTourCase {
         // dice entonces su cifra): se espera a eso antes de tocar el chip.
         let left = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Te quedaban")).firstMatch
         XCTAssertTrue(waitUntil(20) { left.label.hasSuffix(" euros") }, "El importe no llegó a posarse")
-        Thread.sleep(forTimeInterval: 1)
+        // Ronda 2 (N-2): el grupo recibe toques cuando su entrada ya se ve (retardo + muelle `enter`, a ×4 ~1,5 s).
+        Thread.sleep(forTimeInterval: 3)
         chip.tap()
         let tile = element("category-tile-ocio")
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "Falta la ficha Ocio")

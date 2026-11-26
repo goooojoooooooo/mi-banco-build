@@ -60,7 +60,10 @@ struct CardFlightLayer: View {
     }
 
     private func start(_ request: CardFlight.Request) {
-        guard !motion.reduce, !blocked, request.source != .zero else {
+        // Una petición sin marco de origen (la de la demo `-MiBancoDemoFlightRequest`) no vuela: la cabecera espera y
+        // aparece por su respaldo, como cuando un vuelo no llega.
+        if request.source == .zero, !motion.reduce { return }
+        guard !motion.reduce, !blocked else {
             // Sin vuelo: la cabecera no espera. La petición se limpia un momento después (quien abre el banco aún la
             // lee para saberse llamado desde el abanico) y no queda colgada para la próxima vez.
             flight.landed = true

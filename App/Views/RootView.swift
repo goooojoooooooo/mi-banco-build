@@ -1119,7 +1119,7 @@ private struct DemoRootTasks: ViewModifier {
     func body(content: Content) -> some View {
         content
             .task {
-                // Ronda 1 (kit m-4), solo grabación: el ojo se cierra solo a los `s` s (`-MiBancoDemoCloseEyeAfter`),
+                // Ronda 1 (kit m-4), solo grabación: el ojo se cierra solo a los `s` s (`-MiBancoDemoCloseEyeOverRoll`),
                 // para grabar el cierre del ojo sobre una cifra que rueda desde ANTES del cambio.
                 guard let seconds = DemoMode.closeEyeAfterSeconds else { return }
                 LaunchProbe.shared.eyeClosesAt = Date().timeIntervalSince1970 + seconds

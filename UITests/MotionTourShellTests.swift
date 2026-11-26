@@ -327,16 +327,15 @@ final class MotionTourShellTests: MotionTourCase {
 
     func testCardFlightWithTheEyeClosed() throws { cardFlightBursts("card-flight-ojo", extra: ["-MiBancoDemoPrivate"]) }
 
-    func testCardFlightReduceMotion() throws {
-        cardFlightBursts("card-flight-reducir", extra: ["-MiBancoReduceMotion"])
-    }
+    // Sin variante con Reducir movimiento: con Reducir no hay abanico (no se levanta la tarjeta, diseño de la línea A)
+    // ni vuelo; el banco desde Ajustes con Reducir lo cubre `testReduceMotionWalk`.
 
-    /// Ronda 1 (kit m-4): el ojo se cierra (solo, `-MiBancoDemoCloseEyeAfter`) mientras el total aún rueda tras el
+    /// Ronda 1 (kit m-4): el ojo se cierra (solo, `-MiBancoDemoCloseEyeOverRoll`) mientras el total aún rueda tras el
     /// arranque. Se graba desde 1 s ANTES del cambio: el barajado y los puntos encima de la cifra, sin ningún fotograma
     /// con una casilla vacía ni con un dígito y su punto a la vez.
     func testEyeClosesOverARollingFigure() throws {
         // Ronda 2 (N-6): a cámara lenta (×4) y con el texto dibujado de cada importe (`-MiBancoDrawnText`).
-        launch(["-MiBancoDemoCloseEyeAfter", "4.5", "-MiBancoDrawnText"], scale: 4)
+        launch(["-MiBancoDemoCloseEyeOverRoll", "4.5", "-MiBancoDrawnText"], scale: 4)
         XCTAssertTrue(waitUntil(20) { (self.probe()["ojoCierraEn"] ?? "-") != "-" }, "La app no dijo cuándo cierra el ojo")
         let at = Double(probe()["ojoCierraEn"] ?? "") ?? 0
         let wait = at - 1 - Date().timeIntervalSince1970

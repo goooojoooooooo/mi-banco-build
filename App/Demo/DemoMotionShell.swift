@@ -36,10 +36,10 @@ extension DemoMode {
         return min(seconds, 60)
     }
 
-    /// `-MiBancoDemoCloseEyeAfter <s>`: a los `s` segundos de arrancar, el ojo se cierra solo (para grabar el cierre
+    /// `-MiBancoDemoCloseEyeOverRoll <s>`: a los `s` segundos de arrancar, el ojo se cierra solo (para grabar el cierre
     /// sobre una cifra que rueda). Como mucho 60 s.
     static var closeEyeAfterSeconds: Double? {
-        guard isActive, let seconds = value(after: "-MiBancoDemoCloseEyeAfter").flatMap(Double.init), seconds.isFinite,
+        guard isActive, let seconds = value(after: "-MiBancoDemoCloseEyeOverRoll").flatMap(Double.init), seconds.isFinite,
               seconds > 0 else { return nil }
         return min(seconds, 60)
     }
@@ -162,7 +162,7 @@ extension DemoMode {
     /// Ronda 1: «No es mío» desde el aviso que no se ha podido guardar (M-2) y cuándo se han ido los textos del bloqueo
     /// y empezó su fundido (I-1).
     var notMineFailures = 0
-    /// Ronda 1: cuándo se cerrará solo el ojo (`-MiBancoDemoCloseEyeAfter`).
+    /// Ronda 1: cuándo se cerrará solo el ojo (`-MiBancoDemoCloseEyeOverRoll`).
     var eyeClosesAt: Double?
     /// I-4 (ronda 1): cuándo se cerrará sola la hoja del movimiento (`-MiBancoDemoAutoCloseDetail`).
     var detailCloseAt: Double?

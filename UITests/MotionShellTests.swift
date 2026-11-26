@@ -1022,12 +1022,19 @@ final class MotionShellTests: XCTestCase {
 
     /// Lo que se ve ahora con forma de importe (etiquetas y valores), para el informe del recorrido.
     private func amountsInView(_ screen: String) -> [String] {
-        let predicate = NSPredicate(format: "label MATCHES %@ OR value MATCHES %@", Self.moneyShape, Self.moneyShape)
+        // Las sondas DEBUG (`launch-probe`, `home-probe`…) llevan horas y recuentos, no importes: no cuentan.
+        let predicate = NSPredicate(format: "(label MATCHES %@ OR value MATCHES %@) AND NOT (identifier CONTAINS %@)",
+                                    Self.moneyShape, Self.moneyShape, "probe")
         return app.descendants(matching: .any).matching(predicate).allElementsBoundByIndex.map { el in
             let id = el.identifier.isEmpty ? "-" : el.identifier
             let value = (el.value as? String).map { " = «\($0)»" } ?? ""
             return "\(screen) · \(id) · «\(el.label)»\(value)"
         }
+    }
+
+    /// Inicio está montado y el arranque ha terminado (sonda `montajes` y sin capa de arranque), sin depender de un texto.
+    private func homeIsUp() -> Bool {
+        waitUntil(60) { (self.probe()["montajes"] ?? "0") != "0" && !self.element("launch-layer").exists }
     }
 
     /// Vuelve atrás en una pila de navegación (el primer botón de la barra).
@@ -1063,8 +1070,7 @@ final class MotionShellTests: XCTestCase {
 
         // Inicio, el reverso de la tarjeta y el detalle.
         launch(["-MiBancoDemoPrivate", "-MiBancoDemoCardElements"])
-        waitForLaunchToEnd(40)
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "No se ve Inicio")
+        XCTAssertTrue(homeIsUp(), "No se ve Inicio")
         look("Inicio")
         let carousel = app.descendants(matching: .any).matching(cardAnchor).firstMatch
         if carousel.waitForExistence(timeout: 10) {
@@ -1162,8 +1168,7 @@ final class MotionShellTests: XCTestCase {
         continueAfterFailure = true
         var reached: [String] = []
         launch(["-MiBancoReduceMotion", "-MiBancoDemoCardElements"])
-        waitForLaunchToEnd(40)
-        if app.staticTexts["Tu dinero"].waitForExistence(timeout: 15) { reached.append("Inicio") }
+        if homeIsUp() { reached.append("Inicio") }
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         if row.waitForExistence(timeout: 10), waitUntil(15, { row.isHittable }) {
             row.tap()
@@ -1174,21 +1179,8 @@ final class MotionShellTests: XCTestCase {
                 app.buttons["Cerrar"].tap()
             }
         }
-        let cardAnchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
-        let carousel = app.descendants(matching: .any).matching(cardAnchor).firstMatch
-        if carousel.waitForExistence(timeout: 10) {
-            carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
-            if app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 10) {
-                let card = app.buttons["wallet-card-rev"]
-                if card.waitForExistence(timeout: 8), waitUntil(8, { card.isHittable }) {
-                    card.tap()
-                    // Sin vuelo, la cabecera del banco está en el acto.
-                    if element("bank-header-balance").waitForExistence(timeout: 8) { reached.append("Abanico y banco") }
-                    let back = app.buttons["bank-over-home-back"]
-                    if back.waitForExistence(timeout: 5) { back.tap() }
-                }
-            }
-        }
+        // Con Reducir no hay abanico (la tarjeta no se levanta: diseño de la línea A); el banco con Reducir se mira
+        // abierto desde Ajustes, más abajo.
         app.terminate()
 
         launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "gasto"])
@@ -1234,7 +1226,7 @@ final class MotionShellTests: XCTestCase {
             if waitUntil(8, { !done.exists }) { reached.append("Resumen cerrado") }
         }
 
-        let expected = ["Inicio", "Detalle", "Abanico y banco", "Gasto", "Suscripciones", "Presupuestos", "Avisos",
+        let expected = ["Inicio", "Detalle", "Gasto", "Suscripciones", "Presupuestos", "Avisos",
                         "Ajustes", "Banco", "Resumen", "Resumen cerrado"]
         XCTAssertEqual(reached, expected, "Con Reducir movimiento no se llega a todo")
     }

@@ -44,8 +44,8 @@ public struct MonthForecast: Equatable, Sendable {
 
 /// Claves (comercio normalizado) de las suscripciones activas (detectadas y no ocultas). Quien suma varios meses la calcula una vez y la pasa.
 public func subscriptionKeys(in state: LedgerState, now: Date, calendar: Calendar,
-                             ownTransferIDs: Set<UUID>? = nil) -> Set<String> {
-    Set(activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: ownTransferIDs).map(\.id))
+                             notSpending: Set<UUID>? = nil) -> Set<String> {
+    Set(activeSubscriptions(in: state, now: now, calendar: calendar, notSpending: notSpending).map(\.id))
 }
 
 /// Categoría de un pago con las categorías recordadas del libro; nil para ingresos.
@@ -53,59 +53,69 @@ public func categoryOf(_ movement: Movement, in state: LedgerState, subscription
     spendingCategory(of: movement, overrides: state.categoryOverrides, subscriptionKeys: subscriptionKeys)
 }
 
+/// ¿Cuenta este pago en «este mes hasta `now`»? Los de solo día (filas del banco, guardadas a las 12:00 de Madrid) cuentan
+/// desde el INICIO de su día (R23); los de hora exacta, por instante. Un pago de mañana sigue fuera hasta mañana.
+public func movementCounts(_ movement: Movement, upTo now: Date, calendar: Calendar) -> Bool {
+    movement.dayOnly ? calendar.startOfDay(for: movement.date) <= now : movement.date <= now
+}
+
+/// Lo que llevas gastado HOY hasta `now` (la cifra «hoy» del aviso de un pago): pagos tuyos de hoy, sin los «no es mío» ni
+/// los traspasos entre tus cuentas (`notSpending`). Los de solo día cuentan desde el INICIO de su día, igual que en las cifras
+/// del mes (R23, R34); uno fechado mañana no cuenta.
+public func spentToday(in movements: [Movement], now: Date, calendar: Calendar, notSpending: Set<UUID>? = nil) -> Int {
+    let start = calendar.startOfDay(for: now)
+    return spendingMovements(in: movements, notSpending: notSpending).reduce(0) { sum, m in
+        m.date >= start && movementCounts(m, upTo: now, calendar: calendar) ? sum + abs(m.amountCents) : sum
+    }
+}
+
 /// Tramo de tiempo de un mes: el mes en curso llega hasta `now` (incluido); un mes pasado, entero.
 private struct MonthWindow {
     let start: Date
     let upper: Date
     let upperInclusive: Bool
+    let calendar: Calendar
 
-    func contains(_ date: Date) -> Bool {
-        date >= start && (upperInclusive ? date <= upper : date < upper)
+    func contains(_ movement: Movement) -> Bool {
+        guard movement.date >= start else { return false }
+        return upperInclusive ? movementCounts(movement, upTo: upper, calendar: calendar) : movement.date < upper
     }
 }
 
-/// El mes pedido y el anterior. Si el mes pedido es el actual, el anterior llega solo hasta el mismo día y hora
-/// (el día se ajusta a la longitud de ese mes, como `spendingPace`); si no, se comparan meses enteros.
+/// El mes pedido y el anterior. Si el mes pedido es el actual, el anterior llega solo hasta el final del mismo día del mes
+/// (R19: granularidad de día; el día se ajusta a la longitud de ese mes, como `spendingPace`); si no, meses enteros.
 private func monthWindows(month: Date, now: Date, calendar: Calendar) -> (current: MonthWindow, previous: MonthWindow)? {
     guard let interval = calendar.dateInterval(of: .month, for: month),
-          let prevStart = calendar.date(byAdding: .month, value: -1, to: interval.start),
-          let prevDays = calendar.range(of: .day, in: .month, for: prevStart) else { return nil }
+          let prevStart = calendar.date(byAdding: .month, value: -1, to: interval.start) else { return nil }
     let current = now < interval.end
-        ? MonthWindow(start: interval.start, upper: now, upperInclusive: true)
-        : MonthWindow(start: interval.start, upper: interval.end, upperInclusive: false)
-    var previous = MonthWindow(start: prevStart, upper: interval.start, upperInclusive: false)
-    if now >= interval.start && now < interval.end {
-        let clock = calendar.dateComponents([.day, .hour, .minute, .second], from: now)
-        var parts = calendar.dateComponents([.year, .month], from: prevStart)
-        parts.day = min(clock.day ?? 1, prevDays.count)
-        parts.hour = clock.hour
-        parts.minute = clock.minute
-        parts.second = clock.second
-        if let cutoff = calendar.date(from: parts) {
-            previous = MonthWindow(start: prevStart, upper: cutoff, upperInclusive: true)
-        }
+        ? MonthWindow(start: interval.start, upper: now, upperInclusive: true, calendar: calendar)
+        : MonthWindow(start: interval.start, upper: interval.end, upperInclusive: false, calendar: calendar)
+    var previous = MonthWindow(start: prevStart, upper: interval.start, upperInclusive: false, calendar: calendar)
+    if now >= interval.start && now < interval.end,
+       let cutoff = sameDayCutoff(now: now, previousMonthStart: prevStart, calendar: calendar) {
+        previous = MonthWindow(start: prevStart, upper: min(cutoff, interval.start), upperInclusive: false, calendar: calendar)
     }
     return (current, previous)
 }
 
 /// Gasto de un mes por categoría frente al mes anterior. Para el mes en curso, la comparación llega al mismo punto del mes.
-/// Quien lo llama para varios meses calcula `ownTransferIDs(in:)` y `subscriptionKeys(...)` una vez y los pasa.
+/// Quien lo llama para varios meses calcula `spendingExclusions(in:now:)` y `subscriptionKeys(...)` una vez y los pasa.
 public func monthSpending(in state: LedgerState, month: Date, now: Date, calendar: Calendar,
-                          ownTransferIDs ownTransfers: Set<UUID>? = nil,
+                          notSpending ownTransfers: Set<UUID>? = nil,
                           subscriptionKeys keys: Set<String>? = nil) -> MonthSpending {
     guard let windows = monthWindows(month: month, now: now, calendar: calendar) else {
         return MonthSpending(monthStart: month, totalCents: 0, previousTotalCents: 0, byCategory: [])
     }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
-    let subKeys = keys ?? subscriptionKeys(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: now)
+    let subKeys = keys ?? subscriptionKeys(in: state, now: now, calendar: calendar, notSpending: transfers)
     var cents: [SpendingCategory: Int] = [:]
     var counts: [SpendingCategory: Int] = [:]
     var previous: [SpendingCategory: Int] = [:]
     var total = 0
     var previousTotal = 0
-    for m in spendingMovements(in: state.movements, excluding: transfers) {
-        let inCurrent = windows.current.contains(m.date)
-        guard inCurrent || windows.previous.contains(m.date) else { continue }
+    for m in spendingMovements(in: state.movements, notSpending: transfers) {
+        let inCurrent = windows.current.contains(m)
+        guard inCurrent || windows.previous.contains(m) else { continue }
         let category = categoryOf(m, in: state, subscriptionKeys: subKeys) ?? .sinCategoria
         let amount = abs(m.amountCents)
         if inCurrent {
@@ -127,30 +137,30 @@ public func monthSpending(in state: LedgerState, month: Date, now: Date, calenda
 
 /// Los pagos de una categoría en el mes (el mes en curso, hasta `now`), el más reciente primero.
 public func spendingMovements(in state: LedgerState, category: SpendingCategory, month: Date, now: Date, calendar: Calendar,
-                              ownTransferIDs ownTransfers: Set<UUID>? = nil,
+                              notSpending ownTransfers: Set<UUID>? = nil,
                               subscriptionKeys keys: Set<String>? = nil) -> [Movement] {
     guard let windows = monthWindows(month: month, now: now, calendar: calendar) else { return [] }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
-    let subKeys = keys ?? subscriptionKeys(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
-    return spendingMovements(in: state.movements, excluding: transfers)
-        .filter { windows.current.contains($0.date) && categoryOf($0, in: state, subscriptionKeys: subKeys) == category }
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: now)
+    let subKeys = keys ?? subscriptionKeys(in: state, now: now, calendar: calendar, notSpending: transfers)
+    return spendingMovements(in: state.movements, notSpending: transfers)
+        .filter { windows.current.contains($0) && categoryOf($0, in: state, subscriptionKeys: subKeys) == category }
         .sorted { $0.date != $1.date ? $0.date > $1.date : $0.id.uuidString > $1.id.uuidString }
 }
 
 /// Previsión del mes: lo gastado, más el ritmo de lo que no son suscripciones por los días que faltan, más las
 /// suscripciones que aún se cobrarán este mes. nil antes del día 5 (muy pocos datos).
 public func monthForecast(in state: LedgerState, now: Date, calendar: Calendar,
-                          ownTransferIDs ownTransfers: Set<UUID>? = nil,
+                          notSpending ownTransfers: Set<UUID>? = nil,
                           subscriptions subs: [Subscription]? = nil) -> MonthForecast? {
     let day = calendar.component(.day, from: now)
     guard day >= 5, let interval = calendar.dateInterval(of: .month, for: now),
           let days = calendar.range(of: .day, in: .month, for: now)?.count else { return nil }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
-    let subscriptions = subs ?? activeSubscriptions(in: state, now: now, calendar: calendar, ownTransferIDs: transfers)
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: now)
+    let subscriptions = subs ?? activeSubscriptions(in: state, now: now, calendar: calendar, notSpending: transfers)
     let keys = Set(subscriptions.map(\.id))
     var spent = 0
     var fromSubscriptions = 0
-    for m in spendingMovements(in: state.movements, excluding: transfers) where m.date >= interval.start && m.date <= now {
+    for m in spendingMovements(in: state.movements, notSpending: transfers) where m.date >= interval.start && movementCounts(m, upTo: now, calendar: calendar) {
         let amount = abs(m.amountCents)
         spent += amount
         if keys.contains(normalizeMerchant(m.merchant ?? "")) { fromSubscriptions += amount }
@@ -166,7 +176,7 @@ public func monthForecast(in state: LedgerState, now: Date, calendar: Calendar,
 /// Con `category` solo suma esa categoría; las suscripciones se reconocen con `subscriptionKeys` o, si falta, con las
 /// detectadas al empezar `month`.
 public func averageMonthlySpending(in state: LedgerState, category: SpendingCategory?, before month: Date, months: Int,
-                                   calendar: Calendar, ownTransferIDs ownTransfers: Set<UUID>? = nil,
+                                   calendar: Calendar, notSpending ownTransfers: Set<UUID>? = nil,
                                    subscriptionKeys keys: Set<String>? = nil) -> Int? {
     guard months > 0, let first = state.movements.map(\.date).min(),
           let firstMonth = calendar.dateInterval(of: .month, for: first)?.start,
@@ -175,13 +185,13 @@ public func averageMonthlySpending(in state: LedgerState, category: SpendingCate
     let from = max(earliest, firstMonth)
     guard from < monthStart,
           let count = calendar.dateComponents([.month], from: from, to: monthStart).month, count > 0 else { return nil }
-    let transfers = ownTransfers ?? ownTransferIDs(in: state.movements)
+    let transfers = ownTransfers ?? spendingExclusions(in: state, now: monthStart)
     var subKeys = keys ?? []
     if category != nil, keys == nil {
-        subKeys = subscriptionKeys(in: state, now: monthStart, calendar: calendar, ownTransferIDs: transfers)
+        subKeys = subscriptionKeys(in: state, now: monthStart, calendar: calendar, notSpending: transfers)
     }
     var sum = 0
-    for m in spendingMovements(in: state.movements, excluding: transfers) where m.date >= from && m.date < monthStart {
+    for m in spendingMovements(in: state.movements, notSpending: transfers) where m.date >= from && m.date < monthStart {
         if let category, categoryOf(m, in: state, subscriptionKeys: subKeys) != category { continue }
         sum += abs(m.amountCents)
     }

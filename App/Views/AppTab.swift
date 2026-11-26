@@ -1,4 +1,4 @@
-/// Las tres pestañas de la app.
+/// Las cuatro pestañas de la app.
 enum AppTab: Hashable {
-    case home, alerts, settings
+    case home, spending, alerts, settings
 }

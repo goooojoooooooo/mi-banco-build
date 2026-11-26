@@ -13,6 +13,8 @@ enum AlertPoster {
         center.setNotificationCategories([
             UNNotificationCategory(identifier: category, actions: [], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: InsightNotifier.category, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: MorningBriefingNotifier.category, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: BankReminders.category, actions: [], intentIdentifiers: [], options: []),
         ])
     }
 
@@ -21,7 +23,9 @@ enum AlertPoster {
     /// `merchantMonth`: compras y gasto de este mes en ese comercio (con este pago). `todaySpentCents`: gastado hoy.
     static func post(movement m: Movement, balance: Int?, estimated: Bool, balances: [String: Int], previousBalance: Int?,
                      merchantMonth: MerchantHistory? = nil, todaySpentCents: Int? = nil) async {
-        let text = alertText(for: m, balance: balance, estimated: estimated)
+        // Ojo cerrado al componerlo: ni importe ni saldo en el texto plegado (decisión del dueño).
+        let hidden = eyeClosed
+        let text = alertText(for: m, balance: balance, estimated: estimated, hidden: hidden)
         let content = UNMutableNotificationContent()
         content.title = text.title
         content.body = text.body
@@ -41,15 +45,24 @@ enum AlertPoster {
             info["monthCents"] = merchantMonth.totalThisMonthCents
         }
         if let todaySpentCents { info["todaySpent"] = todaySpentCents }
+        // I-2 (N1): el ojo de la app en el momento del aviso (clave nueva; las de arriba no cambian). La vista ampliada
+        // dibuja máscaras si esto o la suite compartida dicen ojo cerrado.
+        info[SharedPrivacy.key] = hidden
         content.userInfo = info
         await add(content, id: m.id.uuidString)
+    }
+
+    /// El ojo de la app ahora mismo (la fuente de verdad: el almacén de `AppPreferences`), para componer avisos.
+    static var eyeClosed: Bool {
+        // N-3: la fuente de verdad de la app (no la copia de la suite). M-4: con la misma lectura que la app.
+        AppPreferences.storedPrivateMode
     }
 
     /// Sin importes ni texto del aviso.
     static func postUnread(bank: BankID) async {
         let content = UNMutableNotificationContent()
         content.title = "Aviso sin leer"
-        content.body = "Mi Banco no ha entendido un aviso de \(bank.displayName). Ábrelo para revisarlo."
+        content.body = "\(AppIdentity.displayName) no ha entendido un aviso de \(bank.displayName). Ábrelo para revisarlo."
         content.interruptionLevel = .active
         await add(content, id: UUID().uuidString)
     }

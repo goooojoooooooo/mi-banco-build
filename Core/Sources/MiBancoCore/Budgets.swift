@@ -54,9 +54,9 @@ public struct BudgetStatus: Equatable, Sendable, Identifiable {
 }
 
 /// Estado de cada presupuesto en `month`: primero el del mes, luego las categorías en el orden de `allCases`.
-/// Quien lo llama varias veces calcula `ownTransferIDs(in:)` y `subscriptionKeys(...)` una vez y los pasa.
+/// Quien lo llama varias veces calcula `spendingExclusions(in:now:)` y `subscriptionKeys(...)` una vez y los pasa.
 public func budgetStatuses(in state: LedgerState, month: Date, now: Date, calendar: Calendar,
-                           ownTransferIDs ownTransfers: Set<UUID>? = nil,
+                           notSpending ownTransfers: Set<UUID>? = nil,
                            subscriptionKeys keys: Set<String>? = nil) -> [BudgetStatus] {
     let budgets = state.budgets
     let monthLimit = budgets.monthlyCents.flatMap { $0 > 0 ? $0 : nil }
@@ -65,7 +65,7 @@ public func budgetStatuses(in state: LedgerState, month: Date, now: Date, calend
     }
     if monthLimit == nil && categoryLimits.isEmpty { return [] }
     let spending = monthSpending(in: state, month: month, now: now, calendar: calendar,
-                                 ownTransferIDs: ownTransfers, subscriptionKeys: keys)
+                                 notSpending: ownTransfers, subscriptionKeys: keys)
     var out: [BudgetStatus] = []
     if let monthLimit {
         out.append(BudgetStatus(scope: .month, limitCents: monthLimit, spentCents: spending.totalCents))
@@ -75,4 +75,23 @@ public func budgetStatuses(in state: LedgerState, month: Date, now: Date, calend
         out.append(BudgetStatus(scope: .category(category), limitCents: limit, spentCents: spent))
     }
     return out
+}
+
+/// Lo que significa el texto de un campo de presupuesto.
+public enum BudgetInput: Equatable, Sendable {
+    /// Quitar el límite.
+    case remove
+    /// Un límite de tantos céntimos (siempre mayor que 0).
+    case set(Int)
+    /// Un texto que no se entiende como importe.
+    case invalid
+}
+
+/// Decide qué hace un texto de presupuesto. Un texto sin ninguna cifra y sin más que espacios (también el de no separación),
+/// «€», «,» y «.» quiere decir «quitar el límite», igual que el campo vacío: quien borra los números y deja « €» ha
+/// vaciado el campo. «0» y «0,00 €» también lo quitan; «120» y «120,00 €» son 120 €. Otra cosa («abc», «-», «-5») es inválida.
+public func parseBudgetInput(_ text: String) -> BudgetInput {
+    if text.allSatisfy({ $0.isWhitespace || $0 == "€" || $0 == "," || $0 == "." }) { return .remove }
+    guard let cents = parseBalanceInput(text), cents >= 0 else { return .invalid }
+    return cents > 0 ? .set(cents) : .remove
 }

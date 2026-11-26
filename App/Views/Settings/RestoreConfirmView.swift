@@ -10,7 +10,9 @@ struct RestoreConfirmView: View {
     let restore: () throws -> Void
     let finished: () -> Void
 
-    private enum Phase: Equatable { case asking, restored, failed(String) }
+    /// `stuck`: los datos YA cambiaron en el disco y no se pudo terminar (R35): solo texto y la salida, sin volver a ofrecer deslizar
+    /// (un segundo deslizamiento copiaría lo restaurado encima de la copia de seguridad).
+    private enum Phase: Equatable { case asking, restored, failed(String), stuck(String) }
 
     @State private var phase: Phase = .asking
     @State private var attempt = 0
@@ -32,6 +34,14 @@ struct RestoreConfirmView: View {
             Text("Antes de cambiarlo, lo que hay ahora se guarda como copia en este iPhone y podrás volver a ello desde Copia de seguridad. Esa copia se sustituye cada vez que restauras.")
                 .titan(.callout)
                 .foregroundStyle(Theme.label2)
+            if preview.file.droppedPortfolioEntries > 0 {
+                Text(preview.file.portfolio == nil
+                     ? "La parte de inversiones de esta copia no se pudo leer; se conservará tu cartera actual."
+                     : "Algunas entradas de inversiones de esta copia no se pudieron leer; podrás volver a importar tu extracto.")
+                    .titan(.meta)
+                    .foregroundStyle(Theme.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Spacer(minLength: 8)
             switch phase {
             case .restored:
@@ -40,7 +50,7 @@ struct RestoreConfirmView: View {
                     .foregroundStyle(Theme.label)
                     .frame(maxWidth: .infinity)
                     .transition(.opacity)
-            case .failed(let message):
+            case .failed(let message), .stuck(let message):
                 Text(message)
                     .titan(.meta)
                     .foregroundStyle(Theme.warning)
@@ -48,25 +58,34 @@ struct RestoreConfirmView: View {
             case .asking:
                 EmptyView()
             }
-            SlideToConfirm(title: preview.isPrevious ? "Desliza para volver" : "Desliza para restaurar", systemImage: "arrow.counterclockwise", tint: Theme.label,
-                           action: run)
-                .id(attempt)
-                .accessibilityIdentifier("restore-slide")
-                .allowsHitTesting(phase != .restored)
+            if !isStuck {
+                SlideToConfirm(title: preview.isPrevious ? "Desliza para volver" : "Desliza para restaurar", systemImage: "arrow.counterclockwise", tint: Theme.label,
+                               action: run)
+                    .id(attempt)
+                    // R40: al pasar a «No se pudo terminar…» el control sale con la animación normal de la hoja (ninguna con
+                    // «Reducir movimiento»).
+                    .transition(reduceMotion ? .identity : .opacity)
+                    .accessibilityIdentifier("restore-slide")
+                    .allowsHitTesting(phase != .restored)
+            }
             if phase != .restored {
-                Button("Cancelar") { dismiss() }
-                    .titan(.option)
-                    .foregroundStyle(Theme.label2)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
-                    .accessibilityIdentifier("restore-cancel")
+                Button { dismiss() } label: {
+                    // R40: tras «No se pudo terminar…» los datos YA cambiaron: la salida se llama «Cerrar», no «Cancelar».
+                    Text(isStuck ? "Cerrar" : "Cancelar")
+                        .titan(.option)
+                        .foregroundStyle(Theme.label2)
+                        // La hoja a media altura se dibuja escalada (0,9636 en iOS 26): 48 pt de diseño dejan más de 44 pt en pantalla.
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .contentShape(Rectangle())
+                }
+                .accessibilityIdentifier("restore-cancel")
             }
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Theme.canvas.ignoresSafeArea())
-        .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph, value: phase)
+        .animation(reduceMotion ? (isStuck ? nil : .easeOut(duration: 0.2)) : Theme.Motion.morph, value: phase)
         .sensoryFeedback(.success, trigger: doneTick)
         .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
@@ -77,6 +96,11 @@ struct RestoreConfirmView: View {
                 Theme.canvas.ignoresSafeArea().accessibilityHidden(true)
             }
         }
+    }
+
+    private var isStuck: Bool {
+        if case .stuck = phase { return true }
+        return false
     }
 
     /// "Esto cambia todo lo que hay ahora (182 movimientos) por la copia del 19 nov 2026 (175 movimientos)."
@@ -95,11 +119,15 @@ struct RestoreConfirmView: View {
             phase = .restored
             AccessibilityNotification.Announcement("Copia restaurada").post()
             Task {
-                try? await Task.sleep(for: .milliseconds(900))
+                // Tiempo para leer «Copia restaurada» (y para que una prueba lenta lo vea) antes de cerrar la hoja.
+                try? await Task.sleep(for: .milliseconds(1_600))
                 finished()
             }
         } catch RestoreError.safetyCopyFailed {
             fail("No se pudo guardar la copia de lo que hay ahora, así que no se ha restaurado nada.")
+        } catch RestoreError.reloadFailed {
+            // Lo escrito ya está en el disco: no se puede decir que los datos no cambiaron, y no se vuelve a ofrecer deslizar.
+            phase = .stuck("No se pudo terminar. Cierra la app y vuelve a abrirla.")
         } catch {
             fail("No se pudo restaurar. Tus datos no han cambiado.")
         }

@@ -7,6 +7,7 @@ import MiBancoCore
 extension Notification.Name {
     /// Los intents la publican tras guardar en el almacén; el modelo recarga al recibirla.
     static let ledgerDidChange = Notification.Name("com.mibanco.ledgerDidChange")
+    // `ledgerDidSyncFromBank` (consulta a un banco) vive en `App/Banking/BankSync.swift`.
 }
 
 /// Un movimiento nuevo que acaba de llegar con la app abierta: dispara la coreografía de Inicio (la tarjeta se desliza,
@@ -20,44 +21,161 @@ struct Arrival: Equatable, Sendable {
     let amountCents: Int
 }
 
+/// Vista previa de un extracto CSV antes de aplicarlo al libro (Plan 2, tarea 12).
+struct ImportPreview: Equatable, Hashable, Sendable, Identifiable {
+    let id = UUID()
+    let statement: ParsedStatement
+    let report: ReconcileReport
+    var tradeRepublicRows: [TradeRepublicRow] = []
+    var tradeRepublicInvestmentsFailed: Bool = false
+
+    static func == (a: ImportPreview, b: ImportPreview) -> Bool {
+        a.statement == b.statement
+            && a.report == b.report
+            && a.tradeRepublicRows == b.tradeRepublicRows
+            && a.tradeRepublicInvestmentsFailed == b.tradeRepublicInvestmentsFailed
+    }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+}
+
 @MainActor @Observable
 final class LedgerModel {
     private(set) var state = LedgerState()
     private(set) var arrival: Arrival?
     /// Se reconstruye solo cuando `state` cambia (ver `publish`).
     private(set) var snapshot = LedgerSnapshot()
+    /// Traspasos preparados con «Mover dinero» pendientes o recién confirmados (nunca llevan IBAN).
+    private(set) var pendingMoves: [PendingMove] = []
+    private(set) var pendingMoveStates: [UUID: MoveState] = [:]
     private let store: FileStore
     @ObservationIgnored private var observer: Task<Void, Never>?
+    @ObservationIgnored private var syncObserver: Task<Void, Never>?
     /// Publicación aplazada de una llegada; cualquier publicación posterior la deja sin efecto.
     @ObservationIgnored private var staged: Task<Void, Never>?
+    @ObservationIgnored private var doneMoveTimers: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var resolvingMoves = false
     @ObservationIgnored private var generation = 0
+    /// Presupuestos escritos que no se entienden («abc»): se quedan (solo en memoria) para enseñarlos con su error al
+    /// volver a la pantalla, en vez de perderse sin decir nada.
+    @ObservationIgnored var budgetDrafts: [BudgetScope: String] = [:]
+    private static let onboardingDoneKey = "onboardingDone"
+    /// Una vez arrancada la bienvenida de primera ejecución, sigue activa durante los 3 pasos aunque el paso 1 guarde saldos.
+    private(set) var onboardingSessionActive = false
+    /// false si la lectura inicial del libro falló (U56): se reevalúa en el primer `reload()` que lea bien.
+    @ObservationIgnored private var startupLoadSucceeded = false
     #if DEBUG
     /// Demo: lo que "escribiría el intent en el almacén"; `reload` lo recoge como si lo leyera de disco.
     @ObservationIgnored private var demoIncoming: LedgerState?
     #endif
 
+    /// Tanto en demo como en Release la bienvenida sigue únicamente `onboardingSessionActive` (U48, U56).
+    var needsOnboarding: Bool {
+        onboardingSessionActive
+    }
+
+    func finishOnboarding() {
+        onboardingSessionActive = false
+        #if DEBUG
+        if DemoMode.isActive {
+            publish(state)
+            return
+        }
+        #endif
+        UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+        publish(state)
+    }
+
     init() {
         store = SharedStore.make()
         #if DEBUG
         if DemoMode.isActive {
-            state = DemoMode.state()
-            snapshot = LedgerSnapshot(state: state)
+            let demoState = DemoMode.state()
+            state = demoState
+            snapshot = LedgerSnapshot(state: demoState, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            let decision = onboardingDecision(
+                load: .success(demoState),
+                onboardingDone: DemoMode.onboardingStep == nil
+            )
+            startupLoadSucceeded = true
+            onboardingSessionActive = decision.startSession
+            resolvePendingMoves()
+        } else {
+            loadInitialFromStore()
         }
+        #else
+        loadInitialFromStore()
         #endif
-        reload()
         observer = Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: .ledgerDidChange) {
                 guard let model = self else { break }
                 model.reloadAfterIngest()
             }
         }
+        // Una consulta al banco recarga sin llegada animada, sin sonido ni vibración.
+        syncObserver = Task { [weak self] in
+            for await _ in NotificationCenter.default.notifications(named: .ledgerDidSyncFromBank) {
+                guard let model = self else { break }
+                model.reloadAfterSync()
+            }
+        }
+    }
+
+    /// El «ahora» del libro: el reloj (en la demo, `-MiBancoDemoToday` puede fijarlo para probar otros días).
+    private var clock: Date {
+        #if DEBUG
+        if DemoMode.isActive { return DemoMode.now }
+        #endif
+        return Date()
+    }
+
+    private func loadInitialFromStore() {
+        let result = Result { try store.load() }
+        let done = UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+        let decision = onboardingDecision(load: result, onboardingDone: done)
+        if case .success(let loaded) = result {
+            startupLoadSucceeded = true
+            state = loaded
+            snapshot = LedgerSnapshot(state: loaded, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            if decision.markDone {
+                UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+            }
+        } else {
+            startupLoadSucceeded = false
+        }
+        onboardingSessionActive = decision.startSession
+        resolvePendingMoves()
     }
 
     /// Si falla la lectura se conserva lo que ya se mostraba.
     func reload() {
-        guard let loaded = loadNext() else { return }
-        if loaded != state || !Calendar.current.isDateInToday(snapshot.day) {
+        if let loaded = loadNext() {
+            if !startupLoadSucceeded {
+                startupLoadSucceeded = true
+                let done = UserDefaults.standard.bool(forKey: Self.onboardingDoneKey)
+                let decision = onboardingDecision(load: .success(loaded), onboardingDone: done)
+                if decision.markDone {
+                    UserDefaults.standard.set(true, forKey: Self.onboardingDoneKey)
+                }
+                onboardingSessionActive = decision.startSession
+            }
+            if loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock) {
+                publish(loaded)
+                return
+            }
+        }
+        resolvePendingMoves()
+    }
+
+    /// Tras una consulta a un banco o cambio de lista ASPSP: rehace el snapshot sin `arrival`.
+    private func reloadAfterSync() {
+        if let loaded = loadNext(), (loaded != state || !Calendar.current.isDate(snapshot.day, inSameDayAs: clock)) {
             publish(loaded)
+        } else {
+            snapshot = LedgerSnapshot(state: state, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            resolvePendingMoves()
         }
     }
 
@@ -77,8 +195,88 @@ final class LedgerModel {
         staged?.cancel()
         staged = nil
         state = next
-        snapshot = LedgerSnapshot(state: next)
+        snapshot = LedgerSnapshot(state: next, now: clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
         reschedule(next)
+        resolvePendingMoves()
+    }
+
+    func addPendingMove(_ move: PendingMove) {
+        PendingMoves.add(move)
+        resolvePendingMoves()
+    }
+
+    func removePendingMove(_ id: UUID) {
+        doneMoveTimers[id]?.cancel()
+        doneMoveTimers.removeValue(forKey: id)
+        PendingMoves.remove(id)
+        pendingMoves.removeAll { $0.id == id }
+        pendingMoveStates.removeValue(forKey: id)
+    }
+
+    /// Resuelve los traspasos pendientes contra `state.movements`: caducados fuera en silencio;
+    /// hechos en cuenta propia se marcan como traspaso propio y se retiran tras 6 s.
+    /// `now` nil = el reloj del libro (`clock`: en la demo, `-MiBancoDemoToday`).
+    func resolvePendingMoves(now: Date? = nil) {
+        guard !resolvingMoves else { return }
+        let now = now ?? clock
+        resolvingMoves = true
+        defer { resolvingMoves = false }
+
+        let stored = PendingMoves.all()
+        var kept: [PendingMove] = []
+        var states: [UUID: MoveState] = [:]
+        var claimed = Set<UUID>()
+        var ownTransfersToMark: [UUID] = []
+        var removedExpired = false
+
+        for move in stored {
+            let resolved = moveState(move, movements: state.movements, now: now, claimed: claimed)
+            switch resolved {
+            case .expired:
+                removedExpired = true
+                doneMoveTimers[move.id]?.cancel()
+                doneMoveTimers.removeValue(forKey: move.id)
+            case .waiting:
+                kept.append(move)
+                states[move.id] = .waiting
+            case .done(let movementID):
+                claimed.insert(movementID)
+                kept.append(move)
+                states[move.id] = .done(movementID: movementID)
+                if case .own = move.target,
+                   let match = state.movements.first(where: { $0.id == movementID }),
+                   match.ownTransfer == nil {
+                    ownTransfersToMark.append(movementID)
+                }
+                if doneMoveTimers[move.id] == nil {
+                    let moveID = move.id
+                    let holdSeconds: Int = {
+                        #if DEBUG
+                        if DemoMode.isActive && DemoMode.demoPendingMode == "done" { return 30 }
+                        #endif
+                        return 6
+                    }()
+                    doneMoveTimers[moveID] = Task { [weak self] in
+                        try? await Task.sleep(for: .seconds(holdSeconds))
+                        guard !Task.isCancelled, let self else { return }
+                        let anim: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.quick
+                        withAnimation(anim) {
+                            self.removePendingMove(moveID)
+                        }
+                    }
+                }
+            }
+        }
+
+        if removedExpired {
+            PendingMoves.save(kept)
+        }
+        pendingMoves = kept
+        pendingMoveStates = states
+
+        for movementID in ownTransfersToMark {
+            try? setOwnTransfer(true, for: movementID)
+        }
     }
 
     /// Resumen semanal y recordatorios de suscripciones: se rehacen con cada cambio del libro (nunca en la demo).
@@ -95,7 +293,9 @@ final class LedgerModel {
     private func reloadAfterIngest() {
         guard let next = loadNext(), next != state else { return }
         let known = Set(state.movements.map(\.id))
-        guard let newest = next.movements.filter({ !known.contains($0.id) }).max(by: { $0.date < $1.date }),
+        // Solo un aviso o un pago de Cartera es una llegada; lo que trae el banco (aunque se cuele aquí) nunca.
+        guard let newest = next.movements.filter({ !known.contains($0.id) && ($0.source == .notification || $0.source == .wallet) })
+            .max(by: { $0.date < $1.date }),
               abs(newest.date.timeIntervalSinceNow) < 600 else {
             publish(next)
             return
@@ -111,10 +311,11 @@ final class LedgerModel {
             let animation: Animation? = UIAccessibility.isReduceMotionEnabled ? nil : Theme.Motion.roll
             withAnimation(animation) {
                 self.state = next
-                self.snapshot = LedgerSnapshot(state: next)
+                self.snapshot = LedgerSnapshot(state: next, now: self.clock, cachedASPSPs: BankConnector.shared.cachedASPSPs)
             }
             self.staged = nil
             self.reschedule(next)
+            self.resolvePendingMoves()
         }
     }
 
@@ -122,11 +323,23 @@ final class LedgerModel {
     /// Demo (`-MiBancoDemoArrival`): ingesta un pago de Apple Pay con el mismo `Ledger.ingest` que los intents,
     /// deja el estado nuevo donde `reload` lo lee y publica `ledgerDidChange`: el resto (detección de la llegada,
     /// coreografía, háptica, aviso de VoiceOver) es el código real.
-    func demoSimulateArrival() {
+    /// `income` (`-MiBancoDemoArrivalIncome`): en vez del pago, llega dinero (un aviso de «Has recibido…» de Revolut).
+    func demoSimulateArrival(income: Bool = DemoMode.arrivalIsIncome) {
         var ledger = Ledger(state: state)
-        guard case .stored = ledger.ingest(.wallet(bank: .ima, amount: "23,45", merchant: "Carrefour"), now: Date()) else { return }
+        let input: IngestInput = income
+            ? .notification(bank: .rev, title: nil, subtitle: nil, body: "Has recibido 120,00 € de Carlos")
+            : .wallet(bank: .ima, amount: "23,45", merchant: "Carrefour")
+        guard case .stored = ledger.ingest(input, now: clock) else { return }
         demoIncoming = ledger.state
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
+    }
+    #endif
+
+    #if DEBUG
+    /// Demo (`-MiBancoDemoCardMoment staleArrival`): se anuncia la llegada de un ingreso cuyo movimiento no se publica
+    /// nunca (como un aviso que sustituye a otro sin cambiar el número de movimientos). Inicio debe dejarla caducar.
+    func demoAnnounceUnpublishedArrival() {
+        arrival = Arrival(id: UUID(), bank: .rev, isIncome: true, title: "Carlos", amountCents: 12_000)
     }
     #endif
 
@@ -164,12 +377,98 @@ final class LedgerModel {
         try mutate { $0.setMuted(false, merchant: merchant.raw) }
     }
 
+    /// Categoría de un pago; con `applyToMerchant` se recuerda para todo el comercio. nil devuelve la que decide la app.
+    func setCategory(_ category: SpendingCategory?, for id: UUID, applyToMerchant: Bool) throws {
+        try mutate { $0.setCategory(category, for: id, applyToMerchant: applyToMerchant) }
+    }
+
+    /// «Volver a la categoría automática» (ver `Ledger.resetCategoryToAutomatic`).
+    func resetCategory(for id: UUID) throws {
+        try mutate { $0.resetCategoryToAutomatic(for: id) }
+    }
+
+    /// true si la categoría del pago la eligió el dueño (en el pago o para su comercio).
+    func hasChosenCategory(_ id: UUID) -> Bool {
+        Ledger(state: state).hasChosenCategory(id)
+    }
+
+    /// true si el pago tiene categoría elegida en él mismo (no solo la de su comercio).
+    func hasOwnCategory(_ id: UUID) -> Bool {
+        Ledger(state: state).hasOwnCategory(id)
+    }
+
+    /// true = traspaso entre tus cuentas; false = no lo es (aunque lo parezca); nil = que lo decida la app.
+    func setOwnTransfer(_ value: Bool?, for id: UUID) throws {
+        try mutate { $0.setOwnTransfer(value, for: id) }
+    }
+
+    func setMonthlyBudget(_ cents: Int?) throws {
+        try mutate { $0.setMonthlyBudget(cents) }
+    }
+
+    func setSubscriptionDismissed(_ dismissed: Bool, id: String) throws {
+        try mutate { $0.setSubscriptionDismissed(dismissed, id: id) }
+    }
+
+    func setBudget(_ cents: Int?, for category: SpendingCategory) throws {
+        try mutate { $0.setBudget(cents, for: category) }
+    }
+
+    func previewImport(_ data: Data, bank: BankID, now: Date? = nil) throws -> ImportPreview {
+        let now = now ?? clock
+        let cal = DateText.madridCalendar
+        let statement = try parseStatement(data, expected: bank, now: now, calendar: cal)
+        let report = Ledger(state: state).previewImport(statement, now: now, calendar: cal)
+        let trRows: [TradeRepublicRow]
+        let trInvestmentsFailed: Bool
+        if bank == .tr {
+            if let table = try? CSVTable.parse(data), let rows = try? parseTradeRepublicExport(table, calendar: cal) {
+                trRows = rows
+                trInvestmentsFailed = false
+            } else {
+                trRows = []
+                trInvestmentsFailed = true
+            }
+        } else {
+            trRows = []
+            trInvestmentsFailed = false
+        }
+        return ImportPreview(
+            statement: statement,
+            report: report,
+            tradeRepublicRows: trRows,
+            tradeRepublicInvestmentsFailed: trInvestmentsFailed
+        )
+    }
+
+    @discardableResult
+    func applyImport(_ preview: ImportPreview, now: Date? = nil) throws -> ReconcileReport {
+        let now = now ?? clock
+        let cal = DateText.madridCalendar
+        #if DEBUG
+        if DemoMode.isActive {
+            var ledger = Ledger(state: state)
+            let report = ledger.importStatement(preview.statement, now: now, calendar: cal)
+            publish(ledger.state)
+            return report
+        }
+        #endif
+        let report = try store.update { ledger -> ReconcileReport in
+            ledger.importStatement(preview.statement, now: now, calendar: cal)
+        }
+        reload()
+        return report
+    }
+
     /// Restaura una copia: antes guarda lo actual como `ledger-antes-de-restaurar.json`, las dos cosas dentro de una sola
     /// actualización coordinada. Si esa copia falla no se restaura nada y lanza `RestoreError.safetyCopyFailed`.
     func restore(_ file: BackupFile) throws {
         #if DEBUG
         if DemoMode.isActive {
-            publish(file.ledger)
+            // Las mismas reglas que en disco (`Ledger.restore`: las conexiones con bancos no salen de la copia).
+            var ledger = Ledger(state: state)
+            ledger.restore(file.ledger)
+            publish(ledger.state)
             restoreCount += 1
             return
         }
@@ -177,7 +476,9 @@ final class LedgerModel {
         try store.restoreKeepingCopy(file.ledger, copyName: Self.safetyCopyName)
         // Se publica lo que quedó en disco aunque coincida con lo anterior: así se rehacen siempre el snapshot y los
         // recordatorios (`reschedule`) con los datos restaurados.
-        publish(try store.load())
+        let reloaded: LedgerState
+        do { reloaded = try store.load() } catch { throw RestoreError.reloadFailed }
+        publish(reloaded)
         restoreCount += 1
     }
 
@@ -188,12 +489,20 @@ final class LedgerModel {
     private(set) var restoreCount = 0
 
     /// La copia guardada antes de la última restauración, lista para "Volver a lo de antes" (nil si no hay).
-    func previousPreview() -> RestorePreview? {
+    func previousPreview(portfolioSafetyCopy: Portfolio? = nil) -> RestorePreview? {
         #if DEBUG
-        if DemoMode.isActive { return DemoMode.scrollsToBackup ? DemoMode.demoPreviousPreview(currentCount: state.movements.count) : nil }
+        if DemoMode.isActive {
+            guard DemoMode.scrollsToBackup else { return nil }
+            let demo = DemoMode.demoPreviousPreview(currentCount: state.movements.count)
+            return RestorePreview(
+                file: BackupFile(exportedAt: demo.file.exportedAt, ledger: demo.file.ledger, portfolio: portfolioSafetyCopy),
+                currentCount: demo.currentCount,
+                isPrevious: true
+            )
+        }
         #endif
         guard let info = store.copyInfo(named: Self.safetyCopyName) else { return nil }
-        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state),
+        return RestorePreview(file: BackupFile(exportedAt: info.date, ledger: info.state, portfolio: portfolioSafetyCopy),
                               currentCount: state.movements.count, isPrevious: true)
     }
 

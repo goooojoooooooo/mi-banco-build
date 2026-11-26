@@ -72,7 +72,9 @@ public func changePercent(from previous: Int, to current: Int) -> Int? {
     return (current < previous) == (previous > 0) ? -rounded : rounded
 }
 
-/// "+12 %", "-30 %", "0 %" (con espacio duro antes del %).
+/// "+12 %", "-30 %", "0 %" (con espacio duro antes del %). Por encima de 999 % no se escribe la cifra: ">999 %"
+/// (cabe en la columna de 66 pt; con tope 999 la cifra nunca necesita separador de miles).
 public func formatSignedPercent(_ percent: Int) -> String {
-    "\(percent > 0 ? "+" : "")\(percent)\u{00A0}%"
+    if percent > 999 { return ">999\u{00A0}%" }
+    return "\(percent > 0 ? "+" : "")\(percent)\u{00A0}%"
 }

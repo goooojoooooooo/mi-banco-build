@@ -2,11 +2,14 @@ import SwiftUI
 import MiBancoCore
 
 /// Detalle de un movimiento, en una hoja (cristal del sistema en iOS 26). Llega con la transición de zoom desde el
-/// logo de la fila; cuando el logo se ha posado, el resto entra escalonado (60 ms). El importe cuenta desde 0.
+/// logo de la fila; el importe vuela desde donde estaba en la fila hasta su sitio (D1) y las líneas entran escalonadas
+/// desde 0,15 s (55 ms × 0,82ⁿ). «Te quedaban» empieza oculto y rueda cuando el importe se posa.
 /// Todas las acciones pasan por `LedgerModel` (mutaciones de Core) y la lista de Inicio se actualiza sola.
 struct MovementDetailSheet: View {
     let model: LedgerModel
     let id: UUID
+    /// Dónde estaba el importe en la fila tocada (pantalla completa); nil si no se abrió desde una fila de Inicio.
+    var amountOrigin: CGRect? = nil
     let onDelete: (UUID) -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -25,7 +28,7 @@ struct MovementDetailSheet: View {
     var body: some View {
         Group {
             if let movement = model.movement(id) {
-                DetailContent(movement: movement, snapshot: model.snapshot, model: model,
+                DetailContent(movement: movement, snapshot: model.snapshot, model: model, amountOrigin: amountOrigin,
                               onClose: { dismiss() }, onDelete: { onDelete(id) })
             } else {
                 Color.clear
@@ -56,14 +59,32 @@ private struct DetailContent: View {
     let movement: Movement
     let snapshot: LedgerSnapshot
     let model: LedgerModel
+    let amountOrigin: CGRect?
     let onClose: () -> Void
     let onDelete: () -> Void
 
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @ScaledMetric(relativeTo: .largeTitle) private var amountSize: CGFloat = 46
     @ScaledMetric(relativeTo: .body) private var tileSize: CGFloat = 60
+    /// El importe entra (sube y aparece) y, cuando se ha posado, «Te quedaban» deja de estar oculto y rueda desde 0:
+    /// nunca enseña su cifra final antes de contar.
+    @State private var amountShown = false
+    @State private var amountLanded = false
+    /// D1: el vuelo del importe desde la fila (0 = donde estaba en la fila, 1 = en su sitio), desde dónde sale y a qué
+    /// escala, y dónde está su sitio en la pantalla (se mide; solo se lee al empezar el vuelo).
+    // Empieza en 0: sin origen (y con el desplazamiento a cero) es la identidad; con origen, el vuelo es un cambio de 0 a 1
+    // (si empezara en 1 y se pusiera a 0 y a 1 en la misma actualización, no habría nada que animar).
+    @State private var flight: CGFloat = 0
+    @State private var flyDelta = CGSize.zero
+    @State private var flyScale: CGFloat = 1
+    @State private var slotFrame: CGRect?
+    @State private var landingStarted = false
+    /// El vuelo espera a que la hoja se pose (su subida o su zoom la lleva el sistema): mientras se mueve, el sitio
+    /// medido del importe no es el final.
+    @State private var flightArmed = false
     @State private var editingNote = false
     @State private var noteText = ""
     @State private var noteSaved = false
@@ -87,23 +108,43 @@ private struct DetailContent: View {
                         .foregroundStyle(Theme.label)
                         .multilineTextAlignment(.center)
                         .padding(.top, 12)
-                        .staggeredEntrance(5, rise: 8)
-                    Text("\(DateText.moment(movement.date)) · \(movement.bank.displayName)")
+                        .staggeredEntrance(0, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                    Text("\(DateText.moment(movement.date, dayOnly: movement.dayOnly)) · \(movement.bank.displayName)")
                         .titan(.subtitle)
                         .foregroundStyle(Theme.label2)
                         .padding(.top, 3)
-                        .staggeredEntrance(5, rise: 8)
-                    CountingAmount(cents: movement.amountCents, style: .plain(sign: true))
+                        .staggeredEntrance(1, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                    // El importe rueda (`RollingAmount` ya oculta las cifras con el ojo cerrado y se encoge si no cabe).
+                    RollingAmount(cents: movement.amountCents, style: .plain(sign: true))
                         .font(.system(size: amountSize, weight: .semibold))
                         .tracking(-amountSize * 0.03)
-                        .monospacedDigit()
                         .foregroundStyle(movement.amountCents > 0 && !movement.flaggedNotMine ? Theme.income : Theme.label)
-                        .strikethrough(movement.flaggedNotMine, color: Theme.label3)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .privateAmount(radius: 14)
+                        // m-12: los dígitos que ruedan no salen de su línea (no pisan «Hoy, 16:43 · Revolut» de encima):
+                        // el recorte deja fuera también el aire de arriba de la línea (el ascendente de la fuente), que
+                        // era por donde entraban los dígitos hasta tocar la fecha (run12 `row-detail` 7–12).
+                        .clipShape(TopTrimmed(fraction: 0.15))
+                        // «No es mío»: la raya se dibuja encima (las cifras que ruedan no son texto que se pueda tachar).
+                        .overlay {
+                            if movement.flaggedNotMine {
+                                Capsule()
+                                    .fill(Theme.label3)
+                                    .frame(height: max(1.5, amountSize * 0.055))
+                                    .offset(y: amountSize * 0.06)
+                                    .transition(.opacity)
+                            }
+                        }
+                        // D1: el importe vuela desde la fila (solo transformaciones; sus dígitos ruedan dentro de su
+                        // propio grupo, que no se deforma con el vuelo).
+                        .geometryGroup()
+                        .modifier(ArcFlight(progress: flight, delta: flyDelta, arc: motion.distance(30), startScale: flyScale))
+                        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame in
+                            slotFrame = frame
+                            landAmount()
+                        }
                         .padding(.top, 10)
-                        .staggeredEntrance(6, rise: 10)
+                        .opacity(amountShown ? 1 : 0)
+                        .offset(y: amountShown || flyDelta != .zero ? 0 : motion.distance(10))
+                        .accessibilityElement(children: .ignore)
                         .accessibilityLabel("\(movement.amountCents < 0 ? "Pago de" : "Ingreso de") \(spokenAmount(abs(movement.amountCents), hidden: hidden))")
                     if movement.flaggedNotMine {
                         Label("No es tuyo: no cuenta en tu gasto", systemImage: "exclamationmark.triangle.fill")
@@ -123,14 +164,19 @@ private struct DetailContent: View {
                     if let after = snapshot.balanceAfter[movement.id] {
                         DetailPair(key: "Te quedaban") {
                             HStack(spacing: 6) {
-                                CountingAmount(cents: after).privateAmount()
+                                // Empieza oculto: ni un 0 ni la cifra final hasta que el importe de arriba se posa.
+                                RollingAmount(cents: after, revealed: amountLanded)
+                                    .opacity(amountLanded ? 1 : 0)
+                                    .animation(motion.fade, value: amountLanded)
                                 if snapshot.balances[movement.bank]?.estimated ?? false {
                                     Text("estimado").titan(.meta).foregroundStyle(Theme.label3)
                                 }
                             }
                         }
                         .accessibilityElement(children: .ignore)
-                        .accessibilityLabel("Te quedaban \(spokenAmount(after, hidden: hidden))")
+                        // Hasta que el importe de arriba se posa, «Te quedaban» no dice cifra (tampoco a VoiceOver): no la
+                        // enseña antes de contarla.
+                        .accessibilityLabel(amountLanded ? "Te quedaban \(spokenAmount(after, hidden: hidden))" : "Te quedaban")
                     }
                     DetailPair(key: "Cuenta", divided: snapshot.balanceAfter[movement.id] != nil) {
                         HStack(spacing: 8) {
@@ -145,16 +191,16 @@ private struct DetailContent: View {
                     }
                     OwnTransferRow(movement: movement, isOn: snapshot.ownTransfers.contains(movement.id), model: model)
                 }
-                .staggeredEntrance(7)
+                .staggeredEntrance(2, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
 
                 if movement.kind == .payment, let key = merchantKey, let history = snapshot.histories[key] {
                     MerchantHistoryGroup(history: history, recent: snapshot.recentPayments[key] ?? [], current: movement.id)
-                        .staggeredEntrance(8)
+                        .staggeredEntrance(3, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
                 }
 
                 if editingNote || movement.note != nil {
                     noteGroup
-                        .staggeredEntrance(9)
+                        .staggeredEntrance(4, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
@@ -172,11 +218,11 @@ private struct DetailContent: View {
                         }
                     }
                 }
-                .staggeredEntrance(10)
+                .staggeredEntrance(5, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
 
                 SlideToConfirm(title: "Desliza para borrar el movimiento", action: onDelete)
                     .padding(.top, 6)
-                    .staggeredEntrance(11)
+                    .staggeredEntrance(6, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 32)
@@ -184,6 +230,8 @@ private struct DetailContent: View {
             .animation(reduceMotion ? nil : Theme.Motion.morph, value: editingNote)
         }
         .scrollIndicators(.hidden)
+        // Para las pruebas de toque: lo que hay DENTRO de la hoja (no lo de Inicio, debajo).
+        .accessibilityIdentifier("movement-detail-scroll")
         .safeAreaInset(edge: .top, spacing: 0) {
             HStack {
                 Spacer()
@@ -206,12 +254,76 @@ private struct DetailContent: View {
         .onChange(of: noteFocused) { _, focused in
             if !focused && editingNote { commitNote() }
         }
+        .onAppear(perform: landAmount)
+        .task { await backstop() }
+        .task(id: flightArmed) { await flightAfterPresentation() }
+    }
+
+    /// D1. El importe sale volando desde donde estaba en la fila (si se abrió desde una fila de Inicio y se conocen
+    /// los dos sitios) con el muelle de vuelo y un arco de 30 pt; si no, sube 10 pt y aparece, como antes. Con Reducir
+    /// movimiento, solo un fundido. Al posarse destapa «Te quedaban», que rueda desde 0 (nunca enseña antes su cifra).
+    /// Se llama al aparecer y cuando se mide su sitio: empieza una sola vez, con lo que se sepa entonces.
+    private func landAmount() {
+        guard !landingStarted else { return }
+        if !motion.reduce, amountOrigin != nil {
+            // La presentación de la hoja (subida o zoom desde el logo) la anima el sistema, a su velocidad: el vuelo
+            // sale cuando ha terminado (0,45 s reales), desde donde estaba el importe en la fila hasta su sitio ya quieto.
+            flightArmed = true
+            return
+        }
+        startFlight()
+    }
+
+    private func startFlight() {
+        guard !landingStarted else { return }
+        landingStarted = true
+        if !motion.reduce, let start = FlyInGeometry.start(from: amountOrigin, to: slotFrame) {
+            // Desde la fila: en su sitio de salida, sin animar, y desde ahí vuela (el sitio ya está medido).
+            flyDelta = start.delta
+            flyScale = start.scale
+            amountShown = true
+            withAnimation(motion.animation(.fly).delay(motion.seconds(0.05)), completionCriteria: .logicallyComplete) {
+                flight = 1
+            } completion: {
+                amountLanded = true
+            }
+            return
+        }
+        withAnimation(motion.animation(.fly).delay(motion.seconds(0.3)), completionCriteria: .logicallyComplete) {
+            amountShown = true
+        } completion: {
+            amountLanded = true
+        }
+    }
+
+    /// La espera del vuelo: la presentación de la hoja la lleva el sistema a su velocidad (no va a cámara lenta), así
+    /// que son 0,45 s reales; después, el vuelo con lo medido.
+    private func flightAfterPresentation() async {
+        guard flightArmed, !landingStarted else { return }
+        try? await Task.sleep(for: .seconds(0.45))
+        guard !Task.isCancelled else { return }
+        startFlight()
+    }
+
+    /// Respaldo (m-5): si el vuelo no llegara a avisar de que se posó, a los 0,8 s (según intensidad y cámara lenta)
+    /// más 1 s de pausa (cámara lenta incluida) el importe se FUNDE en su sitio y «Te quedaban» rueda: nunca aparece
+    /// de golpe. La espera es una pausa que lee `\.motion` (se probó a encadenarla al final de una animación invisible
+    /// y SwiftUI la daba por acabada al instante: «Te quedaban» se destapaba antes de tiempo, run 45608404581).
+    private func backstop() async {
+        try? await Task.sleep(for: .seconds(motion.seconds(0.8) + motion.pause(1) + (amountOrigin == nil ? 0 : 0.45)))
+        guard !Task.isCancelled, !amountLanded else { return }
+        withAnimation(motion.fade) {
+            amountShown = true
+            if flyDelta != .zero { flight = 1 }
+        }
+        amountLanded = true
     }
 
     private var kindText: String {
-        if movement.source == .wallet { return "Apple Pay" }
         if movement.source == .bank { return "Tu banco" }
         if movement.source == .statement { return "Extracto importado" }
+        if movement.bankRef != nil { return "Aviso · confirmado por tu banco" }
+        if movement.source == .wallet { return "Apple Pay" }
         if movement.kind == .income { return "Ingreso" }
         return movement.isShop ? "Compra con tarjeta" : "Pago"
     }

@@ -1,61 +1,129 @@
 import SwiftUI
 import LocalAuthentication
+import MiBancoCore
 
-/// Bloqueo: negro, la marca (su ola se traza al aparecer), una línea y el botón de Face ID.
+/// Bloqueo: negro, la marca, una línea y el botón de Face ID.
+///
+/// En el arranque en frío (`playsLaunch`) la marca se monta aquí mismo con el arranque «logo en piezas»: las dos
+/// mitades de la ola llegan entre líneas de velocidad y encajan, se dibuja la loseta, aparece el nombre y cruza un
+/// brillo. Es solo dibujo: Face ID se pide a la vez y no espera a nada, el botón está desde el primer fotograma y un
+/// toque en la pantalla deja la marca terminada (no desbloquea nada). En un re-bloqueo (volver de segundo plano) la
+/// marca aparece quieta y entera, sin animación.
 struct LockView: View {
     @Binding var locked: Bool
+    /// Arranque en frío: las piezas se montan sobre la marca. Si no, la marca está quieta desde el principio.
+    var playsLaunch = false
+    /// Se pregunta en el instante de desbloquear: cómo se va este bloqueo (fundiéndose, soltando o no su marca; o de
+    /// golpe, porque la tapa lo releva). Lo decide la carcasa con `ShellState`.
+    var leaveOnUnlock: () -> LockLeave = { .fades(handsMark: false) }
+    /// Aviso a la carcasa, justo después de desbloquear: cuánto dura el fundido con el que se va este bloqueo (0 si se
+    /// quita de golpe). Hasta entonces Inicio no recibe toques.
+    var fadeStarted: (_ seconds: Double) -> Void = { _ in }
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var authenticating = false
     /// Un intento automático por bloqueo (esta vista solo existe mientras está bloqueado).
     @State private var autoAttempted = false
-    @State private var drawn: CGFloat = 0
     @State private var failures = 0
+    /// Solo dibujo: cuándo empezó a montarse la marca, si ya ha terminado (o se saltó con un toque) y dónde está.
+    @State private var launchStart = LaunchClock.startDate()
+    @State private var launchFinished = false
+    @State private var markFrame: CGRect = .zero
+    @State private var clicks = 0
+    /// La marca ya la lleva la que vuela (solo dibujo; se pone al desbloquear).
+    @State private var markHandedOff = false
+    /// Se desbloqueó antes de que la marca terminara de montarse: el nombre y el lema, que aún no habían salido, ya no
+    /// salen (no aparecen de golpe para fundirse enseguida).
+    @State private var textsDropped = false
+    /// Ya desbloqueado y fundiéndose: no recibe toques, VoiceOver ya no lo ve (su botón no se puede activar ni con
+    /// doble toque) y `unlock()` no hace nada, así que no vuelve a pedir Face ID. Los toques tampoco llegan a Inicio:
+    /// la carcasa no se los da hasta que este fundido termina (`ShellState.homeTakesTouches`).
+    @State private var leaving = false
+
+    /// Lo que recibe `accessibilityHidden`: VoiceOver deja de ver el bloqueo (y su «Desbloquear») en cuanto se va.
+    private var hiddenFromVoiceOver: Bool { leaving }
+
+    #if DEBUG
+    private func noteVoiceOverForTests() {
+        LaunchProbe.shared.lockVoiceOver = hiddenFromVoiceOver ? "oculto" : "visible"
+    }
+    #endif
+
+    private static let markSize: CGFloat = 76
+
+    /// La marca ya no se mueve: no es un arranque en frío, o ya se montó.
+    private var markSettled: Bool { !playsLaunch || launchFinished }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            AppMark(size: 76, drawn: drawn)
-            Text("Mi Banco")
-                .titan(.sheetTitle)
-                .foregroundStyle(Theme.label)
-                .padding(.top, Theme.Space.gutter)
-                .accessibilityAddTraits(.isHeader)
-            Text("Tu dinero, solo para ti.")
-                .titan(.callout)
-                .foregroundStyle(Theme.label2)
-                .multilineTextAlignment(.center)
-                .padding(.top, 6)
-            Spacer()
-            Button(action: unlock) {
-                Label("Desbloquear", systemImage: "faceid")
-                    .titan(.option)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.black)
-                    .symbolEffect(.bounce, value: failures)
-                    .frame(maxWidth: .infinity, minHeight: 52)
-                    .background(.white, in: Capsule())
+        let timeline = LaunchTimeline(motion)
+        let center = CGPoint(x: markFrame.midX, y: markFrame.midY)
+        LaunchStage(
+            timeline: timeline, act: .lock, start: launchStart, finished: markSettled,
+            timeMultiplier: motion.timeMultiplier
+        ) { frame in
+            LockFace(
+                nameOpacity: textsDropped ? 0 : frame.name, nameSpread: CGFloat(1 - frame.name),
+                taglineOpacity: textsDropped ? 0 : frame.name
+            ) {
+                LaunchMark(frame: frame, size: Self.markSize)
+                    .opacity(markHandedOff ? 0 : frame.mark)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { markFrame = $0 }
+            } action: {
+                Button(action: unlock) {
+                    UnlockLabel(failures: failures)
+                }
+                .buttonStyle(.pressable)
+                .disabled(authenticating)
             }
-            .buttonStyle(.pressable)
-            .disabled(authenticating)
-            .padding(.horizontal, Theme.Space.gutter + 8)
-            .padding(.bottom, Theme.Space.gutter)
+            // Las líneas de velocidad van por detrás de todo y las mitades de la ola por delante de la marca; los dos
+            // lienzos ocupan la pantalla entera, no reciben toques y solo existen mientras la marca se monta.
+            .background {
+                if !markSettled, markFrame != .zero {
+                    LaunchSkyCanvas(frame: frame, center: center).ignoresSafeArea()
+                }
+            }
+            .overlay {
+                if !markSettled, markFrame != .zero, !frame.joined {
+                    LaunchHalvesCanvas(
+                        frame: frame, center: center, markSize: Self.markSize, distanceScale: motion.level.distanceScale
+                    )
+                    .ignoresSafeArea()
+                }
+            }
         }
-        .frame(maxWidth: .infinity)
+        // Lo que cambia DENTRO del bloqueo (la marca que queda terminada o se entrega a la que vuela, las piezas y las
+        // líneas que desaparecen) cambia de golpe, aunque ocurra en la misma actualización que el fundido de salida. El
+        // fundido lo aplica quien quita el bloqueo, por fuera de esta vista: a ese no le afecta.
+        .transaction { $0.animation = nil }
         .background(Theme.canvas.ignoresSafeArea())
-        .onAppear {
-            if reduceMotion {
-                drawn = 1
-            } else {
-                withAnimation(Theme.Motion.markDraw.delay(0.1)) { drawn = 1 }
-            }
-        }
+        // Un toque en cualquier parte deja la marca terminada. Solo cambia el dibujo: no toca `locked`.
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded { launchFinished = true })
+        .allowsHitTesting(!leaving)
+        // Mientras se funde, VoiceOver tampoco lo ve: «Desbloquear» no se puede activar con la app ya desbloqueada.
+        // (Un modificador propio: el que esconde a VoiceOver es el mismo que lo apunta para las pruebas al aparecer; si
+        // se quitara, la sonda se quedaría sin «visible» y `testLaunchSkippableAndNeverAboveLock` fallaría.)
+        .modifier(LockVoiceOverHidden(hidden: hiddenFromVoiceOver))
+        .launchProbe("lock-mark", value: launchFinished ? "completa" : (playsLaunch ? "piezas" : "fija"))
+        .sensoryFeedback(Haptics.lock, trigger: clicks)
+        .task { await assembleMark(timeline) }
         .task {
             #if DEBUG
             if DemoMode.holdsLock {
-                // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación.
-                try? await Task.sleep(for: .seconds(4))
-                unlockWithFade()
+                // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación. (Si una prueba
+                // retrasa el arranque para grabarlo, el bloqueo de demo espera lo mismo; la espera es exacta para que
+                // las grabaciones sepan cuándo ocurre.)
+                var seconds = DemoMode.lockSeconds + DemoMode.launchHoldSeconds
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(seconds), tolerance: .milliseconds(20))
+                    if unlockWithFade() { return }
+                    // La app estaba en segundo plano y el desbloqueo no se aceptó (como un Face ID tardío). El «vuelve a
+                    // pedirlo al volver» de la demo: espera a primer plano y el bloqueo dura otra vez lo suyo, entero.
+                    while !Task.isCancelled, case .refused = leaveOnUnlock() {
+                        try? await Task.sleep(for: .milliseconds(200))
+                    }
+                    seconds = DemoMode.lockSeconds
+                }
                 return
             }
             #endif
@@ -66,7 +134,36 @@ struct LockView: View {
         }
     }
 
+    /// Solo dibujo: espera a que las piezas encajen (golpe háptico) y a que la marca quede montada, y para el reloj.
+    /// Los tiempos salen del guion por el multiplicador de grabación (intensidad, Reducir movimiento, cámara lenta).
+    private func assembleMark(_ timeline: LaunchTimeline) async {
+        #if DEBUG
+        if playsLaunch {
+            LaunchProbe.shared.lockPlays += 1
+            LaunchProbe.shared.startsAt = launchStart.timeIntervalSince1970
+        } else {
+            LaunchProbe.shared.lockStatic += 1
+        }
+        #endif
+        guard playsLaunch, !launchFinished else { return }
+        let multiplier = max(motion.timeMultiplier, 0.01)
+        let began = launchStart
+        func wait(until elapsed: Double) async -> Bool {
+            let remaining = elapsed * multiplier - Date().timeIntervalSince(began)
+            if remaining > 0 { try? await Task.sleep(for: .seconds(remaining), tolerance: LaunchClock.tolerance) }
+            return !Task.isCancelled && !launchFinished
+        }
+        if let lockAt = timeline.piecesLockAt {
+            guard await wait(until: lockAt) else { return }
+            clicks += 1
+        }
+        guard await wait(until: timeline.lockDuration) else { return }
+        launchFinished = true
+    }
+
     private func unlock() {
+        // Ya desbloqueado y fundiéndose: no se vuelve a pedir Face ID (ni con un doble toque de VoiceOver).
+        guard !leaving else { return }
         Task { await authenticate() }
     }
 
@@ -95,8 +192,166 @@ struct LockView: View {
         if ok { unlockWithFade() } else { failures += 1 }
     }
 
-    /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto.
-    private func unlockWithFade() {
-        withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.unlock) { locked = false }
+    /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto. El fundido lee `\.motion`:
+    /// obedece la intensidad, Reducir movimiento (también el forzado al grabar) y la cámara lenta.
+    ///
+    /// Devuelve `false` si la carcasa no acepta el desbloqueo (la app ya está en segundo plano: `ShellState` lo
+    /// ignoraría). Entonces este bloqueo no cambia NADA de su dibujo y se queda como estaba, listo para volver a pedir
+    /// Face ID al volver a primer plano.
+    @discardableResult
+    private func unlockWithFade() -> Bool {
+        // Antes de irse, el DIBUJO queda como lo va a recoger la salida: la marca terminada (ni mitades en el aire ni
+        // líneas de velocidad, aunque Face ID haya sido más rápido que las piezas) y, si la marca echa a volar ahora,
+        // este bloqueo deja de dibujar la suya. Esos cambios van sin animación (`.transaction` en `body`); el único que
+        // se anima es el fundido del bloqueo entero. Nada de esto toca `locked`.
+        let leave = leaveOnUnlock()
+        if case .refused = leave {
+            // El intento automático vuelve a estar disponible: al volver a `.active` se pide otra vez.
+            autoAttempted = false
+            #if DEBUG
+            LaunchProbe.shared.refusedUnlocks += 1
+            #endif
+            return false
+        }
+        #if DEBUG
+        // Para las pruebas: cómo estaba la marca en el instante del desbloqueo, ANTES de dejarla terminada.
+        LaunchProbe.shared.lockMarkBeforeLeaving = launchFinished ? "completa" : (playsLaunch ? "piezas" : "fija")
+        #endif
+        var takesTheMark = false
+        if case .fades(let handsMark) = leave { takesTheMark = handsMark && LaunchTimeline(motion).exitDuration != nil }
+        // Si la marca aún se estaba montando y ahora sale volando, el nombre y el lema ya no llegan a salir.
+        if playsLaunch, !launchFinished, takesTheMark { textsDropped = true }
+        launchFinished = true
+        if takesTheMark { markHandedOff = true }
+        leaving = true
+        #if DEBUG
+        noteVoiceOverForTests()
+        // Para las pruebas: cómo DEJA este bloqueo su marca al irse (después de forzarla a terminada: si esa línea
+        // faltara, diría «piezas»), y si se queda fundiéndose con su marca dibujada (si entonces echara a volar otra,
+        // se verían dos).
+        LaunchProbe.shared.lockMarkLeaving = launchFinished ? "completa" : "piezas"
+        if case .fades = leave {
+            LaunchProbe.shared.lockFadesWithItsMark = !takesTheMark
+        } else {
+            LaunchProbe.shared.lockFadesWithItsMark = false
+        }
+        #endif
+        switch leave {
+        case .refused:
+            return false
+        case .fades:
+            // La misma duración que el fundido: `motion.fade` dura 0,22 s (× cámara lenta). Es una curva con final
+            // (no un muelle, que a su duración nominal aún deja el bloqueo a un par de puntos de opacidad): cuando la
+            // carcasa devuelve los toques a Inicio, del bloqueo no queda ni un píxel.
+            let seconds = motion.reduce ? 0.22 * motion.timeMultiplier : motion.seconds(0.3)
+            withAnimation(motion.reduce ? motion.fade : .easeOut(duration: seconds)) { locked = false }
+            fadeStarted(seconds)
+        case .covered:
+            // La escena no está activa (Face ID aún la tiene): la tapa se pone encima en esta misma actualización y este
+            // bloqueo se quita de golpe, sin fundido. Si se fundiera debajo, al volver la escena a activa antes de
+            // acabar asomaría a medio apagar —marca, lema y botón— junto a la marca que echa a volar.
+            var atOnce = Transaction()
+            atOnce.disablesAnimations = true
+            withTransaction(atOnce) { locked = false }
+            fadeStarted(0)
+        }
+        return true
+    }
+}
+
+/// La etiqueta del botón del bloqueo. La tapa del selector de apps reserva su hueco con una copia oculta de esta misma
+/// vista: así la marca queda exactamente en el mismo sitio en las dos, también con el texto en tamaños de
+/// accesibilidad, que es cuando el botón crece.
+struct UnlockLabel: View {
+    var failures = 0
+
+    var body: some View {
+        Label("Desbloquear", systemImage: "faceid")
+            .titan(.option)
+            .fontWeight(.semibold)
+            .foregroundStyle(.black)
+            .symbolEffect(.bounce, value: failures)
+            .frame(maxWidth: .infinity, minHeight: 52)
+            .background(.white, in: Capsule())
+    }
+}
+
+/// Cómo deja la pantalla el bloqueo al desbloquear. Lo decide la carcasa (`ShellState.lockExitOnUnlock`).
+enum LockLeave {
+    /// La escena está activa: el bloqueo se funde sobre Inicio. `handsMark`: la marca echa a volar en ese mismo instante
+    /// desde donde está la del bloqueo, que deja de dibujar la suya (nunca se ven dos).
+    case fades(handsMark: Bool)
+    /// La escena no está activa: la tapa del selector de apps releva al bloqueo y este se quita de golpe.
+    case covered
+    /// La app ya está en segundo plano: el desbloqueo no se acepta y el bloqueo se queda (`ShellState.acceptsUnlock`).
+    case refused
+}
+
+/// La cara del bloqueo: la marca, el nombre y el lema, con el botón (o su hueco) abajo. La comparten el bloqueo y la
+/// tapa del selector de apps, para que la marca esté exactamente en el mismo sitio en los dos, y apunta ese sitio en
+/// `LaunchAnchor.lockMarkFrame` (de ahí sale volando la marca al desbloquear).
+struct LockFace<Mark: View, Action: View>: View {
+    /// Solo mientras la marca se monta en el arranque: el nombre aparece y su interletraje se cierra.
+    var nameOpacity: Double = 1
+    /// 1 = letras separadas (0,24 em de más), 0 = como siempre.
+    var nameSpread: CGFloat = 0
+    /// El lema aparece con el nombre mientras la marca se monta; la tapa del selector de apps no lo enseña (0).
+    var taglineOpacity: Double = 1
+    @ViewBuilder let mark: Mark
+    @ViewBuilder let action: Action
+    @Environment(\.launchAnchor) private var anchor
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            mark
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { anchor?.lockMarkFrame = $0 }
+            Text(AppIdentity.displayName)
+                .modifier(NameSpread(spread: nameSpread))
+                .titan(.sheetTitle)
+                .foregroundStyle(Theme.label)
+                .opacity(nameOpacity)
+                .padding(.top, Theme.Space.gutter)
+                .accessibilityAddTraits(.isHeader)
+            Text("Tu dinero, solo para ti.")
+                .titan(.callout)
+                .foregroundStyle(Theme.label2)
+                .multilineTextAlignment(.center)
+                .padding(.top, 6)
+                .opacity(taglineOpacity)
+            Spacer()
+            action
+                .padding(.horizontal, Theme.Space.gutter + 8)
+                .padding(.bottom, Theme.Space.gutter)
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+/// El interletraje de más del nombre mientras la marca se monta. En reposo (`spread` 0) no toca nada: el nombre es
+/// exactamente el de siempre.
+private struct NameSpread: ViewModifier {
+    let spread: CGFloat
+
+    @ViewBuilder func body(content: Content) -> some View {
+        if spread > 0.001 {
+            content.tracking(TitanFont.sheetTitle.tracking + 0.24 * spread * TitanFont.sheetTitle.size)
+        } else {
+            content
+        }
+    }
+}
+
+/// D-9: mientras el bloqueo se funde, VoiceOver no lo ve (ni su «Desbloquear»). En DEBUG, este mismo modificador
+/// apunta en la sonda lo que acaba de recibir al aparecer: quitarlo deja la sonda sin «visible», y la prueba lo nota.
+private struct LockVoiceOverHidden: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .accessibilityHidden(hidden)
+            #if DEBUG
+            .onAppear { LaunchProbe.shared.lockVoiceOver = hidden ? "oculto" : "visible" }
+            #endif
     }
 }

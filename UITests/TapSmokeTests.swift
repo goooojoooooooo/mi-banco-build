@@ -38,6 +38,19 @@ final class TapSmokeTests: XCTestCase {
         return XCTWaiter().wait(for: [exp], timeout: timeout) == .completed
     }
 
+    /// La pantalla de bloqueo nombra la app como «Onyx» (rulings, RONDA 3/5 (b)), nunca con el nombre viejo.
+    func testLockShowsAppName() throws {
+        app.terminate()
+        // `-MiBancoDemoLockSeconds 12`: el bloqueo de demo dura lo bastante para mirarlo con calma.
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "12",
+                               "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
+        app.launch()
+        XCTAssertTrue(app.buttons["Desbloquear"].waitForExistence(timeout: 8), "Falta la pantalla de bloqueo")
+        XCTAssertTrue(app.staticTexts["Onyx"].exists, "El bloqueo debe decir «Onyx»")
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "Mi Banco")).count, 0,
+                       "El bloqueo aún dice «Mi Banco»")
+    }
+
     func testEyeTogglesPrivacy() throws {
         let hide = button("Ocultar importes")
         XCTAssertTrue(hide.waitForExistence(timeout: 5))
@@ -77,14 +90,16 @@ final class TapSmokeTests: XCTestCase {
     }
 
     func testTabsAndRowOpenDetail() throws {
-        // Con cuatro pestañas, la barra de cristal del simulador de CI tarda en cambiar tras el toque: margen de 15 s y,
-        // si no cambió, un segundo toque (la comprobación es la misma).
+        // Con cuatro pestañas, la barra de cristal del simulador de CI a veces no toma el toque sintético: toque, pulsación
+        // corta y otro toque (la comprobación es la misma).
         let tabs = app.tabBars.buttons
         func open(_ name: String, until target: XCUIElement) -> Bool {
             tabs[name].tap()
-            if target.waitForExistence(timeout: 15) { return true }
+            if target.waitForExistence(timeout: 8) { return true }
+            tabs[name].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).press(forDuration: 0.25)
+            if target.waitForExistence(timeout: 8) { return true }
             tabs[name].tap()
-            return target.waitForExistence(timeout: 15)
+            return target.waitForExistence(timeout: 10)
         }
         XCTAssertTrue(open("Avisos", until: app.navigationBars["Avisos"]), "No se ve Avisos")
         XCTAssertTrue(open("Ajustes", until: app.navigationBars["Ajustes"]), "No se ve Ajustes")
@@ -97,6 +112,9 @@ final class TapSmokeTests: XCTestCase {
         XCTAssertTrue(close.waitForExistence(timeout: 5), "No se abrió la hoja de detalle")
         close.tap()
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 5))
-        XCTAssertFalse(button("Cerrar").exists)
+        // La hoja se va con una animación: se espera a que «Cerrar» desaparezca en vez de mirarlo en el mismo instante.
+        let gone = NSPredicate(format: "exists == false")
+        let exp = XCTNSPredicateExpectation(predicate: gone, object: button("Cerrar"))
+        XCTAssertEqual(XCTWaiter().wait(for: [exp], timeout: 8), .completed, "La hoja de detalle no se cerró")
     }
 }

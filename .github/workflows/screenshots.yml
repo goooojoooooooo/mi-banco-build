@@ -2,11 +2,20 @@ name: screenshots
 run-name: screenshots ${{ github.ref_name }}
 on:
   workflow_dispatch:
+    inputs:
+      pequeno:
+        description: "Todo en un iPhone de 393 pt (iPhone 15/16), y ademas capturas pequeno de la guia"
+        type: boolean
+        default: false
+      runner:
+        description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
+        required: false
+        default: "namespace-profile-onyx"
 permissions:
   contents: read
 jobs:
   capturas:
-    runs-on: macos-15-intel
+    runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -14,7 +23,7 @@ jobs:
         run: |
           ls -d /Applications/Xcode*.app
           CHOSEN=""
-          for app in "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)" /Applications/Xcode_16.4.app; do
+          for app in /Applications/Xcode_26.2.app $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
             [ -d "$app" ] || continue
             echo "Probando $app"
             if DEVELOPER_DIR="$app/Contents/Developer" xcrun simctl list runtimes available | grep -E "^iOS " ; then
@@ -32,9 +41,21 @@ jobs:
         run: |
           xcrun simctl list runtimes
           xcrun simctl list devicetypes | grep -i "iphone 1[67]" || true
-          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
-          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+")
+          RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS .*com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9]+-[0-9]+$" | sort -V | tail -1 || true)
+          if [ -z "$RUNTIME_LINE" ]; then
+            RUNTIME_LINE=$(xcrun simctl list runtimes available | grep -E "^iOS " | sort -V | tail -1)
+          fi
+          RUNTIME=$(echo "$RUNTIME_LINE" | grep -oE "com\.apple\.CoreSimulator\.SimRuntime\.[^[:space:]]+")
           DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "iPhone [0-9]+ Pro Max" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | tail -1)
+          # G30 M5: exige un iPhone de 393 pt (15/16) y falla si no existe, sin elegir 402 pt en silencio.
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            DEVICETYPE=$(xcrun simctl list devicetypes | grep -E "^iPhone (15|16) \(" | sed -E 's/.*\((com\.apple[^)]*)\).*/\1/' | sort -V | head -1 || true)
+            if [ -z "$DEVICETYPE" ]; then
+              echo "No se encontro un simulador de 393 pt (iPhone 15 o 16) para pequeno=true"
+              xcrun simctl list devicetypes | grep -E "^iPhone " || true
+              exit 1
+            fi
+          fi
           echo "Runtime: $RUNTIME_LINE"
           echo "Dispositivo: $DEVICETYPE"
           UDID=$(xcrun simctl create "MiBancoShots" "$DEVICETYPE" "$RUNTIME")
@@ -88,12 +109,70 @@ jobs:
           shot avisos 10 -MiBancoDemoScreen avisos
           shot avisos-ajustes 10 -MiBancoDemoScreen avisos -MiBancoDemoRules
           shot ajustes 10 -MiBancoDemoScreen ajustes
+          shot ajustes-inversiones 10 -MiBancoDemoScreen ajustes -MiBancoDemoInvestmentsSettings
           shot ajustes-copia 10 -MiBancoDemoScreen ajustes -MiBancoDemoBackup
           shot restaurar 10 -MiBancoDemoScreen ajustes -MiBancoDemoRestorePreview
+          # La guia de avisos: la lista y pasos de Revolut (apagar «Notificar al ejecutar», rellenar «Titulo») y de Apple Pay.
+          shot guia-avisos 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
+          shot guia-lista-media 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0 -MiBancoDemoGuideHalfway
+          shot guia-escribir 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 4
+          shot guia-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 10
+          shot guia-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
+          shot guia-ayuda 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19 -MiBancoDemoGuideHelpOpen
+          shot guia-cartera 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 6
+          shot guia-cartera-banco 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide wallet 17
+          # Con letra de accesibilidad el bloque de botones no debe apretar el contenido.
+          xcrun simctl ui "$UDID" content_size accessibility-extra-extra-extra-large
+          shot guia-letra-grande 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 19
+          xcrun simctl ui "$UDID" content_size large
+          shot inicio-inversiones 10 -MiBancoDemoCard inv
+          shot posicion 10 -MiBancoDemoCard inv -MiBancoDemoPosition
+          shot mover-destino 10 -MiBancoDemoMove 1
+          shot mover-importe 10 -MiBancoDemoMove 2
+          shot mover-listo 10 -MiBancoDemoMove 3
+          shot cuentas 10 -MiBancoDemoScreen ajustes -MiBancoDemoAccounts
+          shot proximos-cobros 10 -MiBancoDemoScreen gasto -MiBancoDemoUpcoming
+          shot resumen 12 -MiBancoDemoBriefing busy
+          shot resumen-tranquilo 12 -MiBancoDemoBriefing quiet
+          shot resumen-privado 12 -MiBancoDemoBriefing busy -MiBancoDemoPrivate
+          shot bancos 10 -MiBancoDemoScreen ajustes -MiBancoDemoBanks
+          shot guia 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuide
+          shot importar 10 -MiBancoDemoScreen ajustes -MiBancoDemoImport
+          shot reverso-revolut 10 -MiBancoDemoCard rev -MiBancoDemoFlip -MiBancoDemoBanks
+          shot bienvenida-1 10 -MiBancoDemoOnboarding 1
+          shot bienvenida-2 10 -MiBancoDemoOnboarding 2
+          shot bienvenida-3 10 -MiBancoDemoOnboarding 3
           # La llegada entra a los ~4 s; a los ~9 s ya se ha asentado (saldo, total y fila nueva).
           shot llegada 9 -MiBancoDemoArrival
           # El bloqueo se quita solo a los ~4 s desde que la app pinta: a los ~3,5 s del lanzamiento todavia se ve.
           shot bloqueo 3.5 -MiBancoDemoLock
+          if [ "${{ inputs.pequeno }}" = "true" ]; then
+            shot guia-pequeno-lista 10 -MiBancoDemoScreen ajustes -MiBancoDemoAlertsGuide rev 0
+            shot guia-pequeno-campo 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            shot guia-pequeno-ayuda 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19 -MiBancoDemoGuideHelpOpen
+            shot guia-pequeno-apagar 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 10
+            # Letra un punto y tres puntos mayor (sin ser de accesibilidad), retomando el paso 19.
+            xcrun simctl ui "$UDID" content_size extra-large
+            shot guia-pequeno-campo-xl 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            xcrun simctl ui "$UDID" content_size extra-extra-extra-large
+            shot guia-pequeno-campo-xxxl 10 -MiBancoDemoScreen ajustes -MiBancoDemoGuideSeed rev 19
+            xcrun simctl ui "$UDID" content_size large
+          fi
+          # Galeria de movimiento (solo DEBUG): marca, cifras, controles, modo privado y movimiento reducido.
+          shot motion-galeria 10 -MiBancoMotionGallery
+          shot motion-galeria-cifras 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage cifras
+          shot motion-galeria-controles 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage controles
+          shot motion-galeria-privado 10 -MiBancoMotionGallery -MiBancoDemoPrivate -MiBancoMotionGalleryPage cifras
+          # Fuera del entorno de preferencias y con el ojo cerrado guardado: el importe sigue oculto y no hay chip «Ojo».
+          shot motion-galeria-sin-preferencias 10 -MiBancoMotionGallery -MiBancoMotionGalleryNoPrefs -MiBancoDemoPrivate -MiBancoMotionGalleryPage cifras
+          shot motion-galeria-reducido 10 -MiBancoMotionGallery -MiBancoMotionReduce
+          # Tamaño de texto más grande de accesibilidad: nada se recorta ni se pisa.
+          shot motion-galeria-texto-grande 10 -MiBancoMotionGallery -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          shot motion-galeria-controles-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage botones -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          # Filas con el texto más grande: el importe se encoge y el título cabe. (La de «segmentado» salía igual que «pasos»:
+          # las dos anclas quedan a menos de una pantalla del final; el segmentado ya está entero en «controles».)
+          shot motion-galeria-filas-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage filas -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
+          shot motion-galeria-pasos-texto-grande 10 -MiBancoMotionGallery -MiBancoMotionGalleryPage pasos -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityXXXL
           ls -l out
       - uses: actions/upload-artifact@v4
         if: always()

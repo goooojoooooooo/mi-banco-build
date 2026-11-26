@@ -30,6 +30,10 @@ struct SpendingPage: Equatable, Sendable {
     /// Cómo se llama lo que marca, para VoiceOver ("el mes pasado a estas alturas").
     let markName: String
     let rows: [CategoryRowModel]
+    /// El gasto acumulado día a día del mes y el del mes anterior entero: el gráfico de Gasto.
+    let series: MonthSeries
+    /// "Octubre": el nombre del mes anterior (la leyenda del gráfico).
+    let previousTitle: String
 }
 
 extension LedgerSnapshot {
@@ -99,7 +103,9 @@ extension LedgerSnapshot {
             pages[start] = SpendingPage(
                 month: month, title: title, comparison: comparison, forecast: forecastText,
                 markCaption: isCurrent ? "La marca indica cuánto llevabas el mes pasado a estas alturas." : "La marca indica el mes anterior.",
-                markName: isCurrent ? "el mes pasado a estas alturas" : "el mes anterior", rows: rows)
+                markName: isCurrent ? "el mes pasado a estas alturas" : "el mes anterior", rows: rows,
+                series: monthSeries(in: state, month: start, now: now, calendar: calendar, notSpending: notSpending),
+                previousTitle: previousName.prefix(1).uppercased() + previousName.dropFirst())
         }
         return (months, pages)
     }
@@ -110,9 +116,9 @@ extension LedgerSnapshot {
         return "\(formatEUR(abs(difference))) \(difference < 0 ? "menos" : "más") que en \(previous)"
     }
 
-    /// "12 % más que el mes pasado".
+    /// "12 % más que el mes pasado a estas alturas" (el mes en curso se compara con el mismo punto del mes anterior).
     private static func spoken(percent: Int, current: Bool) -> String {
-        let reference = current ? "el mes pasado" : "el mes anterior"
+        let reference = current ? "el mes pasado a estas alturas" : "el mes anterior"
         if percent == 0 { return "igual que \(reference)" }
         return "\(abs(percent)) % \(percent > 0 ? "más" : "menos") que \(reference)"
     }

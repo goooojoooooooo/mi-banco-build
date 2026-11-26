@@ -20,6 +20,7 @@ struct BudgetsView: View {
     @FocusState private var focused: BudgetScope?
 
     private static let invalidText = "Escribe un importe como 120,00"
+    private static let saveFailedText = "No se pudo guardar. Inténtalo de nuevo."
 
     private static let scopes: [BudgetScope] = [.month] + SpendingCategory.allCases.filter { $0 != .sinCategoria }.map { .category($0) }
 
@@ -119,13 +120,14 @@ struct BudgetsView: View {
                 BudgetBar(status: status, name: barName, index: index, textTrailingInset: stacked ? 0 : 10)
                     .padding(.leading, stacked ? 0 : 54)
                     .transition(.opacity)
+                    .accessibilityIdentifier("\(identifier(scope)).barra")
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(minHeight: 64)
         .animation(reduceMotion ? nil : Theme.Motion.reveal, value: status != nil)
-        .staggeredEntrance(index, rise: 10)
+        .motionEntrance(index, rise: 10)
     }
 
     private func name(_ scope: BudgetScope) -> String {
@@ -187,7 +189,7 @@ struct BudgetsView: View {
         for (scope, text) in model.budgetDrafts {
             texts[scope] = text
             dirty.insert(scope)
-            errors[scope] = Self.invalidText
+            errors[scope] = parseBudgetInput(text) == .invalid ? Self.invalidText : Self.saveFailedText
         }
     }
 
@@ -198,13 +200,14 @@ struct BudgetsView: View {
     private func commit(_ scope: BudgetScope) {
         guard dirty.contains(scope) else { return refresh(scope) }
         let text = (texts[scope] ?? "").trimmingCharacters(in: .whitespaces)
-        // Vacío o 0 quita el presupuesto.
+        // Vacío, 0 o un texto sin cifras («€», « €», «,») quita el presupuesto (R32).
         let cents: Int?
-        if text.isEmpty {
+        switch parseBudgetInput(text) {
+        case .remove:
             cents = nil
-        } else if let parsed = parseBalanceInput(text), parsed >= 0 {
-            cents = parsed > 0 ? parsed : nil
-        } else {
+        case .set(let value):
+            cents = value
+        case .invalid:
             withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[scope] = Self.invalidText }
             errorTick += 1
             model.budgetDrafts[scope] = text
@@ -224,8 +227,10 @@ struct BudgetsView: View {
             refresh(scope)
             flashSaved(scope)
         } catch {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[scope] = "No se pudo guardar. Inténtalo de nuevo." }
+            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[scope] = Self.saveFailedText }
             errorTick += 1
+            // Lo escrito se queda aunque se salga de la pantalla (se recupera en `restoreDrafts`).
+            model.budgetDrafts[scope] = text
         }
     }
 

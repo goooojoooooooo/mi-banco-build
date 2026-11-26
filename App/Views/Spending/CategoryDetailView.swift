@@ -36,7 +36,7 @@ struct CategoryDetailView: View {
                             .foregroundStyle(Theme.label)
                             .accessibilityAddTraits(.isHeader)
                     }
-                    .staggeredEntrance(0, rise: 8)
+                    .motionEntrance(0, rise: 8)
 
                     HeroBalance(cents: header?.cents ?? 0, centsColor: Theme.label2)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -44,7 +44,7 @@ struct CategoryDetailView: View {
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("Gastado en \(category.displayName), \(title.lowercased()): \(spokenAmount(header?.cents ?? 0, hidden: preferences.privateMode))")
                         .accessibilityIdentifier("categoria.total")
-                        .staggeredEntrance(1)
+                        .motionEntrance(1)
 
                     if let comparison = header?.comparison {
                         Text(comparison)
@@ -53,14 +53,14 @@ struct CategoryDetailView: View {
                             .privateAmount(radius: 6)
                             .padding(.top, 4)
                             .accessibilityIdentifier("categoria.comparacion")
-                            .staggeredEntrance(2)
+                            .motionEntrance(2)
                     }
 
                     if let budget {
                         BudgetBar(status: budget, name: "Presupuesto de \(category.displayName)", index: 0)
                             .padding(.top, 16)
                             .accessibilityIdentifier("categoria.presupuesto")
-                            .staggeredEntrance(3)
+                            .motionEntrance(3)
                     }
                 }
                 .padding(.horizontal, Theme.Space.gutter)
@@ -76,7 +76,7 @@ struct CategoryDetailView: View {
                     ForEach(entries) { entry in
                         ListEntryView(entry: entry, logoDomain: logoDomain(of: entry, in: snapshot), isFresh: false, zoom: zoom,
                                       onOpen: openDetail, onDeleteUnread: { _ in })
-                            .staggeredEntrance(4 + order(of: entry))
+                            .motionEntrance(4 + order(of: entry))
                     }
                 }
             }

@@ -9,9 +9,13 @@ struct AlertsView: View {
     var isVisible = false
     /// Abre la hoja de un movimiento (la presenta `RootView`).
     let onOpen: (UUID) -> Void
+    var onMorningRuleChanged: () -> Void = {}
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    /// Al entrar en la pestaña, los avisos llegan uno tras otro.
+    /// El movimiento del kit: intensidad, cámara lenta y Reducir movimiento (el del sistema o el forzado para grabar).
+    @Environment(\.motion) private var motion
+    /// El cambio de pestaña que anuncia `RootView` (cuando lo haga): repite la entrada igual que `isVisible`.
+    @Environment(\.tabEntrance) private var tabEntrance
+    /// Al entrar en la pestaña, los avisos llegan uno tras otro desde la derecha.
     @State private var entrance = Entrance()
 
     var body: some View {
@@ -23,15 +27,16 @@ struct AlertsView: View {
                     VStack(alignment: .leading, spacing: 0) {
                         if insights.isEmpty {
                             AlertsEmptyState()
-                                .staggeredEntrance(0)
+                                .motionEntrance(0)
                         } else {
                             GroupHeader("Novedades")
-                                .staggeredEntrance(0)
+                                .motionEntrance(0)
                             VStack(spacing: 0) {
                                 ForEach(Array(insights.enumerated()), id: \.element.id) { index, insight in
                                     InsightRow(insight: insight, isLast: index == insights.count - 1, onOpen: onOpen)
-                                        .staggeredEntrance(1 + index)
-                                        .transition(reduceMotion
+                                        // Cada aviso entra desde 40 pt a la derecha, uno tras otro.
+                                        .motionEntrance(1 + index, rise: 0, slide: 40)
+                                        .transition(motion.reduce
                                             ? AnyTransition.opacity
                                             : AnyTransition.asymmetric(insertion: AnyTransition.move(edge: .top).combined(with: .opacity),
                                                                        removal: AnyTransition.opacity))
@@ -42,9 +47,14 @@ struct AlertsView: View {
                             .padding(.horizontal, 16)
                         }
 
-                        AlertRules(model: model, settings: snapshot.alertSettings, mutedCount: snapshot.mutedList.count)
+                        AlertRules(
+                            model: model,
+                            settings: snapshot.alertSettings,
+                            mutedCount: snapshot.mutedList.count,
+                            onMorningRuleChanged: onMorningRuleChanged
+                        )
                             .id(AlertsAnchor.rules)
-                            .staggeredEntrance(min(1 + insights.count, 8))
+                            .motionEntrance(min(1 + insights.count, 8))
 
                         Text("Todo se calcula en tu iPhone con tus movimientos. Nada sale del teléfono.")
                             .titan(.meta)
@@ -53,7 +63,7 @@ struct AlertsView: View {
                             .padding(.top, 8)
                     }
                     // Solo la lista corta de avisos (≤ 12) anima su cambio; los avisos nuevos entran desde arriba.
-                    .animation(reduceMotion ? Animation.easeOut(duration: 0.2) : Theme.Motion.reveal, value: insights.map(\.id))
+                    .animation(motion.reduce ? motion.fade : motion.calmAnimation(.row), value: insights.map(\.id))
                     .padding(.bottom, Theme.Space.section)
                 }
                 .scrollIndicators(.hidden)
@@ -73,13 +83,22 @@ struct AlertsView: View {
         }
         .environment(\.entrance, entrance)
         .onChange(of: isVisible) { _, visible in
-            guard visible, !reduceMotion else { return }
-            let token = entrance.token + 1
-            entrance = Entrance(token: token, active: true, scope: .assembly)
-            Task {
-                try? await Task.sleep(for: .seconds(1.2))
-                if entrance.token == token { entrance.active = false }
-            }
+            if visible { playEntrance() }
+        }
+        .onChange(of: tabEntrance.token) { _, _ in
+            if isVisible, !tabEntrance.suppressed { playEntrance() }
+        }
+    }
+
+    /// La entrada por capas: los grupos llegan uno tras otro durante 1,2 s del kit. Con Reducir movimiento no hay entrada.
+    private func playEntrance() {
+        guard !motion.reduce else { return }
+        let token = entrance.token + 1
+        entrance = Entrance(token: token, active: true, scope: .assembly)
+        let window = motion.seconds(MotionEntranceWindow.seconds)
+        Task {
+            try? await Task.sleep(for: .seconds(window))
+            if entrance.token == token { entrance.active = false }
         }
     }
 }
@@ -137,7 +156,7 @@ private struct InsightRow: View {
                 .background(Theme.raised, in: .rect(cornerRadius: 9, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                CountingSentence(text: insight.title, hidden: preferences.privateMode)
+                RollingSentence(text: insight.title, hidden: preferences.privateMode)
                     .titan(.option)
                     .foregroundStyle(Theme.label)
                     .fixedSize(horizontal: false, vertical: true)
@@ -227,70 +246,142 @@ extension InsightKind {
     }
 }
 
-/// Una frase con un importe dentro ("Pago grande: 320,00 € en MediaMarkt"): el importe cuenta desde 0 la primera vez
-/// que se ve y al entrar en la pestaña (desaceleración de 1 s); el resto del texto no se mueve. Con el modo privado,
-/// el importe pasa a "•••". Con Reducir movimiento, no cuenta.
-private struct CountingSentence: View {
+/// Una frase con un importe dentro ("Pago grande: 320,00 € en MediaMarkt"): el importe es un `RollingAmount` (rueda desde
+/// 0 la primera vez que se ve y al entrar en la pestaña, y del valor anterior al nuevo si cambia); el resto del texto no se
+/// mueve. La frase se parte en palabras y se coloca como un párrafo (`ParagraphFlow`), así el importe puede ir en medio y
+/// la frase sigue saltando de línea donde le toca. Con el modo privado no se monta ninguna cifra: la frase es un texto con
+/// la máscara del kit («•••,•• €») en el sitio del importe y «•••» en cualquier otro. Sin importe, es un texto normal.
+/// Quien la usa pone la etiqueta de VoiceOver de la fila entera.
+private struct RollingSentence: View {
     let text: String
     let hidden: Bool
 
-    @State private var shown: Double?
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.entrance) private var entrance
-
     var body: some View {
-        let split = AmountSplit(text)
-        Group {
-            if hidden {
-                Text(maskingAmounts(text))
-            } else if let split {
-                SentenceFigure(value: shown ?? (reduceMotion ? Double(split.cents) : 0), split: split)
-            } else {
-                Text(text)
+        if hidden {
+            // Ninguna cifra montada: un texto normal con la máscara del kit en el sitio del importe.
+            Text(masked)
+        } else if let split = AmountSplit(text) {
+            let pieces = SentencePieces(split)
+            ParagraphFlow {
+                ForEach(Array(pieces.before.enumerated()), id: \.offset) { _, word in
+                    Text(word)
+                }
+                // Lo que va pegado al importe (un punto, una coma) no se separa de él al saltar de línea.
+                HStack(alignment: .firstTextBaseline, spacing: 0) {
+                    // Dentro de una frase: si el ojo se cierra con la cifra montada, la máscara solo ocupa lo que mide.
+                    RollingAmount(cents: split.cents, inline: true)
+                    if !pieces.glue.isEmpty { Text(pieces.glue) }
+                }
+                ForEach(Array(pieces.after.enumerated()), id: \.offset) { _, word in
+                    Text(word)
+                }
             }
-        }
-        .contentTransition(.opacity)
-        .onAppear(perform: start)
-        .onChange(of: entrance.token) { _, _ in recount() }
-        .onChange(of: text) { _, _ in
-            guard let cents = AmountSplit(text)?.cents else { return }
-            withAnimation(reduceMotion ? nil : Theme.Motion.roll) { shown = Double(cents) }
+        } else {
+            Text(text)
         }
     }
 
-    private func start() {
-        guard shown == nil, let cents = AmountSplit(text)?.cents else { return }
-        guard !reduceMotion else {
-            shown = Double(cents)
-            return
-        }
-        shown = 0
-        withAnimation(Theme.Motion.countUp.delay(0.1)) { shown = Double(cents) }
-    }
-
-    private func recount() {
-        guard entrance.active, !reduceMotion, let cents = AmountSplit(text)?.cents else { return }
-        shown = 0
-        let target = Double(cents)
-        Task {
-            try? await Task.sleep(for: .milliseconds(20))
-            withAnimation(Theme.Motion.countUp.delay(0.12)) { shown = target }
-        }
+    /// "Pago grande: •••,•• € en MediaMarkt": la máscara del kit donde iba el importe y «•••» en los demás.
+    private var masked: String {
+        guard let split = AmountSplit(text) else { return maskingAmounts(text) }
+        return maskingAmounts(split.prefix) + maskedEUR(split.cents, sign: false) + maskingAmounts(split.suffix)
     }
 }
 
-/// Dibuja la frase con el importe animado en su sitio (cifras tabulares: nada tiembla).
-private struct SentenceFigure: View, Animatable {
-    var value: Double
-    let split: AmountSplit
+/// Las piezas de una frase con importe: las palabras de antes (cada una con su espacio detrás), lo que va pegado al
+/// importe (hasta el primer espacio, incluido) y las palabras de después.
+struct SentencePieces: Equatable {
+    let before: [String]
+    let glue: String
+    let after: [String]
 
-    nonisolated var animatableData: Double {
-        get { value }
-        set { value = newValue }
+    init(_ split: AmountSplit) {
+        self.init(prefix: split.prefix, suffix: split.suffix)
     }
 
-    var body: some View {
-        Text(split.prefix + formatEUR(Int(value.rounded())) + split.suffix)
+    /// Lo que va antes y después del importe (también para frases de euros enteros, como la previsión de Gasto).
+    init(prefix: String, suffix: String) {
+        before = Self.words(prefix)
+        if let space = suffix.firstIndex(of: " ") {
+            let cut = suffix.index(after: space)
+            glue = String(suffix[..<cut])
+            after = Self.words(String(suffix[cut...]))
+        } else {
+            glue = suffix
+            after = []
+        }
+    }
+
+    /// "Pago grande: " -> ["Pago ", "grande: "]. Solo parte por el espacio normal: «9,99 €» (espacio duro) no se parte.
+    static func words(_ text: String) -> [String] {
+        var out: [String] = []
+        var current = ""
+        for ch in text {
+            current.append(ch)
+            if ch == " " {
+                out.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { out.append(current) }
+        return out
+    }
+}
+
+/// Coloca sus piezas como las palabras de un párrafo: una tras otra y, cuando la siguiente no cabe, en la línea de
+/// abajo. Cada pieza va centrada en el alto de su línea. Una pieza más ancha que la línea se queda con el ancho de la línea.
+/// También la usa la cabecera de Suscripciones («… al mes · … al año»): un solo juego de vistas que salta de línea.
+struct ParagraphFlow: Layout {
+    private struct Arrangement {
+        var frames: [CGRect] = []
+        var size = CGSize.zero
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(subviews, width: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let arrangement = arrange(subviews, width: bounds.width)
+        for (index, frame) in arrangement.frames.enumerated() where index < subviews.count {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading, proposal: ProposedViewSize(frame.size))
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> Arrangement {
+        var out = Arrangement()
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowStart = 0
+        var rowHeight: CGFloat = 0
+
+        // Cierra la línea en curso: centra cada pieza en el alto de la línea y baja a la siguiente.
+        func closeRow() {
+            for i in rowStart..<out.frames.count {
+                out.frames[i].origin.y = y + (rowHeight - out.frames[i].height) / 2
+            }
+            y += rowHeight
+            x = 0
+            rowHeight = 0
+            rowStart = out.frames.count
+        }
+
+        for subview in subviews {
+            var size = subview.sizeThatFits(.unspecified)
+            if size.width > width {
+                size = subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
+            }
+            if x > 0, x + size.width > width { closeRow() }
+            out.frames.append(CGRect(x: x, y: y, width: size.width, height: size.height))
+            x += size.width
+            rowHeight = max(rowHeight, size.height)
+            out.size.width = max(out.size.width, x)
+        }
+        closeRow()
+        out.size.height = y
+        return out
     }
 }
 

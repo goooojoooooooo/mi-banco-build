@@ -90,7 +90,9 @@ private func pay(_ cents: Int, _ merchant: String?, _ when: Date, isShop: Bool =
     }
 
     @Test func personasYSinCategoria() {
-        #expect(spendingCategory(of: pay(500, "Carlos", nov(19), isShop: false), overrides: [:], subscriptionKeys: []) == .personas)
+        // Un nombre sin más no prueba que el pago fuera a una persona (puede ser el dueño de un bar): sin categoría.
+        #expect(spendingCategory(of: pay(500, "Carlos", nov(19), isShop: false), overrides: [:], subscriptionKeys: []) == .sinCategoria)
+        #expect(spendingCategory(of: pay(500, "Bizum a Carlos", nov(19), isShop: false), overrides: [:], subscriptionKeys: []) == .personas)
         #expect(spendingCategory(of: pay(500, "Tienda Rara", nov(19), isShop: true), overrides: [:], subscriptionKeys: []) == .sinCategoria)
         #expect(spendingCategory(of: pay(500, nil, nov(19)), overrides: [:], subscriptionKeys: []) == .sinCategoria)
         let inc = Movement(bank: .rev, amountCents: 500, merchant: "Carlos", kind: .income, source: .notification, date: nov(19))

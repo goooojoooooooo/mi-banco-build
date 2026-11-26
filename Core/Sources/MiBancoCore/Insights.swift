@@ -1,6 +1,6 @@
 import Foundation
 
-public enum InsightKind: String, Codable, Sendable {
+public enum InsightKind: String, Codable, Sendable, CaseIterable {
     case lowBalance, largePayment, unusualPayment, salary, duplicateCharge
     case subscriptionUpcoming, subscriptionPriceChange, spendingPace, weeklyDigest
     case largeIncome
@@ -8,6 +8,23 @@ public enum InsightKind: String, Codable, Sendable {
 }
 
 public enum InsightSeverity: String, Codable, Sendable { case info, warning, positive }
+
+/// Lo que dice una idea sin sus cifras, en campos (no en el texto): de aquí sale el aviso con el ojo cerrado, sin
+/// analizar el título (`notificationText(for:hidden:)`). Nada de esto lleva un importe.
+public struct InsightFacts: Equatable, Sendable {
+    /// Cambio de precio: true = ha subido. Ritmo de gasto: true = por encima del mes pasado.
+    public var up: Bool?
+    /// Suscripción próxima: «hoy», «mañana», «el lunes»…
+    public var when: String?
+    /// Presupuesto: «del mes», «de Supermercado».
+    public var budgetScope: String?
+
+    public init(up: Bool? = nil, when: String? = nil, budgetScope: String? = nil) {
+        self.up = up
+        self.when = when
+        self.budgetScope = budgetScope
+    }
+}
 
 public struct Insight: Equatable, Sendable, Identifiable {
     /// Estable: tipo + sujeto + día, para no repetir el mismo aviso.
@@ -20,9 +37,11 @@ public struct Insight: Equatable, Sendable, Identifiable {
     public let bank: BankID?
     public let merchant: String?
     public let movementID: UUID?
+    /// Lo que dice sin cifras (para el aviso con el ojo cerrado).
+    public let facts: InsightFacts
 
     public init(id: String, kind: InsightKind, severity: InsightSeverity, title: String, detail: String?, date: Date,
-                bank: BankID?, merchant: String?, movementID: UUID?) {
+                bank: BankID?, merchant: String?, movementID: UUID?, facts: InsightFacts = InsightFacts()) {
         self.id = id
         self.kind = kind
         self.severity = severity
@@ -32,8 +51,12 @@ public struct Insight: Equatable, Sendable, Identifiable {
         self.bank = bank
         self.merchant = merchant
         self.movementID = movementID
+        self.facts = facts
     }
 }
+
+/// El detalle del cobro duplicado (no lleva cifras: el aviso con el ojo cerrado lo conserva).
+public let duplicateChargeDetail = "Dos cargos iguales en pocos minutos"
 
 private let feedLimit = 12
 private let recentWindow: TimeInterval = 7 * 86_400
@@ -47,9 +70,9 @@ private func dayKey(_ date: Date, _ calendar: Calendar) -> String {
 
 private func make(_ kind: InsightKind, _ severity: InsightSeverity, subject: String, title: String, detail: String? = nil,
                   date: Date, bank: BankID? = nil, merchant: String? = nil, movementID: UUID? = nil,
-                  calendar: Calendar) -> Insight {
+                  facts: InsightFacts = InsightFacts(), calendar: Calendar) -> Insight {
     Insight(id: "\(kind.rawValue)|\(subject)|\(dayKey(date, calendar))", kind: kind, severity: severity, title: title,
-            detail: detail, date: date, bank: bank, merchant: merchant, movementID: movementID)
+            detail: detail, date: date, bank: bank, merchant: merchant, movementID: movementID, facts: facts)
 }
 
 private func isMuted(_ merchant: String?, in state: LedgerState) -> Bool {
@@ -145,7 +168,7 @@ private func movementInsights(_ m: Movement, in state: LedgerState, index: Merch
             if twin {
                 out.append(make(.duplicateCharge, .warning, subject: m.id.uuidString,
                                 title: "Posible cobro duplicado: \(amount)\(merchantSuffix(m.merchant))",
-                                detail: "Dos cargos iguales en pocos minutos",
+                                detail: duplicateChargeDetail,
                                 date: m.date, bank: m.bank, merchant: m.merchant, movementID: m.id, calendar: calendar))
             }
         }
@@ -156,7 +179,8 @@ private func movementInsights(_ m: Movement, in state: LedgerState, index: Merch
             out.append(make(.subscriptionPriceChange, .info, subject: "\(m.bank.rawValue)|\(key)",
                             title: "\(sub.merchant) ha \(up ? "subido" : "bajado") \(formatEUR(abs(sub.amountCents - before)))",
                             detail: "Ahora \(formatEUR(sub.amountCents)) al mes",
-                            date: m.date, bank: m.bank, merchant: m.merchant, movementID: m.id, calendar: calendar))
+                            date: m.date, bank: m.bank, merchant: m.merchant, movementID: m.id,
+                            facts: InsightFacts(up: up), calendar: calendar))
         }
     }
     return out
@@ -185,7 +209,7 @@ private func budgetInsight(_ status: BudgetStatus, exceeded: Bool, date: Date, m
     }
     return make(exceeded ? .budgetExceeded : .budgetWarning, .warning, subject: "\(status.id)|\(monthKey(date, calendar))",
                 title: title, detail: detail, date: date, bank: movement?.bank, merchant: movement?.merchant,
-                movementID: movement?.id, calendar: calendar)
+                movementID: movement?.id, facts: InsightFacts(budgetScope: label), calendar: calendar)
 }
 
 /// Presupuestos (el del mes y el de su categoría) que este pago cruza: del 80 % hacia arriba o del 100 % hacia arriba.
@@ -304,7 +328,8 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar,
             }
             out.append(make(.subscriptionUpcoming, .info, subject: "\(sub.bank.rawValue)|\(sub.id)",
                             title: "\(sub.merchant) se cobra \(when): \(formatEUR(sub.amountCents))",
-                            date: sub.nextDate, bank: sub.bank, merchant: sub.merchant, calendar: calendar))
+                            date: sub.nextDate, bank: sub.bank, merchant: sub.merchant,
+                            facts: InsightFacts(when: when), calendar: calendar))
         }
     }
 
@@ -321,7 +346,8 @@ public func insights(for state: LedgerState, now: Date, calendar: Calendar,
         let below = pace.differenceCents < 0
         out.append(make(.spendingPace, below ? .positive : .info, subject: "month",
                         title: "Vas \(formatEUR(abs(pace.differenceCents))) por \(below ? "debajo" : "encima") del mes pasado",
-                        detail: "Llevas \(formatEUR(pace.thisMonthCents)) este mes", date: now, calendar: calendar))
+                        detail: "Llevas \(formatEUR(pace.thisMonthCents)) este mes", date: now,
+                        facts: InsightFacts(up: !below), calendar: calendar))
     }
 
     let weekday = calendar.component(.weekday, from: now)

@@ -1,9 +1,16 @@
 import MiBancoCore
 
-/// Las cuatro tarjetas del carrusel de Inicio, en orden: «Todo» y una por banco.
-/// La tarjeta elegida es también el filtro de la lista de movimientos.
+/// Las tarjetas del carrusel de Inicio, en orden: «Todo», una por banco y «Cartera» cuando hay inversiones.
+/// La tarjeta elegida es también el filtro de la lista de movimientos (o de posiciones en «Cartera»).
 enum AccountCard: String, CaseIterable, Hashable, Identifiable, Sendable {
-    case all, rev, ima, tr
+    case all, rev, ima, tr, investments
+
+    /// Las cuatro tarjetas bancarias (sin la de inversiones).
+    static let bankCards: [AccountCard] = [.all, .rev, .ima, .tr]
+
+    static func visible(hasInvestments: Bool) -> [AccountCard] {
+        hasInvestments ? Self.allCases : bankCards
+    }
 
     var id: String { rawValue }
 
@@ -17,7 +24,7 @@ enum AccountCard: String, CaseIterable, Hashable, Identifiable, Sendable {
 
     var bank: BankID? {
         switch self {
-        case .all: nil
+        case .all, .investments: nil
         case .rev: .rev
         case .ima: .ima
         case .tr: .tr
@@ -26,17 +33,33 @@ enum AccountCard: String, CaseIterable, Hashable, Identifiable, Sendable {
 
     /// Texto del control segmentado.
     var segmentTitle: String {
-        bank?.shortName ?? "Todo"
+        switch self {
+        case .all: "Todo"
+        case .investments: "Cartera"
+        case .rev, .ima, .tr: bank?.shortName ?? ""
+        }
     }
 
-    /// Para VoiceOver ("Todo", "Revolut", "Trade Republic").
+    /// Para VoiceOver ("Todo", "Revolut", "Trade Republic", "Inversiones").
     var spokenName: String {
-        bank?.displayName ?? "Todo"
+        switch self {
+        case .all: "Todo"
+        case .investments: "Inversiones"
+        case .rev, .ima, .tr: bank?.displayName ?? ""
+        }
     }
 
     var material: CardMaterial {
-        bank?.material ?? .all
+        switch self {
+        case .all: .all
+        case .investments: .investments
+        case .rev, .ima, .tr: bank?.material ?? .all
+        }
     }
 
     var index: Int { Self.allCases.firstIndex(of: self) ?? 0 }
+
+    func index(in cards: [AccountCard]) -> Int {
+        cards.firstIndex(of: self) ?? 0
+    }
 }

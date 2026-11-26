@@ -7,8 +7,17 @@ import MiBancoCore
 struct SubscriptionsView: View {
     let model: LedgerModel
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var errorTick = 0
+
+    /// Solo en la demo con `-MiBancoDemoBigSubscriptions`: la cabecera enseña importes mil veces mayores (cinco y seis
+    /// cifras), para comprobar que salta de línea en vez de salirse. En la app de verdad, 1.
+    private static var headerScale: Int {
+        #if DEBUG
+        if DemoMode.isActive, DemoMode.bigSubscriptionTotals { return 1_000 }
+        #endif
+        return 1
+    }
 
     var body: some View {
         let snapshot = model.snapshot
@@ -22,16 +31,16 @@ struct SubscriptionsView: View {
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.top, Theme.Space.small)
                         .accessibilityIdentifier("suscripciones.vacio")
-                        .staggeredEntrance(0, rise: 8)
+                        .motionEntrance(0, rise: 8)
                 } else {
-                    SubscriptionsHeader(monthlyCents: snapshot.subscriptionsMonthlyCents,
-                                        yearlyCents: snapshot.subscriptionsYearlyCents)
+                    SubscriptionsHeader(monthlyCents: snapshot.subscriptionsMonthlyCents * Self.headerScale,
+                                        yearlyCents: snapshot.subscriptionsYearlyCents * Self.headerScale)
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.bottom, 10)
-                        .staggeredEntrance(0, rise: 8)
+                        .motionEntrance(0, rise: 8)
                     ForEach(Array(snapshot.subscriptions.enumerated()), id: \.element.id) { i, row in
-                        SubscriptionRowView(row: row, isLast: i == snapshot.subscriptions.count - 1, hideAction: { hide(row) })
-                            .staggeredEntrance(1 + i)
+                        SubscriptionRowView(row: row, isLast: i == snapshot.subscriptions.count - 1, index: i, hideAction: { hide(row) })
+                            .motionEntrance(1 + i)
                             .transition(rowTransition)
                     }
                     // Ocultar una fila es un menú contextual: se dice aquí para que se pueda descubrir.
@@ -42,7 +51,7 @@ struct SubscriptionsView: View {
                         .padding(.horizontal, Theme.Space.gutter)
                         .padding(.top, Theme.Space.row)
                         .accessibilityIdentifier("suscripciones.pie")
-                        .staggeredEntrance(1 + snapshot.subscriptions.count)
+                        .motionEntrance(1 + snapshot.subscriptions.count)
                 }
 
                 if !snapshot.hiddenSubscriptions.isEmpty {
@@ -82,12 +91,12 @@ struct SubscriptionsView: View {
 
     /// La fila se va con un muelle sin rebote hacia el lado; con Reducir movimiento, solo se funde.
     private var rowTransition: AnyTransition {
-        reduceMotion ? .opacity : .asymmetric(insertion: .opacity, removal: .opacity.combined(with: .move(edge: .leading)))
+        motion.reduce ? .opacity : .asymmetric(insertion: .opacity, removal: .opacity.combined(with: .move(edge: .leading)))
     }
 
     private func hide(_ row: LedgerSnapshot.SubscriptionRow) {
         do {
-            try withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
+            try withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
                 try model.setSubscriptionDismissed(true, id: row.id)
             }
         } catch {
@@ -100,7 +109,7 @@ struct SubscriptionsView: View {
 struct HiddenSubscriptionsView: View {
     let model: LedgerModel
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dismiss) private var dismiss
     @State private var errorTick = 0
 
@@ -114,11 +123,11 @@ struct HiddenSubscriptionsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, Theme.Space.gutter)
                     .padding(.bottom, 8)
-                    .staggeredEntrance(0, rise: 8)
+                    .motionEntrance(0, rise: 8)
                 ForEach(Array(hidden.enumerated()), id: \.element.id) { i, row in
                     SubscriptionRowView(row: row, isLast: i == hidden.count - 1, restoreAction: { restore(row) })
-                        .staggeredEntrance(1 + i)
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .trailing)))
+                        .motionEntrance(1 + i)
+                        .transition(motion.reduce ? .opacity : .opacity.combined(with: .move(edge: .trailing)))
                 }
             }
             .padding(.bottom, Theme.Space.section)
@@ -136,7 +145,7 @@ struct HiddenSubscriptionsView: View {
 
     private func restore(_ row: LedgerSnapshot.SubscriptionRow) {
         do {
-            try withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal) {
+            try withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
                 try model.setSubscriptionDismissed(false, id: row.id)
             }
         } catch {
@@ -145,28 +154,72 @@ struct HiddenSubscriptionsView: View {
     }
 }
 
-/// «24,98 € al mes · 299,76 € al año»: las dos cifras cuentan desde 0 al montar y ruedan si cambian.
+/// «24,98 € al mes · 299,76 € al año»: las dos cifras ruedan desde 0 al montar y de la anterior a la nueva si cambian
+/// (`RollingAmount`; con el ojo cerrado, «•••,•• €» y nunca una cifra). Las dos partes se colocan como un párrafo
+/// (`ParagraphFlow`): si no caben en una línea (importes largos, letra grande), la segunda baja a la línea siguiente; nunca
+/// se salen del ancho ni se montan dos copias. Con letra de accesibilidad, una debajo de la otra.
 private struct SubscriptionsHeader: View {
     let monthlyCents: Int
     let yearlyCents: Int
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
-        HStack(spacing: 0) {
-            CountingAmount(cents: monthlyCents).privateAmount()
-            Text(" al mes · ")
-            CountingAmount(cents: yearlyCents).privateAmount()
-            Text(" al año")
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(ParagraphFlow())
+        layout {
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                RollingAmount(cents: monthlyCents, inline: true)
+                Text(stacked ? " al mes" : " al mes · ")
+                    .lineLimit(1)
+                    .fixedSize()
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                RollingAmount(cents: yearlyCents, inline: true)
+                Text(" al año")
+                    .lineLimit(1)
+                    .fixedSize()
+            }
         }
         .titan(.cardTitle)
         .foregroundStyle(Theme.label)
-        .lineLimit(2)
-        .minimumScaleFactor(0.8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(spokenAmount(monthlyCents, hidden: preferences.privateMode)) al mes, \(spokenAmount(yearlyCents, hidden: preferences.privateMode)) al año")
         .accessibilityIdentifier("suscripciones.total")
+    }
+}
+
+/// «HOY»: la etiqueta de la suscripción que se cobra hoy. Sale con un salto (muelle `snap`, de 0,3 a 1) poco después de
+/// su fila; con Reducir movimiento, se funde. La fila ya dice «Próximo cobro: hoy»: para VoiceOver la etiqueta no existe.
+private struct TodayTag: View {
+    /// Orden de su fila: sale después de que la fila haya entrado.
+    let index: Int
+
+    @Environment(\.motion) private var motion
+    @State private var popped = false
+
+    var body: some View {
+        Text("HOY")
+            .titan(.captionStrong)
+            .fontWeight(.semibold)
+            .foregroundStyle(.black)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(Theme.label, in: Capsule())
+            .scaleEffect(popped || motion.reduce ? 1 : 0.3)
+            .opacity(popped ? 1 : 0)
+            .accessibilityHidden(true)
+            .onAppear {
+                guard !popped else { return }
+                let delay = motion.seconds(0.32) + motion.stagger(index, firstGap: 0.055, decay: 0.8)
+                withAnimation(motion.animation(.snap).delay(motion.reduce ? 0 : delay)) { popped = true }
+            }
     }
 }
 
@@ -175,14 +228,17 @@ private struct SubscriptionsHeader: View {
 struct SubscriptionRowView: View {
     let row: LedgerSnapshot.SubscriptionRow
     var isLast = false
+    /// Orden en la lista: retrasa el salto de «HOY» hasta que la fila ha entrado.
+    var index = 0
     /// Nil en las ocultas.
     var hideAction: (() -> Void)?
     /// Solo en las ocultas.
     var restoreAction: (() -> Void)?
 
-    init(row: LedgerSnapshot.SubscriptionRow, isLast: Bool, hideAction: @escaping () -> Void) {
+    init(row: LedgerSnapshot.SubscriptionRow, isLast: Bool, index: Int = 0, hideAction: @escaping () -> Void) {
         self.row = row
         self.isLast = isLast
+        self.index = index
         self.hideAction = hideAction
     }
 
@@ -208,10 +264,16 @@ struct SubscriptionRowView: View {
                     MerchantTile(image: logos.image(merchant: row.merchant, domain: row.logoDomain, isShop: true),
                                  symbol: "repeat", size: tileSize)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(row.merchant)
-                            .titan(.row)
-                            .foregroundStyle(Theme.label)
-                            .lineLimit(stacked ? nil : 1)
+                        HStack(alignment: .center, spacing: 8) {
+                            Text(row.merchant)
+                                .titan(.row)
+                                .foregroundStyle(Theme.label)
+                                .lineLimit(stacked ? nil : 1)
+                            // Solo en las activas: una oculta no avisa de su cobro.
+                            if row.chargesToday, restoreAction == nil {
+                                TodayTag(index: index)
+                            }
+                        }
                         Text(row.nextCharge)
                             .titan(.subtitle)
                             .foregroundStyle(Theme.label2)
@@ -220,19 +282,7 @@ struct SubscriptionRowView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 VStack(alignment: stacked ? .leading : .trailing, spacing: 2) {
-                    Text(formatEUR(row.amountCents))
-                        .titan(.row)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .privateAmount()
-                    if let change = row.priceChange {
-                        Text(change)
-                            .titan(.meta)
-                            .foregroundStyle(row.priceWentUp ? Theme.warning : Theme.label2)
-                            .lineLimit(1)
-                            .privateAmount(radius: 6)
-                    }
+                    amountTexts
                 }
                 .padding(.leading, stacked ? tileSize + 14 : 0)
             }
@@ -263,9 +313,28 @@ struct SubscriptionRowView: View {
                 .opacity(isLast ? 0 : 1)
         }
         .contentShape(Rectangle())
-        .contextMenu {
+        .gatedContextMenu(privateTitle: row.merchant) {
             if let hideAction {
                 Button("Esto no es una suscripción", systemImage: "eye.slash", action: hideAction)
+            }
+        } preview: {
+            HStack(spacing: 14) {
+                MerchantTile(image: logos.image(merchant: row.merchant, domain: row.logoDomain, isShop: true),
+                             symbol: "repeat", size: tileSize)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(row.merchant)
+                        .titan(.row)
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                    Text(row.nextCharge)
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label2)
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .trailing, spacing: 2) {
+                    amountTexts
+                }
             }
         }
         .accessibilityElement(children: restoreAction == nil ? .ignore : .contain)
@@ -275,6 +344,27 @@ struct SubscriptionRowView: View {
             restoreAction?()
         }
         .accessibilityIdentifier(restoreAction == nil ? "suscripciones.fila" : "suscripciones.filaOculta")
+    }
+
+    /// El importe y, debajo, el cambio de precio. Con el ojo cerrado no se monta ninguna cifra: la máscara del kit
+    /// («•••,•• €») y «Sube ••• €», no un desenfoque.
+    @ViewBuilder private var amountTexts: some View {
+        let hidden = preferences.privateMode
+        Text(hidden ? maskedEUR(row.amountCents, sign: false) : formatEUR(row.amountCents))
+            .titan(.row)
+            .foregroundStyle(Theme.label)
+            .lineLimit(1)
+            .fixedSize()
+            .contentTransition(.identity)
+            .privacySensitive()
+        if let change = row.priceChange {
+            Text(hidden ? maskingAmounts(change) : change)
+                .titan(.meta)
+                .foregroundStyle(row.priceWentUp ? Theme.warning : Theme.label2)
+                .lineLimit(1)
+                .contentTransition(.identity)
+                .privacySensitive()
+        }
     }
 
     private var spoken: String {

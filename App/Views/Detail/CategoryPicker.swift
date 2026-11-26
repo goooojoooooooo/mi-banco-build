@@ -14,11 +14,16 @@ struct CategoryPickerRow: View {
     let model: LedgerModel
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
+    /// D2: la ficha blanca de la elegida es UNA sola pieza que se desliza a la nueva al elegir.
+    @Namespace private var selection
     @ScaledMetric(relativeTo: .body) private var tileHeight: CGFloat = 60
     @State private var expanded: Bool
     @State private var applyToMerchant: Bool
     @State private var selectTick = 0
+    /// m-1: cuántas veces se ha elegido cada categoría: solo bota el símbolo de la que se elige (no el de la que se deja).
+    @State private var bounces: [SpendingCategory: Int] = [:]
     @State private var errorTick = 0
     @State private var failed = false
 
@@ -45,6 +50,15 @@ struct CategoryPickerRow: View {
     private var merchantName: String? {
         guard let merchant = movement.merchant, !normalizeMerchant(merchant).isEmpty else { return nil }
         return merchant
+    }
+
+    /// Con elección propia en el pago, el botón quita solo esa; sin ella y con una para todo el comercio, quita la del
+    /// comercio y lo dice con su nombre (el mismo que muestra «Aplicar a todo lo de …»).
+    private var resetTitle: String {
+        if !model.hasOwnCategory(movement.id), let merchant = merchantName {
+            return "Quitar mi categoría de todo \(merchant)"
+        }
+        return "Volver a la categoría automática"
     }
 
     private var fold: Animation { reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal }
@@ -115,14 +129,15 @@ struct CategoryPickerRow: View {
             LazyVGrid(columns: columns, spacing: 8) {
                 ForEach(Array(SpendingCategory.allCases.enumerated()), id: \.element) { index, category in
                     CategoryTile(category: category, selected: category == current, index: index, height: tileHeight,
-                                 fixedHeight: !typeSize.isAccessibilitySize) {
+                                 fixedHeight: !typeSize.isAccessibilitySize, selection: selection,
+                                 bounce: bounces[category] ?? 0) {
                         choose(category)
                     }
                 }
             }
             if model.hasChosenCategory(movement.id) {
                 Button(action: resetToAutomatic) {
-                    Text("Volver a la categoría automática")
+                    Text(resetTitle)
                         .titan(.option)
                         .foregroundStyle(Theme.label)
                         .multilineTextAlignment(.center)
@@ -157,9 +172,14 @@ struct CategoryPickerRow: View {
             return
         }
         do {
-            try model.setCategory(category, for: movement.id, applyToMerchant: applyToMerchant && merchantName != nil)
+            // D2: la ficha blanca se desliza a la elegida (el muelle de los indicadores) y la rejilla se pliega cuando
+            // ya ha llegado, para que se vea. Con Reducir movimiento, fundidos y sin espera.
+            try withAnimation(motion.animation(.indicator)) {
+                try model.setCategory(category, for: movement.id, applyToMerchant: applyToMerchant && merchantName != nil)
+            }
             selectTick += 1
-            withAnimation(fold) {
+            if !motion.reduce { bounces[category, default: 0] += 1 }
+            withAnimation(fold.delay(motion.reduce ? 0 : motion.seconds(0.32))) {
                 failed = false
                 expanded = false
             }
@@ -192,9 +212,14 @@ private struct CategoryTile: View {
     let height: CGFloat
     /// false en tamaños de accesibilidad: la ficha crece con su texto en vez de recortarlo.
     let fixedHeight: Bool
+    /// D2: la ficha blanca compartida (una sola, se desliza de la antigua a la nueva).
+    let selection: Namespace.ID
+    /// Sube solo cuando se elige ESTA ficha: su símbolo bota.
+    let bounce: Int
     let action: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var shown = false
 
     private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -205,6 +230,8 @@ private struct CategoryTile: View {
                 Image(systemName: category.symbolName)
                     .font(.system(size: 20, weight: .regular))
                     .frame(height: 24)
+                    // D2: el símbolo de la elegida da un bote al elegirla (con Reducir movimiento, no).
+                    .symbolEffect(.bounce, value: bounce)
                 Text(category.displayName)
                     .titan(.caption)
                     .lineLimit(fixedHeight ? 2 : nil)
@@ -216,7 +243,13 @@ private struct CategoryTile: View {
             .padding(.horizontal, 4)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: height, maxHeight: fixedHeight ? height : nil)
-            .background(selected ? Theme.tileSelected : Theme.chipFill, in: shape)
+            .background {
+                if selected {
+                    shape.fill(Theme.tileSelected).matchedGeometryEffect(id: "selected-category", in: selection)
+                } else {
+                    shape.fill(Theme.chipFill)
+                }
+            }
             .overlay(alignment: .topTrailing) {
                 if selected {
                     ZStack {

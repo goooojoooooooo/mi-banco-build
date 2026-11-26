@@ -46,16 +46,23 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        CFBundleDisplayName: Mi Banco
+        CFBundleDisplayName: Onyx
         NSFaceIDUsageDescription: Para que solo tú veas tu dinero
         NSSupportsLiveActivities: true
+        # Actualización de bancos en segundo plano (tarea 10)
+        UIBackgroundModes: [fetch]
+        BGTaskSchedulerPermittedIdentifiers: [com.mibanco.app.refresh]
         # Conexión bancaria (tarea 9): esquema de vuelta del banco
         CFBundleURLTypes:
           - CFBundleURLName: com.mibanco.app.callback
             CFBundleURLSchemes: [mibanco]
+        LSApplicationQueriesSchemes: [revolut, imagin, traderepublic, shortcuts]
         ALTAppGroups: [group.com.mibanco.shared]
         UIUserInterfaceStyle: Dark
-        UILaunchScreen: {}
+        # Pantalla de lanzamiento del sistema: negro liso (color `LaunchBlack` del catálogo), también con el iPhone en
+        # modo claro; así no hay un destello blanco antes del arranque negro de la app.
+        UILaunchScreen:
+          UIColorName: LaunchBlack
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
@@ -91,7 +98,7 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        CFBundleDisplayName: Mi Banco
+        CFBundleDisplayName: Onyx
         ALTAppGroups: [group.com.mibanco.shared]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.usernotifications.content-extension
@@ -135,7 +142,7 @@ targets:
       properties:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
-        CFBundleDisplayName: Mi Banco
+        CFBundleDisplayName: Onyx
         ALTAppGroups: [group.com.mibanco.shared]
         NSExtension:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension

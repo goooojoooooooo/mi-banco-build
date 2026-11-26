@@ -9,4 +9,5 @@ enum SpendingRoute: Hashable {
     case transfers
     case subscriptions
     case hiddenSubscriptions
+    case upcoming
 }

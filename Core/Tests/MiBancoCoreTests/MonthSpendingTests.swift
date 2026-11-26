@@ -58,6 +58,9 @@ private func ledger(_ movements: [Movement]) -> LedgerState { LedgerState(moveme
         #expect(formatSignedPercent(12) == "+12\u{00A0}%")
         #expect(formatSignedPercent(-30) == "-30\u{00A0}%")
         #expect(formatSignedPercent(0) == "0\u{00A0}%")
+        #expect(formatSignedPercent(999) == "+999\u{00A0}%")
+        #expect(formatSignedPercent(1_000) == ">999\u{00A0}%")
+        #expect(formatSignedPercent(59_900) == ">999\u{00A0}%")
     }
 
     @Test func porCategoria() {

@@ -4,21 +4,8 @@ import XCTest
 /// con pausas para que cada animación se vea. Aserciones mínimas (que el elemento exista); lo único que debe pasar es no romper.
 /// Solo `-MiBancoDemo`: la demo no desactiva el telón de arranque ni ningún movimiento (el telón, el montaje por capas,
 /// las cifras que cuentan y el carrusel dependen solo de Reducir movimiento, que el simulador trae apagado).
-final class MotionTourTests: XCTestCase {
-    var app: XCUIApplication!
-
-    override func setUpWithError() throws {
-        continueAfterFailure = false
-        addUIInterruptionMonitor(withDescription: "Alerta del sistema") { alert in
-            for name in ["Permitir", "Allow", "OK", "Aceptar", "Not Now", "Ahora no"] {
-                let b = alert.buttons[name]
-                if b.exists { b.tap(); return true }
-            }
-            return false
-        }
-        app = XCUIApplication()
-        app.launchArguments = ["-MiBancoDemo", "-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
-    }
+/// El recorrido va a tiempo real (escala 1) para que el vídeo enseñe la velocidad de verdad; las ráfagas, a cámara lenta.
+final class MotionTourTests: MotionTourCase {
 
     /// Pausa entre pasos, para que se vea cada animación en el vídeo.
     private func beat(_ seconds: TimeInterval = 1.2) {
@@ -35,8 +22,40 @@ final class MotionTourTests: XCTestCase {
         return app.descendants(matching: .any).matching(predicate).firstMatch
     }
 
+    /// Ráfaga de prueba de la tubería: en la galería de movimiento, un ingreso hace rodar las cifras del importe grande.
+    /// A ×4 la cuenta dura varios segundos: 16 fotogramas cada 0,4 s la enseñan a medias en varios de ellos.
+    func testGalleryBurst() throws {
+        launch(["-MiBancoMotionGallery", "-MiBancoMotionGalleryPage", "cifras"])
+        XCTAssertTrue(app.staticTexts["gallery.title"].waitForExistence(timeout: 15), "La galería no aparece")
+        let income = app.buttons["gallery.income"]
+        XCTAssertTrue(income.waitForExistence(timeout: 10), "No aparece el botón Ingreso")
+        let deadline = Date().addingTimeInterval(10)
+        while !income.isHittable, Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
+        XCTAssertTrue(income.isHittable, "El botón Ingreso no se puede tocar")
+        income.tap()
+        burst("gallery-burst", frames: 16, every: 0.4)
+    }
+
+    /// El ojo sobre una cifra con millares (lote 2): al abrirlo, las cifras ruedan desde el barajado y la columna de
+    /// millares aparece según rueda — nunca «0.145,19 €»—; al cerrarlo, barajado y puntos. Debajo, la frase con el
+    /// importe en línea (sin blanco delante cuando está oculto) y el importe en euros enteros («••• €» ↔ «1.290 €»).
+    func testGalleryEyeOnThousands() throws {
+        launch(["-MiBancoMotionGallery", "-MiBancoMotionGalleryPage", "frases", "-MiBancoDemoPrivate"])
+        let eye = app.buttons["gallery.sentence.eye"]
+        XCTAssertTrue(eye.waitForExistence(timeout: 20), "No aparece el ojo de la sección de frases")
+        let deadline = Date().addingTimeInterval(10)
+        while !eye.isHittable, Date() < deadline { Thread.sleep(forTimeInterval: 0.25) }
+        XCTAssertTrue(eye.isHittable, "El ojo de la sección de frases no se puede tocar")
+        burst("gallery-frases-ojo", frames: 2, every: 0.3)
+        eye.tap()
+        burst("gallery-eye-thousands", frames: 16, every: 0.18)
+        Thread.sleep(forTimeInterval: 2)
+        eye.tap()
+        burst("gallery-eye-thousands-cerrar", frames: 12, every: 0.15)
+    }
+
     func testTour() throws {
-        app.launch()
+        launch(scale: 1)
         // Lo que se ve de la llegada: el vídeo lo graba entero; aquí solo se espera.
         beat(3)
 

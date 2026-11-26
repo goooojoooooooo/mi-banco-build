@@ -994,7 +994,7 @@ final class MotionScreensTests: XCTestCase {
     /// (`-MiBancoDemoCloseEyeAfter`). El campo tiene que soltar el foco (el teclado se va) y pasar a la máscara: ningún
     /// dígito dibujado y ningún importe con cifras en pantalla.
     private func closeTheEyeWhileEditingAndCheck(_ extra: [String]) {
-        let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoCloseEyeAfter", "12"] + extra)
+        let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoSettingsCloseEyeAfter", "12"] + extra)
         XCTAssertFalse(value(field).hasPrefix("importe oculto"), "El ojo se cerró antes de empezar a editar")
         field.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
@@ -1336,8 +1336,10 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 10), "No se ve Suscripciones")
         let probe = element("suscripciones.rollTiming")
         XCTAssertTrue(probe.waitForExistence(timeout: 5), "Falta la sonda de duración de Suscripciones")
-        let expected = "ultimos2=383,383;explicitos=2"
-        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", expected), probe, timeout: 5),
+        // En Sutil (×0,85), 0,45 s × 0,85 = 382,5 ms (382 o 383 ms según el redondeo por número de dígitos; con `.brief`
+        // se quedaba en 450 ms y `explicitos=0`).
+        let expected = NSPredicate(format: "value MATCHES %@", "^ultimos2=38[0-5],38[0-5];explicitos=2;.*$")
+        XCTAssertTrue(waitFor(expected, probe, timeout: 5),
                       "Los totales de Suscripciones no rodaron en 0,45 s escalados por movimiento: \(value(probe))")
     }
 

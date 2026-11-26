@@ -68,12 +68,13 @@ extension DemoMode {
     /// campo de importe enmascarado vuelve a llevar la cifra real dentro, pintada en transparente.
     static var regressesMaskedField: Bool { isActive && arguments.contains("-MiBancoDemoRegressMaskedField") }
 
-    /// `-MiBancoDemoCloseEyeAfter <s>`:    /// `-MiBancoDemoCloseEyeAfter <s>`: Ajustes cierra el ojo solo (como el interruptor) a los segundos dados (reales).
-    /// Para grabar desde ANTES del cierre (un fotograma de control con las cifras) y para cerrar el ojo con un saldo en
-    /// edición sin tocar nada (el teclado taparía el interruptor).
+    /// `-MiBancoDemoSettingsCloseEyeAfter <s>` (o `-MiBancoDemoCloseEyeAfter <s>`): Ajustes cierra el ojo solo (como el
+    /// interruptor) a los segundos dados (reales) desde que aparece «Modo privado». Usar el nombre propio evita chocar
+    /// con `-MiBancoDemoCloseEyeAfter` de `RootView`, que cuenta desde el arranque.
     static var closesEyeAfterSeconds: Double? {
-        guard isActive, let raw = value(after: "-MiBancoDemoCloseEyeAfter"), let seconds = Double(raw), seconds.isFinite,
-              seconds > 0 else { return nil }
+        guard isActive,
+              let raw = value(after: "-MiBancoDemoSettingsCloseEyeAfter") ?? value(after: "-MiBancoDemoCloseEyeAfter"),
+              let seconds = Double(raw), seconds.isFinite, seconds > 0 else { return nil }
         return min(seconds, 120)
     }
 

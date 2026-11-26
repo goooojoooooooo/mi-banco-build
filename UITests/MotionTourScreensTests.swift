@@ -470,7 +470,7 @@ final class MotionTourScreensTests: MotionTourCase {
         // El ojo se cierra solo, por el mismo camino que el interruptor, 9 s después de que el interruptor aparezca en
         // pantalla; la ráfaga empieza antes: los primeros fotogramas son el control (cifras a la vista) y después el
         // cierre, fotograma a fotograma (lote de cierre, ronda 1, m-2: antes empezaba después del toque).
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoCloseEyeAfter", "9"])
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoSettingsCloseEyeAfter", "9"])
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
         let toggle = element("settings-private-mode")
         scrollDown(to: toggle)

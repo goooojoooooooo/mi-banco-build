@@ -1198,9 +1198,12 @@ final class MotionHomeTests: XCTestCase {
         let row = firstRow()
         XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas")
         XCTAssertEqual(homeProbe()["importeOculto"], "0", "El importe ya estaba apagado: \(homeProbe())")
-        // Con texto grande la primera fila queda bajo el borde: se sube la lista hasta tenerla a la vista.
+        // Con texto grande la primera fila es muy alta y sus dos cápsulas van apiladas: se sube la lista hasta que la
+        // fila entera (incluida la cápsula inferior «No es mío») quede por encima de la barra de pestañas, así `flag.tap()`
+        // no desplaza la lista (desplazar la lista cierra la fila abierta).
         let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
-        for _ in 0..<8 where !row.isHittable {
+        let bottom = app.windows.firstMatch.frame.maxY - 160
+        for _ in 0..<10 where !(row.exists && row.isHittable && row.frame.maxY < bottom) {
             centre.press(forDuration: 0.1, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: -260)), withVelocity: 500,
                          thenHoldForDuration: 0.3)
         }

@@ -302,9 +302,6 @@ private struct ThresholdRow: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
 
-    /// Con el ojo cerrado (y sin editar) el umbral no se dibuja: en su sitio va la máscara del kit.
-    private var masked: Bool { preferences.privateMode && !focused && !text.isEmpty }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.tight) {
             HStack(spacing: Theme.Space.row) {
@@ -316,7 +313,7 @@ private struct ThresholdRow: View {
                     SavedCheck()
                         .transition(.opacity)
                 }
-                MaskedAmountTextField(placeholder: "100,00 €", text: textBinding, masked: masked)
+                MaskedAmountTextField(placeholder: "100,00 €", text: textBinding, hidden: preferences.privateMode, editing: focused)
                     .titan(.option)
                     .fontWeight(.semibold)
                     .multilineTextAlignment(.trailing)

@@ -1,31 +1,49 @@
 import SwiftUI
+import MiBancoCore
 
 /// Lo que enseña un campo de importe con el ojo cerrado y sin editar: la máscara del kit.
 let maskedFieldMask = maskedEUR(0, sign: false)
 
-/// Un campo de importe que puede ir enmascarado (Ajustes, Avisos, bienvenida, Presupuestos: un solo componente).
+/// Un campo de importe que obedece al ojo (Ajustes, Avisos, bienvenida, Presupuestos: un solo componente).
 ///
-/// Con `masked` (el ojo cerrado y sin editar) el campo CONTIENE la máscara «•••,•• €», no la cifra: la cifra no se
-/// monta ni se pinta en transparente. Escribir en el campo enmascarado no hace nada (el setter no guarda); al tocarlo, quien
-/// lo usa lo enfoca, deja de estar enmascarado y vuelve el texto de verdad. El cambio de cifra a máscara (y al revés) es en
-/// el acto: sin transición de contenido ni animación; el campo es sensible para las capturas del sistema. VoiceOver dice
-/// «importe oculto».
+/// Qué enseña y qué guarda lo decide Core (`MaskedFieldEditing`, decisión del dueño: con el ojo cerrado la cifra guardada
+/// NUNCA se ve, tampoco al tocar el campo para editarlo):
+/// - Ojo abierto: el texto guardado, como siempre.
+/// - Ojo cerrado y sin editar: el campo CONTIENE la máscara «•••,•• €» (la cifra no se monta ni se pinta en transparente).
+/// - Ojo cerrado y editando: el campo se abre vacío y enseña solo lo que se teclea; lo tecleado es lo que se guarda y, si
+///   se borra todo, se guarda el valor de antes (nunca un 0, un vacío ni la máscara).
+/// El cambio de cifra a máscara es en el acto: sin transición de contenido ni animación; el campo es sensible para las
+/// capturas del sistema. `editing` es el foco del campo, que lleva quien lo usa (con `.focused`).
 ///
 /// La sonda de las pruebas (solo DEBUG, con `-MiBancoDemoDrawnAmounts`) apunta EL MISMO texto que recibe el campo
-/// (`shown`): no se puede separar de lo que se dibuja (lote de cierre, ronda 1, I-1).
+/// (`shown`): no se puede separar de lo que se dibuja.
 struct MaskedAmountTextField: View {
     let placeholder: String
     @Binding var text: String
-    let masked: Bool
+    /// El ojo está cerrado.
+    let hidden: Bool
+    /// El campo tiene el foco.
+    let editing: Bool
+
+    @State private var edit = MaskedFieldEditing()
 
     var body: some View {
         let shown = shownText
         TextField(placeholder, text: shown)
             .foregroundStyle(textColor)
             .contentTransition(.identity)
-            .animation(nil, value: masked)
+            .animation(nil, value: hidden)
+            .animation(nil, value: editing)
             .privacySensitive()
-            .accessibilityValue((masked ? "importe oculto" : text) + drawnAmountForTests(shown.wrappedValue))
+            .accessibilityValue(edit.spoken(stored: text, hidden: hidden, editing: editing)
+                + drawnAmountForTests(shown.wrappedValue))
+            .onChange(of: editing, initial: true) { _, now in
+                if now {
+                    edit.begin(stored: text, hidden: hidden)
+                } else {
+                    edit.end()
+                }
+            }
     }
 
     /// El texto que se le da al campo (y que apunta la sonda).
@@ -35,12 +53,22 @@ struct MaskedAmountTextField: View {
         // real dentro del campo, pintado en transparente.
         if DemoMode.isActive, DemoMode.regressesMaskedField { return $text }
         #endif
-        return masked ? Binding(get: { maskedFieldMask }, set: { _ in }) : $text
+        switch edit.shown(stored: text, hidden: hidden, editing: editing) {
+        case .mask:
+            return Binding(get: { maskedFieldMask }, set: { _ in })
+        case .text(let shown):
+            if !hidden { return $text }
+            if editing, edit.editsHidden {
+                // Lo tecleado se enseña; lo que se guarda lo decide Core (lo tecleado o, vacío, el valor de antes).
+                return Binding(get: { edit.draft }, set: { typed in text = edit.type(typed) })
+            }
+            return Binding(get: { shown }, set: { _ in })
+        }
     }
 
     private var textColor: Color {
         #if DEBUG
-        if DemoMode.isActive, DemoMode.regressesMaskedField, masked { return .clear }
+        if DemoMode.isActive, DemoMode.regressesMaskedField, hidden, !editing { return .clear }
         #endif
         return Theme.label
     }

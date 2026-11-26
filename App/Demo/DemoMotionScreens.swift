@@ -68,16 +68,20 @@ extension DemoMode {
     /// campo de importe enmascarado vuelve a llevar la cifra real dentro, pintada en transparente.
     static var regressesMaskedField: Bool { isActive && arguments.contains("-MiBancoDemoRegressMaskedField") }
 
-    /// `-MiBancoDemoRegressEyeFocus`: SOLO para demostrar que la prueba falla con el defecto de antes: cerrar el ojo desde
-    /// Ajustes no suelta el foco del saldo en edición.
-    static var regressesEyeFocus: Bool { isActive && arguments.contains("-MiBancoDemoRegressEyeFocus") }
-
-    /// `-MiBancoDemoCloseEyeAfter <s>`: Ajustes cierra el ojo solo (como el interruptor) a los segundos dados (reales).
+    /// `-MiBancoDemoCloseEyeAfter <s>`:    /// `-MiBancoDemoCloseEyeAfter <s>`: Ajustes cierra el ojo solo (como el interruptor) a los segundos dados (reales).
     /// Para grabar desde ANTES del cierre (un fotograma de control con las cifras) y para cerrar el ojo con un saldo en
     /// edición sin tocar nada (el teclado taparía el interruptor).
     static var closesEyeAfterSeconds: Double? {
         guard isActive, let raw = value(after: "-MiBancoDemoCloseEyeAfter"), let seconds = Double(raw), seconds.isFinite,
               seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
+
+    /// `-MiBancoDemoFocusBalanceAfter <s>`: Ajustes enfoca el saldo de Trade Republic solo, a los segundos dados (reales),
+    /// como si se tocara. Para grabar desde ANTES del toque lo que enseña el campo al editarlo con el ojo cerrado.
+    static var focusesBalanceAfterSeconds: Double? {
+        guard isActive, let raw = value(after: "-MiBancoDemoFocusBalanceAfter"), let seconds = Double(raw),
+              seconds.isFinite, seconds > 0 else { return nil }
         return min(seconds, 120)
     }
 

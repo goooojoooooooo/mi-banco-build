@@ -313,6 +313,12 @@ struct SettingsView: View {
             try? await Task.sleep(for: .seconds(seconds))
             privacyBinding.wrappedValue = true
         }
+        // `-MiBancoDemoFocusBalanceAfter <s>`: enfoca el saldo de Trade Republic, como un toque (para grabarlo desde antes).
+        .task {
+            guard let seconds = DemoMode.focusesBalanceAfterSeconds else { return }
+            try? await Task.sleep(for: .seconds(seconds))
+            focused = .tr
+        }
         #endif
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
@@ -347,10 +353,6 @@ struct SettingsView: View {
 
     /// Suelta el foco de un saldo en edición sin animación (ver `onChange(of: preferences.privateMode)`).
     private func releaseAmountFocus() {
-        #if DEBUG
-        // Solo para demostrar que la prueba falla con el defecto de antes (`-MiBancoDemoRegressEyeFocus`).
-        if DemoMode.isActive, DemoMode.regressesEyeFocus { return }
-        #endif
         guard focused != nil else { return }
         var still = Transaction()
         still.disablesAnimations = true
@@ -528,14 +530,13 @@ private struct BalanceRow: View {
                         .accessibilityLabel("Saldo de \(bank.displayName): \(spoken)")
                 } else {
                     let isEditing = focused.wrappedValue == bank
-                    // Con el ojo cerrado (y sin editar) el saldo no se dibuja: en su sitio va la máscara del kit.
-                    let masked = hidden && !isEditing && !text.isEmpty
+                    // Con el ojo cerrado el saldo guardado no se dibuja nunca (ni al editarlo): `MaskedAmountTextField`.
                     HStack(spacing: 8) {
                         if saved {
                             SavedCheck()
                                 .transition(.opacity)
                         }
-                        MaskedAmountTextField(placeholder: "0,00 €", text: $text, masked: masked)
+                        MaskedAmountTextField(placeholder: "0,00 €", text: $text, hidden: hidden, editing: isEditing)
                             .titan(.option)
                             .fontWeight(.semibold)
                             .multilineTextAlignment(stacked ? .leading : .trailing)

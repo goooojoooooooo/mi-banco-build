@@ -1007,12 +1007,89 @@ final class MotionScreensTests: XCTestCase {
         closeTheEyeWhileEditingAndCheck([])
     }
 
-    /// I-3, la prueba de la prueba: si cerrar el ojo no soltara el foco (`-MiBancoDemoRegressEyeFocus`), el MISMO cuerpo
-    /// tiene que fallar.
-    func testClosingTheEyeWhileEditingCatchesTheKeptFocus() throws {
-        XCTExpectFailure("Si el saldo en edición no suelta el foco al cerrarse el ojo, la prueba tiene que fallar") {
-            closeTheEyeWhileEditingAndCheck(["-MiBancoDemoRegressEyeFocus"])
-        }
+    // MARK: - Editar con el ojo cerrado (decisión del dueño: la cifra guardada no se enseña NUNCA)
+
+    /// Lo DIBUJADO por el campo está vacío (la sonda «; dibujado: » sin nada detrás).
+    private func drawsNothing(_ value: String) -> Bool {
+        value.range(of: "dibujado: $", options: .regularExpression) != nil
+    }
+
+    /// (1)(2)(3) Ajustes: con el ojo cerrado, tocar el saldo lo abre VACÍO (ni la cifra guardada ni ningún importe en
+    /// pantalla); salir sin teclear conserva el saldo (se ve al abrir el ojo); teclear uno nuevo lo guarda y, al salir,
+    /// queda enmascarado.
+    func testEditingABalanceWithTheEyeClosedNeverShowsTheStoredFigure() throws {
+        let (field, toggle) = settingsWithBalanceAndEye([])
+        XCTAssertTrue(drawsDigits(value(field)), "Control: con el ojo abierto el campo no dibuja su cifra: \(value(field))")
+        let stored = value(field).components(separatedBy: "; dibujado: ").last ?? ""
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "No se cerró el ojo")
+
+        // (1) Tocar el campo con el ojo cerrado: se abre vacío.
+        field.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
+        XCTAssertTrue(drawsNothing(value(field)), "Al editar con el ojo cerrado el campo no se abre vacío: \(value(field))")
+        XCTAssertTrue(value(field).hasPrefix("importe oculto"), "Al editar con el ojo cerrado se lee el saldo: \(value(field))")
+        XCTAssertEqual(visibleAmounts(), [], "Al editar con el ojo cerrado se ven importes")
+
+        // (2) Salir sin teclear: al abrir el ojo, el saldo de antes sigue ahí.
+        field.typeText("\n")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "Al salir sin teclear el campo no vuelve a la máscara: \(value(field))")
+        XCTAssertTrue(waitFor(hittable, toggle, timeout: 5), "El interruptor no se puede tocar")
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "dibujado: " + stored), field, timeout: 5),
+                      "Entrar y salir sin teclear cambió el saldo (antes «\(stored)»): \(value(field))")
+
+        // (3) Teclear uno nuevo con el ojo cerrado: se guarda y queda enmascarado al salir.
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "No se cerró el ojo otra vez")
+        field.tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
+        field.typeText("512,34")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "dibujado: 512,34"), field, timeout: 5),
+                      "Lo que se teclea no se ve mientras se teclea: \(value(field))")
+        field.typeText("\n")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "Al salir el saldo nuevo no queda enmascarado: \(value(field))")
+        XCTAssertFalse(drawsDigits(value(field)), "Al salir el campo dibuja una cifra: \(value(field))")
+        XCTAssertTrue(waitFor(hittable, toggle, timeout: 5), "El interruptor no se puede tocar")
+        toggle.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "512,34"), field, timeout: 5),
+                      "El saldo tecleado con el ojo cerrado no se guardó: \(value(field))")
+    }
+
+    /// (4) Un umbral de Avisos y un límite de Presupuestos: con el ojo cerrado se abren vacíos, sin ningún importe en
+    /// pantalla; lo tecleado se ve mientras se teclea y, al salir, queda enmascarado.
+    private func editHiddenAmount(_ field: XCUIElement, typing: String, what: String) {
+        field.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "\(what): no se enfocó (no hay teclado)")
+        XCTAssertTrue(drawsNothing(value(field)), "\(what): con el ojo cerrado no se abre vacío: \(value(field))")
+        XCTAssertEqual(visibleAmounts(), [], "\(what): al editar con el ojo cerrado se ven importes")
+        field.typeText(typing)
+        XCTAssertTrue(waitFor(NSPredicate(format: "value CONTAINS %@", "dibujado: " + typing), field, timeout: 5),
+                      "\(what): lo tecleado no se ve: \(value(field))")
+        field.typeText("\n")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 5),
+                      "\(what): al salir no queda enmascarado: \(value(field))")
+        XCTAssertFalse(drawsDigits(value(field)), "\(what): al salir dibuja una cifra: \(value(field))")
+    }
+
+    func testEditingThresholdsAndLimitsWithTheEyeClosed() throws {
+        continueAfterFailure = true
+        launch(["-MiBancoDemoScreen", "avisos", "-MiBancoDemoRules", "-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"])
+        XCTAssertTrue(app.navigationBars["Avisos"].waitForExistence(timeout: 20), "No se ve Avisos")
+        let threshold = app.textFields["Avisar por debajo de"]
+        scrollDown(to: threshold)
+        XCTAssertTrue(threshold.waitForExistence(timeout: 8), "Falta el umbral de «Saldo bajo»")
+        editHiddenAmount(threshold, typing: "75", what: "Umbral de Avisos")
+
+        app.terminate()
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoBudgets", "-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"])
+        let limit = app.textFields["presupuestos.mes"]
+        XCTAssertTrue(limit.waitForExistence(timeout: 20), "No se ve Presupuestos")
+        editHiddenAmount(limit, typing: "650", what: "Límite de Presupuestos")
     }
 
     /// I-2: la pantalla de una categoría con el ojo cerrado: la comparación con el mes anterior es la máscara (no un

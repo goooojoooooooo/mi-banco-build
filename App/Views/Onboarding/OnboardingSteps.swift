@@ -93,8 +93,6 @@ struct OnboardingBalancesStep: View {
     private func balanceRow(for bank: BankID) -> some View {
         let stacked = typeSize.isAccessibilitySize
         let isEditing = focused == bank
-        let currentText = texts[bank] ?? ""
-        let masked = preferences.privateMode && !isEditing && !currentText.isEmpty
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.small))
             : AnyLayout(HStackLayout(spacing: Theme.Space.row))
@@ -107,7 +105,7 @@ struct OnboardingBalancesStep: View {
                         .foregroundStyle(Theme.label)
                 }
                 if !stacked { Spacer(minLength: Theme.Space.small) }
-                MaskedAmountTextField(placeholder: "0,00 €", text: binding(for: bank), masked: masked)
+                MaskedAmountTextField(placeholder: "0,00 €", text: binding(for: bank), hidden: preferences.privateMode, editing: isEditing)
                     .titan(.option)
                     .fontWeight(.semibold)
                     .multilineTextAlignment(stacked ? .leading : .trailing)

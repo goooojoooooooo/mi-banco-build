@@ -481,6 +481,19 @@ final class MotionTourScreensTests: MotionTourCase {
         burst("settings-eye-close", frames: 24, every: 0.25)
     }
 
+    /// Editar un saldo con el ojo cerrado (decisión del dueño): Ajustes enfoca el saldo de Trade Republic solo a los 10 s
+    /// (como un toque) y la ráfaga empieza antes: el campo pasa de la máscara a vacío, nunca a la cifra guardada.
+    func testSettingsEditEye() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoPrivate", "-MiBancoDemoFocusBalanceAfter", "10"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let opened = Date()
+        let field = app.textFields["Saldo de Trade Republic"]
+        scrollDown(to: field)
+        let wait = 8 - Date().timeIntervalSince(opened)
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst("settings-edit-eye", frames: 20, every: 0.25)
+    }
+
     /// La pantalla de una categoría con el ojo cerrado (lote de cierre, ronda 1, I-2): total y comparación con máscara.
     func testCategoryDetailEye() throws {
         launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoCategory", "compras", "-MiBancoDemoPrivate"])

@@ -26,7 +26,7 @@ struct AmountField<ID: Hashable>: View {
                     .accessibilityLabel("Guardado")
             }
             // Con el ojo cerrado (y sin editar) el campo contiene la máscara del kit, no el límite.
-            MaskedAmountTextField(placeholder: placeholder, text: $text, masked: masked)
+            MaskedAmountTextField(placeholder: placeholder, text: $text, hidden: preferences.privateMode, editing: focused.wrappedValue == id)
                 .titan(.option)
                 .fontWeight(.semibold)
                 .multilineTextAlignment(stacked ? .leading : .trailing)
@@ -44,10 +44,5 @@ struct AmountField<ID: Hashable>: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { focused.wrappedValue = id }
-    }
-
-    /// Con el ojo cerrado y sin editar, el límite escrito se tapa con la máscara.
-    private var masked: Bool {
-        preferences.privateMode && focused.wrappedValue != id && !text.isEmpty
     }
 }

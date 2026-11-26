@@ -67,6 +67,8 @@ struct AlertView: View {
                     if model.hidden {
                         // I-2: con el ojo cerrado, la máscara nítida (nunca una cifra, ni contando).
                         Text(AmountMask.text(negative: model.amountCents < 0, showsPlus: model.amountCents > 0))
+                            .contentTransition(.identity)
+                            .privacySensitive()
                     } else {
                         RollingFigure(value: landed ? Double(model.amountCents) : 0, style: .signed)
                             .animation(number(Theme.Motion.countUp, delay: 0.15), value: landed)
@@ -91,6 +93,8 @@ struct AlertView: View {
                         if model.hidden {
                             Text(AmountMask.text(negative: false, showsPlus: false))
                                 .font(.system(size: 40, weight: .semibold))
+                                .contentTransition(.identity)
+                                .privacySensitive()
                         } else {
                             RollingFigure(value: Double(landed ? after : (model.balanceBefore ?? after)), style: .hero)
                                 .animation(number(Theme.Motion.roll, delay: 0.35), value: landed)
@@ -119,6 +123,7 @@ struct AlertView: View {
                 // Sin saldo: el cuerpo del aviso (con el ojo cerrado, sin cifras).
                 Text(model.hidden ? privateSpokenText(model.body).replacingOccurrences(of: "importe oculto", with: "•••") : model.body)
                     .font(Theme.font(size: 15, weight: .medium))
+                    .privacySensitive(model.hidden)
                     .foregroundStyle(Theme.card2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -174,6 +179,7 @@ struct AlertView: View {
                         Spacer(minLength: 8)
                         Text(line.value)
                             .font(Theme.font(.footnote, weight: .semibold))
+                            .privacySensitive(model.hidden)
                             .foregroundStyle(Theme.label)
                             .lineLimit(1)
                     }

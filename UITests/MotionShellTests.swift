@@ -739,6 +739,85 @@ final class MotionShellTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(looked, 6, "El aviso se fue antes de poder mirarlo: la prueba no dice nada")
     }
 
+    /// Las coordenadas de la app (para tocar un punto exacto, no un elemento).
+    private func at(_ point: CGPoint) -> XCUICoordinate {
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: point.x, dy: point.y))
+    }
+
+    /// N-2 (ronda 1 de avisos). Lo que SÍ se puede probar aquí: mientras el aviso se despliega sus botones no reciben
+    /// toques (sonda `accionesAviso`, que refleja el `allowsHitTesting` de los botones) y, desplegado del todo, «Añadir
+    /// nota» abre la hoja con un toque de verdad. Un toque A MITAD del despliegue no se puede dar con XCUITest: espera a
+    /// que la app quede quieta antes de tocar (run 45725015309: al llegar el toque la sonda ya decía «desplegado»), así
+    /// que ese caso va a la lista del iPhone. A ×12 el aviso cae en ~11 s y se despliega en ~6 s.
+    func testInAppBannerActionsWaitForTheUnfold() throws {
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "12"])
+        let banner = element("in-app-banner")
+        XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso dentro de la app")
+        XCTAssertTrue(waitUntil(40) { self.probe()["desplegandoAviso"] == "1" }, "El aviso no empezó a desplegarse")
+        XCTAssertEqual(probe()["accionesAviso"], "0", "Los botones reciben toques mientras el aviso se despliega")
+        XCTAssertTrue(waitUntil(20) { self.probe()["accionesAviso"] == "1" }, "El aviso no terminó de desplegarse")
+        XCTAssertFalse(app.buttons["Cerrar"].exists, "Ya había una hoja abierta")
+        banner.buttons["Añadir nota"].tap()
+        XCTAssertTrue(app.buttons["Cerrar"].waitForExistence(timeout: 15), "Desplegado, «Añadir nota» no abrió la hoja")
+    }
+
+    /// N-1 (ronda 1 de avisos: un toque que falla si el defecto vuelve): desplegado, el aviso tapa el chevron «‹» de mes
+    /// de Gasto. Un toque en un punto del chevron que queda bajo el relleno visible del aviso (fuera de sus botones) no
+    /// cambia el mes ni abre nada. Control: cuando el aviso se ha ido solo, el MISMO punto sí cambia el mes (si el punto
+    /// no cayera sobre el chevron, la prueba tampoco pasa).
+    func testInAppBannerTakesOnlyVisibleTouches() throws {
+        launch(["-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "12"])
+        let banner = element("in-app-banner")
+        let month = element("gasto.mes")
+        let previous = element("gasto.mesAnterior")
+        XCTAssertTrue(month.waitForExistence(timeout: 30), "Falta el mes de Gasto")
+        XCTAssertTrue(banner.waitForExistence(timeout: 40), "No apareció el aviso dentro de la app")
+        let monthBefore = month.label
+        XCTAssertTrue(waitUntil(40) { self.probe()["accionesAviso"] == "1" }, "El aviso no terminó de desplegarse")
+        // El marco del elemento es la tarjeta. Se deja 5 pt dentro de su borde (un toque justo en el borde, x = 10 en
+        // run 45729245328, puede caer fuera de la tarjeta y entonces SÍ debe pasar a Gasto).
+        let bannerFrame = banner.frame.insetBy(dx: 5, dy: 2)
+        let buttons = [banner.buttons["Añadir nota"].frame, banner.buttons["No es mío"].frame]
+        let chevron = previous.frame
+        let covered = stride(from: chevron.minX + 2, through: chevron.maxX - 2, by: 2)
+            .map { CGPoint(x: $0, y: chevron.midY) }
+            .first { p in bannerFrame.contains(p) && !buttons.contains { $0.insetBy(dx: -4, dy: -4).contains(p) } }
+        guard let point = covered else {
+            XCTFail("Ningún punto del chevron (\(chevron)) queda bajo el relleno del aviso (\(bannerFrame)), fuera de sus botones")
+            return
+        }
+        at(point).tap()
+        Thread.sleep(forTimeInterval: 1.5)
+        XCTAssertEqual(month.label, monthBefore, "Un toque en el aviso atravesó hasta el chevron de mes de Gasto")
+        XCTAssertFalse(app.buttons["Cerrar"].exists, "Un toque en el aviso abrió una hoja")
+        XCTAssertTrue(banner.exists, "El toque en el aviso lo quitó")
+        // Control: el aviso se va solo (a ×12, ~44 s desde que aparece); sin él, el mismo punto cambia el mes.
+        XCTAssertTrue(waitUntil(60) { !banner.exists }, "El aviso no se fue")
+        XCTAssertTrue(waitUntil(10) { previous.isHittable }, "El chevron de mes no se puede tocar")
+        at(point).tap()
+        XCTAssertTrue(waitUntil(10) { month.label != monthBefore },
+                      "Sin aviso, el punto del chevron no cambia el mes: la prueba no probaba nada")
+    }
+
+    /// N-3 (ronda 1 de avisos): los avisos (texto y carga) y la Live Activity leen el ojo de la APP, no la copia de la
+    /// suite compartida. Con `-MiBancoDemoSharedEyeOpposite` la copia dice lo contrario del ojo: si alguno volviera a
+    /// leer la suite, aquí diría lo contrario de lo esperado.
+    func testAlertsReadTheAppEyeNotTheSharedCopy() throws {
+        launch(["-MiBancoDemoPrivate", "-MiBancoDemoSharedEyeOpposite"])
+        waitForLaunchToEnd(30)
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "abierto" },
+                      "La copia saboteada no dice lo contrario: la prueba no dice nada: \(probe())")
+        XCTAssertEqual(probe()["ojoAviso"], "cerrado", "Un aviso con el ojo cerrado se compondría con cifras: \(probe())")
+        XCTAssertEqual(probe()["ojoActividad"], "cerrado", "La Live Activity no sigue al ojo cerrado: \(probe())")
+        let show = app.buttons["Mostrar importes"]
+        XCTAssertTrue(show.waitForExistence(timeout: 8), "Falta el ojo cerrado de Inicio")
+        XCTAssertTrue(waitUntil(8) { show.isHittable }, "El ojo no se puede tocar")
+        show.tap()
+        XCTAssertTrue(waitUntil(10) { self.probe()["ojoCompartido"] == "cerrado" }, "La copia no cambió: \(probe())")
+        XCTAssertEqual(probe()["ojoAviso"], "abierto", "Con el ojo abierto un aviso saldría sin cifras: \(probe())")
+        XCTAssertEqual(probe()["ojoActividad"], "abierto", "La Live Activity no sigue al ojo abierto: \(probe())")
+    }
+
     /// C4 (D1, decisión del dueño): «Te quedaban» empieza oculto y solo dice su cifra cuando el importe de arriba se ha
     /// posado. A ×20 el vuelo del importe dura varios segundos: justo al abrir la hoja, «Te quedaban» no tiene forma de
     /// importe; después sí (si no llegara nunca, la prueba tampoco pasa).

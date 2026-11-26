@@ -284,6 +284,14 @@ private struct AppShellView: View {
                     speaker.stop()
                 }
             }
+            // Avisos con el ojo cerrado: los programados de antemano (resumen semanal, suscripciones) llevan su texto
+            // fijado; al cambiar el ojo se vuelven a programar con el texto que toca (sin cifras con el ojo cerrado).
+            .onChange(of: preferences.privateMode) { _, _ in
+                #if DEBUG
+                if DemoMode.isActive { return }
+                #endif
+                Task { await AlertScheduler.reschedule(for: model.state) }
+            }
             .onChange(of: lockEnabled) { _, enabled in
                 // Cambiar el ajuste solo es posible con la app ya desbloqueada: no volver a pedir Face ID.
                 let setting = Self.lockSetting(enabled: enabled)

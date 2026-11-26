@@ -154,21 +154,23 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
     return .sinCategoria
 }
 
-/// Palabras de un pago A UNA PERSONA: Bizum, transferencia (y la abreviatura «transf» de los extractos), traspaso,
-/// «enviado/a». «envio» solo no (hay mensajerías «Envíos Express»): cuenta como «envío a …». Es LA lista: la del aviso
+/// Palabras de un pago A UNA PERSONA: Bizum, transferencia (y la abreviatura «transf» de los extractos), «enviado/a».
+/// «envio» solo no (hay mensajerías «Envíos Express»): cuenta como «envío a …». «traspaso» tampoco: en los bancos
+/// españoles casi siempre es entre tus cuentas (sigue siendo un concepto genérico). Es LA lista: la del aviso
 /// (`notificationSendWords`) y los conceptos genéricos (`genericPayeeWords`) salen de ella.
 let personPaymentWords: Set<String> = [
-    "bizum", "bizums", "transferencia", "transferencias", "transfer", "transf", "traspaso", "traspasos",
+    "bizum", "bizums", "transferencia", "transferencias", "transfer", "transf",
     "enviado", "enviada",
 ]
 
 /// Palabras de un concepto genérico (Bizum, transferencias, recibos…): el «comercio» no es un comercio, así que elegir una
 /// categoría para un pago así no debería aplicarse por defecto a todo lo que lleva ese texto.
 private let genericPayeeWords: Set<String> = personPaymentWords.union([
-    "recibo", "domiciliacion", "adeudo", "cajero", "retirada", "ingreso", "pago", "pagos", "cargo", "devolucion", "comision",
+    "traspaso", "traspasos", "recibo", "domiciliacion", "adeudo", "cajero", "retirada", "ingreso", "pago", "pagos", "cargo",
+    "devolucion", "comision",
 ])
 
-/// Palabras de un envío A TI MISMO (bolsillos, huchas, cuentas de ahorro): no es una persona aunque diga «traspaso».
+/// Palabras de un envío A TI MISMO (bolsillos, huchas, cuentas de ahorro): no es una persona aunque diga «transferencia».
 private let ownAccountWords: Set<String> = ["ahorro", "ahorros", "hucha", "huchas", "savings", "vault", "pocket", "bolsillo"]
 
 /// Palabras enteras del texto, normalizadas como los comercios (`normalizeMerchant`: sin mayúsculas ni tildes). Es la
@@ -194,7 +196,7 @@ func saysPersonPayment(_ text: String?) -> Bool {
 
 /// true si hay prueba de que el pago fue a una persona: no es una compra en tienda (`isShop`) y, o bien una fuente lo
 /// marcó (`personPayment`: aviso de envío, código de transferencia del banco, «Transfer» de Revolut), o bien el texto
-/// del aviso o del banco lo dice («Bizum a Ana», «Transferencia a Laura», «TRANSF A FAVOR DE…», «Traspaso a Juan»,
+/// del aviso o del banco lo dice («Bizum a Ana», «Transferencia a Laura», «TRANSF A FAVOR DE…», «Enviado a Juan»,
 /// «Envío a Lucía»). Se mira también el nombre que dio el banco al enlazar (`bankMerchant`). Un nombre a secas
 /// («Manuel García») no prueba nada.
 public func isPersonPayment(_ movement: Movement) -> Bool {

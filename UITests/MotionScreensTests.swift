@@ -965,11 +965,11 @@ final class MotionScreensTests: XCTestCase {
     private func closeTheEyeInSettingsAndCheckTheFields(_ extra: [String]) {
         let (field, toggle) = settingsWithBalanceAndEye(extra)
         XCTAssertTrue(toggle.isHittable, "El interruptor no se puede tocar con los saldos a la vista")
-        XCTAssertTrue(drawsDigits(value(field)), "Control: con el ojo abierto el campo no dibuja su cifra: """ + BS + """(value(field))")
+        XCTAssertTrue(drawsDigits(value(field)), "Control: con el ojo abierto el campo no dibuja su cifra: \(value(field))")
         toggle.tap()
         let now = value(field)
-        XCTAssertTrue(now.hasPrefix("importe oculto"), "Tras cerrar el ojo el campo se sigue leyendo: """ + BS + """(now)")
-        XCTAssertFalse(drawsDigits(now), "Tras cerrar el ojo el campo sigue dibujando una cifra: """ + BS + """(now)")
+        XCTAssertTrue(now.hasPrefix("importe oculto"), "Tras cerrar el ojo el campo se sigue leyendo: \(now)")
+        XCTAssertFalse(drawsDigits(now), "Tras cerrar el ojo el campo sigue dibujando una cifra: \(now)")
         XCTAssertEqual(visibleAmounts(), [], "Tras cerrar el ojo en Ajustes se ven importes")
     }
 
@@ -995,10 +995,10 @@ final class MotionScreensTests: XCTestCase {
         XCTAssertFalse(value(field).hasPrefix("importe oculto"), "El ojo se cerró antes de empezar a editar")
         field.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
-        XCTAssertTrue(drawsDigits(value(field)), "Control: editando, el campo no enseña su cifra: """ + BS + """(value(field))")
+        XCTAssertTrue(drawsDigits(value(field)), "Control: editando, el campo no enseña su cifra: \(value(field))")
         XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 25),
-                      "Al cerrarse el ojo, el saldo en edición sigue enseñando su cifra: """ + BS + """(value(field))")
-        XCTAssertFalse(drawsDigits(value(field)), "Con el ojo cerrado el campo dibuja una cifra: """ + BS + """(value(field))")
+                      "Al cerrarse el ojo, el saldo en edición sigue enseñando su cifra: \(value(field))")
+        XCTAssertFalse(drawsDigits(value(field)), "Con el ojo cerrado el campo dibuja una cifra: \(value(field))")
         XCTAssertEqual(visibleAmounts(), [], "Con el ojo cerrado se ven importes en Ajustes")
     }
 
@@ -1100,12 +1100,12 @@ final class MotionScreensTests: XCTestCase {
                 "-MiBancoDemoDrawnAmounts"])
         let total = element("categoria.total")
         XCTAssertTrue(total.waitForExistence(timeout: 20), "No se abrió la categoría")
-        XCTAssertTrue(total.label.hasSuffix("importe oculto"), "El total de la categoría se lee: """ + BS + """(total.label)")
+        XCTAssertTrue(total.label.hasSuffix("importe oculto"), "El total de la categoría se lee: \(total.label)")
         let comparison = element("categoria.comparacion")
         XCTAssertTrue(comparison.waitForExistence(timeout: 5), "La categoría no trae la comparación con el mes anterior")
         XCTAssertNil(comparison.label.range(of: "[0-9]", options: .regularExpression),
-                     "La comparación se lee con el ojo cerrado: """ + BS + """(comparison.label)")
-        XCTAssertFalse(drawsDigits(value(comparison)), "La comparación dibuja cifras con el ojo cerrado: """ + BS + """(value(comparison))")
+                     "La comparación se lee con el ojo cerrado: \(comparison.label)")
+        XCTAssertFalse(drawsDigits(value(comparison)), "La comparación dibuja cifras con el ojo cerrado: \(value(comparison))")
         XCTAssertEqual(visibleAmounts(), [], "La categoría enseña importes con el ojo cerrado")
     }
 

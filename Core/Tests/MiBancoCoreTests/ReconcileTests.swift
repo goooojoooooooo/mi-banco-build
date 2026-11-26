@@ -313,6 +313,7 @@ private func tx(
         #expect(l.state.movements.count == 2)
         let kept = l.state.movements.first { $0.id == capture.id }
         #expect(kept?.bankRef == nil)
+        #expect(kept?.linkedAt == nil)
         #expect(l.state.movements.contains { $0.id == other.id })
     }
 

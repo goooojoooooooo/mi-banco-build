@@ -107,15 +107,17 @@ private func kinds(_ list: [Insight]) -> [InsightKind] { list.map(\.kind) }
             pay(20_000, "D", date(10, 25)), pay(3_000, "E", nov(2)), pay(3_500, "F", nov(18)),
             pay(99_999, "G", nov(5), flagged: true), income(50_000, "Nómina", nov(3)),
         ]
+        // R19: el mes pasado cuenta hasta el FINAL del 19 de octubre (los dos pagos de ese día, a las 11 y a las 13).
         let p = spendingPace(movements: ms, now: nov(19), calendar: cal)
-        #expect(p == SpendingPace(thisMonthCents: 6_500, lastMonthSamePointCents: 15_000))
-        #expect(p?.differenceCents == -8_500)
+        #expect(p == SpendingPace(thisMonthCents: 6_500, lastMonthSamePointCents: 22_000))
+        #expect(p?.differenceCents == -15_500)
     }
 
     @Test func ritmoAjustaElDiaAlMesMasCorto() {
         let ms = [pay(1_000, "A", nov(15)), pay(2_000, "B", nov(30, 11)), pay(3_000, "C", nov(30, 13)), pay(500, "D", date(12, 2))]
+        // El 31 de diciembre compara con TODO el 30 de noviembre (R19: final del día).
         let p = spendingPace(movements: ms, now: date(12, 31), calendar: cal)
-        #expect(p == SpendingPace(thisMonthCents: 500, lastMonthSamePointCents: 3_000))
+        #expect(p == SpendingPace(thisMonthCents: 500, lastMonthSamePointCents: 6_000))
     }
 
     @Test func ritmoMesCortoElOtroLado() {

@@ -13,12 +13,15 @@ public func base64URL(_ data: Data) -> String {
         .replacingOccurrences(of: "=", with: "")
 }
 
+/// Vida por defecto de cada JWT de Enable Banking (300 s, margen amplio para deriva de reloj; SEC-10).
+public let enableBankingDefaultJWTLifetime: TimeInterval = 300
+
 /// "cabecera.reclamaciones" en base64url, con claves ordenadas para que sea estable byte a byte.
 /// La vida máxima de un JWT de Enable Banking es 86400 s.
 public func enableBankingJWTSigningInput(appID: String, now: Date, lifetime: TimeInterval) -> String {
     let iat = Int(now.timeIntervalSince1970.rounded(.down))
     // NaN o infinito no deben tumbar la app: se usa la vida por defecto.
-    let safeLifetime = lifetime.isFinite ? lifetime : 3600
+    let safeLifetime = lifetime.isFinite ? lifetime : enableBankingDefaultJWTLifetime
     let life = Int(min(max(safeLifetime, 1), 86_400))
     let header: [String: Any] = ["typ": "JWT", "alg": "RS256", "kid": appID]
     let claims: [String: Any] = [
@@ -32,7 +35,7 @@ public func enableBankingJWTSigningInput(appID: String, now: Date, lifetime: Tim
 }
 
 public func enableBankingJWT(
-    appID: String, now: Date, lifetime: TimeInterval = 3600, signer: any JWTSigner
+    appID: String, now: Date, lifetime: TimeInterval = enableBankingDefaultJWTLifetime, signer: any JWTSigner
 ) throws -> String {
     let input = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: lifetime)
     let signature = try signer.signRS256(Data(input.utf8))

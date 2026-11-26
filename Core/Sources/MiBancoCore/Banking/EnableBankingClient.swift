@@ -6,6 +6,8 @@ public enum BankingConstants {
     public static let callbackScheme = "mibanco"
     public static let country = "ES"
     public static let maxPages = 50
+    public static let maxResponseBytes = 10 * 1024 * 1024
+    public static let jwtLifetime: TimeInterval = enableBankingDefaultJWTLifetime
 }
 
 public enum TransactionStrategy: String, Sendable {
@@ -13,7 +15,18 @@ public enum TransactionStrategy: String, Sendable {
     case longest
 }
 
-/// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 3600 s.
+/// Lo recibido de una cuenta. `complete == false`: se cortó (límite de páginas o clave repetida); lo recibido sirve.
+public struct TransactionFetch: Equatable, Sendable {
+    public let transactions: [EBTransaction]
+    public let complete: Bool
+
+    public init(transactions: [EBTransaction], complete: Bool) {
+        self.transactions = transactions
+        self.complete = complete
+    }
+}
+
+/// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 300 s.
 public struct EnableBankingClient: Sendable {
     private let transport: any HTTPTransport
     private let signer: any JWTSigner
@@ -67,10 +80,20 @@ public struct EnableBankingClient: Sendable {
     }
 
     /// Sigue `continuation_key` hasta agotarlo; más de `maxPages` páginas es `.tooManyPages`.
-    /// `dateFrom` es `yyyy-MM-dd` (lo formatea quien llama).
+    /// `dateFrom` es `yyyy-MM-dd` (lo formatea quien llama). Quien quiera quedarse con lo recibido usa `fetchTransactions`.
     public func transactions(
         accountUID: String, dateFrom: String, strategy: TransactionStrategy
     ) async throws -> [EBTransaction] {
+        let fetch = try await fetchTransactions(accountUID: accountUID, dateFrom: dateFrom, strategy: strategy)
+        guard fetch.complete else { throw BankingClientError.tooManyPages }
+        return fetch.transactions
+    }
+
+    /// Como `transactions`, pero con el límite de páginas o una clave de continuación repetida (el banco da vueltas) se
+    /// para y devuelve lo recibido con `complete == false`, en vez de tirarlo. Un fallo de red o de la API sí se propaga.
+    public func fetchTransactions(
+        accountUID: String, dateFrom: String, strategy: TransactionStrategy
+    ) async throws -> TransactionFetch {
         struct Page: Decodable {
             let transactions: [EBTransaction]?
             let continuationKey: String?
@@ -81,16 +104,23 @@ public struct EnableBankingClient: Sendable {
         }
         var all: [EBTransaction] = []
         var key: String?
+        var seenKeys = Set<String>()
         for _ in 0..<BankingConstants.maxPages {
             var query = [("date_from", dateFrom), ("strategy", strategy.rawValue)]
             if let key { query.append(("continuation_key", key)) }
             let data = try await call("GET", "/accounts/\(escape(accountUID))/transactions", query: query)
             let page = try decode(Page.self, from: data)
             all += page.transactions ?? []
-            guard let next = page.continuationKey, !next.isEmpty else { return all }
+            guard let next = page.continuationKey, !next.isEmpty else {
+                return TransactionFetch(transactions: all, complete: true)
+            }
+            // Una clave ya vista en cualquier página anterior: el banco da vueltas y no avanza.
+            guard seenKeys.insert(next).inserted else {
+                return TransactionFetch(transactions: all, complete: false)
+            }
             key = next
         }
-        throw BankingClientError.tooManyPages
+        return TransactionFetch(transactions: all, complete: false)
     }
 
     public func deleteSession(id: String) async throws {
@@ -104,7 +134,7 @@ public struct EnableBankingClient: Sendable {
     ) async throws -> Data {
         let token: String
         do {
-            token = try enableBankingJWT(appID: appID, now: now(), lifetime: 3600, signer: signer)
+            token = try enableBankingJWT(appID: appID, now: now(), lifetime: BankingConstants.jwtLifetime, signer: signer)
         } catch {
             // La firma falla cuando la clave guardada no sirve.
             throw BankingClientError.api(.keyRejected, code: nil)

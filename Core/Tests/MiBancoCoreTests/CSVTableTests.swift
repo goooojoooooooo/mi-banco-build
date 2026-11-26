@@ -110,4 +110,42 @@ import Testing
         #expect(mixed.rows.isEmpty)
         #expect(mixed.malformedRows == 1)
     }
+
+    // MARK: SEC-11 — topes de filas, columnas y longitud de celda
+
+    @Test func rejectsTooManyColumns() throws {
+        let okHeader = (1...CSVTable.maxColumns).map { "c\($0)" }.joined(separator: ",")
+        let okRow = (1...CSVTable.maxColumns).map { "\($0)" }.joined(separator: ",")
+        let ok = try parse("\(okHeader)\n\(okRow)\n")
+        #expect(ok.headers.count == CSVTable.maxColumns)
+
+        let tooManyHeader = (1...(CSVTable.maxColumns + 1)).map { "c\($0)" }.joined(separator: ",")
+        #expect(throws: CSVLimitError.tooManyColumns(limit: CSVTable.maxColumns)) {
+            try parse("\(tooManyHeader)\n")
+        }
+    }
+
+    @Test func rejectsCellLongerThanLimit() throws {
+        let okCell = String(repeating: "a", count: CSVTable.maxCellLength)
+        let ok = try parse("a,b\n\(okCell),1\n")
+        #expect(ok.rows.first?.first?.count == CSVTable.maxCellLength)
+
+        let tooLongCell = String(repeating: "a", count: CSVTable.maxCellLength + 1)
+        #expect(throws: CSVLimitError.cellTooLong(limit: CSVTable.maxCellLength)) {
+            try parse("a,b\n\(tooLongCell),1\n")
+        }
+    }
+
+    @Test func rejectsTooManyRows() throws {
+        var csv = "a,b\n"
+        csv.reserveCapacity(4 + (CSVTable.maxRows + 1) * 4)
+        for _ in 0..<CSVTable.maxRows { csv += "1,2\n" }
+        let ok = try parse(csv)
+        #expect(ok.rows.count == CSVTable.maxRows)
+
+        csv += "1,2\n"
+        #expect(throws: CSVLimitError.tooManyRows(limit: CSVTable.maxRows)) {
+            try parse(csv)
+        }
+    }
 }

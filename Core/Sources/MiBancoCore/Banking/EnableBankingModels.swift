@@ -129,19 +129,24 @@ public struct EBBalance: Codable, Equatable, Sendable {
     public let balanceAmount: EBAmount
     public let balanceType: String
     public let lastChangeDateTime: String?
+    /// Día de referencia del saldo (`yyyy-MM-dd`), p. ej. el cierre contabilizado de un día.
+    public let referenceDate: String?
 
     enum CodingKeys: String, CodingKey {
         case name
         case balanceAmount = "balance_amount"
         case balanceType = "balance_type"
         case lastChangeDateTime = "last_change_date_time"
+        case referenceDate = "reference_date"
     }
 
-    public init(name: String? = nil, balanceAmount: EBAmount, balanceType: String, lastChangeDateTime: String? = nil) {
+    public init(name: String? = nil, balanceAmount: EBAmount, balanceType: String, lastChangeDateTime: String? = nil,
+                referenceDate: String? = nil) {
         self.name = name
         self.balanceAmount = balanceAmount
         self.balanceType = balanceType
         self.lastChangeDateTime = lastChangeDateTime
+        self.referenceDate = referenceDate
     }
 }
 

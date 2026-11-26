@@ -307,4 +307,27 @@ import Testing
         let m = try JSONDecoder().decode(Movement.self, from: Data(json.utf8))
         #expect(m.isShop == false)
     }
+
+    // MARK: Ronda U0–U68 (U56)
+
+    @Test func bienvenidaSoloConLibroVacioDeVerdad() {
+        struct ReadFail: Error {}
+        let failed = onboardingDecision(load: .failure(ReadFail()), onboardingDone: false)
+        #expect(failed.startSession == false)
+        #expect(failed.markDone == false)
+
+        let empty = onboardingDecision(load: .success(LedgerState()), onboardingDone: false)
+        #expect(empty.startSession == true)
+        #expect(empty.markDone == false)
+
+        var withData = LedgerState()
+        withData.balances[.rev] = ManualBalance(cents: 10_000, setAt: t0, origin: .manual)
+        let populated = onboardingDecision(load: .success(withData), onboardingDone: false)
+        #expect(populated.startSession == false)
+        #expect(populated.markDone == true)
+
+        let alreadyDone = onboardingDecision(load: .success(LedgerState()), onboardingDone: true)
+        #expect(alreadyDone.startSession == false)
+        #expect(alreadyDone.markDone == false)
+    }
 }

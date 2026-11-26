@@ -63,6 +63,23 @@ private func tx(_ id: String) -> String {
         #expect(request.url.absoluteString == "https://api.enablebanking.com/accounts/u-1/balances")
     }
 
+    @Test func jwtExpiresIn300Seconds() async throws {
+        let transport = FixtureTransport([.json(200, #"{"balances":[]}"#)])
+        _ = try await makeClient(transport).balances(accountUID: "u-1")
+        let request = try #require(await transport.requests.first)
+        let auth = try #require(request.headers["Authorization"])
+        let jwt = String(auth.dropFirst("Bearer ".count))
+        let parts = jwt.split(separator: ".")
+        #expect(parts.count == 3)
+        var b64 = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+        while b64.count % 4 != 0 { b64 += "=" }
+        let payloadData = try #require(Data(base64Encoded: b64))
+        let payload = try #require(try JSONSerialization.jsonObject(with: payloadData) as? [String: Any])
+        let iat = try #require(payload["iat"] as? Int)
+        let exp = try #require(payload["exp"] as? Int)
+        #expect(exp - iat == 300)
+    }
+
     @Test func startAuthBody() async throws {
         let transport = FixtureTransport([.json(200, #"{"url":"https://bank.example/consent?x=1"}"#)])
         let aspsp = EBASPSP(name: "Revolut", country: "ES")
@@ -141,15 +158,58 @@ private func tx(_ id: String) -> String {
         #expect(request.url.query == "date_from=2026-11-01&strategy=default")
     }
 
+    /// Páginas con claves distintas, para que solo el límite las pare.
+    private func endlessPages(_ count: Int) -> [Reply] {
+        (0..<count).map { .json(200, #"{"transactions":["# + tx("t\($0)") + #"],"continuation_key":"k\#($0)"}"#) }
+    }
+
     @Test func stopsAfterMaxPages() async throws {
-        let page = #"{"transactions":[],"continuation_key":"again"}"#
-        let transport = FixtureTransport([], fallback: .json(200, page))
+        let transport = FixtureTransport(endlessPages(60))
         await #expect(throws: BankingClientError.tooManyPages) {
             _ = try await makeClient(transport).transactions(
                 accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
         }
         let sent = await transport.requests
         #expect(sent.count == 50)
+    }
+
+    @Test func pageLimitKeepsWhatWasFetched() async throws {
+        let transport = FixtureTransport(endlessPages(60))
+        let fetch = try await makeClient(transport).fetchTransactions(
+            accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
+        #expect(fetch.complete == false)
+        #expect(fetch.transactions.count == 50)
+        #expect(fetch.transactions.first?.transactionID == "t0")
+        let sent = await transport.requests
+        #expect(sent.count == 50)
+    }
+
+    @Test func repeatedContinuationKeyStopsAndKeepsWhatWasFetched() async throws {
+        let page = #"{"transactions":["# + tx("t1") + #"],"continuation_key":"again"}"#
+        let transport = FixtureTransport([], fallback: .json(200, page))
+        let fetch = try await makeClient(transport).fetchTransactions(
+            accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
+        #expect(fetch.complete == false)
+        #expect(fetch.transactions.count == 2)
+        let sent = await transport.requests
+        #expect(sent.count == 2)
+    }
+
+    @Test func completeFetchIsComplete() async throws {
+        let transport = FixtureTransport([.json(200, #"{"transactions":["# + tx("t1") + #"]}"#)])
+        let fetch = try await makeClient(transport).fetchTransactions(
+            accountUID: "u-1", dateFrom: "2025-11-20", strategy: .standard)
+        #expect(fetch == TransactionFetch(transactions: fetch.transactions, complete: true))
+        #expect(fetch.transactions.count == 1)
+    }
+
+    @Test func networkFailureAfterSomePagesStillThrows() async {
+        let page = #"{"transactions":["# + tx("t1") + #"],"continuation_key":"k1"}"#
+        let transport = FixtureTransport([.json(200, page), .fail(.notConnectedToInternet)])
+        await #expect(throws: BankingClientError.offline) {
+            _ = try await makeClient(transport).fetchTransactions(
+                accountUID: "u-1", dateFrom: "2025-11-20", strategy: .longest)
+        }
     }
 
     @Test func mapsHTTPErrors() async {
@@ -230,5 +290,24 @@ private func tx(_ id: String) -> String {
         let sent = await transport.requests
         let request = try #require(sent.first)
         #expect(request.url.absoluteString == "https://api.enablebanking.com/accounts/a%2Fb%20c/balances")
+    }
+
+    @Test func rejects3xxRedirectStatusWithoutFollowing() async {
+        let transport = FixtureTransport([.json(302, "")])
+        await #expect(throws: BankingClientError.api(.unknown, code: nil)) {
+            _ = try await makeClient(transport).balances(accountUID: "u-1")
+        }
+    }
+
+    @Test func responseByteLimitRejectsOversizedHeader() async {
+        #expect(BankingConstants.maxResponseBytes == 10 * 1024 * 1024)
+        let empty = AsyncStream<UInt8> { $0.finish() }
+        await #expect(throws: CappedDownloadError.tooLarge) {
+            _ = try await collectCapped(
+                empty,
+                expectedLength: Int64(BankingConstants.maxResponseBytes + 1),
+                limit: BankingConstants.maxResponseBytes
+            )
+        }
     }
 }

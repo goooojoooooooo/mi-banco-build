@@ -10,7 +10,11 @@ struct WeekBlock: View {
     let balance: BalanceInfo?
 
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.entrance) private var entrance
     @ScaledMetric(relativeTo: .caption) private var barArea: CGFloat = 40
+
+    /// Cuenta desde 0 solo dentro del montaje de Inicio; en un cambio de tarjeta (o fuera de una entrada) sale con su cifra.
+    private var countsOnAssembly: Bool { entrance.active && entrance.scope == .assembly }
 
     var body: some View {
         let hidden = preferences.privateMode
@@ -20,9 +24,14 @@ struct WeekBlock: View {
                     Text(card.bank.map { "Gastado en 7 días · \($0.shortName)" } ?? "Gastado en 7 días")
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
-                    CountingAmount(cents: week.totalCents)
+                    // Un importe por tarjeta (`.id(card)`): al cambiar de tarjeta se monta de nuevo y sale ya con el suyo,
+                    // con la lista (nunca enseña un instante la cifra de la otra tarjeta, ni rueda de una a otra, ni un
+                    // «0,00 €»). Al montarse Inicio (arranque o desbloqueo) cuenta desde 0 como las cifras de la tarjeta
+                    // (su fila aún está oculta mientras el kit espera para rodar). Llega un movimiento: rueda a la cifra
+                    // nueva. Con el ojo cerrado dibuja «•••,•• €».
+                    RollingAmount(cents: week.totalCents, countsUp: countsOnAssembly)
                         .titan(.week)
-                        .privateAmount()
+                        .id(card)
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Gastado en 7 días: \(spokenAmount(week.totalCents, hidden: hidden)). \(hidden ? "" : week.summary)")
@@ -48,15 +57,52 @@ struct WeekBlock: View {
     @ViewBuilder
     private var footnote: some View {
         if card == .all, let pace {
-            PaceSentence(pace: pace)
+            PaceLineSwap(pace: pace)
         } else if card != .all {
-            Text(balance.map { $0.estimated ? "Saldo estimado: corrígelo en Ajustes" : "Saldo exacto del último aviso" }
-                 ?? "Sin saldo: escríbelo en Ajustes")
+            Text(balanceFootnote)
+        }
+    }
+
+    private var balanceFootnote: String {
+        guard let balance else { return "Sin saldo: escríbelo en Ajustes" }
+        switch balance.origin {
+        case .bank:
+            return balance.estimated ? "Saldo estimado desde el banco" : "Saldo exacto del banco"
+        case .statement:
+            return balance.estimated ? "Saldo estimado desde el extracto" : "Saldo exacto del extracto"
+        case .notice, .manual:
+            return balance.estimated ? "Saldo estimado: corrígelo en Ajustes" : "Saldo exacto del último aviso"
         }
     }
 }
 
-/// "Este mes 412,30 €, 85,70 € menos que en octubre": la diferencia en blanco, los importes ocultables.
+/// La frase del mes cuando cambia (llega un movimiento): no cambia de golpe antes que nada se mueva. Espera a que la
+/// fila nueva aterrice (0,2 s), se apaga en 0,1 s, cambia y vuelve en 0,1 s: nunca dos frases a la vez. Con Reducir
+/// movimiento, el mismo fundido sin espera. Solo cambia la opacidad.
+private struct PaceLineSwap: View {
+    let pace: PaceLine
+    @Environment(\.motion) private var motion
+    @State private var shown: PaceLine?
+    @State private var visible = true
+
+    var body: some View {
+        PaceSentence(pace: shown ?? pace)
+            .opacity(visible ? 1 : 0)
+            .onChange(of: pace) { _, new in
+                let wait = motion.reduce ? 0 : motion.seconds(0.2)
+                withAnimation(.easeIn(duration: motion.seconds(0.1)).delay(wait)) {
+                    visible = false
+                } completion: {
+                    shown = new
+                    withAnimation(.easeOut(duration: motion.seconds(0.1))) { visible = true }
+                }
+            }
+            .onAppear { shown = pace }
+    }
+}
+
+/// "Este mes 412,30 €, 85,70 € menos que en octubre": la diferencia en blanco. Con el ojo cerrado los dos importes son
+/// su máscara («•••,•• €»): la cifra no se monta bajo un desenfoque.
 private struct PaceSentence: View {
     let pace: PaceLine
     @Environment(AppPreferences.self) private var preferences
@@ -65,13 +111,14 @@ private struct PaceSentence: View {
         let hidden = preferences.privateMode
         HStack(spacing: 0) {
             Text("Este mes ")
-            Text(formatEUR(pace.thisMonthCents)).privateAmount()
+            MaskedAmountText(formatEUR(pace.thisMonthCents), masked: maskedEUR(pace.thisMonthCents, sign: false))
             if let diff = pace.differenceCents {
                 if diff == 0 {
                     Text(", igual que en \(pace.previousMonthName)")
                 } else {
                     Text(", ")
-                    Text(formatEUR(abs(diff))).foregroundStyle(Theme.label).privateAmount()
+                    MaskedAmountText(formatEUR(abs(diff)), masked: maskedEUR(abs(diff), sign: false))
+                        .foregroundStyle(Theme.label)
                     Text(diff < 0 ? " menos que en \(pace.previousMonthName)" : " más que en \(pace.previousMonthName)")
                 }
             }
@@ -91,10 +138,12 @@ private struct PaceSentence: View {
     }
 }
 
-/// Siete barras de 10 pt (máx. 40 pt) con su inicial; hoy en blanco y el día que más, con su cifra encima.
+/// Siete barras de 10 pt (máx. 40 pt) con su inicial; hoy en blanco y el día que más, con su cifra encima (con el ojo
+/// cerrado, «•••»: la cifra no se monta).
 private struct WeekBars: View {
     let week: WeekSpend
     let barArea: CGFloat
+    @Environment(\.motion) private var motion
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 9) {
@@ -108,12 +157,11 @@ private struct WeekBars: View {
                             .frame(width: 10, height: height(day))
                             .overlay(alignment: .top) {
                                 if day.id == week.peakID {
-                                    Text(roundedEUR(day.cents))
+                                    MaskedAmountText(roundedEUR(day.cents), masked: "•••")
                                         .titan(.captionStrong)
                                         .foregroundStyle(Theme.label2)
                                         .fixedSize()
                                         .offset(y: -18)
-                                        .privateAmount()
                                 }
                             }
                     }
@@ -123,7 +171,8 @@ private struct WeekBars: View {
                 }
             }
         }
-        .animation(Theme.Motion.rowSettle, value: week)
+        // Las barras cambian de alto con el muelle de fila, sin rebote (con Reducir movimiento, un fundido).
+        .animation(motion.calmAnimation(.row), value: week)
     }
 
     private func height(_ day: WeekSpend.Day) -> CGFloat {

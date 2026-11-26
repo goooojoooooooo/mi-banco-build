@@ -5,15 +5,33 @@ import MiBancoCore
 /// Los saldos se editan en su fila; solo se guarda un campo que el usuario ha tocado (`dirty`).
 struct SettingsView: View {
     let model: LedgerModel
+    let portfolio: PortfolioModel
+    let accountBook: AccountBookModel
+    let briefing: BriefingModel
     /// Pedido desde la tarjeta de Inicio ("Editar saldo"): enfoca ese banco y se vacía.
     @Binding var focusRequest: BankID?
+    /// Pedido desde Inicio ("Añadir IBAN") o demo: abre «Cuentas y contactos».
+    @Binding var openAccountsRequest: Bool
+    /// Pedido desde un aviso de consentimiento, el resumen o el reverso de una tarjeta: abre ese banco en «Bancos».
+    @Binding var openBankRequest: BankID?
+    /// Copia de seguridad e importación: abren la hoja raíz y el selector de archivos único (U55).
+    var present: (RootSheet) -> Void = { _ in }
+    var requestImport: (ImportKind) -> Void = { _ in }
+    var importBackup: () -> Void = {}
+    var importTradeRepublic: () -> Void = {}
 
     @AppStorage("lockEnabled") private var lockEnabled = true
     @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// El movimiento tal como lo ve el kit: la fila «Animaciones» dice el nivel que de verdad está en uso.
+    @Environment(\.motion) private var motion
+    /// El cambio de pestaña que anuncia RootView (cuando lo haga): repite la entrada de las filas de Bancos.
+    @Environment(\.tabEntrance) private var tabEntrance
+    /// Al entrar en Ajustes, las filas de Bancos llegan una tras otra.
+    @State private var entrance = Entrance()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
     /// Bancos recién guardados: un ✓ que se traza junto al campo.
     @State private var savedFlash: Set<BankID> = []
     @State private var saveCount = 0
@@ -22,32 +40,150 @@ struct SettingsView: View {
     @State private var errors: [BankID: String] = [:]
     /// Solo los campos que el usuario ha editado se guardan; el resto sigue al modelo.
     @State private var dirty: Set<BankID> = []
+    @State private var showAccounts = false
+    @State private var pushedBank: BankID?
+    @State private var showConnectionGuide = false
     @FocusState private var focused: BankID?
+    #if DEBUG
+    /// Demo (`-MiBancoDemoAlertsGuide`): abre la guía de avisos nada más aparecer Ajustes.
+    @State private var demoOpensGuide = false
+    #endif
+
+    private var showsPrepareConnectionRow: Bool {
+        #if DEBUG
+        if DemoMode.isActive {
+            return !DemoMode.banksConnected
+        }
+        #endif
+        return !BankingCredentials.isReady
+    }
+
+    private func bankPrimaryStatus(for bank: BankID, now: Date) -> String {
+        if BankSyncStatus.shared.running.contains(bank) {
+            return "Conectado · actualizando…"
+        }
+        return bankStatusLines(
+            bank: bank,
+            link: model.state.links[bank],
+            estimated: model.snapshot.balances[bank]?.estimated,
+            canConnect: BankConnector.shared.canConnect(bank),
+            now: now,
+            calendar: DateText.madridCalendar
+        ).primary
+    }
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    ForEach(BankID.allCases, id: \.self) { bank in
-                        BalanceRow(bank: bank, info: model.snapshot.balances[bank], text: binding(bank),
-                                   error: errors[bank], saved: savedFlash.contains(bank), focused: $focused,
-                                   onSubmit: { commit(bank) })
+            // `timeline.date` es el comienzo del minuto (hasta 59 s antes de ahora): «hace 4 min» cuando ya son 5. Se dibuja con
+            // la hora de verdad y el `TimelineView` solo marca cuándo volver a dibujar (U80).
+            TimelineView(.everyMinute) { _ in
+                let now = AppClock.now
+                Form {
+                    // Avisos va primero: los avisos al instante son lo primero que pidió el dueño, y la guía se encuentra
+                    // sin deslizar.
+                    Section {
+                        NavigationLink {
+                            AlertsGuideView(model: model)
+                        } label: {
+                            OptionLabel(title: "Avisos al instante", detail: "Guía de 2 minutos y aviso de prueba", systemImage: "bolt")
+                        }
+                        .accessibilityIdentifier("settings-alerts-guide")
+                        .listRowBackground(Theme.grouped)
+                    } header: {
+                        SettingsHeader("Avisos")
                     }
+
+                    Section {
+                        ForEach(Array(BankID.allCases.enumerated()), id: \.element) { index, bank in
+                            Button {
+                                pushedBank = bank
+                            } label: {
+                                HStack(spacing: 14) {
+                                    BankLogo(bank: bank, size: 30)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(bank.displayName)
+                                            .titan(.option)
+                                            .foregroundStyle(Theme.label)
+                                        // El estado cambia con un fundido cruzado (conectando, actualizando, al día).
+                                        Text(bankPrimaryStatus(for: bank, now: now))
+                                            .titan(.meta)
+                                            .foregroundStyle(Theme.label3)
+                                            .contentTransition(.opacity)
+                                            .animation(motion.calmAnimation(.row), value: bankPrimaryStatus(for: bank, now: now))
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Theme.passive)
+                                        .accessibilityHidden(true)
+                                }
+                                .padding(.vertical, 4)
+                                .frame(minHeight: 52)
+                                .contentShape(Rectangle())
+                                .motionEntrance(index)
+                                .environment(\.entrance, entrance)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings-bank-\(bank.rawValue)")
+                            .listRowBackground(Theme.grouped)
+                            .listRowSeparatorTint(Theme.separator)
+                        }
+                        if showsPrepareConnectionRow {
+                            Button {
+                                showConnectionGuide = true
+                            } label: {
+                                HStack(spacing: Theme.Space.row) {
+                                    OptionLabel(title: "Preparar conexión", detail: "Una vez, unos 15 minutos", systemImage: "key")
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(Theme.passive)
+                                        .accessibilityHidden(true)
+                                }
+                                .contentShape(Rectangle())
+                                .motionEntrance(BankID.allCases.count)
+                                .environment(\.entrance, entrance)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("settings-prepare-connection")
+                            .listRowBackground(Theme.grouped)
+                            .listRowSeparatorTint(Theme.separator)
+                        }
+                    } header: {
+                        SettingsHeader("Bancos")
+                    } footer: {
+                        SettingsFooter("\(AppIdentity.displayName) habla con tu banco a través de Enable Banking, desde este iPhone. Tu clave no sale de aquí.")
+                    }
+
+                    Section {
+                        ForEach(BankID.allCases, id: \.self) { bank in
+                            BalanceRow(bank: bank, info: model.snapshot.balances[bank], link: model.state.links[bank],
+                                       now: now, text: binding(bank), error: errors[bank], saved: savedFlash.contains(bank),
+                                       focused: $focused, onSubmit: { commit(bank) })
+                        }
+                    Button {
+                        showAccounts = true
+                    } label: {
+                        HStack(spacing: Theme.Space.row) {
+                            OptionLabel(title: "Cuentas y contactos", detail: "IBAN, colchón mínimo y destinatarios", systemImage: "building.columns")
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(Theme.passive)
+                                .accessibilityHidden(true)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("settings-accounts")
+                    .listRowBackground(Theme.grouped)
+                    .listRowSeparatorTint(Theme.separator)
                 } header: {
                     SettingsHeader("Saldos")
                 } footer: {
-                    SettingsFooter("Toca un saldo para corregirlo. imagin y Trade Republic no envían el saldo en sus avisos, así que lo estimamos.")
-                }
-
-                Section {
-                    NavigationLink {
-                        AlertsGuideView(model: model)
-                    } label: {
-                        OptionLabel(title: "Avisos al instante", detail: "Guía de 2 minutos y aviso de prueba", systemImage: "bolt")
-                    }
-                    .listRowBackground(Theme.grouped)
-                } header: {
-                    SettingsHeader("Avisos")
+                    SettingsFooter(model.state.links.isEmpty
+                        ? "Toca un saldo para corregirlo. imagin y Trade Republic no envían el saldo en sus avisos, así que lo estimamos."
+                        : "Los bancos conectados ponen su saldo solos. Trade Republic y los que no conectes se corrigen aquí.")
                 }
 
                 Section {
@@ -67,6 +203,28 @@ struct SettingsView: View {
                     SettingsFooter("Al volver a la app te pedirá Face ID o tu código. El ojo de Inicio es el mismo modo privado.")
                 }
 
+                // Intensidad del movimiento: el segmentado del kit, a todo el ancho de su grupo. Cambia al instante en
+                // toda la app (`MotionEnvironment` lee esta preferencia) y se recuerda.
+                Section {
+                    TitanSegmented(selection: motionLevelBinding, options: Self.motionLevels)
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel("Animaciones")
+                        .accessibilityValue(Self.motionTitle(motion.level))
+                        .accessibilityIdentifier("settings-motion-level")
+                        .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                        .listRowBackground(Theme.grouped)
+                } header: {
+                    SettingsHeader("Animaciones")
+                } footer: {
+                    SettingsFooter("Con Reducir movimiento activado en el iPhone, la app usa fundidos tranquilos.")
+                }
+
+                InvestmentsSection(portfolio: portfolio, importTradeRepublic: importTradeRepublic)
+
+                AssistantSettingsSection(briefing: briefing)
+
+                BackupSection(model: model, portfolio: portfolio, present: present, importBackup: importBackup)
+
                 Section {
                     Toggle(isOn: $logoDownloads) {
                         OptionLabel(title: "Descargar logos que falten", detail: "Para tiendas que la app no conoce", systemImage: "arrow.down.to.line")
@@ -77,32 +235,68 @@ struct SettingsView: View {
                     SettingsHeader("Logos")
                 } footer: {
                     VStack(alignment: .leading, spacing: Theme.Space.gutter) {
-                        SettingsFooter("Mi Banco busca en internet el logo de las tiendas donde pagas y que no conoce. El servicio de logos ve la web de la tienda, nunca tus importes ni a quién envías dinero.")
+                        SettingsFooter("\(AppIdentity.displayName) busca en internet el logo de las tiendas donde pagas y que no conoce. El servicio de logos ve la web de la tienda, nunca tus importes ni a quién envías dinero.")
                         Text(diagnostics)
                             .titan(.caption)
                             .foregroundStyle(Theme.label3)
                     }
                 }
+                }
+                .scrollContentBackground(.hidden)
+                .scrollDismissesKeyboard(.interactively)
+                .listSectionSpacing(.compact)
+                .background(Theme.canvas.ignoresSafeArea())
             }
-            .scrollContentBackground(.hidden)
-            .scrollDismissesKeyboard(.interactively)
-            .listSectionSpacing(.compact)
-            .background(Theme.canvas.ignoresSafeArea())
             .navigationTitle("Ajustes")
+            .navigationDestination(isPresented: $showAccounts) {
+                AccountsView(accountBook: accountBook)
+            }
+            .navigationDestination(item: $pushedBank) { bank in
+                BankLinkView(model: model, portfolio: portfolio, bank: bank, present: present, requestImport: requestImport)
+            }
+            .navigationDestination(isPresented: $showConnectionGuide) {
+                ConnectionGuideView(model: model, requestImport: requestImport)
+            }
+            #if DEBUG
+            .navigationDestination(isPresented: $demoOpensGuide) { AlertsGuideView(model: model) }
+            .task { if DemoMode.guideStart != nil || DemoMode.guideSeed != nil { demoOpensGuide = true } }
+            #endif
+        }
+        .onChange(of: tabEntrance.token) { _, _ in
+            if !tabEntrance.suppressed { playEntrance() }
         }
         .onAppear {
+            playEntrance()
             refreshUntouched()
             applyFocusRequest()
+            applyAccountsRequest()
+            applyBankRequest()
+            #if DEBUG
+            if DemoMode.isActive {
+                if DemoMode.opensAccounts {
+                    showAccounts = true
+                } else if DemoMode.opensConnectionGuide {
+                    showConnectionGuide = true
+                } else if DemoMode.opensStatementImport {
+                    pushedBank = .rev
+                }
+            }
+            #endif
         }
         .onChange(of: focusRequest) { _, _ in applyFocusRequest() }
+        .onChange(of: openAccountsRequest) { _, _ in applyAccountsRequest() }
+        .onChange(of: openBankRequest) { _, _ in applyBankRequest() }
         // Un intent puede cambiar un saldo con Ajustes abierto: los campos sin tocar lo reflejan.
         .onChange(of: model.snapshot.balances) { _, _ in refreshUntouched() }
         .onChange(of: focused) { old, _ in
             if let old { commit(old) }
         }
-        // Al salir de la app se suelta el foco: guarda lo editado y quita el teclado de encima del bloqueo.
+        // Al salir de la app o bloquear se suelta el foco: guarda lo editado y quita el teclado de encima del bloqueo.
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { focused = nil }
         }
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
@@ -110,27 +304,76 @@ struct SettingsView: View {
         .sensoryFeedback(.error, trigger: errorCount)
     }
 
+    /// La entrada de Ajustes: las filas de Bancos llegan una tras otra durante 1,2 s del kit. Con Reducir movimiento, nada.
+    private func playEntrance() {
+        guard !motion.reduce else { return }
+        let token = entrance.token + 1
+        entrance = Entrance(token: token, active: true, scope: .assembly)
+        let window = motion.seconds(MotionEntranceWindow.seconds)
+        Task {
+            try? await Task.sleep(for: .seconds(window))
+            if entrance.token == token { entrance.active = false }
+        }
+    }
+
+    /// Los tres niveles, del más tranquilo al que aprobó el dueño.
+    private static let motionLevels: [(value: MotionLevel, title: String)] = [
+        (.subtle, "Sutil"), (.balanced, "Equilibrado"), (.expressive, "Expresivo"),
+    ]
+
+    private static func motionTitle(_ level: MotionLevel) -> String {
+        switch level {
+        case .subtle: "Sutil"
+        case .balanced: "Equilibrado"
+        case .expressive: "Expresivo"
+        }
+    }
+
+    private var motionLevelBinding: Binding<MotionLevel> {
+        Binding(get: { preferences.motionLevel }, set: { preferences.motionLevel = $0 })
+    }
+
     /// El interruptor y el ojo de Inicio son el mismo estado, con la misma animación.
     private var privacyBinding: Binding<Bool> {
         Binding(get: { preferences.privateMode }, set: { on in
-            withAnimation(reduceMotion ? nil : Theme.Motion.privacy) { preferences.privateMode = on }
+            withAnimation(motion.reduce ? nil : motion.calmAnimation(.enter)) { preferences.privateMode = on }
         })
     }
 
-    /// "Diagnóstico: datos en grupo compartido · Versión 0.3.0 (3)"
+    /// "Diagnóstico: datos en grupo compartido · Versión 0.3.0 (3)\nAbrir bancos: Revolut sí · imagin no · Trade Republic sí"
     private var diagnostics: String {
         let place = SharedStore.location == .appGroup ? "grupo compartido" : "carpeta de la app"
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "Diagnóstico: datos en \(place) · Versión \(version) (\(build))"
+        return "Diagnóstico: datos en \(place) · Versión \(version) (\(build))\n\(BankApps.diagnosticsLine)"
+    }
+
+    private func applyAccountsRequest() {
+        guard openAccountsRequest else { return }
+        openAccountsRequest = false
+        showAccounts = true
+    }
+
+    private func applyBankRequest() {
+        guard let bank = openBankRequest else { return }
+        openBankRequest = nil
+        pushedBank = bank
     }
 
     private func applyFocusRequest() {
         guard let bank = focusRequest else { return }
         focusRequest = nil
+        if model.state.links[bank] != nil {
+            pushedBank = bank
+            return
+        }
+        let generation = gate?.generation
         Task {
             try? await Task.sleep(for: .milliseconds(350))
+            guard scenePhase == .active,
+                  gate?.canPresent != false,
+                  gate == nil || gate?.generation == generation else { return }
             focused = bank
         }
     }
@@ -172,7 +415,7 @@ struct SettingsView: View {
             return
         }
         guard let cents = parseBalanceInput(text) else {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[bank] = "Escribe un importe como 340,20" }
+            withAnimation(motion.fade) { errors[bank] = "Escribe un importe como 340,20" }
             errorCount += 1
             return
         }
@@ -187,37 +430,45 @@ struct SettingsView: View {
             refresh(bank)
             flashSaved(bank)
         } catch {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { errors[bank] = "No se pudo guardar. Inténtalo de nuevo." }
+            withAnimation(motion.fade) { errors[bank] = "No se pudo guardar. Inténtalo de nuevo." }
             errorCount += 1
         }
     }
 
-    /// ✓ trazado 1,4 s junto al campo.
+    /// ✓ trazado junto al campo: da un pequeño bote (1 → 1,12 → 1), se queda 1,4 s del kit y se va con un fundido.
     private func flashSaved(_ bank: BankID) {
-        withAnimation(Theme.Motion.quick) { _ = savedFlash.insert(bank) }
+        withAnimation(motion.fade) { _ = savedFlash.insert(bank) }
         saveCount += 1
+        let hold = motion.seconds(1.4)
         Task {
-            try? await Task.sleep(for: .seconds(1.4))
-            withAnimation(.easeOut(duration: 0.3)) { _ = savedFlash.remove(bank) }
+            try? await Task.sleep(for: .seconds(hold))
+            withAnimation(motion.fade) { _ = savedFlash.remove(bank) }
         }
     }
 }
 
-/// Fila de saldo: logo, nombre, "Exacto · del aviso de las 18:47" / "Estimado · corregido el 10 nov", y el campo.
-/// Para VoiceOver, el campo es "Saldo de Revolut".
+/// Fila de saldo: logo, nombre, estado según origen real (banco conectado, extracto, aviso o a mano; R25) y el campo
+/// (solo lectura si el banco está conectado). Para VoiceOver, el campo editable es "Saldo de Revolut".
 private struct BalanceRow: View {
+    @Environment(\.motion) private var motion
     let bank: BankID
     let info: BalanceInfo?
+    var link: BankLinkInfo? = nil
+    var now: Date = Date()
     @Binding var text: String
     let error: String?
     let saved: Bool
     var focused: FocusState<BankID?>.Binding
     let onSubmit: () -> Void
 
+    @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var isConnected: Bool { link != nil }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
+        let hidden = preferences.privateMode
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.small))
             : AnyLayout(HStackLayout(spacing: Theme.Space.row))
@@ -232,31 +483,47 @@ private struct BalanceRow: View {
                 }
                 .accessibilityElement(children: .combine)
                 if !stacked { Spacer(minLength: Theme.Space.small) }
-                HStack(spacing: 8) {
-                    if saved {
-                        DrawnCheck(lineWidth: 2, color: Theme.label)
-                            .frame(width: 16, height: 16)
-                            .transition(.opacity)
-                            .accessibilityLabel("Guardado")
-                    }
-                    TextField("0,00 €", text: $text)
+                if isConnected {
+                    let formatted = info.map { formatEUR($0.cents).replacingOccurrences(of: "-", with: "\u{2212}") } ?? "—"
+                    let spoken = info.map { spokenAmount($0.cents, hidden: hidden) } ?? "sin saldo"
+                    // Con el ojo cerrado, la máscara del kit: ninguna cifra montada.
+                    Text(hidden ? (info.map { maskedEUR($0.cents, sign: false) } ?? "—") : formatted)
                         .titan(.option)
                         .fontWeight(.semibold)
                         .foregroundStyle(Theme.label)
-                        .multilineTextAlignment(stacked ? .leading : .trailing)
-                        .keyboardType(.numbersAndPunctuation)
-                        .submitLabel(.done)
-                        .focused(focused, equals: bank)
-                        .onSubmit(onSubmit)
                         .padding(.horizontal, 10)
-                        .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
-                        .background(Color(hex: "#2A2A2D").opacity(focused.wrappedValue == bank ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                        .animation(Theme.Motion.quick, value: focused.wrappedValue == bank)
-                        .privateField(editing: focused.wrappedValue == bank)
-                        .accessibilityLabel("Saldo de \(bank.displayName)")
+                        .frame(minHeight: 40)
+                        .contentTransition(.identity)
+                        .privacySensitive()
+                        .accessibilityLabel("Saldo de \(bank.displayName): \(spoken)")
+                } else {
+                    let isEditing = focused.wrappedValue == bank
+                    // Con el ojo cerrado (y sin editar) el saldo no se dibuja: en su sitio va la máscara del kit.
+                    let masked = hidden && !isEditing && !text.isEmpty
+                    HStack(spacing: 8) {
+                        if saved {
+                            SavedCheck()
+                                .transition(.opacity)
+                        }
+                        TextField("0,00 €", text: $text)
+                            .titan(.option)
+                            .fontWeight(.semibold)
+                            .maskedAmountField(masked, alignment: stacked ? .leading : .trailing)
+                            .multilineTextAlignment(stacked ? .leading : .trailing)
+                            .keyboardType(.numbersAndPunctuation)
+                            .submitLabel(.done)
+                            .focused(focused, equals: bank)
+                            .onSubmit(onSubmit)
+                            .padding(.horizontal, 10)
+                            .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 40)
+                            .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                            .animation(motion.fade, value: isEditing)
+                            .accessibilityLabel("Saldo de \(bank.displayName)")
+                            .accessibilityValue(masked ? "importe oculto" : text)
+                    }
                 }
             }
-            if let error {
+            if !isConnected, let error {
                 Text(error)
                     .titan(.meta)
                     .foregroundStyle(Theme.warning)
@@ -266,20 +533,98 @@ private struct BalanceRow: View {
         .padding(.vertical, 4)
         .frame(minHeight: 52)
         .contentShape(Rectangle())
-        .onTapGesture { focused.wrappedValue = bank }
+        .onTapGesture {
+            if !isConnected { focused.wrappedValue = bank }
+        }
         .listRowBackground(Theme.grouped)
         .listRowSeparatorTint(Theme.separator)
     }
 
     private var status: String {
+        if link != nil {
+            guard let info else { return "Sin saldo todavía" }
+            return connectedBalanceRowStatus(
+                estimated: info.estimated,
+                origin: info.origin,
+                setAt: info.setAt,
+                now: now,
+                calendar: DateText.madridCalendar
+            )
+        }
         guard let info else { return "Sin saldo todavía" }
         let calendar = Calendar.current
-        if !info.estimated {
-            let when = calendar.isDateInToday(info.setAt) ? "de las \(DateText.time(info.setAt))" : "del \(DateText.day(info.setAt))"
-            return "Exacto · del aviso \(when)"
+        let isToday = calendar.isDateInToday(info.setAt)
+        let whenExact = isToday ? "de las \(DateText.time(info.setAt))" : "del \(DateText.day(info.setAt))"
+        let whenFrom = isToday ? "de hoy" : "del \(DateText.day(info.setAt))"
+        let whenCorrected = isToday ? "hoy" : "el \(DateText.day(info.setAt))"
+        switch info.origin {
+        case .bank:
+            return !info.estimated ? "Exacto · del banco \(whenExact)" : "Estimado · desde el banco \(whenFrom)"
+        case .statement:
+            return !info.estimated ? "Exacto · del extracto \(whenExact)" : "Estimado · desde el extracto \(whenFrom)"
+        case .notice:
+            return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso \(whenFrom)"
+        case .manual:
+            if info.fromBank {
+                return !info.estimated ? "Exacto · del aviso \(whenExact)" : "Estimado · desde el aviso \(whenFrom)"
+            }
+            return "Estimado · corregido \(whenCorrected)"
         }
-        let when = calendar.isDateInToday(info.setAt) ? "hoy" : "el \(DateText.day(info.setAt))"
-        return info.fromBank ? "Estimado · desde el aviso de \(when)" : "Estimado · corregido \(when)"
+    }
+}
+
+/// El ✓ de «guardado» junto a un campo: se traza y da un pequeño bote (1 → 1,12 → 1) con los tiempos del kit. Con
+/// Reducir movimiento, sin bote.
+struct SavedCheck: View {
+    @Environment(\.motion) private var motion
+    @State private var landed = 0
+
+    var body: some View {
+        DrawnCheck(lineWidth: 2, color: Theme.label)
+            .frame(width: 16, height: 16)
+            .keyframeAnimator(initialValue: 1.0, trigger: motion.reduce ? 0 : landed) { content, scale in
+                content.scaleEffect(scale)
+            } keyframes: { _ in
+                KeyframeTrack {
+                    CubicKeyframe(1.12, duration: motion.seconds(0.16))
+                    CubicKeyframe(1.0, duration: motion.seconds(0.22))
+                }
+            }
+            .onAppear { landed += 1 }
+            .accessibilityLabel("Guardado")
+    }
+}
+
+/// Un campo de importe con el ojo cerrado: el texto del campo no se dibuja (transparente) y encima va la máscara del
+/// kit, así que no hay ninguna cifra en pantalla, ni tapada. Al editar (o con el ojo abierto) es el campo de siempre.
+private struct MaskedAmountField: ViewModifier {
+    let masked: Bool
+    let alignment: Alignment
+
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(masked ? Color.clear : Theme.label)
+            .overlay(alignment: alignment) {
+                if masked {
+                    Text(maskedEUR(0, sign: false))
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.label)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .allowsHitTesting(false)
+                        .accessibilityLabel("importe oculto")
+                        .accessibilityHidden(true)
+                }
+            }
+            .privacySensitive()
+    }
+}
+
+extension View {
+    /// Ver MaskedAmountField. Va justo después del estilo de letra del campo (hereda su letra).
+    func maskedAmountField(_ masked: Bool, alignment: Alignment) -> some View {
+        modifier(MaskedAmountField(masked: masked, alignment: alignment))
     }
 }
 
@@ -293,9 +638,9 @@ struct OptionLabel: View {
         HStack(spacing: 14) {
             Image(systemName: systemImage)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(Color(hex: "#D1D1D6"))
+                .foregroundStyle(Theme.iconGlyph)
                 .frame(width: 30, height: 30)
-                .background(Color(hex: "#232325"), in: .rect(cornerRadius: 8, style: .continuous))
+                .background(Theme.iconTile, in: .rect(cornerRadius: 8, style: .continuous))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).titan(.option).foregroundStyle(Theme.label)
@@ -331,9 +676,14 @@ struct SettingsFooter: View {
     }
 }
 
-/// La guía de Atajos y el aviso de prueba, en su propia pantalla.
+/// Las guías de Atajos y el aviso de prueba, en su propia pantalla. Cada guía se empuja en esta misma navegación.
 struct AlertsGuideView: View {
     let model: LedgerModel
+    #if DEBUG
+    /// Demo (`-MiBancoDemoAlertsGuide`): paso concreto al que se salta nada más abrir.
+    @State private var demoStart: DemoGuideStart?
+    @Environment(AppPreferences.self) private var preferences
+    #endif
 
     var body: some View {
         Form {
@@ -345,5 +695,28 @@ struct AlertsGuideView: View {
         .background(Theme.canvas.ignoresSafeArea())
         .navigationTitle("Avisos al instante")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
+        #if DEBUG
+        .navigationDestination(item: $demoStart) { start in
+            GuideStepView(track: start.track, model: model, start: start.resume ? nil : start.step,
+                          resume: start.resume ? preferences.guideResume(start.track) : nil)
+        }
+        .task {
+            if let seed = DemoMode.guideSeed {
+                demoStart = DemoGuideStart(track: seed.track, step: seed.number - 1, resume: true)
+            } else if let start = DemoMode.guideStart, let track = start.track {
+                demoStart = DemoGuideStart(track: track, step: start.step)
+            }
+        }
+        #endif
     }
 }
+
+#if DEBUG
+struct DemoGuideStart: Hashable {
+    let track: GuideTrack
+    let step: Int
+    /// Con `-MiBancoDemoGuideSeed`: se abre retomando el paso guardado.
+    var resume = false
+}
+#endif

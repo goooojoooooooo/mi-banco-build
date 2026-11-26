@@ -47,3 +47,13 @@ public struct AccountBook: Codable, Equatable, Sendable, CustomStringConvertible
         payees = try c.decodeIfPresent([Payee].self, forKey: .payees) ?? []
     }
 }
+
+/// Iniciales de un contacto tomadas solo de letras (sin signos ni dígitos); nil si no hay letras (U63).
+public func contactInitials(for name: String) -> String? {
+    let words = name.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+    guard let firstWord = words.first, let a = firstWord.first else { return nil }
+    if words.count >= 2, let b = words[1].first {
+        return "\(a)\(b)".uppercased()
+    }
+    return String(a).uppercased()
+}

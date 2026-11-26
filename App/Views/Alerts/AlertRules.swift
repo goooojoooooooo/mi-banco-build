@@ -8,14 +8,21 @@ struct AlertRules: View {
     let model: LedgerModel
     let settings: AlertSettings
     let mutedCount: Int
+    var onMorningRuleChanged: () -> Void = {}
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @State private var errorTick = 0
 
     private var revealTransition: AnyTransition {
-        reduceMotion
+        // La fila del umbral entra con su muelle; al irse se apaga deprisa (0,12 s), antes de que la regla de debajo
+        // suba a su sitio: nunca queda montada sobre ella (menor m-6).
+        motion.reduce
             ? AnyTransition.opacity
-            : AnyTransition.opacity.combined(with: AnyTransition.offset(y: -10))
+            : AnyTransition.asymmetric(
+                // Entra un instante después de que las reglas de debajo empiecen a hacerle sitio.
+                insertion: AnyTransition.opacity.combined(with: AnyTransition.offset(y: -10))
+                    .animation(motion.animation(.row).delay(motion.seconds(0.08))),
+                removal: AnyTransition.opacity.animation(.easeOut(duration: motion.seconds(0.12))))
     }
 
     var body: some View {
@@ -50,10 +57,22 @@ struct AlertRules: View {
                 rule("Cobro duplicado", "Dos cargos iguales en la misma tienda en pocos minutos.", "square.on.square",
                      .duplicateCharge)
                 RuleDivider()
+                rule("Resumen cada mañana", morningReminderSubtitle(minutes: settings.morningBriefingMinutes),
+                     "sun.horizon", .morningBriefing, id: "alert-rule-morningBriefing")
+                if settings.morningBriefing {
+                    MorningTimeRow(minutes: settings.morningBriefingMinutes) { newMinutes in
+                        try model.updateAlertSettings { $0.morningBriefingMinutes = newMinutes }
+                        onMorningRuleChanged()
+                    }
+                    .transition(revealTransition)
+                }
+                RuleDivider()
                 rule("Resumen semanal", "El domingo a las 20:00, lo que llevas gastado esa semana.", "doc.text", .weeklyDigest)
                 RuleDivider()
                 rule("Ritmo de gasto", "Si vas por encima o por debajo del mes pasado.", "gauge.with.dots.needle.33percent",
                      .spendingPace)
+                RuleDivider()
+                rule("Presupuestos", "Cuando llegas al 80 % y cuando te pasas.", "gauge.with.dots.needle.67percent", .budgets)
             }
             .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
@@ -88,21 +107,29 @@ struct AlertRules: View {
         }
     }
 
-    private func rule(_ title: String, _ detail: String, _ symbol: String, _ key: AlertRule) -> some View {
-        Toggle(isOn: binding(key)) {
+    @ViewBuilder
+    private func rule(_ title: String, _ detail: String, _ symbol: String, _ key: AlertRule, id: String? = nil) -> some View {
+        let toggle = Toggle(isOn: binding(key)) {
             OptionLabel(title: title, detail: detail, systemImage: symbol)
         }
         .toggleStyle(TitanToggleStyle())
         .padding(.horizontal, 16)
+        if let id {
+            toggle.accessibilityIdentifier(id)
+        } else {
+            toggle
+        }
     }
 
     /// El interruptor escribe en el libro (Core) y el snapshot nuevo llega dentro de la animación:
     /// la fila del umbral aparece o se va con el muelle sin rebote.
     private func binding(_ key: AlertRule) -> Binding<Bool> {
         Binding(get: { key.isOn(in: settings) }, set: { on in
-            withAnimation(reduceMotion ? nil : Theme.Motion.reveal) {
+            // La fila del umbral aparece o se va con el muelle `row` del kit.
+            withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
                 do {
                     try model.updateAlertSettings { key.set(on, in: &$0) }
+                    if key == .morningBriefing { onMorningRuleChanged() }
                 } catch {
                     errorTick += 1
                 }
@@ -113,7 +140,7 @@ struct AlertRules: View {
 
 /// Cada interruptor de "Qué quieres que te avise" y el campo de `AlertSettings` que gobierna.
 enum AlertRule: Sendable {
-    case everyMovement, lowBalance, largePayment, income, subscriptions, duplicateCharge, weeklyDigest, spendingPace
+    case everyMovement, lowBalance, largePayment, income, subscriptions, duplicateCharge, morningBriefing, weeklyDigest, spendingPace, budgets
 
     func isOn(in s: AlertSettings) -> Bool {
         switch self {
@@ -123,8 +150,10 @@ enum AlertRule: Sendable {
         case .income: s.income
         case .subscriptions: s.subscriptions
         case .duplicateCharge: s.duplicateCharge
+        case .morningBriefing: s.morningBriefing
         case .weeklyDigest: s.weeklyDigest
         case .spendingPace: s.spendingPace
+        case .budgets: s.budgets
         }
     }
 
@@ -136,9 +165,115 @@ enum AlertRule: Sendable {
         case .income: s.income = on
         case .subscriptions: s.subscriptions = on
         case .duplicateCharge: s.duplicateCharge = on
+        case .morningBriefing: s.morningBriefing = on
         case .weeklyDigest: s.weeklyDigest = on
         case .spendingPace: s.spendingPace = on
+        case .budgets: s.budgets = on
         }
+    }
+}
+
+/// Selector de hora del aviso matinal («Resumen cada mañana»), siempre en hora de Madrid.
+/// Despliega una rueda en línea (nunca una ventana presentada de UIKit) y se pliega sola al bloquear o salir (U33).
+private struct MorningTimeRow: View {
+    let minutes: Int
+    let save: (Int) throws -> Void
+
+    @State private var expanded = false
+    @State private var errorTick = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
+
+    private var validMinutes: Int {
+        (0..<1_440).contains(minutes) ? minutes : defaultMorningBriefingMinutes
+    }
+
+    private var formattedTime: String {
+        String(format: "%02d:%02d", validMinutes / 60, validMinutes % 60)
+    }
+
+    private var canShowWheel: Bool {
+        expanded && scenePhase == .active && gate?.isLocked != true
+    }
+
+    private var timeBinding: Binding<Date> {
+        Binding(
+            get: { Self.date(fromMinutes: validMinutes) },
+            set: { newDate in
+                guard scenePhase == .active, gate?.isLocked != true else { return }
+                let cal = DateText.madridCalendar
+                let comps = cal.dateComponents([.hour, .minute], from: newDate)
+                let total = (comps.hour ?? 8) * 60 + (comps.minute ?? 30)
+                guard total != validMinutes else { return }
+                do {
+                    try save(total)
+                } catch {
+                    errorTick += 1
+                }
+            }
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                guard scenePhase == .active, gate?.isLocked != true else { return }
+                withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: Theme.Space.row) {
+                    Text("Hora del resumen")
+                        .titan(.subtitle)
+                        .foregroundStyle(Theme.label2)
+                    Spacer(minLength: Theme.Space.small)
+                    Text(formattedTime)
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.label)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Theme.raised, in: Capsule())
+                }
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Hora del resumen, \(formattedTime)")
+            .accessibilityIdentifier("morning-briefing-time")
+
+            if canShowWheel {
+                DatePicker("Hora del resumen", selection: timeBinding, displayedComponents: .hourAndMinute)
+                    .labelsHidden()
+                    .datePickerStyle(.wheel)
+                    .environment(\.calendar, DateText.madridCalendar)
+                    .environment(\.timeZone, DateText.madridCalendar.timeZone)
+                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("morning-briefing-wheel")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(.leading, 60)
+        .padding(.trailing, 16)
+        .padding(.bottom, 10)
+        .animation(reduceMotion ? nil : Theme.Motion.quick, value: canShowWheel)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { expanded = false }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { expanded = false }
+        }
+        .sensoryFeedback(.error, trigger: errorTick)
+    }
+
+    private static func date(fromMinutes minutes: Int) -> Date {
+        let cal = DateText.madridCalendar
+        let valid = (0..<1_440).contains(minutes) ? minutes : defaultMorningBriefingMinutes
+        let today = cal.startOfDay(for: Date())
+        return cal.date(bySettingHour: valid / 60, minute: valid % 60, second: 0, of: today) ?? today
     }
 }
 
@@ -162,8 +297,13 @@ private struct ThresholdRow: View {
     @State private var saveTick = 0
     @State private var errorTick = 0
     @FocusState private var focused: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppPreferences.self) private var preferences
+    @Environment(\.motion) private var motion
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.presentationGate) private var gate
+
+    /// Con el ojo cerrado (y sin editar) el umbral no se dibuja: en su sitio va la máscara del kit.
+    private var masked: Bool { preferences.privateMode && !focused && !text.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.tight) {
@@ -173,15 +313,13 @@ private struct ThresholdRow: View {
                     .foregroundStyle(Theme.label2)
                 Spacer(minLength: Theme.Space.small)
                 if saved {
-                    DrawnCheck(lineWidth: 2, color: Theme.label)
-                        .frame(width: 16, height: 16)
+                    SavedCheck()
                         .transition(.opacity)
-                        .accessibilityLabel("Guardado")
                 }
                 TextField("100,00 €", text: textBinding)
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .foregroundStyle(Theme.label)
+                    .maskedAmountField(masked, alignment: .trailing)
                     .multilineTextAlignment(.trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -189,10 +327,10 @@ private struct ThresholdRow: View {
                     .onSubmit(commit)
                     .padding(.horizontal, 10)
                     .frame(minWidth: 96, maxWidth: 128, minHeight: 40)
-                    .background(Color(hex: "#2A2A2D").opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                    .animation(Theme.Motion.quick, value: focused)
-                    .privateField(editing: focused)
+                    .background(Theme.fieldFill.opacity(focused ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
+                    .animation(motion.calmAnimation(.pressIn), value: focused)
                     .accessibilityLabel(title)
+                    .accessibilityValue(masked ? "importe oculto" : text)
             }
             if let problem {
                 Text(problem)
@@ -214,9 +352,12 @@ private struct ThresholdRow: View {
             if !isFocused { commit() }
         }
         .onDisappear { if dirty { commit() } }
-        // Fuera de primer plano el teclado se va (y lo escrito se guarda): nunca queda encima del bloqueo.
+        // Fuera de primer plano o al bloquear el teclado se va (y lo escrito se guarda): nunca queda encima del bloqueo.
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = false }
+        }
+        .onChange(of: gate?.isLocked) { _, locked in
+            if locked == true { focused = false }
         }
         .sensoryFeedback(.success, trigger: saveTick)
         .sensoryFeedback(.error, trigger: errorTick)
@@ -237,7 +378,7 @@ private struct ThresholdRow: View {
             return
         }
         guard let value = parseBalanceInput(text), value > 0 else {
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { problem = "Escribe un importe como 100" }
+            withAnimation(motion.fade) { problem = "Escribe un importe como 100" }
             errorTick += 1
             return
         }
@@ -252,17 +393,19 @@ private struct ThresholdRow: View {
             flashSaved()
         } catch {
             dirty = true
-            withAnimation(reduceMotion ? nil : Theme.Motion.quick) { problem = "No se pudo guardar. Inténtalo de nuevo." }
+            withAnimation(motion.fade) { problem = "No se pudo guardar. Inténtalo de nuevo." }
             errorTick += 1
         }
     }
 
+    /// El ✓ se queda 1,4 s (del kit) junto al campo y se va con un fundido.
     private func flashSaved() {
-        withAnimation(Theme.Motion.quick) { saved = true }
+        withAnimation(motion.fade) { saved = true }
         saveTick += 1
+        let hold = motion.seconds(1.4)
         Task {
-            try? await Task.sleep(for: .seconds(1.4))
-            withAnimation(.easeOut(duration: 0.3)) { saved = false }
+            try? await Task.sleep(for: .seconds(hold))
+            withAnimation(motion.fade) { saved = false }
         }
     }
 }

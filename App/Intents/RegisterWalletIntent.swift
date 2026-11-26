@@ -10,7 +10,8 @@ struct RegisterWalletIntent: AppIntent, LiveActivityIntent {
     @Parameter(title: "Comercio") var merchant: String?
 
     func perform() async throws -> some IntentResult {
-        try await IngestRunner.run(.wallet(bank: bank.id, amount: amount, merchant: merchant))
+        let input = sanitizeIngestInput(.wallet(bank: bank.id, amount: amount, merchant: merchant))
+        try await IngestRunner.run(input)
         return .result()
     }
 }

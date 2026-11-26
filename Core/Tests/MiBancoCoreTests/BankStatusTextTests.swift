@@ -119,4 +119,78 @@ private func link(validUntil: Date) -> BankLinkInfo {
         #expect(r(3_600) == "hace 1 h")
         #expect(r(86_400) == "ayer a las 12:00")
     }
+
+    // MARK: Ronda U0–U68 (U44, U45, U52)
+
+    @Test func sinSaldoNoEsExacto() {
+        var l = link(validUntil: at(2027, 5, 19))
+        l.lastSuccessAt = at(2026, 11, 20, 11, 55)
+        #expect(status(l, estimated: nil).primary == "Actualizado hace 5 min · sin saldo")
+    }
+
+    @Test func saldoNombraSuOrigen() {
+        #expect(connectedBalanceRowStatus(estimated: false, origin: .bank,
+                                          setAt: at(2026, 11, 20, 8, 0), now: now, calendar: madrid)
+            == "exacto · hace 4 h")
+        #expect(connectedBalanceRowStatus(estimated: false, origin: .notice,
+                                          setAt: at(2026, 11, 20, 11, 58), now: now, calendar: madrid)
+            == "exacto · aviso de hace 2 min")
+        #expect(connectedBalanceRowStatus(estimated: true, origin: .notice,
+                                          setAt: at(2026, 11, 20, 11, 58), now: now, calendar: madrid)
+            == "estimado · aviso de hace 2 min")
+        #expect(connectedBalanceRowStatus(estimated: false, origin: .statement,
+                                          setAt: at(2026, 11, 17, 12, 0), now: now, calendar: madrid)
+            == "exacto · extracto del 17 nov")
+    }
+
+    @Test func preposicionesDelReverso() {
+        let todayTime = at(2026, 11, 20, 18, 47)
+        let nowEvening = at(2026, 11, 20, 19, 0)
+        let earlierDay = at(2026, 11, 17, 12, 0)
+
+        #expect(balanceExplanationText(origin: .bank, estimated: false, fromBank: true,
+                                       setAt: todayTime, bank: .rev, now: nowEvening, calendar: madrid)
+            == "Lo dio Revolut a las 18:47.")
+        #expect(balanceExplanationText(origin: .bank, estimated: false, fromBank: true,
+                                       setAt: earlierDay, bank: .rev, now: nowEvening, calendar: madrid)
+            == "Lo dio Revolut el 17 nov.")
+        #expect(balanceExplanationText(origin: .bank, estimated: true, fromBank: true,
+                                       setAt: todayTime, bank: .rev, now: nowEvening, calendar: madrid)
+            == "Parte del saldo que dio el banco a las 18:47 y suma lo que ha llegado después.")
+        #expect(balanceExplanationText(origin: .bank, estimated: true, fromBank: true,
+                                       setAt: earlierDay, bank: .rev, now: nowEvening, calendar: madrid)
+            == "Parte del saldo que dio el banco el 17 nov y suma lo que ha llegado después.")
+        // Detrás de nombre sigue «de las» / «del».
+        #expect(balanceExplanationText(origin: .statement, estimated: false, fromBank: true,
+                                       setAt: earlierDay, bank: .rev, now: nowEvening, calendar: madrid)
+            == "Viene del extracto de Revolut del 17 nov.")
+    }
+
+    /// U45 (M2 de la re-revisión): la misma conexión, dibujada a otra hora, da otra línea: la hora no se guarda con el texto.
+    @Test func horaDeActualizadoSigueAlReloj() {
+        var l = link(validUntil: at(2027, 5, 19))
+        let t0 = at(2026, 11, 20, 8)
+        l.lastSuccessAt = t0
+        func primary(_ when: Date) -> String {
+            bankStatusLines(bank: .rev, link: l, estimated: false, canConnect: true, now: when, calendar: madrid).primary
+        }
+        #expect(primary(t0.addingTimeInterval(5 * 60)) == "Actualizado hace 5 min · exacto")
+        #expect(primary(t0.addingTimeInterval(59 * 60)) == "Actualizado hace 59 min · exacto")
+        #expect(primary(t0.addingTimeInterval(60 * 60)) == "Actualizado hace 1 h · exacto")
+        #expect(primary(t0.addingTimeInterval(4 * 3600)) == "Actualizado hace 4 h · exacto")
+    }
+
+    /// U88 (M6): la acción «Actualizar» de VoiceOver anuncia el resultado: «Actualizado», o el mensaje de la tarjeta si falla.
+    @Test func anuncioDeActualizarConVoiceOver() {
+        var l = link(validUntil: at(2027, 5, 19))
+        l.lastSuccessAt = at(2026, 11, 20, 11, 55)
+        func announce(_ problem: SyncProblem?) -> String {
+            manualRefreshAnnouncement(bank: .rev, link: l, problem: problem, estimated: false, canConnect: true,
+                                      now: now, calendar: madrid)
+        }
+        #expect(announce(nil) == "Actualizado")
+        #expect(announce(.unknown) == "No se pudo actualizar · lo intentamos más tarde")
+        #expect(announce(.keyRejected) == "Enable Banking no acepta la clave")
+        #expect(announce(.rateLimited).hasPrefix("El banco ha pedido esperar"))
+    }
 }

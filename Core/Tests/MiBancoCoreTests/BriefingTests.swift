@@ -347,6 +347,40 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         #expect(!spokenBriefing(b, input: input, privateMode: true, calendar: cal).contains("Lo que más"))
     }
 
+    /// Lote 3, B2: la voz lee EXACTAMENTE el mismo texto que antes, y cada línea leída sabe dónde está en él (en
+    /// unidades UTF-16, las del motor de voz), en orden y sin solaparse; con el modo privado no hay líneas que resaltar.
+    @Test func laVozSabeQueLineaEstaLeyendo() throws {
+        var input = busy()
+        input.investments = moversSummary([mover("Alfa", change: 210), mover("Beta", change: -130)])
+        let b = makeBriefing(input, calendar: cal)
+        let spoken = spokenBriefingLines(b, input: input, privateMode: false, calendar: cal)
+        #expect(spoken.text == spokenBriefing(b, input: input, privateMode: false, calendar: cal))
+        let lineCount = b.sections.reduce(0) { $0 + $1.lines.count } + 1 + (b.tip == nil ? 0 : 1)
+        #expect(spoken.lines.count == lineCount)
+        #expect(spoken.lines.first?.id == "headline")
+        let utf16 = Array(spoken.text.utf16)
+        var previousEnd = 0
+        for line in spoken.lines {
+            #expect(line.range.lowerBound >= previousEnd, "\(line.id) se solapa con la anterior")
+            #expect(line.range.upperBound <= utf16.count)
+            previousEnd = line.range.upperBound
+            let piece = String(decoding: utf16[line.range], as: UTF16.self)
+            #expect(!piece.isEmpty && !piece.hasPrefix(" "), "\(line.id): «\(piece)»")
+            // A mitad de su rango, la voz está en esa línea.
+            #expect(spoken.line(at: (line.range.lowerBound + line.range.upperBound) / 2) == line.id)
+        }
+        // El saludo no es una línea del resumen: mientras suena, no se resalta nada.
+        #expect(spoken.line(at: 0) == nil)
+        // La línea de inversiones se lee con sus palabras de siempre y en su sitio.
+        let investments = b.sections.first { $0.kind == .investments }!.lines[1]
+        let range = try #require(spoken.lines.first { $0.id == investments.id }?.range)
+        #expect(String(decoding: utf16[range], as: UTF16.self).contains("Lo que más subió: Alfa, más 2,1 por ciento."))
+        // Modo privado: el texto de siempre y ninguna línea.
+        let privateSpoken = spokenBriefingLines(b, input: input, privateMode: true, calendar: cal)
+        #expect(privateSpoken.text == spokenBriefing(b, input: input, privateMode: true, calendar: cal))
+        #expect(privateSpoken.lines.isEmpty)
+    }
+
     @Test func enmascaraLaMonedaEscritaAntesDelNumero() {
         let cases = [("Cobro de €13", "Cobro de •••"), ("Cobro de EUR 20", "Cobro de •••"), ("Cobro de € 13,50", "Cobro de •••"),
                      ("Cobro €13.", "Cobro •••."), ("Cobro de euros 5", "Cobro de •••"), ("Cobro de eur20", "Cobro de •••")]
@@ -733,5 +767,15 @@ private func attentionBriefing(_ items: [AttentionItem]) -> Briefing {
         let b = makeBriefing(input, calendar: cal)
         #expect(render(b.headline, .plain) == nb("Desde ayer a las 22:10 gastaste 12,50 € en 1 pago."))
         #expect(lines(b, .happened).last == nb("200,00 € de imagin a Revolut (entre tus cuentas)"))
+    }
+
+    // MARK: Ronda U0–U68 (U36)
+
+    @Test func vozPrivadaSinCifras() {
+        #expect(privateSpokenText("Café Sol: 61,20 €") == "Café Sol: importe oculto")
+        #expect(privateSpokenText("Café Sol: 61,20\u{00A0}€") == "Café Sol: importe oculto")
+        #expect(privateSpokenText("+1,4 %") == "importe oculto")
+        #expect(privateSpokenText("−2,5\u{00A0}%") == "importe oculto")
+        #expect(privateSpokenText("Gastaste •••") == "Gastaste importe oculto")
     }
 }

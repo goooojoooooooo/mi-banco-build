@@ -6,6 +6,8 @@ import MiBancoCore
 struct SearchResults: View {
     let index: [Movement]
     let logoDomains: [UUID: String]
+    /// Traspasos entre tus cuentas (del snapshot): su fila dice «Traspaso», como en Inicio.
+    let ownTransfers: Set<UUID>
     let query: String
     let zoom: Namespace.ID
     let onOpen: (UUID) -> Void
@@ -45,7 +47,8 @@ struct SearchResults: View {
             return
         }
         let found = searchMovements(index, query: trimmed).prefix(Self.limit).map { LedgerItem.movement($0) }
-        let sections = LedgerSnapshot.sections(for: Array(found), showsBank: true, now: Date(), calendar: .current)
+        let sections = LedgerSnapshot.sections(for: Array(found), showsBank: true, now: Date(), calendar: .current,
+                                                    ownTransfers: ownTransfers)
         entries = ListEntry.flatten(sections, prefix: "q")
         searched = trimmed
         let count = found.count

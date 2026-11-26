@@ -23,6 +23,17 @@ public struct PendingMove: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+private struct LossyPendingMove: Decodable {
+    let value: PendingMove?
+    init(from decoder: Decoder) throws { value = try? PendingMove(from: decoder) }
+}
+
+/// Decodifica una lista de traspasos pendientes elemento a elemento, saltando los corruptos (U31).
+public func decodePendingMoves(_ data: Data) -> [PendingMove] {
+    guard let items = try? JSONDecoder().decode([LossyPendingMove].self, from: data) else { return [] }
+    return items.compactMap(\.value)
+}
+
 public enum MoveState: Equatable, Sendable {
     case waiting
     case done(movementID: UUID)

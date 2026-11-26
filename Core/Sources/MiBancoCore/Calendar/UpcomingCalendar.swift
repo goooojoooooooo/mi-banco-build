@@ -38,6 +38,43 @@ public func firstBelowFloorDays(_ days: [UpcomingDay]) -> [BankID: Date] {
     return first
 }
 
+/// Un único aviso «Pasar X €» por banco en el calendario de 14 días (U21).
+public struct CalendarTopUp: Equatable, Sendable {
+    public let bank: BankID
+    public let firstDay: Date
+    public let suggestedCents: Int
+    public let isEstimated: Bool
+
+    public init(bank: BankID, firstDay: Date, suggestedCents: Int, isEstimated: Bool = false) {
+        self.bank = bank
+        self.firstDay = firstDay
+        self.suggestedCents = suggestedCents
+        self.isEstimated = isEstimated
+    }
+}
+
+/// Un elemento por banco que baja de su mínimo en los 14 días, con el redondeo a 10 € del mayor hueco (U21).
+public func calendarTopUps(days: [UpcomingDay], floors: [BankID: Int]) -> [CalendarTopUp] {
+    var result: [CalendarTopUp] = []
+    for bank in BankID.allCases {
+        guard let firstIdx = days.firstIndex(where: { $0.belowFloor.contains(bank) }) else { continue }
+        let floor = floors[bank] ?? 0
+        var maxShortfall = 0
+        for day in days[firstIdx...] {
+            if let bal = day.balanceAfter[bank] {
+                maxShortfall = max(maxShortfall, floor - bal)
+            }
+        }
+        guard maxShortfall > 0 else { continue }
+        let suggested = (maxShortfall + 999) / 1000 * 1000
+        let first = days[firstIdx]
+        result.append(CalendarTopUp(bank: bank, firstDay: first.day, suggestedCents: suggested,
+                                    isEstimated: first.estimatedBanks.contains(bank)))
+    }
+    func bankOrder(_ bank: BankID) -> Int { BankID.allCases.firstIndex(of: bank) ?? 0 }
+    return result.sorted { $0.firstDay != $1.firstDay ? $0.firstDay < $1.firstDay : bankOrder($0.bank) < bankOrder($1.bank) }
+}
+
 /// Cuántos días mira el calendario, hoy incluido.
 public let upcomingCalendarDays = 14
 

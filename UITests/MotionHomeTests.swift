@@ -1198,6 +1198,13 @@ final class MotionHomeTests: XCTestCase {
         let row = firstRow()
         XCTAssertTrue(row.waitForExistence(timeout: 8), "No hay filas")
         XCTAssertEqual(homeProbe()["importeOculto"], "0", "El importe ya estaba apagado: \(homeProbe())")
+        // Con texto grande la primera fila queda bajo el borde: se sube la lista hasta tenerla a la vista.
+        let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+        for _ in 0..<8 where !row.isHittable {
+            centre.press(forDuration: 0.1, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: -260)), withVelocity: 500,
+                         thenHoldForDuration: 0.3)
+        }
+        XCTAssertTrue(row.isHittable, "La primera fila no llega a verse")
         row.swipeLeft()
         let flag = app.buttons["row-action-flag"]
         XCTAssertTrue(flag.waitForExistence(timeout: 5), "Deslizar la fila no enseñó sus acciones")

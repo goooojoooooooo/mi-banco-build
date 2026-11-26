@@ -321,9 +321,20 @@ final class MotionTourHomeTests: MotionTourCase {
     }
 
     /// `-MiBancoDemoCardMoment rowSwipe`: la primera fila se abre (como al deslizarla) y, al tocar otra vez, se cierra.
-    private func rowSwipe(_ suffix: String, extra: [String], frames: Int = 12) {
+    private func rowSwipe(_ suffix: String, extra: [String], frames: Int = 12, bringRowsUp: Bool = false) {
         launch(["-MiBancoDemoCardMoment", "rowSwipe"] + extra)
         waitForHome()
+        if bringRowsUp {
+            // Con el texto más grande las filas quedan bajo el borde: se sube la lista hasta ver la primera (el
+            // segmentado se queda arriba, fijo).
+            let row = app.buttons.matching(identifier: "movementRow").firstMatch
+            let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+            for _ in 0..<8 where !(row.exists && row.isHittable) {
+                centre.press(forDuration: 0.1, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: -260)), withVelocity: 500,
+                             thenHoldForDuration: 0.3)
+            }
+            Thread.sleep(forTimeInterval: 2)
+        }
         segment("Todo").tap()
         burst("row-swipe" + suffix, frames: frames, every: 0.2)
         Thread.sleep(forTimeInterval: 1.5)
@@ -342,12 +353,13 @@ final class MotionTourHomeTests: MotionTourCase {
     /// Con el texto de accesibilidad más grande (fila apilada, el importe debajo del nombre): al abrirse, el importe se
     /// apaga antes de que se lean las acciones.
     func testRowSwipeLargestText() throws {
-        rowSwipe("-ax", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        rowSwipe("-ax", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"],
+                 bringRowsUp: true)
     }
 
     func testRowSwipeLargestTextEyeClosed() throws {
         rowSwipe("-ax-eye", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
-                                    "-MiBancoDemoPrivate"])
+                                    "-MiBancoDemoPrivate"], bringRowsUp: true)
     }
 
     func testRowSwipeReduceMotion() throws {

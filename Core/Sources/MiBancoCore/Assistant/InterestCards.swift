@@ -73,9 +73,15 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
     public var topicWeights: [AssistantTopic: Int]
     /// Respuestas ya dadas por identificador de tarjeta.
     public var cardFeedback: [String: RecordedCardFeedback]
+    /// Cuánto habla Nyx por su cuenta (por defecto «Cuando importe»).
+    public var nyxTalkLevel: NyxTalkLevel
+    /// Si Nyx lee la puesta al día al abrir cuando llevas auriculares (apagado por defecto).
+    public var nyxReadAloudWithHeadphones: Bool
 
     public init(disabledTopics: Set<AssistantTopic> = [], topicWeights: [AssistantTopic: Int] = [:],
-                cardFeedback: [String: RecordedCardFeedback] = [:]) {
+                cardFeedback: [String: RecordedCardFeedback] = [:],
+                nyxTalkLevel: NyxTalkLevel = .whenItMatters,
+                nyxReadAloudWithHeadphones: Bool = false) {
         self.disabledTopics = disabledTopics
         var cleanWeights: [AssistantTopic: Int] = [:]
         for (topic, w) in topicWeights {
@@ -84,6 +90,8 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
         }
         self.topicWeights = cleanWeights
         self.cardFeedback = Self.cappedFeedback(cardFeedback)
+        self.nyxTalkLevel = nyxTalkLevel
+        self.nyxReadAloudWithHeadphones = nyxReadAloudWithHeadphones
     }
 
     public func isEnabled(_ topic: AssistantTopic) -> Bool {
@@ -141,7 +149,9 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
         min(maxWeight, max(minWeight, value))
     }
 
-    private enum CodingKeys: String, CodingKey { case disabledTopics, topicWeights, cardFeedback }
+    private enum CodingKeys: String, CodingKey {
+        case disabledTopics, topicWeights, cardFeedback, nyxTalkLevel, nyxReadAloudWithHeadphones
+    }
 
     public init(from decoder: any Decoder) throws {
         self.init()
@@ -161,6 +171,8 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
         if let rawFeedback = try? c.decode([String: LossyDecodable<RecordedCardFeedback>].self, forKey: .cardFeedback) {
             cardFeedback = Self.cappedFeedback(rawFeedback.compactMapValues(\.value))
         }
+        nyxTalkLevel = (try? c.decode(NyxTalkLevel.self, forKey: .nyxTalkLevel)) ?? .whenItMatters
+        nyxReadAloudWithHeadphones = (try? c.decode(Bool.self, forKey: .nyxReadAloudWithHeadphones)) ?? false
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -170,6 +182,8 @@ public struct AssistantPreferences: Codable, Equatable, Sendable {
         for (topic, w) in topicWeights where w != 0 { rawWeights[topic.rawValue] = Self.clampedWeight(w) }
         try c.encode(rawWeights, forKey: .topicWeights)
         try c.encode(cardFeedback, forKey: .cardFeedback)
+        try c.encode(nyxTalkLevel, forKey: .nyxTalkLevel)
+        try c.encode(nyxReadAloudWithHeadphones, forKey: .nyxReadAloudWithHeadphones)
     }
 }
 

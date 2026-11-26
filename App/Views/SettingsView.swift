@@ -195,15 +195,8 @@ struct SettingsView: View {
                     }
                     .toggleStyle(TitanToggleStyle())
                     .listRowBackground(Theme.grouped)
-                    Toggle(isOn: privacyBinding) {
-                        OptionLabel(title: "Modo privado", detail: "Oculta los importes en toda la app", systemImage: "eye.slash")
-                    }
-                    .toggleStyle(TitanToggleStyle())
-                    .accessibilityIdentifier("settings-private-mode")
-                    #if DEBUG
-                    .onAppear { armDemoTimers() }
-                    #endif
-                    .listRowBackground(Theme.grouped)
+                    privacyToggle
+                        .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Privacidad")
                 } footer: {
@@ -345,6 +338,20 @@ struct SettingsView: View {
         case .balanced: "Equilibrado"
         case .expressive: "Expresivo"
         }
+    }
+
+    /// «Modo privado» (aparte: dentro de la lista, el `#if DEBUG` hacía que el compilador no pudiera con la expresión).
+    private var privacyToggle: some View {
+        let toggle = Toggle(isOn: privacyBinding) {
+            OptionLabel(title: "Modo privado", detail: "Oculta los importes en toda la app", systemImage: "eye.slash")
+        }
+        .toggleStyle(TitanToggleStyle())
+        .accessibilityIdentifier("settings-private-mode")
+        #if DEBUG
+        return toggle.onAppear { armDemoTimers() }
+        #else
+        return toggle
+        #endif
     }
 
     #if DEBUG

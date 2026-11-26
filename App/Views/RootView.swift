@@ -999,9 +999,10 @@ private struct TabBarCurtain: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .ignoresSafeArea()
         .opacity(covered ? 1 : 0)
-        // M-10: mientras tapa la barra, la barra no recibe toques.
-        .contentShape(Rectangle())
-        .allowsHitTesting(covered)
+        // M-10 (ronda 1): NO se puede bloquear así: la barra de cristal recibe los toques por encima de cualquier capa
+        // de SwiftUI (run 45836401819: con el velo «tocable», la barra seguía tocándose y, en cambio, el velo a pantalla
+        // completa estorbaba a lo de Inicio). El velo no recibe toques.
+        .allowsHitTesting(false)
         .accessibilityHidden(true)
             .onChange(of: token) { _, _ in
                 // La barra de pestañas cierra el montaje: tapada desde el primer fotograma y destapada la última. Con

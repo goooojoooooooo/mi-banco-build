@@ -919,13 +919,11 @@ final class MotionShellTests: XCTestCase {
     /// a ×10 en Expresivo, ~5 s): antes de eso ya han entrado la tarjeta, el selector y las primeras filas.
     func testTabBarEntersLast() throws {
         launch(["-MiBancoMotionScale", "10"])
-        // M-1 (ronda 1): mientras el velo la tapa, la barra no se puede tocar (lo que hay delante es el velo, que llega
-        // hasta el borde de la pantalla); destapada, sí.
+        // M-1 (ronda 1): lo DIBUJADO del velo (que llegue hasta el borde y tape el canto) solo lo enseñan las hojas
+        // (`launch`, `unlock*`): la barra de cristal se puede tocar por encima de cualquier capa de SwiftUI, así que su
+        // «tocable» no dice si está tapada. Aquí: se tapa al empezar, se destapa después y entonces se puede tocar.
         XCTAssertTrue(waitUntil(60) { (self.probe()["barraTapada"] ?? "-") != "-" }, "La barra no se tapó: \(probe())")
         let homeTab = app.tabBars.buttons["Inicio"]
-        if (probe()["barraDestapada"] ?? "-") == "-" {
-            XCTAssertFalse(homeTab.isHittable, "La barra se puede tocar con el velo delante")
-        }
         XCTAssertTrue(waitUntil(90) { self.probe()["barraDestapada"] != "-" && self.probe()["barraDestapada"] != nil },
                       "La barra de pestañas no se destapó: \(probe())")
         XCTAssertTrue(waitUntil(15) { homeTab.isHittable }, "Destapada, la barra no se puede tocar")

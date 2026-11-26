@@ -32,10 +32,10 @@ public enum ConnectEvent: Equatable, Sendable {
     case needsChoice(BankID, [EBASPSP])
     case webOpened(BankID)
     /// La persona cerró la hoja web del banco (no la cerró la app).
-    case webDismissedByUser
+    case webDismissedByUse
     case callback(PendingCheck)
     /// La vuelta ya comprobada contra el `state` guardado. Una vuelta que no se puede verificar (`state` falso o ausente,
-    /// forma rara) o sin intento en el Llavero que llega por `onOpenURL` se ignora sin tocar nada (la puede mandar cualquier
+    /// forma rara) o sin intento en el Llavero que llega por `onOpenURL` se ignora sin tocar nada (la puede mandar cualquie
     /// app); si llega por el propio cierre de la hoja web (`fromWebSession: true`), la hoja ya se ha cerrado y el flujo
     /// termina en `.failed(bank, foreignLink)` para no dejar `.waitingForBank` colgado (R43).
     case callbackReceived(PendingCheck, AuthCallbackResult, fromWebSession: Bool = false)
@@ -308,6 +308,16 @@ public func connectMessage(for error: Error) -> String {
 /// Solo `mibanco://cb…` es de este flujo; cualquier otra dirección se ignora sin ruido.
 public func isBankCallbackURL(_ url: URL) -> Bool {
     url.scheme?.lowercased() == BankingConstants.callbackScheme && url.host?.lowercased() == "cb"
+}
+
+/// Puerta de entrada para `onOpenURL` (`SEC-11`): solo se acepta `mibanco://cb` si existe un intento pendiente.
+/// Sin intento pendiente (`.none`), la URL se ignora de inmediato sin lanzar flujo ni error.
+public func shouldHandleIncomingBankCallback(_ url: URL, pending: PendingCheck) -> Bool {
+    guard isBankCallbackURL(url) else { return false }
+    switch pending {
+    case .none: return false
+    case .valid, .expired: return true
+    }
 }
 
 /// Revolut e imagin siempre; Trade Republic solo si una lista en memoria lo encontró.

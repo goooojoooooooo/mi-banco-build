@@ -5,9 +5,9 @@ import SwiftUI
 /// Permite conectar o renovar con Enable Banking, actualizar ahora, importar extractos CSV o desconectar.
 /// Confirmaciones y selector de archivos pasan por `RootView` (regla de una sola hoja).
 ///
-/// Forma (fase B, S8): una cabecera oscura (banco, saldo, estado y acciones) y, encima, una hoja que sube al desplazar
+/// Forma (fase B, S8): una cabecera oscura (banco, saldo, estado y acciones) y, encima, una hoja que sube al desplaza
 /// con los últimos movimientos de ESE banco y, debajo, su historial y la desconexión (`BankHeaderSheet`).
-/// Conectar (S9) enseña los pasos Verificar › Conectar › Importar con un porcentaje que sigue la fase REAL del conector
+/// Conectar (S9) enseña los pasos Verificar › Conectar › Importar con un porcentaje que sigue la fase REAL del conecto
 /// (`StepPercent`), y al acabar bien, «Banco, conectado». Mientras la lista se llena por primera vez tras conectar, un
 /// esqueleto con brillo (S11).
 /// Si se llega volando desde Inicio (`CardFlight.request` de este banco), la cabecera espera a que la tarjeta aterrice;
@@ -80,7 +80,7 @@ struct BankLinkView: View {
             estimated: model.snapshot.balances[bank]?.estimated,
             canConnect: canConnect,
             now: now,
-            calendar: DateText.madridCalendar
+            calendar: DateText.madridCalenda
         )
         if syncStatus.running.contains(bank) {
             return BankStatusLines(
@@ -107,7 +107,7 @@ struct BankLinkView: View {
         return connector.phase
     }
 
-    /// La fase traducida para ESTE banco (Core: `BankConnectProgress`). La primera carga de movimientos tras conectar
+    /// La fase traducida para ESTE banco (Core: `BankConnectProgress`). La primera carga de movimientos tras conecta
     /// cuenta dentro del tercer paso solo si el trámite se ha visto en esta pantalla.
     private var stage: BankConnectStage {
         progress.stage(of: phase, bank: bank, syncing: syncStatus.running.contains(bank))
@@ -172,7 +172,7 @@ struct BankLinkView: View {
             try? await Task.sleep(for: .seconds(motion.seconds(1.0)))
             guard run == finishRun, progress.showsSuccess else { return }
             // EXCEPCIÓN DECLARADA a «solo transformación, opacidad y color»: soltar el hueco anima el alto de la cabecera
-            // (maquetación). Es un único muelle de la hoja, acotado a este momento, sin bucle y nunca con Reducir
+            // (maquetación). Es un único muelle de la hoja, acotado a este momento, sin bucle y nunca con Reduci
             // movimiento (aceptado en la re-revisión del lote 3).
             withAnimation(motion.animation(.sheet)) { reservedHeight = 0 }
         }
@@ -481,7 +481,7 @@ struct BankLinkView: View {
         .assemblesOnFirstAppear()
     }
 
-    @ViewBuilder
+    @ViewBuilde
     private var phaseRows: some View {
         if let shown = shownProgress, !needsResumeForThisBank {
             VStack(alignment: .leading, spacing: 14) {
@@ -626,7 +626,7 @@ struct BankLinkView: View {
         }
     }
 
-    @ViewBuilder
+    @ViewBuilde
     private func actionRows(lines: BankStatusLines) -> some View {
         if progress.showsStartActions(for: stage) {
             switch lines.action {
@@ -844,6 +844,10 @@ struct BankLinkView: View {
                 guard (gate?.generation ?? 0) == generation else { return }
                 importError = error.message
                 errorTick += 1
+            } catch let error as CSVLimitError {
+                guard (gate?.generation ?? 0) == generation else { return }
+                importError = csvLimitErrorMessage(error)
+                errorTick += 1
             } catch let error as StatementError {
                 guard (gate?.generation ?? 0) == generation else { return }
                 importError = Self.errorMessage(for: error, bank: targetBank)
@@ -873,13 +877,16 @@ struct BankLinkView: View {
     nonisolated private static func readStatementData(from url: URL) throws -> Data {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
-            throw StatementFileError.unreadable
-        }
-        guard size <= maxStatementBytes else {
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxStatementBytes {
             throw StatementFileError.tooLarge
         }
-        guard let data = try? Data(contentsOf: url) else { throw StatementFileError.unreadable }
+        // SEC-11: con o sin tamaño conocido se lee con tope (`maxStatementBytes + 1`), nunca el fichero entero.
+        let data: Data
+        do {
+            data = try readFileCapped(url, limit: maxStatementBytes)
+        } catch {
+            throw StatementFileError.unreadable
+        }
         guard data.count <= maxStatementBytes else { throw StatementFileError.tooLarge }
         return data
     }

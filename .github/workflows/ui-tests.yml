@@ -87,7 +87,7 @@ jobs:
             esac
             SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
           else
-            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests -skip-testing:MiBancoUITests/MotionTourHomeTests -skip-testing:MiBancoUITests/MotionTourScreensTests -skip-testing:MiBancoUITests/MotionTourShellTests"
+            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests -skip-testing:MiBancoUITests/MotionTourHomeTests -skip-testing:MiBancoUITests/MotionTourScreensTests -skip-testing:MiBancoUITests/MotionTourShellTests -skip-testing:MiBancoUITests/MotionTourSecurityTests"
             # La bateria completa va en 2 simuladores salvo que se pida otro numero (experimento medido: mismas pruebas y
             # mismos resultados que en serie). Una clase sola sigue en serie, salvo que se pida `parallel_workers`.
             PARALLEL_WORKERS="${PARALLEL_WORKERS:-2}"
@@ -107,9 +107,9 @@ jobs:
           tail -n 60 build/ui.log
           exit 0
       # G26: a veces el simulador no deja arrancar las pruebas y ninguna llega a empezar («The test runner failed to
-      # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulador
+      # initialize for UI testing ... Timed out waiting for AX loaded notification»): se arranca otra vez el simulado
       # y se repite una sola vez la misma orden de «Pruebas de toques».
-      - name: Reintento si las pruebas no llegaron a empezar
+      - name: Reintento si las pruebas no llegaron a empeza
         run: |
           if [ "$(cat build/status.txt)" = "0" ] || grep -qE "^Test [Cc]ase " build/ui.log || ! grep -q "failed to initialize for UI testing" build/ui.log; then
             exit 0

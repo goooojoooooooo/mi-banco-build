@@ -8,7 +8,19 @@ public enum CSVLimitError: Error, Equatable, Sendable {
     case cellTooLong(limit: Int)
 }
 
-/// Una tabla CSV leída tal cual: cabeceras y filas de texto. Las columnas se buscan por nombre (con alias), nunca por
+/// Mensaje claro en español para el usuario cuando un extracto CSV supera los topes defensivos (`SEC-11`).
+public func csvLimitErrorMessage(_ error: CSVLimitError) -> String {
+    switch error {
+    case .tooManyRows:
+        return "Este archivo tiene demasiadas filas para importarlo de una vez."
+    case .tooManyColumns:
+        return "Este archivo tiene demasiadas columnas. Usa el CSV que exporta tu banco."
+    case .cellTooLong:
+        return "Este archivo tiene campos demasiado largos. Usa el CSV que exporta tu banco."
+    }
+}
+
+/// Una tabla CSV leída tal cual: cabeceras y filas de texto. Las columnas se buscan por nombre (con alias), nunca po
 /// posición, y las desconocidas se ignoran: ningún formato de banco está confirmado con un fichero real.
 public struct CSVTable: Equatable, Sendable {
     public static let maxRows = 50_000

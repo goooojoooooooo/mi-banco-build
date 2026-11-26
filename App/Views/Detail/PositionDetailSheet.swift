@@ -30,7 +30,7 @@ struct PositionDetailSheet: View {
                     onClose: { dismiss() }
                 )
             } else {
-                Color.clear
+                Color.clea
             }
         }
         .environment(\.entrance, entrance)
@@ -61,6 +61,7 @@ private struct PositionDetailContent: View {
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
@@ -69,6 +70,7 @@ private struct PositionDetailContent: View {
 
     @State private var editingPrice = false
     @State private var priceText = ""
+    @State private var initialPriceText = ""
     @State private var priceError: String?
     @State private var priceSaved = false
     @State private var saveCloseTask: Task<Void, Never>?
@@ -197,7 +199,7 @@ private struct PositionDetailContent: View {
                 }
 
                 if editingPrice {
-                    manualPriceEditor
+                    manualPriceEdito
                         .staggeredEntrance(9)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
@@ -250,6 +252,24 @@ private struct PositionDetailContent: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { priceFocused = false }
         }
+        // SEC-05: al cerrarse el ojo mientras se edita el precio, soltar el foco en el acto y sin animación.
+        .onChange(of: preferences.privateMode) { _, on in
+            guard on, priceFocused else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { priceFocused = false }
+        }
+        #if DEBUG
+        .onChange(of: priceFocused, initial: true) { _, focused in
+            guard DemoMode.isActive, focused, !preferences.privateMode,
+                  let seconds = DemoMode.closeEyeWhenFocusedSeconds else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled, priceFocused else { return }
+                preferences.privateMode = true
+            }
+        }
+        #endif
         .onDisappear {
             saveCloseTask?.cancel()
             saveCloseTask = nil
@@ -413,15 +433,17 @@ private struct PositionDetailContent: View {
     }
 
     private var manualPriceEditor: some View {
-        let maskedValue = preferences.privateMode && !priceFocused && !priceText.isEmpty
-            ? "importe oculto"
-            : priceText
-        return DetailGroup {
+        DetailGroup {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 10) {
-                    TextField("Precio en € (vacío para quitar)", text: $priceText)
+                    // SEC-05: componente único enmascarado; con el ojo cerrado nunca monta ni desenfoca la cifra real.
+                    MaskedAmountTextField(
+                        placeholder: "Precio en € (vacío para quitar)",
+                        text: $priceText,
+                        hidden: preferences.privateMode,
+                        editing: priceFocused
+                    )
                         .titan(.option)
-                        .foregroundStyle(Theme.label)
                         .keyboardType(.decimalPad)
                         .submitLabel(.done)
                         .focused($priceFocused)
@@ -429,9 +451,7 @@ private struct PositionDetailContent: View {
                         .padding(.horizontal, 12)
                         .frame(minHeight: 44)
                         .background(Theme.fieldFill, in: .rect(cornerRadius: Theme.Radius.field))
-                        .privateField(editing: priceFocused)
                         .accessibilityLabel("Precio a mano en euros")
-                        .accessibilityValue(maskedValue)
                         .accessibilityIdentifier("manualPriceField")
                         // El teclado decimal no tiene tecla de volver: «Hecho» solo quita el foco, no guarda (U75).
                         .toolbar {
@@ -487,6 +507,7 @@ private struct PositionDetailContent: View {
         } else {
             priceText = ""
         }
+        initialPriceText = priceText
         priceError = nil
         editingPrice = true
         priceFocused = !preferences.privateMode
@@ -496,6 +517,14 @@ private struct PositionDetailContent: View {
         saveCloseTask?.cancel()
         saveCloseTask = nil
         priceFocused = false
+        // Con el ojo cerrado, salir o guardar sin escribir un precio distinto conserva el valor existente.
+        if preferences.privateMode, priceText == initialPriceText {
+            priceError = nil
+            withAnimation(motion.fade) {
+                editingPrice = false
+            }
+            return
+        }
         let trimmed = priceText.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "€", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)

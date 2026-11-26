@@ -8,6 +8,7 @@ struct AccountsView: View {
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.motion) private var motion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.presentationGate) private var gate
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -112,6 +113,24 @@ struct AccountsView: View {
         .onChange(of: focusedField) { old, _ in
             if case .floor(let bank) = old { commitFloor(bank) }
         }
+        // SEC-05: al cerrarse el ojo mientras se edita un colchón mínimo, soltar el foco en el acto y sin animación.
+        .onChange(of: preferences.privateMode) { _, on in
+            guard on, case .floor = focusedField else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { focusedField = nil }
+        }
+        #if DEBUG
+        .onChange(of: focusedField) { _, field in
+            guard DemoMode.isActive, case .floor = field, !preferences.privateMode,
+                  let seconds = DemoMode.closeEyeWhenFocusedSeconds else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                guard !Task.isCancelled, case .floor = focusedField else { return }
+                preferences.privateMode = true
+            }
+        }
+        #endif
         .onDisappear {
             for bank in floorDirty { commitFloor(bank) }
         }
@@ -121,7 +140,7 @@ struct AccountsView: View {
 
     // MARK: - Banco: IBAN + Colchón mínimo
 
-    @ViewBuilder
+    @ViewBuilde
     private func bankSectionRow(_ bank: BankID) -> some View {
         let iban = accountBook.book.ibans[bank]
         let isRevealed = revealedBank == bank && scenePhase == .active && gate?.isLocked != true
@@ -263,12 +282,16 @@ struct AccountsView: View {
                             .transition(.opacity)
                             .accessibilityLabel("Guardado")
                     }
-                    let textVal = floorTexts[bank] ?? ""
                     let isEditing = focusedField == .floor(bank)
-                    TextField("0,00 €", text: floorBinding(bank))
+                    // SEC-05: componente único enmascarado; con el ojo cerrado nunca monta ni desenfoca la cifra real.
+                    MaskedAmountTextField(
+                        placeholder: "0,00 €",
+                        text: floorBinding(bank),
+                        hidden: preferences.privateMode,
+                        editing: isEditing
+                    )
                         .titan(.option)
                         .fontWeight(.semibold)
-                        .foregroundStyle(Theme.label)
                         .multilineTextAlignment(stacked ? .leading : .trailing)
                         .keyboardType(.numbersAndPunctuation)
                         .submitLabel(.done)
@@ -277,9 +300,8 @@ struct AccountsView: View {
                         .padding(.horizontal, 10)
                         .frame(minWidth: 96, maxWidth: stacked ? .infinity : 128, minHeight: 44)
                         .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
-                        .privateField(editing: isEditing)
+                        .animation(motion.fade, value: isEditing)
                         .accessibilityLabel("Colchón mínimo de \(bank.displayName)")
-                        .accessibilityValue(preferences.privateMode && !isEditing && !textVal.isEmpty ? "importe oculto" : textVal)
                         .accessibilityIdentifier("accounts-floor-field-\(bank.rawValue)")
                 }
             }
@@ -475,6 +497,11 @@ struct AccountsView: View {
         guard floorDirty.contains(bank) else { return }
         let raw = (floorTexts[bank] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if raw.isEmpty {
+            if accountBook.book.floors[bank] == nil {
+                floorDirty.remove(bank)
+                floorErrors[bank] = nil
+                return
+            }
             do {
                 try accountBook.setFloor(nil, for: bank)
                 floorDirty.remove(bank)
@@ -491,10 +518,17 @@ struct AccountsView: View {
             errorTick += 1
             return
         }
-        do {
-            try accountBook.setFloor(cents > 0 ? cents : nil, for: bank)
+        let target: Int? = cents > 0 ? cents : nil
+        if target == accountBook.book.floors[bank] {
             floorDirty.remove(bank)
-            floorTexts[bank] = cents > 0 ? formatEUR(cents) : ""
+            floorTexts[bank] = target.map { formatEUR($0) } ?? ""
+            floorErrors[bank] = nil
+            return
+        }
+        do {
+            try accountBook.setFloor(target, for: bank)
+            floorDirty.remove(bank)
+            floorTexts[bank] = target.map { formatEUR($0) } ?? ""
             floorErrors[bank] = nil
             flashFloorSaved(bank)
         } catch {
@@ -612,7 +646,7 @@ func spokenMaskedPhone(_ phone: String) -> String {
 /// Al soltar «Ver» se tapa al instante. Solo en la demo de pruebas (`-MiBancoDemoRevealLinger <s>`) se tapa unos segundos
 /// después, para que una prueba de interfaz pueda leer lo que reveló la pulsación (U74). El bloqueo y salir de primer plano
 /// lo siguen tapando al momento (`isRevealed` mira `scenePhase` y el bloqueo).
-@MainActor
+@MainActo
 private func endReveal(_ hide: @escaping @MainActor () -> Void) {
     #if DEBUG
     if let seconds = DemoMode.revealLingerSeconds {

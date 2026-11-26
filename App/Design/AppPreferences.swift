@@ -9,7 +9,7 @@ final class AppPreferences {
     /// M-4: la misma clave que la carga de los avisos y la suite compartida (una sola fuente).
     nonisolated static let privateModeKey = SharedPrivacy.key
 
-    /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arrancar
+    /// Dónde se guarda el ojo: `UserDefaults.standard`. En la demo (DEBUG), un dominio propio que se siembra al arranca
     /// con `-MiBancoDemoPrivate`, para que la demo nunca toque el ojo del dueño y, aun así, quien observe lo guardado
     /// (`RollingAmount` sin preferencias) lo vea cambiar en vivo.
     nonisolated(unsafe) static let privateModeStore: UserDefaults = {
@@ -163,69 +163,8 @@ final class AppPreferences {
     }
 }
 
-/// Un importe que el modo privado oculta: desenfoque de 9 pt (proporcional al tamaño) + opacidad 0,75, como la maqueta.
-/// Solo se animan opacidad y desenfoque de un texto corto, nunca el de una lista entera; VoiceOver deja de leer la cifra.
-private struct PrivateAmount: ViewModifier {
-    let radius: CGFloat
-    @Environment(AppPreferences.self) private var preferences
-
-    func body(content: Content) -> some View {
-        let hidden = preferences.privateMode
-        content
-            .blur(radius: hidden ? radius : 0, opaque: false)
-            .opacity(hidden ? 0.75 : 1)
-            .privacySensitive()
-            .accessibilityHidden(hidden)
-    }
-}
-
-/// Un importe con etiqueta explícita (U8): oculta visualmente en modo privado y sustituye la etiqueta por «importe oculto»
-/// en el propio texto, sin ocultar el nodo (así VoiceOver lee «importe oculto» y XCUITest nunca ve «€» ni «%»).
-private struct PrivateAmountSpoken: ViewModifier {
-    let spoken: String
-    let radius: CGFloat
-    @Environment(AppPreferences.self) private var preferences
-
-    func body(content: Content) -> some View {
-        let hidden = preferences.privateMode
-        content
-            .blur(radius: hidden ? radius : 0, opaque: false)
-            .opacity(hidden ? 0.75 : 1)
-            .privacySensitive()
-            .accessibilityLabel(hidden ? "importe oculto" : spoken)
-    }
-}
-
-/// Un campo editable con un importe (saldos, umbrales): con el modo privado se difumina solo mientras no se edita,
-/// y nunca se oculta a VoiceOver (tiene que poder encontrarse y editarse).
-private struct PrivateField: ViewModifier {
-    let editing: Bool
-    @Environment(AppPreferences.self) private var preferences
-
-    func body(content: Content) -> some View {
-        let hidden = preferences.privateMode && !editing
-        content
-            .blur(radius: hidden ? 9 : 0, opaque: false)
-            .opacity(hidden ? 0.75 : 1)
-            .privacySensitive()
-    }
-}
-
-extension View {
-    /// `radius`: 9 para importes de fila, más para las cifras grandes.
-    func privateAmount(radius: CGFloat = 9) -> some View { modifier(PrivateAmount(radius: radius)) }
-
-    /// Variante U8 con etiqueta hablada explícita («importe oculto» cuando el ojo está cerrado).
-    func privateAmount(spoken: String, radius: CGFloat = 9) -> some View {
-        modifier(PrivateAmountSpoken(spoken: spoken, radius: radius))
-    }
-
-    /// Para campos de texto con importe: ver `PrivateField`.
-    func privateField(editing: Bool) -> some View { modifier(PrivateField(editing: editing)) }
-}
-
-/// El patrón de privacidad de la fase B para un importe (o una cantidad) que es texto: con el ojo cerrado el texto real
-/// NO se monta — se dibuja su máscara —, porque un texto que solo va difuminado (`.privateAmount()`) lo siguen leyendo
+/// El patrón de privacidad para un importe (o una cantidad) que es texto: con el ojo cerrado el texto real
+/// NO se monta — se dibuja su máscara —, porque un texto que solo va difuminado lo siguen leyendo
 /// las pruebas de toque y cualquier cliente de accesibilidad. Sin transición de contenido (la cifra no se funde con la
 /// máscara), marcado como dato privado, y VoiceOver dice «importe oculto».
 struct MaskedText: View {

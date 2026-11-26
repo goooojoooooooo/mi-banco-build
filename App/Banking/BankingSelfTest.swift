@@ -122,6 +122,16 @@ enum BankingSelfTest {
 
         // 6. El transporte se construye (no se envía nada).
         _ = URLSessionTransport()
+
+        // 7. SEC-11: sin intento pendiente, una URL externa de vuelta bancaria se ignora sin lanzar flujo ni error.
+        if let strayURL = URL(string: "\(BankingConstants.callbackScheme)://cb?code=fake&state=fake") {
+            let connector = await MainActor.run { BankConnector.shared }
+            let accepted = await MainActor.run { connector.shouldHandleExternalCallback(strayURL) }
+            guard !accepted else { return failure("callback sin pendiente aceptado") }
+            await connector.handle(url: strayURL)
+            let phase = await MainActor.run { connector.phase }
+            guard phase == .idle else { return failure("callback sin pendiente cambio fase") }
+        }
         return "Autoprueba: OK"
     }
 

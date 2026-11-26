@@ -275,18 +275,25 @@ final class MotionTourShellTests: MotionTourCase {
     /// C4 (D1): fila → detalle a ×4, desde el toque: el importe sale de la fila y vuela con un arco a su sitio; las
     /// líneas entran desde 0,15 s; «Te quedaban» rueda cuando el importe se posa; las barras del historial crecen 40 ms
     /// una detrás de otra. Luego se cierra (`detail-dismiss`).
+    /// m-4 (lote final): la hoja se cierra SOLA a los 4,5 s de abrirse (`-MiBancoDemoAutoCloseDetail`): un toque en
+    /// «Cerrar» espera a que la app quede quieta y la ráfaga del cierre empezaba con la hoja ya cerrada. La segunda
+    /// ráfaga empieza antes del cierre y lo cubre entero.
     private func rowDetailBursts(_ name: String, extra: [String] = []) {
-        launch(extra)
+        launch(extra + ["-MiBancoDemoAutoCloseDetail", "9"])
         waitForLaunchToEnd()
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 15), "No hay filas de movimientos")
         XCTAssertTrue(waitUntil(15) { row.isHittable }, "La primera fila no se puede tocar")
         row.tap()
         burst(name, frames: 24, every: 0.12)
-        let close = app.buttons["Cerrar"]
-        XCTAssertTrue(close.waitForExistence(timeout: 8), "No se abrió la hoja")
-        close.tap()
-        burst(name == "row-detail" ? "detail-dismiss" : name + "-cerrar", frames: 8, every: 0.15)
+        XCTAssertTrue(app.buttons["Cerrar"].exists, "La hoja se cerró antes de grabar su cierre")
+        // I-4 (ronda 1): la ráfaga del cierre empieza 0,3 s antes del cierre que la app publica (`cierreDetalle`).
+        let closeAt = Double(probe()["cierreDetalle"] ?? "") ?? 0
+        XCTAssertGreaterThan(closeAt, 0, "La app no publicó cuándo se cierra la hoja")
+        let wait = closeAt - 0.3 - Date().timeIntervalSince1970
+        XCTAssertGreaterThan(wait, 0, "La hoja ya se había cerrado al empezar la ráfaga del cierre")
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst(name == "row-detail" ? "detail-dismiss" : name + "-cerrar", frames: 14, every: 0.15)
     }
 
     func testRowDetail() throws { rowDetailBursts("row-detail") }
@@ -294,6 +301,29 @@ final class MotionTourShellTests: MotionTourCase {
     func testRowDetailWithTheEyeClosed() throws { rowDetailBursts("row-detail-ojo", extra: ["-MiBancoDemoPrivate"]) }
 
     func testRowDetailReduceMotion() throws { rowDetailBursts("row-detail-reducir", extra: ["-MiBancoReduceMotion"]) }
+
+    /// Ronda 1 (kit m-4): el ojo se cierra (solo, `-MiBancoDemoCloseEyeAfter`) mientras el total aún rueda tras el
+    /// arranque. Se graba desde 1 s ANTES del cambio: el barajado y los puntos encima de la cifra, sin ningún fotograma
+    /// con una casilla vacía ni con un dígito y su punto a la vez.
+    func testEyeClosesOverARollingFigure() throws {
+        // Ronda 2 (N-6): a cámara lenta (×4) y con el texto dibujado de cada importe (`-MiBancoDrawnText`).
+        launch(["-MiBancoDemoCloseEyeAfter", "4.5", "-MiBancoDrawnText"], scale: 4)
+        XCTAssertTrue(waitUntil(20) { (self.probe()["ojoCierraEn"] ?? "-") != "-" }, "La app no dijo cuándo cierra el ojo")
+        let at = Double(probe()["ojoCierraEn"] ?? "") ?? 0
+        let wait = at - 1 - Date().timeIntervalSince1970
+        XCTAssertGreaterThan(wait, 0, "El ojo ya se había cerrado al empezar la ráfaga")
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst("eye-close-rolling", frames: 14, every: 0.1)
+        // Desde el cierre, ningún importe dibuja un dígito (ni al azar): se mira varias veces mientras la ráfaga sigue.
+        XCTAssertGreaterThan(Date().timeIntervalSince1970, at, "La comprobación empieza antes del cierre")
+        for look in 0..<8 {
+            let digits = NSPredicate(format: "value MATCHES %@", ".*[0-9].*€.*")
+            let drawn = app.descendants(matching: .any).matching(digits).allElementsBoundByIndex.map { $0.value as? String ?? "" }
+            XCTAssertEqual(drawn, [], "Mirada \(look): con el ojo cerrado se dibujan dígitos: \(drawn)")
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        burst("eye-close-rolling-despues", frames: 6, every: 0.2)
+    }
 
     /// C4 (D2): la categoría de un pago: la ficha blanca se desliza a la elegida y su símbolo bota; luego se pliega.
     func testCategoryPick() throws {
@@ -305,6 +335,12 @@ final class MotionTourShellTests: MotionTourCase {
         row.tap()
         let chip = element("category-chip")
         XCTAssertTrue(chip.waitForExistence(timeout: 8), "La primera fila no es un pago con categoría")
+        // Ronda 1 (I-2): los grupos de debajo del importe no reciben toques hasta que el importe se posa («Te quedaban»
+        // dice entonces su cifra): se espera a eso antes de tocar el chip.
+        let left = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "Te quedaban")).firstMatch
+        XCTAssertTrue(waitUntil(20) { left.label.hasSuffix(" euros") }, "El importe no llegó a posarse")
+        // Ronda 2 (N-2): el grupo recibe toques cuando su entrada ya se ve (retardo + muelle `enter`, a ×4 ~1,5 s).
+        Thread.sleep(forTimeInterval: 3)
         chip.tap()
         let tile = element("category-tile-ocio")
         XCTAssertTrue(tile.waitForExistence(timeout: 5), "Falta la ficha Ocio")

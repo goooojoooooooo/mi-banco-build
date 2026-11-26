@@ -60,6 +60,10 @@ extension DemoMode {
     /// lista: la lista nueva parte de invisible (pantalla en negro bajo el selector). La sonda tiene que dar 0.
     static var listSwapBlanks: Bool { isActive && arguments.contains("-MiBancoDemoListBlanks") }
 
+    /// `-MiBancoDemoEyeOpensMidBuild` (solo con `-MiBancoDemo`): con el ojo cerrado, se abre 0,3 s (× intensidad y
+    /// cámara lenta) después de empezar el montaje de Inicio (para fotografiar el ojo abierto a mitad del montaje).
+    static var eyeOpensMidBuild: Bool { isActive && arguments.contains("-MiBancoDemoEyeOpensMidBuild") }
+
     /// `-MiBancoDemoArrivalIncome` (con `-MiBancoDemoArrival`): lo que llega es dinero que entra, no un pago.
     static var arrivalIsIncome: Bool { arguments.contains("-MiBancoDemoArrivalIncome") }
 

@@ -75,13 +75,13 @@ struct SwipeActionsRow<Content: View>: View {
                 // Las acciones solo existen mientras la fila está (algo) abierta: cerrada, no hay nada encima.
                 if offset < -0.5 {
                     buttons
-                        // Sobre el importe: fondo negro, con 16 pt fundidos a la izquierda (sin corte a cuchillo).
+                        // Sobre el importe: fondo negro, con 32 pt fundidos a la izquierda (sin corte a cuchillo).
                         .background(Theme.canvas)
                         .background(alignment: .leading) {
                             LinearGradient(colors: [Theme.canvas.opacity(0), Theme.canvas], startPoint: .leading,
                                            endPoint: .trailing)
-                                .frame(width: 16)
-                                .offset(x: -16)
+                                .frame(width: 32)
+                                .offset(x: -32)
                                 .allowsHitTesting(false)
                         }
                         .offset(x: max(0, span + offset))

@@ -60,14 +60,10 @@ final class MotionTourHomeTests: MotionTourCase {
     /// Montado con el ojo cerrado y abierto a mitad del montaje (a cámara lenta la ventana del montaje dura 5,6 s):
     /// «Gastado en 7 días» aparece en cuanto se abre el ojo, sin quedarse invisible hasta el final de la ventana.
     func testHomeBuildEyeOpensMidway() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "6", "-MiBancoDemoPrivate"])
-        let unlock = app.buttons["Desbloquear"]
-        XCTAssertTrue(unlock.waitForExistence(timeout: 20), "Falta la pantalla de bloqueo")
-        let limit = Date().addingTimeInterval(20)
-        while unlock.exists && Date() < limit {}
-        let eye = app.buttons["Mostrar importes"]
-        if eye.waitForExistence(timeout: 3) { eye.tap() }
-        burst("home-build-eye-opens", frames: 20, every: 0.25)
+        // El ojo lo abre la demo 0,3 s (× cámara lenta) tras empezar el montaje: un toque de la prueba esperaría a que
+        // la app estuviera quieta, o sea, a que el montaje acabara.
+        unlockAndBurst("home-build-eye-opens", extra: ["-MiBancoDemoPrivate", "-MiBancoDemoEyeOpensMidBuild"], frames: 20,
+                       every: 0.25)
     }
 
     func testHomeBuildReduceMotion() throws {
@@ -100,7 +96,7 @@ final class MotionTourHomeTests: MotionTourCase {
         launch(["-MiBancoReduceMotion"])
         waitForHome()
         segment("Revolut").tap()
-        burst("carousel-drag-reduce", frames: 12, every: 0.12)
+        burst("carousel-drag-reduce", frames: 20, every: 0.12)
     }
 
     /// El ojo en Inicio: al cerrarlo las cifras se barajan y pasan a puntos; al abrirlo ruedan hasta la cifra.

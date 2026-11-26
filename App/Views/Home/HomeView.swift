@@ -457,6 +457,16 @@ struct HomeView: View {
         HomeProbe.shared.assemblies += 1
         #endif
         beginEntrance(.assembly)
+        #if DEBUG
+        // Solo demo (`-MiBancoDemoEyeOpensMidBuild`): el ojo se abre a mitad del montaje, como con el botón.
+        if DemoMode.eyeOpensMidBuild, preferences.privateMode {
+            let wait = kit.seconds(0.3)
+            Task {
+                try? await Task.sleep(for: .seconds(wait))
+                withAnimation(kit.fade) { preferences.privateMode = false }
+            }
+        }
+        #endif
     }
 
     /// Abre la ventana de una entrada. Mientras está abierta, las piezas esperan su turno; al cerrarse, todo lo que

@@ -126,6 +126,9 @@ private func category(_ m: Movement, overrides: [String: SpendingCategory] = [:]
         // «tienda china» (compras): «china» sola no dice nada.
         #expect(keywordCategory(for: "Tienda China Hua") == .compras)
         #expect(keywordCategory(for: "Comida China Gran Muralla") == .comerFuera)
+        // «horno de leña» (comer fuera) antes que «horno» (supermercado).
+        #expect(keywordCategory(for: "Pizzería Horno de Leña") == .comerFuera)
+        #expect(keywordCategory(for: "Horno San Onofre") == .supermercado)
         // «taller mecánico» (transporte): «taller» solo no.
         #expect(keywordCategory(for: "Taller Mecánico Hermanos Gil") == .transporte)
     }
@@ -203,7 +206,7 @@ private func category(_ m: Movement, overrides: [String: SpendingCategory] = [:]
         ("cantina", .comerFuera), ("comidas", .comerFuera), ("comida rapida", .comerFuera), ("braseria", .comerFuera),
         ("creperia", .comerFuera), ("arroceria", .comerFuera), ("pulperia", .comerFuera), ("freiduria", .comerFuera),
         ("bistro", .comerFuera), ("restaurante chino", .comerFuera), ("comida china", .comerFuera),
-        ("wok chino", .comerFuera),
+        ("wok chino", .comerFuera), ("horno de lena", .comerFuera),
         // Transporte
         ("autoescuela", .transporte), ("taller mecanico", .transporte), ("neumaticos", .transporte), ("itv", .transporte),
         // Casa y facturas
@@ -222,10 +225,10 @@ private func category(_ m: Movement, overrides: [String: SpendingCategory] = [:]
     ]
 
     @Test(arguments: MerchantCategoryTests.lexicon)
-    func lexicoFijado(_ entry: (String, SpendingCategory)) {
-        #expect(keywordCategory(for: entry.0) == entry.1, "«\(entry.0)»")
+    func lexicoFijado(_ text: String, _ expected: SpendingCategory) {
+        #expect(keywordCategory(for: text) == expected, "«\(text)»")
         // También dentro de un nombre real y en mayúsculas.
-        #expect(keywordCategory(for: "LA " + entry.0.uppercased() + " DE PACO") == entry.1, "«\(entry.0)» en un nombre")
+        #expect(keywordCategory(for: "LA " + text.uppercased() + " DE PACO") == expected, "«\(text)» en un nombre")
     }
 
     @Test func conTildesComoSeEscriben() {

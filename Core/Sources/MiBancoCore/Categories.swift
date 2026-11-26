@@ -45,18 +45,41 @@ private struct KeywordRule: Sendable {
 }
 
 /// Palabras clave -> categoría. Una regla casa si todas sus palabras aparecen seguidas y enteras en el comercio.
+/// Se escriben como quedan tras `normalizeMerchant` (minúsculas, sin tildes, «ñ» -> «n»). A igual número de palabras gana
+/// la lista que va antes. Fuera a propósito: «china»/«chino» solas (nombres y apodos), «taller» solo (también son
+/// clases), «24 horas» (le quitaría la farmacia o el parking a «Farmacia 24 horas»), «envio» (mensajerías) y peluquería,
+/// barbería o estética (ninguna categoría les va: se quedan sin categoría).
 private let keywordRules: [KeywordRule] = {
     let lists: [(SpendingCategory, [String])] = [
-        (.supermercado, ["super", "supermercado", "mercado", "alimentacion", "fruteria", "carniceria", "panaderia"]),
+        (.supermercado, ["super", "supermercado", "mercado", "alimentacion", "fruteria", "carniceria", "panaderia",
+                         // Tiendas de comida del barrio (la pastelería y la confitería, como la panadería: se compra para casa).
+                         "ultramarinos", "verduleria", "charcuteria", "pescaderia", "horno", "colmado", "tienda de barrio",
+                         "minimarket", "mini market", "minimercado", "hipermercado", "polleria", "pasteleria", "confiteria",
+                         "frutas"]),
         (.comerFuera, ["bar", "restaurante", "cafe", "cafeteria", "pizzeria", "burger", "kebab", "taberna", "cerveceria",
-                       "just eat", "uber eats", "deliveroo"]),
-        (.transporte, ["gasolinera", "parking", "aparcamiento", "taxi", "metro", "emt", "bus", "peaje", "cabify", "uber"]),
+                       "just eat", "uber eats", "deliveroo",
+                       // Hostelería de barrio (la heladería, la churrería y la chocolatería: se toma allí).
+                       "tasca", "meson", "bodega", "bodegon", "asador", "marisqueria", "heladeria", "churreria",
+                       "chocolateria", "hamburgueseria", "wok", "sushi", "ramen", "tapas", "taperia", "bocateria",
+                       "sidreria", "vermuteria", "gastrobar", "restaurant", "trattoria", "pub", "cocteleria",
+                       "chiringuito", "cantina", "comidas", "comida rapida", "braseria", "creperia", "arroceria",
+                       "pulperia", "freiduria", "bistro", "restaurante chino", "comida china", "wok chino",
+                       // «Asador Horno de Leña», «Pizzería Horno de Leña»: no es una panadería.
+                       "horno de lena"]),
+        (.transporte, ["gasolinera", "parking", "aparcamiento", "taxi", "metro", "emt", "bus", "peaje", "cabify", "uber",
+                       "autoescuela", "taller mecanico", "neumaticos", "itv"]),
         (.casa, ["luz", "agua", "iberdrola", "endesa", "naturgy", "alquiler", "comunidad", "seguro", "seguros",
-                 "movistar", "vodafone", "fibra"]),
-        (.salud, ["farmacia", "clinica", "dentista", "optica", "hospital", "fisio", "fisioterapia"]),
+                 "movistar", "vodafone", "fibra", "lavanderia", "tintoreria"]),
+        (.salud, ["farmacia", "clinica", "dentista", "optica", "hospital", "fisio", "fisioterapia",
+                  "herbolario", "parafarmacia", "ortopedia", "veterinario", "veterinaria"]),
         (.viajes, ["hotel", "hostal", "airbnb", "booking", "vueling", "iberia", "ryanair", "aeropuerto"]),
         (.ocio, ["cine", "teatro", "concierto", "entradas", "gimnasio", "gym", "museo"]),
         (.efectivo, ["cajero", "retirada", "atm", "reintegro"]),
+        // Tiendas de todo tipo: la última lista, así «Bar La Moda» sigue siendo un bar.
+        (.compras, ["bazar", "super bazar", "bazar chino", "tienda china", "multiprecio", "multiprecios", "todo a 100",
+                    "todo a cien", "ferreteria", "papeleria", "libreria", "estanco", "tabacos", "drogueria", "perfumeria",
+                    "zapateria", "calzados", "merceria", "jugueteria", "floristeria", "electronica", "moda", "modas",
+                    "boutique", "joyeria", "relojeria", "regalos"]),
     ]
     var rules: [KeywordRule] = []
     for (category, list) in lists {
@@ -84,7 +107,9 @@ public func keywordCategory(for merchant: String) -> SpendingCategory? {
 }
 
 /// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, el directorio,
-/// las suscripciones, las palabras clave, una persona (no tienda) y por último sin categoría.
+/// las suscripciones, las palabras clave, una persona (solo con prueba, ver `isPersonPayment`) y por último sin
+/// categoría. Un comercio que no se conoce NO es una persona: el bar del barrio cuyo nombre en la tarjeta es el de su
+/// dueño va a «Sin categoría» hasta que el dueño lo elija.
 public func spendingCategory(of movement: Movement, overrides: [String: SpendingCategory],
                              subscriptionKeys: Set<String>) -> SpendingCategory? {
     guard movement.kind == .payment else { return nil }
@@ -97,22 +122,48 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
            let fromDirectory = directoryCategory(forDomain: domain) { return fromDirectory }
         if subscriptionKeys.contains(key) { return .suscripciones }
         if let byWord = keywordCategory(for: merchant) { return byWord }
-        if !movement.isShop { return .personas }
     }
+    if isPersonPayment(movement) { return .personas }
     return .sinCategoria
 }
 
+/// Palabras de un pago A UNA PERSONA: Bizum, transferencia (y la abreviatura «transf» de los extractos), traspaso,
+/// «enviado/a». «envio» solo no (hay mensajerías «Envíos Express»): cuenta como «envío a …».
+private let personPaymentWords: Set<String> = [
+    "bizum", "bizums", "transferencia", "transferencias", "transfer", "transf", "traspaso", "traspasos",
+    "enviado", "enviada",
+]
+
 /// Palabras de un concepto genérico (Bizum, transferencias, recibos…): el «comercio» no es un comercio, así que elegir una
 /// categoría para un pago así no debería aplicarse por defecto a todo lo que lleva ese texto.
-private let genericPayeeWords: Set<String> = [
-    "bizum", "transferencia", "transferencias", "traspaso", "transfer", "recibo", "domiciliacion", "adeudo", "cajero",
-    "retirada", "ingreso", "pago", "pagos", "cargo", "devolucion", "comision",
-]
+private let genericPayeeWords: Set<String> = personPaymentWords.union([
+    "recibo", "domiciliacion", "adeudo", "cajero", "retirada", "ingreso", "pago", "pagos", "cargo", "devolucion", "comision",
+])
+
+/// Palabras enteras del texto, sin mayúsculas ni tildes.
+private func foldedWords(_ text: String) -> [String] {
+    text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
+        .components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+}
+
+private func saysPersonPayment(_ text: String?) -> Bool {
+    guard let text else { return false }
+    let words = foldedWords(text)
+    return words.contains { personPaymentWords.contains($0) } || containsRun(words, ["envio", "a"])
+}
+
+/// true si hay prueba de que el pago fue a una persona: no es una compra en tienda (`isShop`) y el texto del aviso o del
+/// banco lo dice («Bizum a Ana», «Transferencia a Laura», «TRANSF A FAVOR DE…», «Traspaso a ahorro», «Envío a Lucía»).
+/// Se mira también el nombre que dio el banco al enlazar (`bankMerchant`): el aviso puede traer solo «Ana».
+/// Un nombre a secas («Manuel García») no prueba nada.
+public func isPersonPayment(_ movement: Movement) -> Bool {
+    guard movement.kind == .payment, !movement.isShop else { return false }
+    return saysPersonPayment(movement.merchant) || saysPersonPayment(movement.bankMerchant)
+}
 
 /// true si el texto del comercio es un concepto genérico («Bizum a Ana», «Transferencia enviada», «Recibo»): palabra
 /// entera, sin mayúsculas ni tildes.
 public func isGenericPayee(_ merchant: String?) -> Bool {
     guard let merchant else { return false }
-    let folded = merchant.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).lowercased()
-    return folded.components(separatedBy: CharacterSet.alphanumerics.inverted).contains { genericPayeeWords.contains($0) }
+    return foldedWords(merchant).contains { genericPayeeWords.contains($0) }
 }

@@ -69,8 +69,14 @@ public struct EnableBankingClient: Sendable {
     }
 
     public func createSession(code: String) async throws -> EBSession {
+        try await authorizeSession(code: code).session
+    }
+
+    /// Crea la sesión con el banco y extrae aparte (sin tocar `EBSession` ni `EBAccount`) el IBAN principal en euros, si es inequívoco.
+    public func authorizeSession(code: String) async throws -> EBSessionAuthorization {
         let data = try await call("POST", "/sessions", body: try jsonBody(["code": code]))
-        return try decode(EBSession.self, from: data)
+        let session = try decode(EBSession.self, from: data)
+        return EBSessionAuthorization(session: session, primaryEuroIBAN: extractPrimaryEuroIBAN(fromSessionData: data))
     }
 
     public func balances(accountUID: String) async throws -> [EBBalance] {

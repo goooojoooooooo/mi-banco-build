@@ -46,6 +46,19 @@ public struct AccountBook: Codable, Equatable, Sendable, CustomStringConvertible
         floors = try c.decodeIfPresent([BankID: Int].self, forKey: .floors) ?? [:]
         payees = try c.decodeIfPresent([Payee].self, forKey: .payees) ?? []
     }
+
+    /// Rellena el IBAN del banco solo si está vacío, el banco admite conexión (nunca Trade Republic)
+    /// y el IBAN recibido supera la validación estricta de país, formato y dígitos de control.
+    /// Nunca pisa un IBAN que el dueño ya haya guardado. Devuelve `true` solo si el cuaderno cambia.
+    @discardableResult
+    public mutating func fillIBANIfEmpty(_ raw: String, for bank: BankID) -> Bool {
+        guard bank != .tr else { return false }
+        let existing = ibans[bank]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard existing.isEmpty else { return false }
+        guard let clean = validatedBankIBAN(raw) else { return false }
+        ibans[bank] = clean
+        return true
+    }
 }
 
 /// Iniciales de un contacto tomadas solo de letras (sin signos ni dígitos); nil si no hay letras (U63).

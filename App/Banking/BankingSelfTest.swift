@@ -8,6 +8,7 @@ import SwiftUI
 /// Se abre con el argumento de lanzamiento `-MiBancoSelfTest`. Las claves se generan en ejecución.
 enum BankingSelfTest {
     static let testService = "com.mibanco.banking.selftest"
+    static let accountTestService = "com.mibanco.accounts.selftest"
 
     static func run() async -> String {
         // 1. Clave RSA-2048 en memoria (no permanente) y su PKCS#1.
@@ -112,6 +113,40 @@ enum BankingSelfTest {
             try KeychainVault.deleteAll(service: testService)
             guard !KeychainVault.hasPrivateKey(service: testService) else {
                 return failure("llavero (deleteAll no borro kSecClassKey)")
+            }
+
+            // 5d. Libreta de IBAN en el Llavero: rellena solo vacío, no pisa, rechaza inválido y Trade Republic,
+            // y sobrevive a `KeychainVault.deleteAll` («Olvidar clave y conexiones»).
+            let deleteAccountTestItem = {
+                let query: [CFString: Any] = [
+                    kSecClass: kSecClassGenericPassword,
+                    kSecAttrService: accountTestService,
+                    kSecAttrAccount: AccountBookStore.account,
+                    kSecAttrSynchronizable: false,
+                ]
+                _ = SecItemDelete(query as CFDictionary)
+            }
+            deleteAccountTestItem()
+            defer { deleteAccountTestItem() }
+            let sampleES = "ES9121000418450200051332"
+            let sampleES2 = "ES7921000813610123456789"
+            let sampleDE = "DE89370400440532013000"
+            guard AccountBookStore.fillIBANIfEmpty("es91 2100 0418 4502 0005 1332", for: .ima, service: accountTestService),
+                  !AccountBookStore.fillIBANIfEmpty(sampleES2, for: .ima, service: accountTestService),
+                  !AccountBookStore.fillIBANIfEmpty("ES9221000418450200051332", for: .rev, service: accountTestService),
+                  !AccountBookStore.fillIBANIfEmpty(sampleDE, for: .tr, service: accountTestService)
+            else {
+                return failure("libreta (reglas de relleno)")
+            }
+            // Borrar las credenciales bancarias no debe tocar la libreta de cuentas.
+            try KeychainVault.set(secret, for: .appID, service: testService)
+            try KeychainVault.deleteAll(service: testService)
+            let reloadedBook = try AccountBookStore.loadThrowing(service: accountTestService)
+            guard reloadedBook.ibans[.ima] == sampleES,
+                  reloadedBook.ibans[.rev] == nil,
+                  reloadedBook.ibans[.tr] == nil
+            else {
+                return failure("libreta (lectura tras olvidar credenciales)")
             }
         } catch {
             try? KeychainVault.deleteAll(service: testService)

@@ -32,6 +32,48 @@ public func isValidIBAN(_ raw: String) -> Bool {
     return remainder == 1
 }
 
+/// Longitud exacta del IBAN por código ISO de país (registro ISO 13616 / SWIFT).
+public let ibanCountryLengths: [String: Int] = [
+    "AD": 24, "AE": 23, "AL": 28, "AT": 20, "AZ": 28, "BA": 20, "BE": 16, "BG": 22,
+    "BH": 22, "BI": 27, "BR": 29, "BY": 28, "CH": 21, "CR": 22, "CY": 28, "CZ": 24,
+    "DE": 22, "DJ": 27, "DK": 18, "DO": 28, "EE": 20, "EG": 29, "ES": 24, "FI": 18,
+    "FO": 18, "FR": 27, "GB": 22, "GE": 22, "GI": 23, "GL": 18, "GR": 27, "GT": 28,
+    "HN": 28, "HR": 21, "HU": 28, "IE": 22, "IL": 19, "IQ": 23, "IS": 26, "IT": 27,
+    "JO": 30, "KW": 30, "KZ": 20, "LB": 28, "LC": 32, "LI": 21, "LT": 20, "LU": 20,
+    "LV": 21, "LY": 25, "MC": 27, "MD": 24, "ME": 22, "MK": 19, "MR": 27, "MT": 31,
+    "MU": 30, "NL": 18, "NO": 15, "PK": 24, "PL": 28, "PS": 29, "PT": 25, "QA": 29,
+    "RO": 24, "RS": 22, "SA": 24, "SC": 31, "SD": 18, "SE": 24, "SI": 19, "SK": 24,
+    "SM": 27, "ST": 25, "SV": 28, "TL": 19, "TN": 24, "TR": 26, "UA": 29, "VA": 22,
+    "VG": 24, "XK": 20,
+]
+
+/// Valida un IBAN recibido del banco antes de guardarlo en la libreta:
+/// solo caracteres ASCII propios de un IBAN (letras, cifras, espacio o guion), país del registro ISO 13616
+/// con su longitud exacta, dígitos de control en 02–98 y módulo 97 igual a 1. Devuelve el IBAN normalizado o `nil`.
+public func validatedBankIBAN(_ raw: String) -> String? {
+    let allowedRaw = raw.unicodeScalars.allSatisfy { s in
+        s.isASCII && (
+            (s.value >= 48 && s.value <= 57)
+            || (s.value >= 65 && s.value <= 90)
+            || (s.value >= 97 && s.value <= 122)
+            || s.value == 32
+            || s.value == 45
+        )
+    }
+    guard allowedRaw else { return nil }
+    let clean = normalizeIBAN(raw)
+    guard clean.count >= 15 else { return nil }
+    let country = String(clean.prefix(2))
+    guard let expectedLength = ibanCountryLengths[country], clean.count == expectedLength else {
+        return nil
+    }
+    guard let checkDigits = Int(clean.dropFirst(2).prefix(2)), (2...98).contains(checkDigits) else {
+        return nil
+    }
+    guard isValidIBAN(clean) else { return nil }
+    return clean
+}
+
 /// Grupos de cuatro separados por espacio.
 public func formatIBAN(_ iban: String) -> String {
     let clean = normalizeIBAN(iban)

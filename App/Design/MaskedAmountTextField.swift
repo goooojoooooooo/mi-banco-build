@@ -29,7 +29,8 @@ struct MaskedAmountTextField: View {
 
     var body: some View {
         let shown = shownText
-        TextField(placeholder, text: shown)
+        // Con el ojo cerrado, ni el marcador de posición («0,00 €») parece una cifra: el campo vacío no enseña nada.
+        TextField(hidden ? "" : placeholder, text: shown)
             .foregroundStyle(textColor)
             .contentTransition(.identity)
             .animation(nil, value: hidden)

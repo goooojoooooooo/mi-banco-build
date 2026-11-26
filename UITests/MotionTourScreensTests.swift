@@ -467,29 +467,29 @@ final class MotionTourScreensTests: MotionTourCase {
     /// Cerrar el ojo con el interruptor de Ajustes, mirando los saldos (lote de cierre): ningún fotograma tras el toque
     /// enseña una cifra; los saldos son la máscara en el acto.
     func testSettingsEyeClose() throws {
-        // El ojo se cierra solo, por el mismo camino que el interruptor, a los 10 s de abrir Ajustes; la ráfaga empieza
-        // a los ~7 s: los primeros fotogramas son el control (cifras a la vista) y después el cierre, fotograma a
+        // El ojo se cierra solo, por el mismo camino que el interruptor, a los 24 s de abrir Ajustes (desplazar hasta el interruptor a
+        // cámara lenta tarda); la ráfaga empieza a los ~21 s: los primeros fotogramas son el control (cifras a la vista) y después el cierre, fotograma a
         // fotograma (lote de cierre, ronda 1, m-2: antes empezaba después del toque).
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoCloseEyeAfter", "10"])
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoCloseEyeAfter", "24"])
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
         let opened = Date()
         let toggle = element("settings-private-mode")
         scrollDown(to: toggle)
         XCTAssertTrue(toggle.waitForExistence(timeout: 8), "Falta el interruptor «Modo privado»")
-        let wait = 7 - Date().timeIntervalSince(opened)
+        let wait = 21 - Date().timeIntervalSince(opened)
         if wait > 0 { Thread.sleep(forTimeInterval: wait) }
         burst("settings-eye-close", frames: 24, every: 0.25)
     }
 
-    /// Editar un saldo con el ojo cerrado (decisión del dueño): Ajustes enfoca el saldo de Trade Republic solo a los 10 s
+    /// Editar un saldo con el ojo cerrado (decisión del dueño): Ajustes enfoca el saldo de Trade Republic solo a los 24 s
     /// (como un toque) y la ráfaga empieza antes: el campo pasa de la máscara a vacío, nunca a la cifra guardada.
     func testSettingsEditEye() throws {
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoPrivate", "-MiBancoDemoFocusBalanceAfter", "10"])
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoPrivate", "-MiBancoDemoFocusBalanceAfter", "24"])
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
         let opened = Date()
         let field = app.textFields["Saldo de Trade Republic"]
         scrollDown(to: field)
-        let wait = 8 - Date().timeIntervalSince(opened)
+        let wait = 21 - Date().timeIntervalSince(opened)
         if wait > 0 { Thread.sleep(forTimeInterval: wait) }
         burst("settings-edit-eye", frames: 20, every: 0.25)
     }

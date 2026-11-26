@@ -111,7 +111,7 @@ final class SecurityPhase2UITests: XCTestCase {
     // MARK: - SEC-05 · PositionDetailSheet con MaskedAmountTextField
 
     private func checkPositionManualPriceHidden(_ extra: [String]) {
-        launch(["-MiBancoDemoPosition", "-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"] + extra)
+        launch(["-MiBancoDemoCard", "inv", "-MiBancoDemoPosition", "-MiBancoDemoPrivate", "-MiBancoDemoDrawnAmounts"] + extra)
         let scroll = app.scrollViews["position-scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 20), "No se abrió la hoja de posición")
 
@@ -178,7 +178,7 @@ final class SecurityPhase2UITests: XCTestCase {
     }
 
     func testPositionDetailClosingEyeWhileEditingReleasesFocus() throws {
-        launch(["-MiBancoDemoPosition", "-MiBancoDemoDrawnAmounts", "-MiBancoDemoCloseEyeWhenFocused", "2"])
+        launch(["-MiBancoDemoPosition", "-MiBancoDemoDrawnAmounts", "-MiBancoDemoCloseEyeWhenFocused", "8"])
         let scroll = app.scrollViews["position-scroll"]
         XCTAssertTrue(scroll.waitForExistence(timeout: 20), "No se abrió la hoja de posición")
 
@@ -192,8 +192,8 @@ final class SecurityPhase2UITests: XCTestCase {
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "Con el ojo abierto el editor no enfocó el campo")
         XCTAssertTrue(drawsDigits(value(field)), "Control: con el ojo abierto el campo debe dibujar su cifra: \(value(field))")
 
-        // A los 2 s se cierra el ojo: el teclado se va y el campo pasa a máscara sin cifras dibujadas.
-        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 12),
+        // A los 8 s se cierra el ojo: el teclado se va y el campo pasa a máscara sin cifras dibujadas.
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 18),
                       "Al cerrarse el ojo el campo de precio no pasó a máscara: \(value(field))")
         XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), app.keyboards.element, timeout: 8),
                       "Al cerrarse el ojo el teclado no desapareció del campo de precio")
@@ -264,7 +264,7 @@ final class SecurityPhase2UITests: XCTestCase {
 
     func testAccountsFloorClosingEyeWhileEditingReleasesFocus() throws {
         launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoAccounts", "-MiBancoDemoFloor",
-                "-MiBancoDemoDrawnAmounts", "-MiBancoDemoCloseEyeWhenFocused", "2"])
+                "-MiBancoDemoDrawnAmounts", "-MiBancoDemoCloseEyeWhenFocused", "6"])
         XCTAssertTrue(app.navigationBars["Cuentas y contactos"].waitForExistence(timeout: 20),
                       "No se abrió Cuentas y contactos")
         let floor = app.textFields["accounts-floor-field-rev"]
@@ -274,7 +274,7 @@ final class SecurityPhase2UITests: XCTestCase {
 
         floor.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El colchón no enfocó el teclado")
-        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), floor, timeout: 12),
+        XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), floor, timeout: 16),
                       "Al cerrarse el ojo el colchón en edición no pasó a máscara: \(value(floor))")
         XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), app.keyboards.element, timeout: 8),
                       "Al cerrarse el ojo el teclado no desapareció del colchón")

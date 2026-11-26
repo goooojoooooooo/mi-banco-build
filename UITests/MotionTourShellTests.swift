@@ -302,46 +302,27 @@ final class MotionTourShellTests: MotionTourCase {
 
     func testRowDetailReduceMotion() throws { rowDetailBursts("row-detail-reducir", extra: ["-MiBancoReduceMotion"]) }
 
-    /// C8 (C6): la tarjeta del abanico vuela hasta la cabecera de su banco, que se abre encima de Inicio (la pestaña no
-    /// cambia). Luego «Inicio» lo cierra (`card-flight-vuelta`). A ×4.
-    private func cardFlightBursts(_ name: String, extra: [String] = []) {
-        launch(extra + ["-MiBancoDemoCardElements"])
-        waitForLaunchToEnd()
-        let anchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
-        let carousel = app.descendants(matching: .any).matching(anchor).firstMatch
-        XCTAssertTrue(carousel.waitForExistence(timeout: 15), "Falta el carrusel")
-        carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
-        XCTAssertTrue(app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 15), "No se abrió el abanico")
-        let card = app.buttons["wallet-card-rev"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10), "Falta la tarjeta de Revolut")
-        XCTAssertTrue(waitUntil(15) { card.isHittable }, "La tarjeta de Revolut no se puede tocar")
-        card.tap()
-        burst(name, frames: 24, every: 0.15)
-        let back = app.buttons["bank-over-home-back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "Falta «Inicio» en el banco")
-        back.tap()
-        burst(name + "-vuelta", frames: 8, every: 0.15)
-    }
-
-    func testCardFlight() throws { cardFlightBursts("card-flight") }
-
-    func testCardFlightWithTheEyeClosed() throws { cardFlightBursts("card-flight-ojo", extra: ["-MiBancoDemoPrivate"]) }
-
-    func testCardFlightReduceMotion() throws {
-        cardFlightBursts("card-flight-reducir", extra: ["-MiBancoReduceMotion"])
-    }
-
     /// Ronda 1 (kit m-4): el ojo se cierra (solo, `-MiBancoDemoCloseEyeAfter`) mientras el total aún rueda tras el
     /// arranque. Se graba desde 1 s ANTES del cambio: el barajado y los puntos encima de la cifra, sin ningún fotograma
     /// con una casilla vacía ni con un dígito y su punto a la vez.
     func testEyeClosesOverARollingFigure() throws {
-        launch(["-MiBancoDemoCloseEyeAfter", "4.5"])
+        // Ronda 2 (N-6): a cámara lenta (×4) y con el texto dibujado de cada importe (`-MiBancoDrawnText`).
+        launch(["-MiBancoDemoCloseEyeAfter", "4.5", "-MiBancoDrawnText"], scale: 4)
         XCTAssertTrue(waitUntil(20) { (self.probe()["ojoCierraEn"] ?? "-") != "-" }, "La app no dijo cuándo cierra el ojo")
         let at = Double(probe()["ojoCierraEn"] ?? "") ?? 0
         let wait = at - 1 - Date().timeIntervalSince1970
         XCTAssertGreaterThan(wait, 0, "El ojo ya se había cerrado al empezar la ráfaga")
         if wait > 0 { Thread.sleep(forTimeInterval: wait) }
-        burst("eye-close-rolling", frames: 24, every: 0.1)
+        burst("eye-close-rolling", frames: 14, every: 0.1)
+        // Desde el cierre, ningún importe dibuja un dígito (ni al azar): se mira varias veces mientras la ráfaga sigue.
+        let digits = NSPredicate(format: "value MATCHES %@", ".*[0-9].*€.*")
+        XCTAssertGreaterThan(Date().timeIntervalSince1970, at, "La comprobación empieza antes del cierre")
+        for look in 0..<8 {
+            let drawn = app.descendants(matching: .any).matching(digits).allElementsBoundByIndex.map { $0.value as? String ?? "" }
+            XCTAssertEqual(drawn, [], "Mirada \(look): con el ojo cerrado se dibujan dígitos: \(drawn)")
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+        burst("eye-close-rolling-despues", frames: 6, every: 0.2)
     }
 
     /// C4 (D2): la categoría de un pago: la ficha blanca se desliza a la elegida y su símbolo bota; luego se pliega.

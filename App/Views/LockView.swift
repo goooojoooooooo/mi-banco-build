@@ -260,17 +260,24 @@ struct LockView: View {
             // I-1 (ronda 1): los dos fundidos van en orden, a todos los niveles: el bloqueo (lo que destapa Inicio)
             // empieza a irse cuando los textos y el botón ya se han ido. `locked` cambia YA (la carcasa desbloquea en
             // este instante, como siempre); solo el DIBUJO del fundido espera.
-            let away = textsAwayDuration
+            var away = textsAwayDuration
+            #if DEBUG
+            // Solo para la prueba que demuestra su propio rojo (ronda 2, N-1): el defecto de antes, sin retardo.
+            if DemoMode.lockFadeWithoutDelay { away = 0 }
+            #endif
             // La misma duración que el fundido: `motion.fade` dura 0,22 s (× cámara lenta). Es una curva con final
             // (no un muelle, que a su duración nominal aún deja el bloqueo a un par de puntos de opacidad): cuando la
             // carcasa devuelve los toques a Inicio, del bloqueo no queda ni un píxel.
             let seconds = motion.reduce ? 0.22 * motion.timeMultiplier : motion.seconds(0.3)
             withAnimation((motion.reduce ? motion.fade : .easeOut(duration: seconds)).delay(away)) { locked = false }
+            // (Los textos siguen apagándose en `textsAwayDuration`.)
             fadeStarted(away + seconds, !takesTheMark)
             #if DEBUG
-            let now = Date().timeIntervalSince1970
-            LaunchProbe.shared.lockTextsGoneAt = now + away
-            LaunchProbe.shared.lockFadeBeganAt = now + away
+            // Ronda 2 (N-1): las sondas las escribe lo DIBUJADO (`DrawnOpacityProbe` en el nombre y en el fundido del
+            // bloqueo), fotograma a fotograma; aquí solo se vacían para este desbloqueo.
+            LaunchProbe.shared.lockTextsGoneAt = nil
+            LaunchProbe.shared.lockFadeBeganAt = nil
+            LaunchProbe.shared.lockFadeArmed = true
             #endif
         case .covered:
             // La escena no está activa (Face ID aún la tiene): la tapa se pone encima en esta misma actualización y este
@@ -342,7 +349,7 @@ struct LockFace<Mark: View, Action: View>: View {
                 .titan(.sheetTitle)
                 .foregroundStyle(Theme.label)
                 .opacity(nameOpacity)
-                .opacity(textsAway ? 0 : 1)
+                .modifier(DrawnOpacityProbe(opacity: textsAway ? 0 : 1, mark: .lockTextsGone))
                 .animation(awayAnimation, value: textsAway)
                 .padding(.top, Theme.Space.gutter)
                 .accessibilityAddTraits(.isHeader)
@@ -392,4 +399,39 @@ private struct LockVoiceOverHidden: ViewModifier {
             .onAppear { LaunchProbe.shared.lockVoiceOver = hidden ? "oculto" : "visible" }
             #endif
     }
+}
+
+/// Ronda 2 (N-1): una opacidad animable que, en DEBUG, apunta en `LaunchProbe` el primer fotograma DIBUJADO en que cruza
+/// su umbral: el nombre del bloqueo ya apagado (≤ 0,02) o el bloqueo empezando a irse (< 0,99). Así la prueba compara lo
+/// que se ve, no lo que se programó. En Release solo es una opacidad.
+struct DrawnOpacityProbe: ViewModifier, Animatable {
+    enum Mark { case lockTextsGone, lockFadeBegan }
+
+    var opacity: Double
+    let mark: Mark
+
+    nonisolated var animatableData: Double {
+        get { opacity }
+        set { opacity = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        note()
+        #endif
+        return content.opacity(opacity)
+    }
+
+    #if DEBUG
+    private func note() {
+        let probe = LaunchProbe.shared
+        let now = Date().timeIntervalSince1970
+        switch mark {
+        case .lockTextsGone:
+            if opacity <= 0.02, probe.lockTextsGoneAt == nil, probe.lockFadeArmed { probe.lockTextsGoneAt = now }
+        case .lockFadeBegan:
+            if opacity < 0.99, probe.lockFadeBeganAt == nil, probe.lockFadeArmed { probe.lockFadeBeganAt = now }
+        }
+    }
+    #endif
 }

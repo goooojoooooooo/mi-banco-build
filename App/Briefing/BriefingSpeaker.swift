@@ -49,8 +49,25 @@ final class BriefingSpeaker {
             forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
         ) { [weak self] note in
             let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
-            guard AudioRouteChange(rawReason: raw).stopsSpeech else { return }
+            let previous = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?
+                .outputs.map { Self.kind(of: $0.portType) } ?? []
+            let current = AVAudioSession.sharedInstance().currentRoute.outputs.map { Self.kind(of: $0.portType) }
+            // Ronda 2 (N-4): también al aparecer una salida nueva que no es privada (Bluetooth, coche, AirPlay…).
+            guard speechStops(AudioRouteChange(rawReason: raw), previous: previous, current: current) else { return }
             MainActor.assumeIsolated { self?.stop() }
+        }
+    }
+
+    /// El grupo de una salida de audio (ronda 2, N-4).
+    nonisolated private static func kind(of port: AVAudioSession.Port) -> AudioOutputKind {
+        switch port {
+        case .headphones: .headphones
+        case .builtInReceiver: .receiver
+        case .builtInSpeaker: .speaker
+        case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP: .bluetooth
+        case .carAudio: .car
+        case .airPlay: .airPlay
+        default: .other
         }
     }
 

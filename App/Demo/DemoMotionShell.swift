@@ -44,6 +44,10 @@ extension DemoMode {
         return min(seconds, 60)
     }
 
+    /// `-MiBancoDemoLockFadeWithoutDelay`: el defecto de antes de la ronda 1 (el bloqueo se funde a la vez que se apagan
+    /// sus textos), solo para que la prueba demuestre que lo ve (ronda 2, N-1).
+    static var lockFadeWithoutDelay: Bool { isActive && arguments.contains("-MiBancoDemoLockFadeWithoutDelay") }
+
     /// `-MiBancoDemoNotMineFails`: «No es mío» desde el aviso dentro de la app no se guarda (M-2: el aviso se queda y lo
     /// dice).
     static var notMineFails: Bool { isActive && arguments.contains("-MiBancoDemoNotMineFails") }
@@ -150,8 +154,6 @@ extension DemoMode {
     /// Lote final: cuándo se tapó y cuándo empezó a destaparse la barra de pestañas en el último montaje (s desde 1970).
     var tabBarCoveredAt: Double?
     var tabBarUncoveredAt: Double?
-    /// C8: cuántas tarjetas han aterrizado en la cabecera de su banco.
-    var cardLandings = 0
     /// Ronda 1: «No es mío» desde el aviso que no se ha podido guardar (M-2) y cuándo se han ido los textos del bloqueo
     /// y empezó su fundido (I-1).
     var notMineFailures = 0
@@ -159,8 +161,12 @@ extension DemoMode {
     var eyeClosesAt: Double?
     /// I-4 (ronda 1): cuándo se cerrará sola la hoja del movimiento (`-MiBancoDemoAutoCloseDetail`).
     var detailCloseAt: Double?
-    var lockTextsGoneAt: Double?
-    var lockFadeBeganAt: Double?
+    /// Ronda 2 (N-1): primer fotograma dibujado con el nombre del bloqueo apagado y primer fotograma en que el bloqueo
+    /// empieza a irse. No observados: los escribe el dibujo; salen en la sonda en su siguiente lectura.
+    @ObservationIgnored var lockTextsGoneAt: Double?
+    @ObservationIgnored var lockFadeBeganAt: Double?
+    /// Solo se apuntan tras un desbloqueo (no en el montaje del bloqueo).
+    @ObservationIgnored var lockFadeArmed = false
     /// Lote final: pagos llegados (`model.arrival`) y cuántos con el bloqueo delante.
     var arrivals = 0
     var arrivalsUnderLock = 0
@@ -194,8 +200,7 @@ extension DemoMode {
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
             "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "lineaDibujada=\(drawnLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
-            "llegadas=\(arrivals)", "aterrizajesTarjeta=\(cardLandings)",
-            "ojoCierraEn=\(eyeClosesAt.map { String(format: "%.3f", $0) } ?? "-")", "cierreDetalle=\(detailCloseAt.map { String(format: "%.3f", $0) } ?? "-")", "noEsMioFallos=\(notMineFailures)",
+            "llegadas=\(arrivals)", "ojoCierraEn=\(eyeClosesAt.map { String(format: "%.3f", $0) } ?? "-")", "cierreDetalle=\(detailCloseAt.map { String(format: "%.3f", $0) } ?? "-")", "noEsMioFallos=\(notMineFailures)",
             "textosFuera=\(lockTextsGoneAt.map { String(format: "%.3f", $0) } ?? "-")",
             "fundidoBloqueo=\(lockFadeBeganAt.map { String(format: "%.3f", $0) } ?? "-")",
             "barraTapada=\(tabBarCoveredAt.map { String(format: "%.3f", $0) } ?? "-")",

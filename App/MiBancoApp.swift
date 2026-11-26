@@ -109,9 +109,15 @@ private struct AppShellView: View {
 
     /// Cómo entra y sale una capa: lo dice `ShellState` (solo se anima el bloqueo al quitarse; todo lo demás, de golpe).
     private func transition(of layer: ShellState.Layer) -> AnyTransition {
-        .asymmetric(
+        // El bloqueo se va con la misma opacidad de siempre, pero dibujada por `DrawnOpacityProbe` (ronda 2, N-1: en
+        // DEBUG apunta el primer fotograma en que empieza a irse).
+        let removal: AnyTransition = layer == .lock
+            ? .modifier(active: DrawnOpacityProbe(opacity: 0, mark: .lockFadeBegan),
+                        identity: DrawnOpacityProbe(opacity: 1, mark: .lockFadeBegan))
+            : .opacity
+        return .asymmetric(
             insertion: ShellState.animatesInsertion(of: layer) ? .opacity : .identity,
-            removal: ShellState.animatesRemoval(of: layer) ? .opacity : .identity)
+            removal: ShellState.animatesRemoval(of: layer) ? removal : .identity)
     }
 
     var body: some View {

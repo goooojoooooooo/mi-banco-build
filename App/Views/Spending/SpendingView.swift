@@ -194,9 +194,7 @@ struct SpendingView: View {
         // El mes que entra se construye en el mismo render que cambia la dirección, así que siempre lleva la buena;
         // el que sale solo se funde (su transición se fijó antes del cambio y no puede conocer hacia dónde vas).
         let x = CGFloat(selection.direction) * motion.distance(28)
-        // El mes que sale se apaga en 0,1 s: casi no coincide con el que entra (menor m-6).
-        return .asymmetric(insertion: .opacity.combined(with: .offset(x: x)),
-                           removal: .opacity.animation(.easeOut(duration: motion.seconds(0.10))))
+        return .asymmetric(insertion: .opacity.combined(with: .offset(x: x)), removal: .opacity)
     }
 
     /// Mes y dirección cambian juntos, dentro de la misma animación: sin temporizador ni tarea.

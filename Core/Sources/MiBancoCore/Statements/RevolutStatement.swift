@@ -69,18 +69,11 @@ func parseRevolutStatement(_ table: CSVTable, calendar: Calendar) throws -> Pars
         // La clave de la versión anterior (texto de las celdas), para reconocer filas ya importadas con ella.
         let legacyKey = [table.cell(row, started), table.cell(row, amount), text].joined(separator: "|")
         let legacyRef = "r|" + fnv1aHex(legacyKey) + "|" + String(legacyCounter.next(legacyKey))
-        let isShop = typeText.contains("card payment") || typeText.contains("pago con tarjeta")
-        // Un envío: tipo «Transfer»/«Transferencia» o descripción «To Ana» (lo que Revolut escribe al enviar a alguien).
-        // No a tus bolsillos ni a tus cuentas en otra divisa: «To USD», «To EUR Savings», «To pocket …» (M-1).
-        let saysTransfer = typeText.contains("transfer") || normalizeHeader(text).hasPrefix("to ")
-        let words = foldedWords(text)
-        let toOwnPocket = mentionsOwnAccount(text) || (words.first == "to" && words.count > 1 && currencyCodes.contains(words[1]))
         records.append(BankRecord(
             ref: ref, bank: .rev, amountCents: cents, timing: .exact(startedAt), status: .booked,
             merchant: name.isEmpty ? nil : name,
-            isShop: isShop,
-            legacyRefs: legacyRef == ref ? [] : [legacyRef],
-            personPayment: cents < 0 && !isShop && saysTransfer && !toOwnPocket))
+            isShop: typeText.contains("card payment") || typeText.contains("pago con tarjeta"),
+            legacyRefs: legacyRef == ref ? [] : [legacyRef]))
 
         if let b = parseStatementDecimal(table.cell(row, balance)) {
             let doneAt = parseStatementTimestamp(table.cell(row, completed), calendar: calendar) ?? startedAt
@@ -90,11 +83,3 @@ func parseRevolutStatement(_ table: CSVTable, calendar: Calendar) throws -> Pars
     return ParsedStatement(format: .revolut, records: records, ignoredRows: ignored,
                            latestBalance: latest.map { StatementBalance(cents: $0.cents, at: $0.date) })
 }
-
-/// Códigos de divisa (en minúsculas) que Revolut pone tras «To» cuando el dinero va a tu propia cuenta en otra divisa.
-/// Sin «ron» (también es un nombre).
-private let currencyCodes: Set<String> = [
-    "eur", "usd", "gbp", "chf", "jpy", "cad", "aud", "nzd", "sek", "nok", "dkk", "pln", "czk", "huf", "bgn", "try",
-    "mxn", "brl", "ars", "clp", "cop", "pen", "cny", "hkd", "sgd", "inr", "aed", "sar", "zar", "ils", "thb", "krw",
-    "xau", "xag", "btc", "eth",
-]

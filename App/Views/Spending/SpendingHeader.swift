@@ -107,34 +107,66 @@ struct SpendingSentences: View {
     }
 }
 
-/// Una frase con un importe en euros enteros («A este ritmo terminarás el mes en unos 1.290 €»): la cifra es un
-/// `RollingAmount` de euros enteros (`.whole`) que rueda desde 0 la primera vez que se ve y cada vez que se entra en la
-/// pestaña, con los tiempos del kit (`\.motion`); el resto de la frase no se mueve. La frase se coloca como un párrafo
-/// (`ParagraphFlow`, como las de Avisos): el importe va en medio y la frase salta de línea donde le toca. `inline`: dentro
-/// de una frase la máscara solo ocupa lo que mide. Solo se monta con el ojo abierto (quien la usa enseña la frase tapada
-/// si no, sin ninguna cifra montada).
+/// Una frase con un importe en euros enteros («A este ritmo terminarás el mes en unos 1.290 €»): la cifra cuenta desde 0
+/// la primera vez que se ve y cada vez que se entra en la pestaña (1 s de desaceleración, tras 0,16 s), con los tiempos
+/// del kit (`\.motion`: intensidad, cámara lenta, Reducir movimiento). El resto de la frase no se mueve y las cifras son
+/// tabulares. `RollingAmount` escribe siempre los céntimos y esta cifra no los lleva: por eso cuenta como texto.
+/// Solo se monta con el ojo abierto (quien la usa enseña la frase tapada si no).
 private struct CountingWholeEuros: View {
     let text: String
 
+    @Environment(\.motion) private var motion
+    @Environment(\.entrance) private var entrance
+    /// La entrada por capas en la que la cifra ya ha arrancado; nil = aún no ha contado nunca.
+    @State private var landed: Int?
+
     var body: some View {
-        if let split = WholeEuroSplit(text) {
-            let pieces = SentencePieces(prefix: split.prefix, suffix: split.suffix)
-            ParagraphFlow {
-                ForEach(Array(pieces.before.enumerated()), id: \.offset) { _, word in
-                    Text(word)
-                }
-                // Lo que va pegado al importe (un punto, una coma) no se separa de él al saltar de línea.
-                HStack(alignment: .firstTextBaseline, spacing: 0) {
-                    RollingAmount(cents: split.euros * 100, style: .whole(sign: false), inline: true)
-                    if !pieces.glue.isEmpty { Text(pieces.glue) }
-                }
-                ForEach(Array(pieces.after.enumerated()), id: \.offset) { _, word in
-                    Text(word)
-                }
+        let split = WholeEuroSplit(text)
+        Group {
+            if let split {
+                WholeEuroFigure(euros: drawn(split.euros), split: split)
+                    .animation(motion.reduce ? nil : count, value: split.euros)
+            } else {
+                Text(text)
             }
-        } else {
-            Text(text)
         }
+        .onAppear { start() }
+        // Entrada nueva: la cifra, que ya está en 0 (`drawn`), cuenta otra vez.
+        .onChange(of: entrance.token) { _, _ in start() }
+    }
+
+    private var count: Animation {
+        .timingCurve(0.16, 1, 0.3, 1, duration: motion.seconds(1.0)).delay(motion.seconds(0.16))
+    }
+
+    private var replays: Bool { entrance.active && entrance.scope == .assembly }
+
+    /// 0 hasta que arranca (y desde que empieza una entrada nueva hasta que arranca en ella); después, la cifra.
+    private func drawn(_ euros: Int) -> Double {
+        guard !motion.reduce else { return Double(euros) }
+        guard let landed else { return 0 }
+        return replays && landed != entrance.token ? 0 : Double(euros)
+    }
+
+    private func start() {
+        guard !motion.reduce else { return }
+        let token = entrance.token
+        withAnimation(count) { landed = token }
+    }
+}
+
+/// Dibuja la frase con la cifra animada en su sitio. `Animatable`: SwiftUI interpola `euros` y dibuja cada fotograma.
+private struct WholeEuroFigure: View, Animatable {
+    var euros: Double
+    let split: WholeEuroSplit
+
+    nonisolated var animatableData: Double {
+        get { euros }
+        set { euros = newValue }
+    }
+
+    var body: some View {
+        Text(split.prefix + formatEURWhole(Int(euros.rounded()) * 100) + split.suffix)
     }
 }
 

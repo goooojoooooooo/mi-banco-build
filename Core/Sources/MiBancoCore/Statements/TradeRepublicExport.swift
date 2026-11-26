@@ -186,12 +186,9 @@ func parseTradeRepublicStatement(_ table: CSVTable, calendar: Calendar) throws -
         let merchant = raw.map(cleanBankMerchant).flatMap { $0.isEmpty ? nil : $0 }
         let isShop = (row.mccCode.map { !$0.isEmpty && !nonShopMCC.contains($0) } ?? false)
             || (row.type ?? "").uppercased().contains("CARD")
-        // Solo el código de comercio: los nombres exactos de `type` de una transferencia no se conocen.
-        let personPayment = effect < 0 && !isShop && row.mccCode.map { transferMCC.contains($0) } == true
         records.append(BankRecord(
             ref: ref, bank: .tr, amountCents: effect, timing: timing, status: .booked, merchant: merchant, isShop: isShop,
-            excludedFromSpending: row.isSecuritiesTrade, legacyRefs: legacyRef == ref ? [] : [legacyRef],
-            personPayment: personPayment))
+            excludedFromSpending: row.isSecuritiesTrade, legacyRefs: legacyRef == ref ? [] : [legacyRef]))
     }
     return ParsedStatement(format: .tradeRepublic, records: records, ignoredRows: ignored, latestBalance: nil)
 }

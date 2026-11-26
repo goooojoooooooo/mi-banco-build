@@ -116,7 +116,7 @@ struct LaunchSequence: View {
             LaunchSkyCanvas(frame: frame, center: center)
             LaunchMark(frame: frame, size: Self.markSize)
                 .scaleEffect(1 + (target.side / Self.markSize - 1) * flight)
-                .position(LaunchGeometry.riseThenSlide(center, target.center, flight))
+                .position(LaunchGeometry.lerp(center, target.center, flight))
                 // Con solo fundido (Sutil, Reducir movimiento) la marca grande nunca se ve más que el negro que tiene
                 // debajo: el guion la apaga ENTERA antes de que el negro deje ver Inicio y la marca de su barra (nunca dos).
                 .opacity(lands ? 1 : (pieces ? frame.mark * dissolve : min(frame.mark, frame.black)))
@@ -131,7 +131,7 @@ struct LaunchSequence: View {
                 // centrado; en la ranura no (el nombre de la barra es el mismo texto, con ese mismo hueco detrás).
                 .offset(x: tracking / 2 * (lands ? 1 - min(1, flight) : 1))
                 .scaleEffect(1 + (nameScale - 1) * min(1, flight))
-                .position(LaunchGeometry.riseThenSlide(nameHome, nameSlot.center, flight))
+                .position(LaunchGeometry.lerp(nameHome, nameSlot.center, flight))
                 // Sin ranura, el nombre se va apagando durante el vuelo.
                 // Hacia la bienvenida el nombre no viaja: se apaga en cuanto la marca despega.
                 .opacity(welcome != nil ? frame.name * Double(max(0, 1 - flight / 0.15))
@@ -227,6 +227,9 @@ struct LaunchExit: View {
     /// Lote final: la ranura a la que iba desapareció a mitad del vuelo (otra pestaña): cuándo, y dónde estaba. La
     /// marca sigue hacia ese último sitio y se apaga en `lostFade` s; nunca desaparece de un fotograma a otro.
     @State private var slotLostAt: Date?
+    /// Ronda 2 (N-5): la ranura volvió a mitad del apagado: desde qué opacidad y cuándo; la marca vuelve a 1 con el mismo
+    /// fundido corto, no de un fotograma a otro.
+    @State private var slotBack: (at: Date, from: Double)?
     @State private var lastSlot: CGRect?
     static let lostFade = 0.15
 
@@ -236,7 +239,7 @@ struct LaunchExit: View {
             if timeline.exitDuration != nil {
                 GeometryReader { proxy in
                     LaunchStage(
-                        timeline: timeline, act: .exit(bands: false), start: start, finished: finished,
+                        timeline: timeline, act: .exit(bands: cold), start: start, finished: finished,
                         timeMultiplier: motion.timeMultiplier
                     ) { frame in
                         scene(frame, topInset: proxy.safeAreaInsets.top)
@@ -269,7 +272,10 @@ struct LaunchExit: View {
             if new == nil, landsOnSlot == true, !finished, slotLostAt == nil { slotLostAt = Date() }
             // M-5 (ronda 1): si la ranura VUELVE antes de acabar, la marca vuelve a ir hacia ella entera (si no, se
             // apagaría mientras la ranura sigue sin dibujar la suya: fotogramas sin ninguna marca).
-            if new != nil, !finished { slotLostAt = nil }
+            if new != nil, !finished, let lost = slotLostAt {
+                slotBack = (Date(), fadeOpacity(since: lost))
+                slotLostAt = nil
+            }
         }
         .onAppear {
             lastSlot = anchor?.brandFrame
@@ -294,13 +300,26 @@ struct LaunchExit: View {
         }
     }
 
+    /// Lo que se ve de la marca a los `since` del apagado (1 → 0 en `lostFade`).
+    private func fadeOpacity(since lost: Date) -> Double {
+        max(0, 1 - Date().timeIntervalSince(lost) / max(motion.seconds(Self.lostFade), 0.01))
+    }
+
     private func scene(_ frame: LaunchFrame, topInset: CGFloat) -> some View {
         let home = CGPoint(x: from.midX, y: from.midY)
         // Si la ranura desaparece a mitad del vuelo (otra pestaña), la marca sigue hacia donde estaba y se apaga en
         // `lostFade` s (lote final: antes se iba de golpe, en un fotograma).
         let brand = anchor?.brandFrame ?? (slotLostAt != nil ? lastSlot : nil)
         let lands = (landsOnSlot ?? true) && brand != nil
-        let lostOpacity = slotLostAt.map { max(0, 1 - Date().timeIntervalSince($0) / max(motion.seconds(Self.lostFade), 0.01)) } ?? 1
+        let fade = max(motion.seconds(Self.lostFade), 0.01)
+        let lostOpacity: Double
+        if let lost = slotLostAt {
+            lostOpacity = fadeOpacity(since: lost)
+        } else if let back = slotBack {
+            lostOpacity = min(1, back.from + Date().timeIntervalSince(back.at) / fade * (1 - back.from))
+        } else {
+            lostOpacity = 1
+        }
         let slot = brand ?? (cold ? LaunchGeometry.fallbackSlot(topInset: topInset) : from)
         let flight = CGFloat(frame.flight)
         let target = LaunchGeometry.markTarget(in: slot, markSide: lands && brand != nil ? anchor?.brandMarkSide : nil)
@@ -311,7 +330,7 @@ struct LaunchExit: View {
             }
             AppMark(size: from.width)
                 .scaleEffect(1 + (target.side / max(from.width, 1) - 1) * flight)
-                .position(LaunchGeometry.riseThenSlide(home, target.center, flight))
+                .position(LaunchGeometry.lerp(home, target.center, flight))
                 // Con ranura llega entera hasta ella; sin ranura se deshace por el camino.
                 .opacity(lands ? lostOpacity : frame.mark * LaunchGeometry.landingOpacity(flight: flight, hasSlot: false))
         }
@@ -357,14 +376,5 @@ enum LaunchGeometry {
 
     static func lerp(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {
         CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k)
-    }
-
-    /// Retoque 2 (el vuelo de la marca sin cruzar nada): primero SUBE y después se desliza. La altura llega a la de la
-    /// ranura hacia el 60 % del vuelo (y no se pasa); lo horizontal avanza con el vuelo entero y termina después. Así la
-    /// marca va por la franja vacía de arriba y no pasa por encima de la tarjeta ni del título.
-    static func riseThenSlide(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {
-        let up = min(1, max(0, k) / 0.6)
-        let rise = 1 - (1 - up) * (1 - up)
-        return CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * rise)
     }
 }

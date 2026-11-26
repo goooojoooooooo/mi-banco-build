@@ -38,17 +38,10 @@ public struct BankRecord: Equatable, Sendable {
     public var legacyRefs: [String]
     /// Día en que el banco lo apuntó (`booking_date`, a mediodía), solo en los apuntados. `timing` prefiere el día del pago.
     public var bookedDay: Date?
-    /// true = el banco o el extracto dicen que es un pago a una persona (código de comercio de transferencia, tipo
-    /// «Transfer» de Revolut). Pasa a `Movement.personPayment`.
-    public var personPayment: Bool
-    /// true = `isShop` sale solo de que el nombre se parece a una marca del directorio (sin código de comercio). No se
-    /// guarda: al enlazar, no le quita la señal de persona a un aviso de Bizum («Zara López» no es Zara).
-    public var shopFromName: Bool
 
     public init(ref: String, bank: BankID, amountCents: Int, timing: RecordTiming, status: BankStatus,
                 merchant: String? = nil, isShop: Bool = false, balanceAfterCents: Int? = nil,
-                excludedFromSpending: Bool = false, legacyRefs: [String] = [], bookedDay: Date? = nil,
-                personPayment: Bool = false, shopFromName: Bool = false) {
+                excludedFromSpending: Bool = false, legacyRefs: [String] = [], bookedDay: Date? = nil) {
         self.ref = ref
         self.bank = bank
         self.amountCents = amountCents
@@ -60,8 +53,6 @@ public struct BankRecord: Equatable, Sendable {
         self.excludedFromSpending = excludedFromSpending
         self.legacyRefs = legacyRefs
         self.bookedDay = bookedDay
-        self.personPayment = personPayment
-        self.shopFromName = shopFromName
     }
 }
 
@@ -69,13 +60,6 @@ public struct BankRecord: Equatable, Sendable {
 public enum RecordChannel: Sendable { case bank, statement }
 
 let nonShopMCC: Set<String> = ["4829", "6010", "6011", "6012", "6051", "6540"]
-/// Códigos de comercio de un envío de dinero (4829: transferencia; 6540: envío o recarga de dinero): señal de pago a persona.
-let transferMCC: Set<String> = ["4829", "6540"]
-
-/// true si el tipo de operación es una transferencia emitida (familia ISO 20022 «ICDT») o su descripción lo dice.
-func isTransferCode(_ code: EBBankTransactionCode) -> Bool {
-    code.code?.uppercased() == "ICDT" || saysPersonPayment(code.description)
-}
 
 /// "2026-11-18" (o "2026-11-18T10:00:00...") -> ese día al mediodía en `calendar`; nil si no es una fecha válida.
 func noonOfDay(_ text: String, calendar: Calendar) -> (day: String, date: Date)? {
@@ -133,24 +117,14 @@ public func bankRecords(from transactions: [EBTransaction], bank: BankID, calend
         let cleaned = raw.map(cleanBankMerchant)
         let merchant = (cleaned?.isEmpty == false) ? cleaned : nil
 
-        // El concepto («BIZUM ENVIADO», «TRANSFERENCIA A FAVOR DE…») y el tipo de operación también dicen si es un envío,
-        // aunque el comercio guardado sea el acreedor (el concepto no se guarda).
-        let saysTransfer = remittance.contains { saysPersonPayment($0) } || t.bankTransactionCode.map(isTransferCode) == true
-        let mcc = t.merchantCategoryCode.flatMap { $0.isEmpty ? nil : $0 }
         let isShop: Bool
-        var shopFromName = false
         if !isDebit {
             isShop = false
-        } else if let mcc {
+        } else if let mcc = t.merchantCategoryCode, !mcc.isEmpty {
             isShop = !nonShopMCC.contains(mcc)
         } else {
-            // Sin código: el parecido con una marca no tapa un envío («Bizum» a «Zara López»).
-            isShop = !saysTransfer && (merchant.map { merchantDomain(for: $0) != nil } ?? false)
-            shopFromName = isShop
+            isShop = merchant.map { merchantDomain(for: $0) != nil } ?? false
         }
-
-        let personPayment = isDebit && !isShop && (mcc.map { transferMCC.contains($0) } == true || saysTransfer)
-            && !mentionsOwnAccount(merchant)
 
         var ref = (t.entryReference?.isEmpty == false ? t.entryReference : nil)
             ?? (t.transactionID?.isEmpty == false ? t.transactionID : nil)
@@ -164,8 +138,7 @@ public func bankRecords(from transactions: [EBTransaction], bank: BankID, calend
         out.append(BankRecord(
             ref: ref ?? "", bank: bank, amountCents: cents, timing: timing, status: status, merchant: merchant,
             isShop: isShop, balanceAfterCents: t.balanceAfterTransaction?.euroCents,
-            bookedDay: status == .booked ? t.bookingDate.flatMap { noonOfDay($0, calendar: calendar)?.date } : nil,
-            personPayment: personPayment, shopFromName: shopFromName))
+            bookedDay: status == .booked ? t.bookingDate.flatMap { noonOfDay($0, calendar: calendar)?.date } : nil))
     }
     return out
 }

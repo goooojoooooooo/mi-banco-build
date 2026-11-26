@@ -9,7 +9,6 @@ struct SkeletonRows: View {
     var count = 5
 
     @Environment(\.motion) private var motion
-    @Environment(\.scenePhase) private var scenePhase
 
     /// Anchos de las dos líneas y del importe de cada fila (no todas iguales: parece una lista, no una rejilla).
     private static let widths: [(title: CGFloat, subtitle: CGFloat, amount: CGFloat)] = [
@@ -20,8 +19,7 @@ struct SkeletonRows: View {
         bones(Color.white.opacity(0.09))
             .overlay {
                 if motion.richEffects {
-                    // Parado con la app fuera de primer plano (menor m-1).
-                    TimelineView(.animation(minimumInterval: nil, paused: scenePhase != .active)) { context in
+                    TimelineView(.animation) { context in
                         let period = 1.15 * max(0.05, motion.level.timeScale * motion.timeMultiplier)
                         let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
                         GeometryReader { geo in

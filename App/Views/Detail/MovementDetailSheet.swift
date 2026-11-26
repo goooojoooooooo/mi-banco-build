@@ -514,6 +514,9 @@ private struct HeldUntilLanded: ViewModifier {
     let index: Int
     @Environment(\.motion) private var motion
     @State private var shown: Bool?
+    /// Ronda 2 (N-2): recibe toques solo cuando YA se ve (tras su retardo escalonado y su entrada), no en el instante de
+    /// soltarse.
+    @State private var touchable: Bool?
 
     func body(content: Content) -> some View {
         let visible = shown ?? released
@@ -522,13 +525,24 @@ private struct HeldUntilLanded: ViewModifier {
         content
             .mask { Color.black.opacity(visible ? 1 : 0) }
             // I-2 (ronda 1): mientras espera no recibe toques (no se cambia nada que no se ve).
-            .allowsHitTesting(visible)
+            .allowsHitTesting(touchable ?? released)
             .offset(y: visible ? 0 : motion.distance(16))
-            .onAppear { if shown == nil { shown = released } }
+            .onAppear {
+                if shown == nil { shown = released }
+                if touchable == nil { touchable = released }
+            }
             .onChange(of: released) { _, now in
                 guard now, shown != true else { return }
-                withAnimation(motion.animation(.enter).delay(motion.stagger(index, firstGap: DetailContent.linesGap, decay: DetailContent.linesDecay))) {
-                    shown = true
+                let delay = motion.stagger(index, firstGap: DetailContent.linesGap, decay: DetailContent.linesDecay)
+                withAnimation(motion.animation(.enter).delay(delay)) { shown = true }
+                // Se puede tocar cuando la entrada ya se ve (su retardo y el muelle `enter` posado a la vista).
+                let settle = motion.reduce
+                    ? motion.fadeDuration
+                    : MotionMath.visibleSettle(MotionMath.scaled(SpringToken.enter.base, level: motion.level,
+                                                                 timeMultiplier: motion.timeMultiplier))
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(delay + settle))
+                    touchable = true
                 }
             }
     }

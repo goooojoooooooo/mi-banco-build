@@ -13,7 +13,6 @@ struct CategoryPickerRow: View {
     let current: SpendingCategory
     let model: LedgerModel
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     /// D2: la ficha blanca de la elegida es UNA sola pieza que se desliza a la nueva al elegir.
@@ -26,6 +25,9 @@ struct CategoryPickerRow: View {
     @State private var bounces: [SpendingCategory: Int] = [:]
     @State private var errorTick = 0
     @State private var failed = false
+    /// Ronda 2 (I-3): «Quitar mi categoría…» se decide al ABRIR la rejilla y no cambia mientras está abierta: elegir una
+    /// categoría no inserta un botón que empuja las filas hacia abajo justo antes de plegarse.
+    @State private var resetShown = false
 
     init(movement: Movement, current: SpendingCategory, model: LedgerModel) {
         self.movement = movement
@@ -115,14 +117,15 @@ struct CategoryPickerRow: View {
 
     private var chip: some View {
         Button {
+            if !expanded { resetShown = model.hasChosenCategory(movement.id) }
             withAnimation(fold) { expanded.toggle() }
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: current.symbolName)
                     .font(.system(size: 15, weight: .medium))
                     .frame(width: 20)
-                    .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
-                    .symbolEffect(.bounce, value: reduceMotion ? 0 : selectTick)
+                    .contentTransition(motion.reduce ? .opacity : .symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: motion.reduce ? 0 : selectTick)
                 Text(current.displayName)
                     .fontWeight(.medium)
                     .contentTransition(.opacity)
@@ -138,7 +141,7 @@ struct CategoryPickerRow: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
-        .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph, value: current)
+        .animation(motion.animation(.snap), value: current)
         .accessibilityIdentifier("category-chip")
         .accessibilityLabel("Categoría: \(current.displayName)")
         .accessibilityHint(expanded ? "Toca para cerrar la lista" : "Toca para cambiarla")
@@ -155,7 +158,7 @@ struct CategoryPickerRow: View {
                     }
                 }
             }
-            if model.hasChosenCategory(movement.id) {
+            if resetShown {
                 Button(action: resetToAutomatic) {
                     Text(resetTitle)
                         .titan(.option)
@@ -200,9 +203,14 @@ struct CategoryPickerRow: View {
             }
             selectTick += 1
             if !motion.reduce { bounces[category, default: 0] += 1 }
-            withAnimation(fold.delay(motion.reduce ? 0 : motion.seconds(0.32))) {
-                failed = false
-                expanded = false
+            failed = false
+            // Ronda 2 (I-3): la ficha blanca llega a la elegida y DESPUÉS se pliega todo junto: se retrasa el cambio de
+            // estado (no solo su animación), así la salida de la rejilla y el pliegue empiezan en el mismo instante y
+            // no queda el hueco de la rejilla esperando.
+            let wait = motion.reduce ? 0 : motion.seconds(0.32)
+            Task { @MainActor in
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+                withAnimation(fold) { expanded = false }
             }
         } catch {
             errorTick += 1
@@ -239,9 +247,10 @@ private struct CategoryTile: View {
     let bounce: Int
     let action: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motion) private var motion
     @State private var shown = false
+    /// Ronda 2 (I-3): el Reducir de la app (`\.motion`), no el del sistema.
+    private var reduceMotion: Bool { motion.reduce }
 
     private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
@@ -285,14 +294,14 @@ private struct CategoryTile: View {
             .contentShape(shape)
         }
         .buttonStyle(.pressable)
-        .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.4, bounce: 0.35), value: selected)
+        .animation(motion.animation(.release), value: selected)
         // Entrada escalonada de la rejilla (30 ms por ficha); con Reducir movimiento, solo un fundido.
         .opacity(shown ? 1 : 0)
         .scaleEffect(shown || reduceMotion ? 1 : 0.86)
         .offset(y: shown || reduceMotion ? 0 : 6)
         .onAppear {
             guard !shown else { return }
-            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.assemble.delay(Double(index) * 0.03)) {
+            withAnimation(motion.animation(.enter).delay(reduceMotion ? 0 : motion.seconds(Double(index) * 0.03))) {
                 shown = true
             }
         }

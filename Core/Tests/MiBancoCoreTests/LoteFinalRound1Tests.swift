@@ -49,3 +49,23 @@ import Testing
         #expect(!AudioRouteChange.routeConfigurationChange.stopsSpeech)
     }
 }
+
+/// Lote final, parte 1 — ronda de arreglos 2.
+@Suite struct LoteFinalRound2Tests {
+    /// N-4: la voz se para si aparece una salida nueva que no es privada, aunque la razón del cambio sea «dispositivo
+    /// nuevo»; sigue si continúa por lo mismo o pasa a algo privado.
+    @Test func aNewPublicOutputStopsTheVoice() {
+        let new = AudioRouteChange.newDeviceAvailable
+        for output in [AudioOutputKind.bluetooth, .car, .airPlay, .other] {
+            #expect(speechStops(new, previous: [.speaker], current: [output]), "\(output)")
+            #expect(speechStops(.routeConfigurationChange, previous: [.headphones], current: [output]), "\(output)")
+        }
+        #expect(!speechStops(new, previous: [.speaker], current: [.headphones]))
+        #expect(!speechStops(new, previous: [.receiver], current: [.receiver]))
+        #expect(!speechStops(.categoryChange, previous: [.speaker], current: [.speaker]))
+        #expect(!speechStops(.routeConfigurationChange, previous: [.bluetooth], current: [.bluetooth]))
+        #expect(speechStops(.oldDeviceUnavailable, previous: [.headphones], current: [.speaker]))
+        #expect(AudioOutputKind.headphones.isPrivate && AudioOutputKind.receiver.isPrivate)
+        #expect(!AudioOutputKind.bluetooth.isPrivate && !AudioOutputKind.speaker.isPrivate)
+    }
+}

@@ -149,6 +149,30 @@ public enum AudioRouteChange: Equatable, Sendable {
     }
 }
 
+/// Ronda 2 (N-4): por dónde sale el audio (los mismos grupos que `AVAudioSession.Port`, sin AVFoundation).
+public enum AudioOutputKind: Equatable, Sendable {
+    /// Auriculares con cable.
+    case headphones
+    /// El auricular del propio teléfono (pegado a la oreja).
+    case receiver
+    /// El altavoz del teléfono.
+    case speaker
+    /// Bluetooth (no se distingue unos auriculares de un altavoz), el coche, AirPlay, HDMI u otro.
+    case bluetooth, car, airPlay, other
+
+    /// Una salida privada: solo la oye quien la lleva puesta.
+    public var isPrivate: Bool { self == .headphones || self == .receiver }
+}
+
+/// Ronda 2 (N-4, privacidad): la voz que lee saldos se para (y no vuelve sola) si la salida deja de ser privada o se
+/// abre a otros: se desconectan los auriculares, se fuerza el altavoz, ya no hay salida, o aparece una salida nueva
+/// que no es privada (un altavoz Bluetooth, el coche, AirPlay…, también unos auriculares Bluetooth, que no se pueden
+/// distinguir de un altavoz). Si sigue saliendo por lo mismo de antes, no se para.
+public func speechStops(_ change: AudioRouteChange, previous: [AudioOutputKind], current: [AudioOutputKind]) -> Bool {
+    if change.stopsSpeech { return true }
+    return current.contains { !$0.isPrivate && $0 != .speaker && !previous.contains($0) }
+}
+
 public func spokenBriefingLines(_ briefing: Briefing, input: BriefingInput, privateMode: Bool, calendar: Calendar) -> SpokenBriefing {
     if privateMode {
         return SpokenBriefing(text: spokenBriefing(briefing, input: input, privateMode: true, calendar: calendar), lines: [])

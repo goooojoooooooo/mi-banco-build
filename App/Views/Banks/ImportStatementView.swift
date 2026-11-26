@@ -33,13 +33,10 @@ private struct ImportMorphButton: View {
                             .lineLimit(1)
                             .fixedSize()
                             .opacity(phase == .idle ? 1 : 0)
-                            // El título se va en 0,1 s y solo entonces entra la rueda: nunca uno debajo de la otra (m-6).
-                            .animation(.easeOut(duration: motion.seconds(0.10)), value: phase)
                         if phase == .working {
                             ProgressView()
                                 .tint(.black)
-                                .transition(.opacity.animation(.easeOut(duration: motion.seconds(0.15))
-                                    .delay(motion.seconds(0.10))))
+                                .transition(.opacity)
                         }
                         if phase == .done {
                             DrawnCheck(lineWidth: 2.8, color: .black)
@@ -216,18 +213,14 @@ struct ImportStatementView: View {
                             Task { _ = await apply() }
                         }
                     } else {
-                        // Un botón de verdad, deshabilitado: VoiceOver dice «atenuado» (menor m-7).
-                        Button {} label: {
-                            Text("Nada nuevo que importar")
-                                .titan(.option)
-                                .fontWeight(.semibold)
-                                .foregroundStyle(Theme.label3)
-                                .frame(maxWidth: .infinity, minHeight: 52)
-                                .background(Theme.raised, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(true)
-                        .accessibilityIdentifier("import-confirm")
+                        Text("Nada nuevo que importar")
+                            .titan(.option)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(Theme.label3)
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                            .background(Theme.raised, in: Capsule())
+                            .accessibilityAddTraits(.isButton)
+                            .accessibilityIdentifier("import-confirm")
                     }
 
                     Button {
@@ -300,28 +293,16 @@ struct ImportStatementView: View {
         // El paso se ve al menos su mínimo, aunque guardar sea inmediato.
         let rest = stepSeconds - Date().timeIntervalSince(began)
         if rest > 0 { try? await Task.sleep(for: .seconds(rest)) }
-        let stretch = max(0.05, motion.level.timeScale * motion.timeMultiplier)
-        // Justo la cifra que se DIBUJABA (con Reducir movimiento, el suelo del paso: menor m-2).
-        let drawn = steps.drawn(elapsed: Date().timeIntervalSince(began) / stretch, reduce: motion.reduce)
+        importing = false
         guard ok else {
             // No se guardó: el porcentaje se queda congelado donde estaba.
-            importing = false
-            steps.fail(shown: drawn)
+            let stretch = max(0.05, motion.level.timeScale * motion.timeMultiplier)
+            steps.fail(shown: steps.value(elapsed: Date().timeIntervalSince(began) / stretch))
             errorTick += 1
             return false
         }
-        // Guardado de verdad: el porcentaje corre de lo que se veía a 100 (0,25 s, la rueda sigue en el botón). El tercer
-        // nodo y el botón tardan unos 0,15 s en enseñar su ✓ desde que se marcan (relleno y trazo), así que se marcan
-        // 0,15 s antes de que la cifra llegue: el 100 y los dos ✓ se ven a la vez (menor m-5 del lote 2 y m-13 del
-        // lote 3; antes el ✓ llegaba con 99, y marcándolos al llegar a 100, el 100 iba tres fotogramas por delante).
-        steps.succeed(shown: drawn)
-        stepStarted = Date()
-        let lead = StepPercent.finishSeconds - 0.15
-        try? await Task.sleep(for: .seconds(motion.reduce ? 0 : motion.seconds(lead)))
-        withAnimation(motion.calmAnimation(.row)) {
-            importing = false
-            applied = true
-        }
+        steps.succeed()
+        withAnimation(motion.calmAnimation(.row)) { applied = true }
         successTick += 1
         let linger = motion.seconds(0.6)
         Task {

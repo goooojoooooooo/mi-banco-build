@@ -26,6 +26,9 @@ public struct AccountBook: Codable, Equatable, Sendable, CustomStringConvertible
     /// Céntimos que no se quieren tocar en cada banco.
     public var floors: [BankID: Int]
     public var payees: [Payee]
+    /// Bancos cuyo IBAN rellenado borró a propósito el dueño: no se vuelven a rellenar solos.
+    /// Guarda únicamente el identificador del banco, nunca ningún IBAN ni fragmento.
+    public var autoIBANDismissed: Set<BankID>
 
     /// Sin IBAN, mínimos ni destinatarios en la salida.
     public var description: String { "AccountBook(•••)" }
@@ -35,24 +38,56 @@ public struct AccountBook: Codable, Equatable, Sendable, CustomStringConvertible
         ibans = [:]
         floors = [:]
         payees = []
+        autoIBANDismissed = []
     }
 
-    private enum CodingKeys: String, CodingKey { case ibans, floors, payees }
+    private enum CodingKeys: String, CodingKey { case ibans, floors, payees, autoIBANDismissed }
 
-    /// Tolerante: lo que falte se lee vacío.
+    /// Tolerante: lo que falte se lee vacío (compatible con libretas antiguas sin `autoIBANDismissed`).
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         ibans = try c.decodeIfPresent([BankID: String].self, forKey: .ibans) ?? [:]
         floors = try c.decodeIfPresent([BankID: Int].self, forKey: .floors) ?? [:]
         payees = try c.decodeIfPresent([Payee].self, forKey: .payees) ?? []
+        autoIBANDismissed = try c.decodeIfPresent(Set<BankID>.self, forKey: .autoIBANDismissed) ?? []
     }
 
-    /// Rellena el IBAN del banco solo si está vacío, el banco admite conexión (nunca Trade Republic)
-    /// y el IBAN recibido supera la validación estricta de país, formato y dígitos de control.
+    /// Omite `autoIBANDismissed` cuando está vacío para mantener compatibilidad total en JSON.
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(ibans, forKey: .ibans)
+        try c.encode(floors, forKey: .floors)
+        try c.encode(payees, forKey: .payees)
+        if !autoIBANDismissed.isEmpty {
+            let sorted = autoIBANDismissed.sorted { $0.rawValue < $1.rawValue }
+            try c.encode(sorted, forKey: .autoIBANDismissed)
+        }
+    }
+
+    /// Guarda o borra el IBAN propio de un banco (acción del dueño).
+    /// Si el dueño borra un IBAN existente de un banco conectable, recuerda el borrado en `autoIBANDismissed`
+    /// sin guardar el IBAN; si escribe un IBAN no vacío, limpia esa marca para ese banco.
+    public mutating func setIBAN(_ raw: String?, for bank: BankID) {
+        let clean = raw.map(normalizeIBAN) ?? ""
+        if clean.isEmpty {
+            let hadIBAN = !(ibans[bank]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+            ibans.removeValue(forKey: bank)
+            if hadIBAN && bank != .tr {
+                autoIBANDismissed.insert(bank)
+            }
+        } else {
+            ibans[bank] = clean
+            autoIBANDismissed.remove(bank)
+        }
+    }
+
+    /// Rellena el IBAN del banco solo si está vacío, el dueño no lo borró antes, el banco admite conexión
+    /// (nunca Trade Republic) y el IBAN recibido supera la validación estricta de país, formato y dígitos de control.
     /// Nunca pisa un IBAN que el dueño ya haya guardado. Devuelve `true` solo si el cuaderno cambia.
     @discardableResult
     public mutating func fillIBANIfEmpty(_ raw: String, for bank: BankID) -> Bool {
         guard bank != .tr else { return false }
+        guard !autoIBANDismissed.contains(bank) else { return false }
         let existing = ibans[bank]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         guard existing.isEmpty else { return false }
         guard let clean = validatedBankIBAN(raw) else { return false }

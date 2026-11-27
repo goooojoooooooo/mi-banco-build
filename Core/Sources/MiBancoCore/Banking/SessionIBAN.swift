@@ -4,16 +4,17 @@ import Foundation
 /// para leer el IBAN propio de la cuenta principal en euros y pasarlo directo a `AccountBookStore`.
 /// No conforma a `Encodable` para que nunca se serialice en `StoredSession`, `ledger.json` ni copias,
 /// y oculta el IBAN en cualquier descripción.
-public struct EBSessionAccountIBAN: Decodable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+public struct EBSessionAccountIBAN: Decodable, Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public let uid: String
     public let currency: String?
     public let cashAccountType: String?
-    public let rawIBAN: String?
+    let rawIBAN: String?
 
     public var description: String { "EBSessionAccountIBAN(redacted)" }
     public var debugDescription: String { description }
+    public var customMirror: Mirror { Mirror(self, children: EmptyCollection()) }
 
-    public init(uid: String, currency: String? = nil, cashAccountType: String? = nil, rawIBAN: String? = nil) {
+    init(uid: String, currency: String? = nil, cashAccountType: String? = nil, rawIBAN: String? = nil) {
         self.uid = uid
         self.currency = currency
         self.cashAccountType = cashAccountType
@@ -77,12 +78,13 @@ public struct EBSessionAccountIBAN: Decodable, Equatable, Sendable, CustomString
 
 /// Resultado de `POST /sessions` solo para el flujo de conexión (`BankConnector.finish`):
 /// mantiene `EBSession` y `EBAccount` libres de IBAN y entrega aparte el IBAN validado, si es inequívoco.
-public struct EBSessionAuthorization: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+public struct EBSessionAuthorization: Equatable, Sendable, CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public let session: EBSession
     public let primaryEuroIBAN: String?
 
     public var description: String { "EBSessionAuthorization(redacted)" }
     public var debugDescription: String { description }
+    public var customMirror: Mirror { Mirror(self, children: EmptyCollection()) }
 
     public init(session: EBSession, primaryEuroIBAN: String?) {
         self.session = session

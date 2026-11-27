@@ -142,17 +142,20 @@ struct AccountBookStore {
 @MainActor @Observable
 final class AccountBookModel {
     private(set) var book: AccountBook
+    @ObservationIgnored private let service: String
     @ObservationIgnored private var loadFailed = false
     @ObservationIgnored private var observer: Task<Void, Never>?
 
-    init() {
+    init(service: String = AccountBookStore.service) {
+        self.service = service
         do {
-            self.book = try AccountBookStore.loadThrowing()
+            self.book = try AccountBookStore.loadThrowing(service: service)
             self.loadFailed = false
         } catch {
             self.book = AccountBook()
             self.loadFailed = true
         }
+        guard service == AccountBookStore.service else { return }
         #if DEBUG
         if DemoMode.isActive { return }
         #endif
@@ -165,35 +168,28 @@ final class AccountBookModel {
     }
 
     func reload() {
-        guard let loaded = try? AccountBookStore.loadThrowing() else { return }
+        guard let loaded = try? AccountBookStore.loadThrowing(service: service) else { return }
         loadFailed = false
         if loaded != book { book = loaded }
     }
 
-    /// Si la lectura inicial falló, exige leer del Llavero antes de escribir para nunca pisar datos del dueño con un cuaderno vacío (U28).
+    /// Recarga el cuaderno actual del Llavero antes de escribir para no pisar un IBAN recién rellenado
+    /// antes de que llegue `.accountBookDidChange` (M2). Si la lectura inicial falló, exige leer del Llavero
+    /// antes de escribir para nunca pisar datos del dueño con un cuaderno vacío (U28).
     private func baseBookForWrite() throws -> AccountBook {
         if loadFailed {
-            let loaded = try AccountBookStore.loadThrowing(forWrite: true)
+            let loaded = try AccountBookStore.loadThrowing(forWrite: true, service: service)
             loadFailed = false
             book = loaded
             return loaded
         }
-        return book
+        return (try? AccountBookStore.loadThrowing(forWrite: true, service: service)) ?? book
     }
 
     func setIBAN(_ raw: String?, for bank: BankID) throws {
         var next = try baseBookForWrite()
-        if let raw {
-            let clean = normalizeIBAN(raw)
-            if clean.isEmpty {
-                next.ibans.removeValue(forKey: bank)
-            } else {
-                next.ibans[bank] = clean
-            }
-        } else {
-            next.ibans.removeValue(forKey: bank)
-        }
-        try AccountBookStore.save(next)
+        next.setIBAN(raw, for: bank)
+        try AccountBookStore.save(next, service: service)
         book = next
     }
 
@@ -204,21 +200,21 @@ final class AccountBookModel {
         } else {
             next.floors.removeValue(forKey: bank)
         }
-        try AccountBookStore.save(next)
+        try AccountBookStore.save(next, service: service)
         book = next
     }
 
     func addPayee(_ payee: Payee) throws {
         var next = try baseBookForWrite()
         next.payees.append(payee)
-        try AccountBookStore.save(next)
+        try AccountBookStore.save(next, service: service)
         book = next
     }
 
     func deletePayee(id: UUID) throws {
         var next = try baseBookForWrite()
         next.payees.removeAll { $0.id == id }
-        try AccountBookStore.save(next)
+        try AccountBookStore.save(next, service: service)
         book = next
     }
 

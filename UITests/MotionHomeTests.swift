@@ -1226,6 +1226,32 @@ final class MotionHomeTests: XCTestCase {
         return start.map { h - $0 }
     }
 
+    /// Ancho, en píxeles de la captura, de toda la tinta de un botón (de su primer a su último píxel con tinta, en la
+    /// franja central de alto para no leer las esquinas redondeadas). Un título cortado con «…» sale mucho más estrecho
+    /// que el texto entero. `nil` si no hay captura o no hay tinta.
+    private func inkWidth(of element: XCUIElement) -> (width: Int, scale: CGFloat)? {
+        let image = element.screenshot().image
+        guard let cg = image.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 20, h > 8 else { return nil }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let bgAt = (3 * w + w / 2) * 4
+        let bg = (Int(px[bgAt]), Int(px[bgAt + 1]), Int(px[bgAt + 2]))
+        var minX = w, maxX = -1
+        for y in (h * 20 / 100)..<(h * 80 / 100) {
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                let d = abs(Int(px[i]) - bg.0) + abs(Int(px[i + 1]) - bg.1) + abs(Int(px[i + 2]) - bg.2)
+                if d > 120 { minX = min(minX, x); maxX = max(maxX, x) }
+            }
+        }
+        return maxX >= minX ? (maxX - minX + 1, image.scale) : nil
+    }
+
     /// La fila abierta: el importe se apaga (nunca a la vez que las acciones) y, a tamaño normal, el nombre sigue a la
     /// vista. Con texto de accesibilidad la fila va apilada y el importe está debajo del nombre, a la izquierda.
     private func assertOpenRow(_ extra: [String], largeText: Bool) {
@@ -1271,7 +1297,7 @@ final class MotionHomeTests: XCTestCase {
             // Con el tope AX2 o el 60 % de antes salía al 60 % o menos.
             let axXXXL = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
             let expectedCap = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: axXXXL).capHeight
-                * UIScreen.main.scale
+                * (inkWidth(of: note)?.scale ?? 3)
             let noteInk = firstInkBandHeight(of: note)
             let flagInk = firstInkBandHeight(of: flag)
             XCTAssertNotNil(noteInk, "No se pudo medir la tinta de «Nota»")
@@ -1281,6 +1307,19 @@ final class MotionHomeTests: XCTestCase {
                                             "«Nota» se lee encogida: \(noteInk) px de tinta frente a \(expectedCap) px esperados")
                 XCTAssertGreaterThanOrEqual(Double(flagInk), Double(expectedCap) * 0.8,
                                             "«No es mío» se lee encogida: \(flagInk) px de tinta frente a \(expectedCap) px esperados")
+            }
+            // Ronda 1: el título entero, sin «…» ni recorte. Se compara la tinta dibujada de «No es mío» con el ancho de la
+            // cadena entera en `footnote` semibold a AX-XXXL (referencia), y la cápsula tiene que ser más ancha que ella.
+            if let ink = inkWidth(of: flag) {
+                let refFont = UIFont.systemFont(
+                    ofSize: UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: axXXXL).pointSize, weight: .semibold)
+                let fullWidth = ("No es mío" as NSString).size(withAttributes: [.font: refFont]).width
+                XCTAssertGreaterThanOrEqual(Double(ink.width), Double(fullWidth * ink.scale) * 0.9,
+                                            "«No es mío» sale cortado o en dos líneas: \(ink.width) px de tinta frente a \(fullWidth * ink.scale) px del título entero")
+                XCTAssertGreaterThanOrEqual(flag.frame.width, fullWidth,
+                                            "La cápsula «No es mío» no cabe el título entero: \(flag.frame.width) pt frente a \(fullWidth) pt")
+            } else {
+                XCTFail("No se pudo medir el ancho de tinta de «No es mío»")
             }
             XCTAssertFalse(note.frame.intersects(flag.frame), "Las cápsulas de acción se solapan: \(note.frame) vs \(flag.frame)")
             XCTAssertLessThanOrEqual(note.frame.maxY, flag.frame.minY + 1,

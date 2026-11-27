@@ -999,7 +999,7 @@ final class MotionScreensTests: XCTestCase {
 
     /// Cuerpo común de I-3: se edita el saldo de Trade Republic (con el ojo abierto, el campo enseña su cifra) y, sin
     /// tocar nada (el teclado taparía el interruptor), Ajustes cierra el ojo por el mismo camino que el interruptor
-    /// (`-MiBancoDemoCloseEyeAfter`). El campo tiene que soltar el foco (el teclado se va) y pasar a la máscara: ningún
+    /// (`-MiBancoDemoSettingsCloseEyeAfter`). El campo tiene que soltar el foco (el teclado se va) y pasar a la máscara: ningún
     /// dígito dibujado y ningún importe con cifras en pantalla.
     private func closeTheEyeWhileEditingAndCheck(_ extra: [String]) {
         let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoSettingsCloseEyeAfter", "12"] + extra)

@@ -66,7 +66,7 @@ import Testing
         #expect(detectQuickNoticeBank("Pophams Bakery\n🍽️ Paid €5.50 at Pophams Bakery\nAvailable balance: €120.40") == .rev)
         #expect(detectQuickNoticeBank("Pophams Bakery\n🍽️ Paid €5.50 at Pophams Bakery\nSaldo disponible: 120,40 €") == .rev)
         #expect(detectQuickNoticeBank("Pophams Bakery\nPaid €5.50 at Pophams Bakery\nSpent today: €14.50") == .rev)
-        #expect(detectQuickNoticeBank("Mercadona\nHas pagado 12,50 € en Mercadona\nGastado hoy: 20,00 €") == .rev)
+        #expect(detectQuickNoticeBank("Mercadona\nHas pagado 12,50 € en Mercadona\nSpent today: €20.00") == .rev)
         #expect(detectQuickNoticeBank("🍽️ Paid €5.50 at Pophams Bakery") == .rev)
 
         #expect(detectQuickNoticeBank("Zara\nCard payment of €49.95 at Zara") == .tr)
@@ -77,7 +77,12 @@ import Testing
     @Test func noAdivinaBancoConTextoGenericoContraparteOConflicto() {
         // Sin nombre de app ni patrón propio del banco.
         #expect(detectQuickNoticeBank("Has pagado 12,50 € en Mercadona") == nil)
-        #expect(parseQuickNotice("Has pagado 12,50 € en Mercadona") == nil)
+        // El aviso sin banco no se tira: se guarda aparte (ronda 1, I-1).
+        if case let .unattributedNotice(text)? = parseQuickNotice("Has pagado 12,50 € en Mercadona") {
+            #expect(text == "Has pagado 12,50 € en Mercadona")
+        } else {
+            Issue.record("Se esperaba un aviso sin banco")
+        }
 
         // La contraparte de un traspaso no identifica el banco emisor.
         #expect(detectQuickNoticeBank("Transferencia a imagin\nHas enviado 50,00 € a imagin") == nil)
@@ -86,8 +91,10 @@ import Testing
 
         // Con cabecera explícita de la app, manda la cabecera sobre la contraparte.
         #expect(detectQuickNoticeBank("Revolut\nTransferencia a imagin\nHas enviado 50,00 € a imagin") == .rev)
-        // Sin cabecera, pero con línea de saldo de Revolut, no se confunde con «a imagin».
-        #expect(detectQuickNoticeBank("Transferencia a imagin\nHas enviado 50,00 € a imagin\nSaldo disponible: 200,00 €") == .rev)
+        // Una línea de saldo disponible sola NO decide Revolut (ronda 1, I-1): ni en español ni en inglés.
+        #expect(detectQuickNoticeBank("Transferencia a imagin\nHas enviado 50,00 € a imagin\nSaldo disponible: 200,00 €") == nil)
+        #expect(detectQuickNoticeBank("Mercadona\nHas pagado 12,50 € en Mercadona\nGastado hoy: 20,00 €") == nil)
+        #expect(detectQuickNoticeBank("Zara\nHas pagado 49,95 € en Zara\nAvailable balance: €300.00") == nil)
 
         // Señales enfrentadas de dos bancos sin cabecera explícita -> nil.
         #expect(detectQuickNoticeBank("Saveback: 0,10 €\nSpent today: €14.50") == nil)
@@ -187,5 +194,220 @@ import Testing
         #expect(trMove.amountCents == -4_995)
         #expect(trMove.merchant == "Zara")
         #expect(guideStatus(.tradeRepublic, in: ledger.state, now: t0 + 30, calendar: utc) == .working(since: t0 + 30, last: t0 + 30))
+    }
+}
+
+// MARK: Avisos rápidos, ronda 1
+
+@Suite struct QuickNoticeRound1Tests {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 1_800_000_000)
+
+    private var utc: Calendar {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "UTC")!
+        return c
+    }
+
+    // MARK: I-1 · nunca perder un pago en silencio ni atribuirlo a un banco sin pruebas
+
+    @Test func textoEspanolDeTradeRepublicSinNombreDeAppSeGuardaSinLeerYNoTocaRevolut() {
+        let raw = "Zara\nHas pagado 49,95 € en Zara\nSaldo disponible: 300,00 €"
+        #expect(detectQuickNoticeBank(raw) == nil)
+        guard let input = parseQuickNotice(raw) else {
+            Issue.record("El aviso sin banco deducible no debe tirarse")
+            return
+        }
+        guard case let .unattributedNotice(text) = input else {
+            Issue.record("Se esperaba un aviso sin banco")
+            return
+        }
+        #expect(text.contains("Zara"))
+
+        var ledger = Ledger()
+        ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        #expect(ledger.ingest(input, now: t0) == .unread)
+        #expect(ledger.state.unread.count == 1)
+        #expect(ledger.state.unread[0].bank == nil)
+        #expect(ledger.state.unread[0].text.contains("49,95"))
+        #expect(ledger.state.movements.isEmpty)
+        // El saldo de Revolut sigue exacto y sin tocar; ninguna guía se marca.
+        #expect(ledger.balance(.rev)?.cents == 20_000)
+        #expect(ledger.balance(.rev)?.estimated == false)
+        #expect(guideStatus(.revolut, in: ledger.state, now: t0, calendar: utc) == .notYet)
+        #expect(guideStatus(.tradeRepublic, in: ledger.state, now: t0, calendar: utc) == .notYet)
+    }
+
+    @Test func mismoTextoConNombreDeTradeRepublicEsUnMovimientoDeTradeRepublic() {
+        let raw = "Trade Republic\nZara\nHas pagado 49,95 € en Zara\nSaldo disponible: 300,00 €"
+        guard let input = parseQuickNotice(raw) else {
+            Issue.record("No se obtuvo IngestInput")
+            return
+        }
+        var ledger = Ledger()
+        ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        guard case .stored(let m) = ledger.ingest(input, now: t0) else {
+            Issue.record("No se guardó el pago de Trade Republic")
+            return
+        }
+        #expect(m.bank == .tr)
+        #expect(m.amountCents == -4_995)
+        #expect(ledger.balance(.rev)?.cents == 20_000)
+        #expect(ledger.balance(.rev)?.estimated == false)
+        #expect(ledger.state.unread.isEmpty)
+        #expect(guideStatus(.tradeRepublic, in: ledger.state, now: t0, calendar: utc) == .working(since: t0, last: t0))
+        #expect(guideStatus(.revolut, in: ledger.state, now: t0, calendar: utc) == .notYet)
+    }
+
+    @Test func formatoRealDeRevolutConYSinNombreDeAppEsRevolut() {
+        let con = "Revolut\nPophams Bakery\n🍽️ Paid €5.50 at Pophams Bakery\nAvailable balance: €120.40"
+        let sin = "Pophams Bakery\n🍽️ Paid €5.50 at Pophams Bakery\nAvailable balance: €120.40"
+        for raw in [con, sin] {
+            #expect(detectQuickNoticeBank(raw) == .rev)
+            var ledger = Ledger()
+            ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+            guard let input = parseQuickNotice(raw), case .stored(let m) = ledger.ingest(input, now: t0) else {
+                Issue.record("No se guardó el pago de Revolut: \(raw)")
+                continue
+            }
+            #expect(m.bank == .rev)
+            #expect(m.amountCents == -550)
+            #expect(ledger.balance(.rev)?.cents == 12_040)
+            #expect(ledger.state.unread.isEmpty)
+        }
+    }
+
+    @Test func lineaDeSaldoDisponibleSolaNoDecideRevolut() {
+        for raw in [
+            "Saldo disponible: 120,40 €",
+            "Available balance: €120.40",
+            "Has recibido 20,00 € de Ana\nSaldo disponible: 140,40 €",
+            "Gastado hoy: 14,50 €",
+        ] {
+            #expect(detectQuickNoticeBank(raw) == nil, "\(raw.debugDescription)")
+        }
+        // Revolut sí tiene frases propias.
+        #expect(detectQuickNoticeBank("Spent today: €14.50\nHas pagado 5,50 € en Bar") == .rev)
+    }
+
+    @Test func avisoSinBancoRepetidoNoSeGuardaDosVecesYCodigosSeIgnoran() {
+        let raw = "Has pagado 12,50 € en Mercadona"
+        guard let input = parseQuickNotice(raw) else {
+            Issue.record("No se obtuvo IngestInput")
+            return
+        }
+        var ledger = Ledger()
+        #expect(ledger.ingest(input, now: t0) == .unread)
+        #expect(ledger.ingest(input, now: t0 + 20) == .duplicate)
+        #expect(ledger.state.unread.count == 1)
+
+        // Sin importe o con un código: nada que enseñar al dueño, nada que guardar.
+        #expect(parseQuickNotice("Tu código OTP es 482910") == nil)
+        #expect(parseQuickNotice("Abre la app para ver tu extracto") == nil)
+    }
+
+    @Test func avisoSinBancoRespetaSaneadoYTopes() {
+        let raw = "Has pagado 12,50 € en \u{202E}Mercadona\u{0007}" + String(repeating: "x", count: 3_000)
+        guard case let .unattributedNotice(text)? = parseQuickNotice(raw) else {
+            Issue.record("Se esperaba un aviso sin banco")
+            return
+        }
+        #expect(!text.contains("\u{202E}"))
+        #expect(!text.contains("\u{0007}"))
+        #expect(text.unicodeScalars.count <= QuickNoticeLimits.fieldMaxLength)
+    }
+
+    @Test func avisoSinLeerSinBancoConviveConLibrosAntiguos() throws {
+        // Un libro guardado antes: el aviso sin leer trae banco.
+        let old = Data(#"{"id":"11111111-1111-1111-1111-111111111111","bank":"tr","text":"texto","date":800000000}"#.utf8)
+        let decoded = try JSONDecoder().decode(UnreadNotice.self, from: old)
+        #expect(decoded.bank == .tr)
+        // Uno nuevo sin banco: no escribe la clave y vuelve a leerse igual.
+        let fresh = UnreadNotice(bank: nil, text: "texto", date: Date(timeIntervalSinceReferenceDate: 800_000_000))
+        let data = try JSONEncoder().encode(fresh)
+        #expect(try JSONDecoder().decode(UnreadNotice.self, from: data) == fresh)
+        let noKey = Data(#"{"id":"22222222-2222-2222-2222-222222222222","text":"texto","date":800000000}"#.utf8)
+        #expect(try JSONDecoder().decode(UnreadNotice.self, from: noKey).bank == nil)
+    }
+
+    // MARK: Pendiente y luego cargado: cuenta una sola vez
+
+    private func notice(_ body: String) -> IngestInput {
+        .notification(bank: .rev, title: nil, subtitle: nil, body: body)
+    }
+
+    @Test func pendienteYLuegoCargadoCuentaUnaVez() {
+        var ledger = Ledger()
+        ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        guard case .stored = ledger.ingest(notice("Pago pendiente de 12,50 € en Mercadona"), now: t0) else {
+            Issue.record("El pago pendiente debe registrarse")
+            return
+        }
+        #expect(ledger.balance(.rev)?.cents == 18_750)
+        // Pasados unos minutos llega el aviso del cargo: es el mismo pago.
+        #expect(ledger.ingest(notice("Has pagado 12,50 € en Mercadona"), now: t0 + 300) == .duplicate)
+        #expect(ledger.state.movements.count == 1)
+        #expect(ledger.balance(.rev)?.cents == 18_750)
+        // Y una reentrega del cargo tampoco suma.
+        #expect(ledger.ingest(notice("Has pagado 12,50 € en Mercadona"), now: t0 + 330) == .duplicate)
+        #expect(ledger.state.movements.count == 1)
+    }
+
+    @Test func pendienteEnInglesYLuegoCargadoCuentaUnaVez() {
+        var ledger = Ledger()
+        _ = ledger.ingest(notice("Pending payment of €5.50 at Pophams Bakery"), now: t0)
+        #expect(ledger.ingest(notice("🍽️ Paid €5.50 at Pophams Bakery"), now: t0 + 600) == .duplicate)
+        #expect(ledger.state.movements.count == 1)
+    }
+
+    @Test func pendienteNoSeFundeConOtroImporteComercioOMuchoDespues() {
+        var ledger = Ledger()
+        _ = ledger.ingest(notice("Pago pendiente de 12,50 € en Mercadona"), now: t0)
+        // Otro importe, otro comercio y otro banco: movimientos distintos.
+        guard case .stored = ledger.ingest(notice("Has pagado 12,60 € en Mercadona"), now: t0 + 60) else {
+            Issue.record("Otro importe es otro pago")
+            return
+        }
+        guard case .stored = ledger.ingest(notice("Has pagado 12,50 € en Lidl"), now: t0 + 90) else {
+            Issue.record("Otro comercio es otro pago")
+            return
+        }
+        guard case .stored = ledger.ingest(.notification(bank: .tr, title: nil, subtitle: nil, body: "Has pagado 12,50 € en Mercadona"),
+                                           now: t0 + 120) else {
+            Issue.record("Otro banco es otro pago")
+            return
+        }
+        // Horas después ya no es el mismo cargo.
+        guard case .stored = ledger.ingest(notice("Has pagado 12,50 € en Mercadona"), now: t0 + 6 * 3600) else {
+            Issue.record("Fuera de la ventana es otro pago")
+            return
+        }
+        #expect(ledger.state.movements.count == 5)
+    }
+
+    @Test func dosComprasIgualesYaCargadasSeCuentanLasDos() {
+        var ledger = Ledger()
+        guard case .stored = ledger.ingest(notice("Has pagado 1,50 € en Metro de Madrid"), now: t0) else {
+            Issue.record("Primer billete")
+            return
+        }
+        guard case .stored = ledger.ingest(notice("Has pagado 1,50 € en Metro de Madrid"), now: t0 + 400) else {
+            Issue.record("Segundo billete: no hay ningún pendiente, son dos compras")
+            return
+        }
+        #expect(ledger.state.movements.count == 2)
+    }
+
+    @Test func pendienteDespuesDeCargadoNoDuplica() {
+        var ledger = Ledger()
+        _ = ledger.ingest(notice("Has pagado 12,50 € en Mercadona"), now: t0)
+        #expect(ledger.ingest(notice("Pago pendiente de 12,50 € en Mercadona"), now: t0 + 120) == .duplicate)
+        #expect(ledger.state.movements.count == 1)
+    }
+
+    @Test func movimientoSinMarcaDePendienteNoEscribeLaClave() throws {
+        let m = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .notification, date: t0)
+        let data = try JSONEncoder().encode(m)
+        #expect(try JSONDecoder().decode(Movement.self, from: data) == m)
+        #expect(!String(decoding: data, as: UTF8.self).contains("noticePending"))
     }
 }

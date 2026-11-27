@@ -7,8 +7,10 @@ import Testing
         parseNotification(bank: .rev, title: title, subtitle: nil, body: body)
     }
 
-    private func mov(_ kind: MovementKind, _ cents: Int, _ merchant: String?, balance: Int? = nil, shop: Bool = false) -> ParseResult {
-        .movement(ParsedMovement(kind: kind, amountCents: cents, merchant: merchant, reportedBalanceCents: balance, merchantIsShop: shop))
+    private func mov(_ kind: MovementKind, _ cents: Int, _ merchant: String?, balance: Int? = nil, shop: Bool = false,
+                     pending: Bool = false) -> ParseResult {
+        .movement(ParsedMovement(kind: kind, amountCents: cents, merchant: merchant, reportedBalanceCents: balance,
+                                 merchantIsShop: shop, isPending: pending))
     }
 
     private func isShop(_ r: ParseResult) -> Bool? {
@@ -133,11 +135,30 @@ import Testing
 
     // L2: un pago pendiente CON importe es un movimiento normal, no algo que descartar sin rastro.
     @Test func pagosPendientesConImporteSeRegistran() {
-        #expect(parse(nil, "Pago pendiente de 12,50 € en Mercadona") == mov(.payment, 1250, "Mercadona", shop: true))
-        #expect(parse(nil, "Pago pendiente: 12,50 €") == mov(.payment, 1250, nil, shop: false))
-        #expect(parse(nil, "Pending payment of €5.50 at Pophams Bakery") == mov(.payment, 550, "Pophams Bakery", shop: true))
-        #expect(parse(nil, "Pending payment €7.00 at Uber") == mov(.payment, 700, "Uber", shop: true))
-        #expect(parse(nil, "Autorización pendiente: 8,40 € en Café Central") == mov(.payment, 840, "Café Central", shop: true))
+        #expect(parse(nil, "Pago pendiente de 12,50 € en Mercadona") == mov(.payment, 1250, "Mercadona", shop: true, pending: true))
+        #expect(parse(nil, "Pago pendiente: 12,50 €") == mov(.payment, 1250, nil, shop: false, pending: true))
+        #expect(parse(nil, "Pending payment of €5.50 at Pophams Bakery") == mov(.payment, 550, "Pophams Bakery", shop: true, pending: true))
+        #expect(parse(nil, "Pending payment €7.00 at Uber") == mov(.payment, 700, "Uber", shop: true, pending: true))
+        #expect(parse(nil, "Autorización pendiente: 8,40 € en Café Central") == mov(.payment, 840, "Café Central", shop: true, pending: true))
+    }
+
+    // Ronda 1 (m-5): «pago de nómina» y similares son ingresos, nunca un pago saliente.
+    @Test(arguments: [
+        "Pago de nómina 1.500 €",
+        "Pago de nómina: 1.500,00 €",
+        "Pago de nómina de 1.500,00 € en tu cuenta",
+        "Pago de salario 1.200,00 €",
+        "Salary payment €1,500.00",
+        "Payroll payment: €1,500.00",
+    ])
+    func pagoDeNominaNoEsUnPagoSaliente(_ body: String) {
+        #expect(kind(parse(nil, body)) == .income, "\(body)")
+    }
+
+    // Ronda 1: solo la palabra «pendiente»/«pending» marca el aviso como pendiente.
+    @Test func soloLosPendientesLlevanLaMarca() {
+        if case .movement(let m) = parse(nil, "Has pagado 12,50 € en Mercadona") { #expect(!m.isPending) } else { Issue.record("movimiento") }
+        if case .movement(let m) = parse(nil, "Pago pendiente de 12,50 € en Mercadona") { #expect(m.isPending) } else { Issue.record("movimiento") }
     }
 
     // L2 añadido: formato real del aviso de Revolut (emoji delante del importe y línea de saldo disponible con o sin emoji).

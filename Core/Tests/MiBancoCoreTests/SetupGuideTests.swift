@@ -87,9 +87,9 @@ private func bankSteps(_ bank: String, other: String) -> [Row] {
             "Notificación",
             "Solo hay que rellenar este campo. Si en vez de «Notificación» ves «Entrada de atajo», tócala: lleva el aviso entero."),
         row(4, "Guarda y suma \(other)",
-            "Toca «OK» arriba a la derecha. Para saber si funciona, mira la lista de guías después del próximo aviso de \(bank). Si usas \(other), súmalo al mismo atajo.",
+            "Toca «OK» arriba a la derecha para guardar. Para sumar \(other) al mismo atajo, abre esta automatización en «Automatización», toca «Aplicación» y marca también «\(other)».",
             "OK",
-            "En iOS 27 puedes apilar el aviso de \(other) en este mismo atajo para tener los dos en 1 minuto. Si tu versión no te deja apilarlos, repite estos pasos eligiendo «\(other)»."),
+            "Una automatización de «Notificación» admite varias aplicaciones: déjala con \(bank) y \(other) marcadas, sin tocar los demás filtros. Onyx detecta el banco de cada aviso. Si tu iPhone no te deja marcar las dos, repite estos pasos eligiendo «\(other)». Para saber si funciona, mira la lista de guías después del próximo aviso."),
     ]
 }
 

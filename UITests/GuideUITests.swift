@@ -230,7 +230,7 @@ final class GuideUITests: XCTestCase {
         return bottom + 12
     }
 
-    /// Abre «¿No te sale esto?» sin deslizar nada y comprueba que se ve (G28): si es más baja que lo visible, entera po
+    /// Abre «¿No te sale esto?» sin deslizar nada y comprueba que se ve (G28): si es más baja que lo visible, entera por
     /// encima del margen de los botones (`open.minY - 12`, sin recortar ni los 12 pt de relleno); si es más alta, su
     /// principio dentro de lo visible y, tras deslizar una vez, su final.
     private func assertOpeningHelpShowsIt(_ name: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -341,7 +341,7 @@ final class GuideUITests: XCTestCase {
 
     /// Con el texto arriba (letra de accesibilidad), VoiceOver lee en el orden de la pantalla (G27): lo imprescindible,
     /// «Empezar desde el principio» y el dibujo al final.
-    @MainActo
+    @MainActor
     func testTextFirstReadsInScreenOrder() throws {
         launchResumed("rev", 6, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
         waitForStep(6, "No retomó rev en el paso 6")

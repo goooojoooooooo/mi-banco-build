@@ -118,7 +118,7 @@ public enum GuideTrack: String, CaseIterable, Sendable {
     public var bank: BankID {
         switch self {
         case .revolut, .walletRevolut: .rev
-        case .tradeRepublic, .walletTradeRepublic: .t
+        case .tradeRepublic, .walletTradeRepublic: .tr
         case .walletImagin: .ima
         }
     }
@@ -313,7 +313,7 @@ private func applePayGuideSteps(for track: GuideTrack) -> [GuideStep] {
     }
 
     let bank = track.bankName
-    let trigger = N.transactionTrigge
+    let trigger = N.transactionTrigger
     let center = "en el centro de la pantalla"
     let list = "en la lista"
     let results = "en la lista de resultados"

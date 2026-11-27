@@ -93,7 +93,7 @@ import Testing
         #expect(detectQuickNoticeBank("Saveback: 0,10 €\nSpent today: €14.50") == nil)
     }
 
-    // MARK: Reparto en título y cuerpo e integración con Ledge
+    // MARK: Reparto en título y cuerpo e integración con Ledger
 
     @Test func reparteTituloYCuerpoEnFormatoMultilineaYUnaLinea() {
         let multi = "Revolut\nPophams Bakery\n🍽️ Paid €5.50 at Pophams Bakery\nSaldo disponible: 120,40 €"

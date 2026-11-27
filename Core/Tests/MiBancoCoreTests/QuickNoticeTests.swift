@@ -413,3 +413,74 @@ import Testing
         #expect(!String(decoding: data, as: UTF8.self).contains("noticePending"))
     }
 }
+
+// MARK: Avisos rápidos, ronda 2
+
+@Suite struct QuickNoticeRound2Tests {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 1_800_000_000)
+
+    private func notice(_ body: String) -> IngestInput {
+        .notification(bank: .rev, title: nil, subtitle: nil, body: body)
+    }
+
+    private let pending = "Pago pendiente de 12,50 € en Mercadona"
+    private let settled = "Has pagado 12,50 € en Mercadona"
+    private var wallet: IngestInput { .wallet(bank: .rev, amount: "12,50 €", merchant: "Mercadona") }
+
+    // N-1: el cargo no mueve la hora del pendiente: una lectura de saldo intermedia no se deshace.
+    @Test func cargoSinSaldoNoDeshaceUnaLecturaIntermedia() {
+        var ledger = Ledger()
+        ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        _ = ledger.ingest(notice(pending), now: t0)
+        #expect(ledger.balance(.rev)?.cents == 18_750)
+        // Entre medias llega una lectura de saldo que ya incluye el pago.
+        ledger.setBalance(.rev, cents: 18_750, now: t0 + 300)
+        #expect(ledger.ingest(notice(settled), now: t0 + 600) == .duplicate)
+        #expect(ledger.state.movements.count == 1)
+        #expect(ledger.state.movements[0].date == t0)
+        #expect(ledger.balance(.rev)?.cents == 18_750)
+        // La reentrega del cargo sigue reconociéndose.
+        #expect(ledger.ingest(notice(settled), now: t0 + 630) == .duplicate)
+        #expect(ledger.state.movements.count == 1)
+        #expect(ledger.balance(.rev)?.cents == 18_750)
+    }
+
+    @Test func movimientoSinCargoNoEscribeLosCamposNuevos() throws {
+        let m = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .notification, date: t0)
+        let text = String(decoding: try JSONEncoder().encode(m), as: UTF8.self)
+        #expect(!text.contains("settledFingerprint") && !text.contains("settledAt"))
+    }
+
+    // N-2: Cartera, pendiente y cargado son UN pago, lleguen en el orden que lleguen.
+    @Test func carteraPendienteYCargadoCuentanUnaVezEnTodosLosOrdenes() {
+        // (entrada, segundos desde t0)
+        let orders: [(String, [(IngestInput, TimeInterval)])] = [
+            ("W,P,S", [(wallet, 0), (notice(pending), 20), (notice(settled), 400)]),
+            ("P,W,S", [(notice(pending), 0), (wallet, 20), (notice(settled), 400)]),
+            ("P,S,W", [(notice(pending), 0), (notice(settled), 600), (wallet, 630)]),
+        ]
+        for (name, steps) in orders {
+            var ledger = Ledger()
+            ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+            for (input, at) in steps { _ = ledger.ingest(input, now: t0 + at) }
+            #expect(ledger.state.movements.count == 1, "\(name)")
+            #expect(ledger.balance(.rev)?.cents == 18_750, "\(name)")
+        }
+    }
+
+    // N-3: las palabras de ingreso valen enteras y nunca dentro del nombre del comercio.
+    // (Pruebas del lector en NotificationParserTests.)
+
+    // Anclaje del «paid» de Revolut: «You paid € at …» de otro banco no es de Revolut.
+    @Test func paidDeOtroBancoNoSeAtribuyeARevolut() {
+        #expect(detectQuickNoticeBank("You paid €5.00 at Zara\nAvailable balance: €100.00") == nil)
+        #expect(detectQuickNoticeBank("Zara\nYou paid €5.00 at Zara") == nil)
+        #expect(detectQuickNoticeBank("🍽️ Paid €5.50 at Pophams Bakery") == .rev)
+        #expect(detectQuickNoticeBank("Paid 5,50 € at Pophams Bakery") == .rev)
+        // Sin banco: se guarda sin leer, no se atribuye.
+        if case .unattributedNotice? = parseQuickNotice("You paid €5.00 at Zara\nAvailable balance: €100.00") {
+        } else {
+            Issue.record("Se esperaba un aviso sin banco")
+        }
+    }
+}

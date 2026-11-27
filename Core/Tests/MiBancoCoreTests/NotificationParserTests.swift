@@ -155,6 +155,18 @@ import Testing
         #expect(kind(parse(nil, body)) == .income, "\(body)")
     }
 
+    // Ronda 2 (N-3): las palabras de ingreso valen enteras y fuera del nombre del comercio.
+    @Test(arguments: [
+        "Compra de 12,00 € en Nominalia",
+        "Compra de 12,00 € en Nomina Shop",
+        "Paid €9.99 at SalaryFinance",
+        "Paid €9.99 at Payroll Cafe",
+        "Pago en Vinos Denominación 30,00 €",
+    ])
+    func palabrasDeIngresoDentroDelComercioSiguenSiendoPago(_ body: String) {
+        #expect(kind(parse(nil, body)) == .payment, "(body)")
+    }
+
     // Ronda 1: solo la palabra «pendiente»/«pending» marca el aviso como pendiente.
     @Test func soloLosPendientesLlevanLaMarca() {
         if case .movement(let m) = parse(nil, "Has pagado 12,50 € en Mercadona") { #expect(!m.isPending) } else { Issue.record("movimiento") }

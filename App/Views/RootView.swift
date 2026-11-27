@@ -309,6 +309,8 @@ struct RootView: View {
                 },
                 onCancel: { sheet = nil }
             )
+        case .savings:
+            SavingsEditorSheet(model: model, onClose: { sheet = nil })
         }
     }
 
@@ -931,6 +933,8 @@ enum RootSheet: Identifiable {
     case restore(RestorePreview)
     case confirmDisconnect(BankID)
     case confirmForget
+    /// Poner o corregir la cuenta remunerada de Revolut (Plan 12).
+    case savings
 
     var id: String {
         switch self {
@@ -942,6 +946,7 @@ enum RootSheet: Identifiable {
         case .restore(let preview): "restore-\(preview.id)"
         case .confirmDisconnect(let bank): "confirm-disconnect-\(bank.rawValue)"
         case .confirmForget: "confirm-forget"
+        case .savings: "savings"
         }
     }
 }

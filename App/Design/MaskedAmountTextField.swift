@@ -24,6 +24,8 @@ struct MaskedAmountTextField: View {
     let hidden: Bool
     /// El campo tiene el foco.
     let editing: Bool
+    /// Lo que enseña con el ojo cerrado y sin editar (el interés de la cuenta remunerada usa «•,•• %»).
+    var mask: String = maskedFieldMask
 
     @State private var edit = MaskedFieldEditing()
 
@@ -56,7 +58,7 @@ struct MaskedAmountTextField: View {
         #endif
         switch edit.shown(stored: text, hidden: hidden, editing: editing) {
         case .mask:
-            return Binding(get: { maskedFieldMask }, set: { _ in })
+            return Binding(get: { mask }, set: { _ in })
         case .text(let shown):
             if !hidden { return $text }
             if editing, edit.editsHidden {

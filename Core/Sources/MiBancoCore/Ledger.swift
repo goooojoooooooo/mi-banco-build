@@ -254,13 +254,16 @@ public struct LedgerState: Codable, Equatable, Sendable {
     public var statementCoverage: [BankID: [DateInterval]]
     /// Primer y último aviso visto por cada guía de Atajos (clave: `GuideTrack.rawValue`).
     public var guideSightings: [String: GuideSighting]
+    /// La cuenta remunerada de Revolut que puso el dueño (Plan 12); nil = no hay y no se escribe: los libros de antes se
+    /// leen y se vuelven a guardar igual.
+    public var savings: SavingsAccount?
 
     public init(balances: [BankID: ManualBalance] = [:], movements: [Movement] = [], unread: [UnreadNotice] = [],
                 alertSettings: AlertSettings = AlertSettings(), mutedMerchants: Set<String> = [],
                 categoryOverrides: [String: SpendingCategory] = [:], budgets: Budgets = Budgets(),
                 dismissedSubscriptions: Set<String> = [],
                 links: [BankID: BankLinkInfo] = [:], statementCoverage: [BankID: [DateInterval]] = [:],
-                guideSightings: [String: GuideSighting] = [:]) {
+                guideSightings: [String: GuideSighting] = [:], savings: SavingsAccount? = nil) {
         self.balances = balances
         self.movements = movements
         self.unread = unread
@@ -272,10 +275,11 @@ public struct LedgerState: Codable, Equatable, Sendable {
         self.links = links
         self.statementCoverage = statementCoverage
         self.guideSightings = guideSightings
+        self.savings = savings
     }
 
     private enum CodingKeys: String, CodingKey { case balances, movements, unread, alertSettings, mutedMerchants, categoryOverrides, budgets, dismissedSubscriptions
-        case links, statementCoverage, guideSightings
+        case links, statementCoverage, guideSightings, savings
     }
 
     /// Los libros guardados antes de los avisos no traen ajustes ni silenciados: valores por defecto.
@@ -293,6 +297,7 @@ public struct LedgerState: Codable, Equatable, Sendable {
         statementCoverage = try c.decodeIfPresent([BankID: [DateInterval]].self, forKey: .statementCoverage) ?? [:]
         // Tolerante: un registro ausente o estropeado no impide abrir el libro.
         guideSightings = (try? c.decodeIfPresent([String: GuideSighting].self, forKey: .guideSightings)) ?? [:]
+        savings = try c.decodeIfPresent(SavingsAccount.self, forKey: .savings)
     }
 }
 

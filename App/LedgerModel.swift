@@ -349,6 +349,11 @@ final class LedgerModel {
         try mutate { $0.setBalance(bank, cents: cents, now: Date()) }
     }
 
+    /// Pone o corrige la cuenta remunerada: el saldo de ahora pasa a ser la base (Plan 12).
+    func setSavings(cents: Int, annualRateBasisPoints: Int?) throws {
+        try mutate { $0.setSavings(balanceCents: cents, annualRateBasisPoints: annualRateBasisPoints, now: clock) }
+    }
+
     func deleteUnread(_ id: UUID) throws {
         try mutate { $0.removeUnread(id: id) }
     }

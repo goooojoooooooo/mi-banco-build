@@ -163,6 +163,10 @@ struct SettingsView: View {
                             BalanceRow(bank: bank, info: model.snapshot.balances[bank], link: model.state.links[bank],
                                        now: now, text: binding(bank), error: errors[bank], saved: savedFlash.contains(bank),
                                        focused: $focused, onSubmit: { commit(bank) })
+                            // La cuenta remunerada va debajo de Revolut: Enable Banking no la da y se sigue aparte.
+                            if bank == .rev {
+                                SavingsRow(savings: model.snapshot.savings, onOpen: { present(.savings) })
+                            }
                         }
                     Button {
                         showAccounts = true
@@ -628,6 +632,56 @@ private struct BalanceRow: View {
             }
             return "Estimado · corregido \(whenCorrected)"
         }
+    }
+}
+
+/// Fila de la cuenta remunerada de Revolut (Plan 12), sangrada bajo la de Revolut: su saldo estimado y el interés, o la
+/// entrada para ponerla. Abre la hoja única (`RootSheet.savings`). Con el ojo cerrado, ni el saldo ni el interés llevan cifras.
+private struct SavingsRow: View {
+    let savings: SavingsBalance?
+    let onOpen: () -> Void
+
+    @Environment(AppPreferences.self) private var preferences
+
+    var body: some View {
+        let hidden = preferences.privateMode
+        let status = savings.map { savingsStatusText(annualRateBasisPoints: $0.annualRateBasisPoints, hidden: hidden) }
+            ?? "Revolut no la comparte: pon su saldo una vez"
+        Button(action: onOpen) {
+            HStack(spacing: Theme.Space.row) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(savings == nil ? "Añadir cuenta remunerada" : "Cuenta remunerada")
+                        .titan(.option)
+                        .foregroundStyle(Theme.label)
+                    Text(status)
+                        .titan(.meta)
+                        .foregroundStyle(Theme.label3)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: Theme.Space.small)
+                if let savings {
+                    MaskedText(cents: savings.cents, hidden: hidden)
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.label)
+                        .accessibilityIdentifier("settings-savings-amount")
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.passive)
+                    .accessibilityHidden(true)
+            }
+            // Sangrada bajo el logo de Revolut (30 pt + 14 de separación).
+            .padding(.leading, 44)
+            .padding(.vertical, 4)
+            .frame(minHeight: 52)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("settings-savings")
+        .listRowBackground(Theme.grouped)
+        .listRowSeparatorTint(Theme.separator)
     }
 }
 

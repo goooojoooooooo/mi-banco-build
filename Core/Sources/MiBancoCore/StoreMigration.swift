@@ -98,6 +98,8 @@ private func reconcileExistingTarget(
             tag: storeMigrationSourceBackupTag
         )
         guard writeProtectedAndVerify(legacyData, to: backupURL, directory: targetDirectory, validate: validate) else {
+            // Solo se quita el intento fallido que acabamos de crear (la ruta no existía): el origen queda intacto.
+            try? fm.removeItem(at: backupURL)
             return false
         }
         try? fm.removeItem(at: legacy)

@@ -68,7 +68,7 @@ struct SettingsView: View {
             estimated: model.snapshot.balances[bank]?.estimated,
             canConnect: BankConnector.shared.canConnect(bank),
             now: now,
-            calendar: DateText.madridCalenda
+            calendar: DateText.madridCalendar
         ).primary
     }
 
@@ -564,7 +564,7 @@ private struct BalanceRow: View {
                 origin: info.origin,
                 setAt: info.setAt,
                 now: now,
-                calendar: DateText.madridCalenda
+                calendar: DateText.madridCalendar
             )
         }
         guard let info else { return "Sin saldo todavía" }

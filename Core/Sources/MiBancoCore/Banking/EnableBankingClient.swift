@@ -29,7 +29,7 @@ public struct TransactionFetch: Equatable, Sendable {
 /// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 300 s.
 public struct EnableBankingClient: Sendable {
     private let transport: any HTTPTransport
-    private let signer: any JWTSigne
+    private let signer: any JWTSigner
     private let appID: String
     private let now: @Sendable () -> Date
 
@@ -38,7 +38,7 @@ public struct EnableBankingClient: Sendable {
         now: @escaping @Sendable () -> Date
     ) {
         self.transport = transport
-        self.signer = signe
+        self.signer = signer
         self.appID = appID
         self.now = now
     }

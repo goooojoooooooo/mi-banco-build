@@ -102,7 +102,7 @@ actor BankSync {
 
     /// Al abrir la app: solo si ya se superó el bloqueo y está de verdad en primer plano EN ESTE MOMENTO
     /// (se lee el estado vivo, no el de cuando se pidió).
-    @MainActo
+    @MainActor
     static func refreshOnOpen(isUnlocked: Bool) {
         guard isUnlocked, UIApplication.shared.applicationState == .active else { return }
         Task { _ = await BankSync.shared.refresh(trigger: .appOpen, isUnlocked: true) }
@@ -168,7 +168,7 @@ actor BankSync {
         var results: [BankID: SyncOutcome] = [:]
         let loaded = (try? store.load()) ?? LedgerState()
         var links = loaded.links
-        let calendar = bankingCalenda
+        let calendar = bankingCalendar
 
         // En segundo plano NUNCA se construyen ni se envían cabeceras PSU; con usuario presente, solo en primer plano
         // y con el bloqueo superado.
@@ -317,7 +317,7 @@ actor BankSync {
         psuHeaders activePSU: [String: String]?,
         availablePSU: [String: String],
         store: FileStore,
-        calendar: Calenda
+        calendar: Calendar
     ) async -> SyncOutcome? {
         // 0. Sesión y cliente ANTES de anotar nada: un fallo local (Llavero sin desbloquear tras reiniciar, credenciales
         // ilegibles) no gasta uno de los intentos del día, no pone espera ni aparece como fallo del banco.
@@ -387,7 +387,7 @@ actor BankSync {
         strategy: TransactionStrategy,
         psuHeaders: [String: String]?,
         store: FileStore,
-        calendar: Calenda
+        calendar: Calendar
     ) async throws -> SyncOutcome {
         let from = bankDateParameter(dateFrom, calendar: calendar)
         // 2 y 3. Saldos y movimientos de cada cuenta. Todo se reúne antes de tocar el libro.
@@ -431,7 +431,7 @@ actor BankSync {
         linkBeforeAttempt: BankLinkInfo,
         availablePSU: [String: String],
         store: FileStore,
-        calendar: Calenda
+        calendar: Calendar
     ) async -> SyncOutcome? {
         var freshCache: [String: [EBASPSP]] = [:]
         let refreshed = await fetchAndStoreRequiredPSUHeaders(

@@ -475,7 +475,7 @@ enum BankingSelfTest {
         func set(_ error: Error) {
             lock.lock()
             defer { lock.unlock() }
-            stored = erro
+            stored = error
         }
 
         var value: Error? {

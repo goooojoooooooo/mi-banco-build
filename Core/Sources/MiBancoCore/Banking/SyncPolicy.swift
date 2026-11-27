@@ -166,7 +166,7 @@ public func syncProblem(for error: Error) -> SyncProblem {
 /// ¿Es un fallo del banco o de la red (se anota, gasta un intento y puede poner espera)? Un fallo local (Llavero sin
 /// desbloquear tras reiniciar, credenciales ilegibles, disco) o una cancelación no lo es: no se anota nada.
 public func isBankFailure(_ error: Error) -> Bool {
-    error is BankingClientError || error is URLErro
+    error is BankingClientError || error is URLError
 }
 
 /// Por qué no se pudo leer la sesión guardada del Llavero.

@@ -17,6 +17,11 @@ func nyxMonthKey(_ date: Date, _ calendar: Calendar) -> String {
     return "\(y)-\(m < 10 ? "0\(m)" : "\(m)")"
 }
 
+/// Ventana de días de «presupuesto fuera de ritmo» (diseño §6.3): del día 8 al antepenúltimo del mes (`daysInMonth - 2`).
+func nyxIsBudgetOffPaceDay(_ dayOfMonth: Int, daysInMonth: Int) -> Bool {
+    dayOfMonth >= 8 && dayOfMonth <= daysInMonth - 2
+}
+
 private func nyxMedian(_ values: [Int]) -> Int {
     let s = values.sorted()
     return s.count % 2 == 1 ? s[s.count / 2] : (s[s.count / 2 - 1] + s[s.count / 2]) / 2
@@ -70,9 +75,19 @@ private func computeNyxBaselines(in state: LedgerState, now: Date, calendar: Cal
     let fullMonths: Int
     if let first = state.movements.map(\.date).min(),
        let firstMonth = calendar.dateInterval(of: .month, for: first)?.start,
-       let monthStart = calendar.dateInterval(of: .month, for: now)?.start,
-       firstMonth < monthStart {
-        fullMonths = max(0, calendar.dateComponents([.month], from: firstMonth, to: monthStart).month ?? 0)
+       let monthStart = calendar.dateInterval(of: .month, for: now)?.start {
+        // Solo cuenta el mes inicial como completo si el primer movimiento cayó el día 1; si no, empieza en el siguiente.
+        let firstFullMonth: Date
+        if calendar.component(.day, from: first) == 1 {
+            firstFullMonth = firstMonth
+        } else {
+            firstFullMonth = calendar.date(byAdding: .month, value: 1, to: firstMonth) ?? monthStart
+        }
+        if firstFullMonth < monthStart {
+            fullMonths = max(0, calendar.dateComponents([.month], from: firstFullMonth, to: monthStart).month ?? 0)
+        } else {
+            fullMonths = 0
+        }
     } else {
         fullMonths = 0
     }
@@ -257,7 +272,7 @@ public func nyxMoneyObservations(state: LedgerState, book: AccountBook, newMovem
                                       observedAt: now, facts: facts, viaInstantAlert: false))
         case .ok:
             // Del día 8 al antepenúltimo del mes (diseño §6.3), por debajo del 80 %, gastado ≥ 20 € y proyección ≥ 110 %.
-            if dayOfMonth >= 8, dayOfMonth <= daysInMonth - 2, status.spentCents >= 2_000,
+            if nyxIsBudgetOffPaceDay(dayOfMonth, daysInMonth: daysInMonth), status.spentCents >= 2_000,
                status.spentCents * daysInMonth * 100 >= status.limitCents * 110 * dayOfMonth {
                 raw.append(NyxObservation(situation: .budgetOffPace, subject: subject, priority: .normal,
                                           observedAt: now, facts: facts, viaInstantAlert: false))

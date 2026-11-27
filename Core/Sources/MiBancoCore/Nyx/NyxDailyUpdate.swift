@@ -44,11 +44,45 @@ extension NyxSituation {
 
 private let nyxFocusWindowSeconds: TimeInterval = 7 * 86_400
 
+private func nyxIsExpiredFocusCandidate(_ obs: NyxObservation, startOfToday: Date, calendar: Calendar) -> Bool {
+    switch obs.situation {
+    case .shortfall, .bankExpiring, .appExpiring:
+        guard let day = obs.facts.day else { return false }
+        return calendar.startOfDay(for: day) < startOfToday
+    default:
+        return false
+    }
+}
+
+/// Clave de estado para que, si una observación de estado está en `current` y en memoria, gane siempre la actual.
+private func nyxFocusStateKey(_ obs: NyxObservation) -> String? {
+    switch obs.situation {
+    case .lowBalance:
+        return obs.facts.bank.map { "lowBalance|\($0.rawValue)" }
+    case .bankExpired, .bankExpiring, .bankStale:
+        return obs.facts.bank.map { "bankHealth|\($0.rawValue)" }
+    case .alertsSilent, .alertsNeverArrived:
+        return obs.facts.track.map { "guideHealth|\($0)" }
+    case .notificationsOff:
+        return "notificationsOff"
+    case .appExpiring:
+        return "appExpiring"
+    case .budgetNear, .budgetOffPace, .budgetExceeded:
+        return obs.facts.budgetScope.map { "budget|\($0)" }
+    case .categoryAboveNormal:
+        return obs.facts.category.map { "category|\($0.rawValue)" }
+    default:
+        return nil
+    }
+}
+
 /// Hasta tres candidatas para «Para tener en cuenta» (diseño §6.6): las observaciones de esta apertura más las entradas
-/// `nueva`/`vista` de los últimos 7 días, quitando las descartadas/hechas y lo que ya sale en «Ojo con esto».
+/// `nueva`/`vista` de los últimos 7 días, quitando las descartadas/hechas, las de fecha futura ya pasada y lo que ya sale
+/// en «Ojo con esto». Para observaciones de estado presentes en `current` y en memoria, gana siempre la actual.
 public func nyxFocusCandidates(current: [NyxObservation], memory: NyxMemory, briefing: Briefing,
-                               input: BriefingInput, now: Date) -> [NyxObservation] {
+                               input: BriefingInput, now: Date, calendar: Calendar = .current) -> [NyxObservation] {
     let cutoff = now.addingTimeInterval(-nyxFocusWindowSeconds)
+    let startOfToday = calendar.startOfDay(for: now)
     let resolvedIDs = Set(memory.entries.filter { $0.status == .dismissed || $0.status == .done }.map(\.id))
 
     var attentionBanks = Set(bankProblemBanks(input))
@@ -58,21 +92,33 @@ public func nyxFocusCandidates(current: [NyxObservation], memory: NyxMemory, bri
 
     var pool: [NyxObservation] = []
     var seen = Set<String>()
+    var seenStateKeys = Set<String>()
 
-    func consider(_ obs: NyxObservation) {
-        guard !resolvedIDs.contains(obs.id), seen.insert(obs.id).inserted else { return }
-        if obs.situation == .budgetExceeded { return }
+    func consider(_ obs: NyxObservation, fromCurrent: Bool) {
+        guard !resolvedIDs.contains(obs.id) else { return }
+        if nyxIsExpiredFocusCandidate(obs, startOfToday: startOfToday, calendar: calendar) { return }
+        if obs.situation == .budgetExceeded {
+            if fromCurrent, let key = nyxFocusStateKey(obs) { seenStateKeys.insert(key) }
+            return
+        }
         if (obs.situation == .bankExpired || obs.situation == .bankExpiring || obs.situation == .bankStale),
            let bank = obs.facts.bank, attentionBanks.contains(bank) {
             return
         }
+        guard seen.insert(obs.id).inserted else { return }
+        if let stateKey = nyxFocusStateKey(obs), !seenStateKeys.insert(stateKey).inserted { return }
         pool.append(obs)
     }
 
-    for obs in current { consider(obs) }
+    let sortedCurrent = current.sorted { a, b in
+        if a.priority != b.priority { return a.priority < b.priority }
+        if a.observedAt != b.observedAt { return a.observedAt > b.observedAt }
+        return a.id < b.id
+    }
+    for obs in sortedCurrent { consider(obs, fromCurrent: true) }
     for entry in memory.entries where entry.status == .new || entry.status == .seen {
         guard entry.observation.observedAt >= cutoff, entry.observation.observedAt <= now else { continue }
-        consider(entry.observation)
+        consider(entry.observation, fromCurrent: false)
     }
 
     let sorted = pool.sorted { a, b in

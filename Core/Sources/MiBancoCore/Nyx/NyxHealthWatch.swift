@@ -40,6 +40,7 @@ public func nyxHealthObservations(state: LedgerState, health: NyxAppHealth, memo
 
         let expiryDay = calendar.startOfDay(for: link.consentValidUntil)
         let days = calendar.dateComponents([.day], from: startOfToday, to: expiryDay).day ?? 99
+        // Incluye `days == 0` mientras `now < link.consentValidUntil` (coherente con `bankExpired`, `BriefingInput` y «hoy» en el catálogo).
         if days >= 0, days <= 10 {
             let late = days <= 3
             out.append(NyxObservation(

@@ -57,8 +57,8 @@ public struct NyxDecision: Equatable, Sendable {
 /// Decide qué observaciones se guardan y cómo se entregan, aplicando en orden las reglas de diseño §6.5.
 /// Las observaciones descartadas (ya conocidas o de comercio silenciado) no aparecen en el resultado.
 public func nyxDecide(_ observations: [NyxObservation], memory: NyxMemory, talk: NyxTalkLevel, moment: NyxMoment,
-                      appActive: Bool, mutedMerchants: Set<String>, alertSettings: AlertSettings,
-                      now: Date, calendar: Calendar) -> [NyxDecision] {
+                      appActive: Bool, notificationsAllowed: Bool = true, mutedMerchants: Set<String>,
+                      alertSettings: AlertSettings, now: Date, calendar: Calendar) -> [NyxDecision] {
     let sorted = observations.sorted { a, b in
         if a.priority != b.priority { return a.priority < b.priority }
         if a.observedAt != b.observedAt { return a.observedAt < b.observedAt }
@@ -72,6 +72,7 @@ public func nyxDecide(_ observations: [NyxObservation], memory: NyxMemory, talk:
         return count + 1
     }
     var lastBySituation = memory.lastInterruption.filter { $0.value <= now }
+    var bannerGiven = false
     var decisions: [NyxDecision] = []
 
     for obs in sorted {
@@ -126,12 +127,17 @@ public func nyxDecide(_ observations: [NyxObservation], memory: NyxMemory, talk:
             continue
         }
 
-        // 9. Forma de entrega.
+        // 9. Forma de entrega: con la app abierta, como mucho un `.banner` por tanda; sin permiso del sistema, a la lista.
         let delivery: NyxDelivery
-        if obs.situation == .notificationsOff {
-            delivery = appActive ? .banner : .list
-        } else if appActive {
-            delivery = .banner
+        if appActive {
+            if !bannerGiven {
+                delivery = .banner
+                bannerGiven = true
+            } else {
+                delivery = .list
+            }
+        } else if obs.situation == .notificationsOff || !notificationsAllowed {
+            delivery = .list
         } else if nyxIsQuietHour(now, calendar: calendar) {
             delivery = .silentNotification
         } else {

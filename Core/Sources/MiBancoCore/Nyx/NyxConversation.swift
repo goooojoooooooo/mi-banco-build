@@ -42,6 +42,18 @@ private let nyxNewQuestionCues: Set<String> = [
     "saldo", "saldos", "presupuesto", "presupuestos", "ingresos", "traspasos", "inversiones", "cartera", "resumen",
 ]
 
+/// Palabras de consulta financiera normal: evitan desviar preguntas de saldos, gasto o presupuesto a preguntas propias de Nyx.
+private let nyxFinancialQuestionCues: Set<String> = [
+    "cuanto", "cuanta", "cuantos", "cuantas",
+    "saldo", "saldos", "dinero",
+    "gaste", "gastado", "gasto", "gastos", "gastar",
+    "pague", "pagado", "pago", "pagos", "llevo",
+    "cobre", "cobrado", "ingreso", "ingresos", "nomina", "sueldo",
+    "presupuesto", "presupuestos", "suscripcion", "suscripciones",
+    "traspaso", "traspasos", "inversion", "inversiones", "cartera",
+    "cobros", "recibos", "sobra", "libre",
+]
+
 private func nyxFoldedTokens(_ text: String) -> (rawFolded: String, tokens: [String], joined: String) {
     let rawFolded = foldedQuery(text)
     let tokens = rawFolded.components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
@@ -50,13 +62,18 @@ private func nyxFoldedTokens(_ text: String) -> (rawFolded: String, tokens: [Str
 }
 
 private func nyxOwnQuestion(tokens: [String], joined: String) -> NyxQuestion? {
+    guard !tokens.contains(where: { nyxFinancialQuestionCues.contains($0) }) else { return nil }
     if joined.contains(" has visto ") || joined.contains(" me he perdido ") || tokens.contains("novedades") {
         return .seen
     }
+    let connectedAsModifier = joined.contains(" en la cuenta conectad")
+        || joined.contains(" en el banco conectad")
+        || joined.contains(" de la cuenta conectad")
+        || joined.contains(" del banco conectad")
     if tokens.contains(where: { $0.hasPrefix("funciona") })
         || joined.contains(" va todo bien con la app ")
         || joined.contains(" todo bien con la app ")
-        || tokens.contains(where: { $0.hasPrefix("conectad") })
+        || (!connectedAsModifier && tokens.contains(where: { $0.hasPrefix("conectad") }))
         || joined.contains(" llegan los avisos ")
         || joined.contains(" llegan avisos ") {
         return .appStatus
@@ -216,18 +233,27 @@ private func nyxShouldRemember(_ intent: AssistantIntent) -> Bool {
     }
 }
 
-private func nyxSeenSinceLabel(_ since: Date?, now: Date, calendar: Calendar) -> String {
-    guard let since else { return "la última vez" }
+private let nyxConversationWeekdays = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"]
+
+private func nyxSeenSinceLabel(_ since: Date, hidden: Bool, now: Date, calendar: Calendar) -> String {
     let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: since),
                                        to: calendar.startOfDay(for: now)).day ?? 0
     switch days {
     case ...0: return "hoy"
     case 1: return "ayer"
-    default: return "el " + shortSpanishDate(since, calendar: calendar, withYear: false)
+    default:
+        guard hidden else {
+            return "el " + shortSpanishDate(since, calendar: calendar, withYear: false)
+        }
+        if days <= 6 {
+            let weekday = nyxConversationWeekdays[((calendar.component(.weekday, from: since) - 1) % 7 + 7) % 7]
+            return "el \(weekday)"
+        }
+        return "la semana pasada"
     }
 }
 
-private func nyxSeenAnswer(memory: NyxMemory, now: Date, calendar: Calendar) -> AssistantAnswer {
+private func nyxSeenAnswer(memory: NyxMemory, privateMode: Bool, now: Date, calendar: Calendar) -> AssistantAnswer {
     let cutoff = now.addingTimeInterval(-7 * 86_400)
     let recent = memory.entries.filter { $0.observation.observedAt >= cutoff && $0.observation.observedAt <= now }
     guard !recent.isEmpty else {
@@ -235,16 +261,18 @@ private func nyxSeenAnswer(memory: NyxMemory, now: Date, calendar: Calendar) -> 
                                lines: [BriefingLine(id: "seen-empty",
                                                     parts: [.text("No he visto nada nuevo desde la última vez.")])])
     }
-    let sinceLabel = nyxSeenSinceLabel(memory.lastLookAt, now: now, calendar: calendar)
+    let oldest = recent.map(\.observation.observedAt).min() ?? cutoff
+    let sinceLabel = nyxSeenSinceLabel(oldest, hidden: privateMode, now: now, calendar: calendar)
     var lines = [BriefingLine(id: "seen-header", parts: [.text("Esto es lo que he visto desde \(sinceLabel):")])]
     for entry in recent {
         let message = nyxMessage(for: entry.observation, now: now, calendar: calendar)
-        lines.append(BriefingLine(id: "seen-\(entry.id)", parts: message.open))
+        let parts: [BriefingPart] = privateMode ? [.text(nyxDisplayText(message, hidden: true))] : message.open
+        lines.append(BriefingLine(id: "seen-\(entry.id)", parts: parts))
     }
     return AssistantAnswer(intent: .unknown, lines: lines)
 }
 
-private func nyxAppStatusAnswer(health: [NyxObservation], now: Date, calendar: Calendar) -> AssistantAnswer {
+private func nyxAppStatusAnswer(health: [NyxObservation], privateMode: Bool, now: Date, calendar: Calendar) -> AssistantAnswer {
     guard !health.isEmpty else {
         return AssistantAnswer(intent: .unknown,
                                lines: [BriefingLine(id: "health-ok",
@@ -252,7 +280,8 @@ private func nyxAppStatusAnswer(health: [NyxObservation], now: Date, calendar: C
     }
     let lines = health.map { obs in
         let message = nyxMessage(for: obs, now: now, calendar: calendar)
-        return BriefingLine(id: "health-\(obs.id)", parts: message.open)
+        let parts: [BriefingPart] = privateMode ? [.text(nyxDisplayText(message, hidden: true))] : message.open
+        return BriefingLine(id: "health-\(obs.id)", parts: parts)
     }
     return AssistantAnswer(intent: .unknown, lines: lines)
 }
@@ -261,7 +290,7 @@ private func nyxAppStatusAnswer(health: [NyxObservation], now: Date, calendar: C
 /// La barrera contra consejos de inversión corre siempre primero, también en preguntas seguidas.
 public func nyxAnswer(_ question: String, conversation: inout NyxConversation, modelIntent: AssistantIntent?,
                       memory: NyxMemory, health: [NyxObservation], state: LedgerState, portfolio: Portfolio?,
-                      book: AccountBook, now: Date, calendar: Calendar) -> NyxReply {
+                      book: AccountBook, privateMode: Bool = false, now: Date, calendar: Calendar) -> NyxReply {
     let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
     let knownMerchants = ledgerMerchantKeys(in: state)
     let modelAsksAdvice: Bool = if case .adviceRequest? = modelIntent { true } else { false }
@@ -281,9 +310,11 @@ public func nyxAnswer(_ question: String, conversation: inout NyxConversation, m
     if let own = nyxOwnQuestion(tokens: parsed.tokens, joined: parsed.joined) {
         switch own {
         case .seen:
-            return NyxReply(question: .seen, answer: nyxSeenAnswer(memory: memory, now: now, calendar: calendar))
+            return NyxReply(question: .seen,
+                            answer: nyxSeenAnswer(memory: memory, privateMode: privateMode, now: now, calendar: calendar))
         case .appStatus:
-            return NyxReply(question: .appStatus, answer: nyxAppStatusAnswer(health: health, now: now, calendar: calendar))
+            return NyxReply(question: .appStatus,
+                            answer: nyxAppStatusAnswer(health: health, privateMode: privateMode, now: now, calendar: calendar))
         case .assistant:
             break
         }

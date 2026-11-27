@@ -92,7 +92,7 @@ public enum NyxSituation: String, Codable, CaseIterable, Sendable {
         }
     }
 
-    /// Situaciones centradas en un comercio: respetan comercios silenciados y alimentan `merchantDismissals`.
+    /// Situaciones centradas en un comercio: respetan comercios silenciados (y, salvo `suggestMute`, alimentan `merchantDismissals`).
     public var isMerchantCentric: Bool {
         switch self {
         case .unusualPayment, .largePayment, .duplicateCharge, .subscriptionUp, .subscriptionDown, .suggestMute:
@@ -364,15 +364,28 @@ public struct NyxMemory: Codable, Equatable, Sendable {
 
     public mutating func mark(_ id: String, _ status: NyxEntryStatus, now: Date) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        entries[index].status = status
-        entries[index].statusAt = now
+        let previousStatus = entries[index].status
+        let previousStatusAt = entries[index].statusAt
+        guard previousStatus != status else { return }
+
         let obs = entries[index].observation
         let situationKey = obs.situation.rawValue
         var merchantKey: String?
-        if obs.situation.isMerchantCentric, let merchant = obs.facts.merchant {
+        if obs.situation.isMerchantCentric, obs.situation != .suggestMute, let merchant = obs.facts.merchant {
             let key = normalizeMerchant(merchant)
             if !key.isEmpty { merchantKey = key }
         }
+
+        // Al revertir un descarte (p. ej. «Deshacer» → `.seen` o `.new`), retira esa fecha para no apilar descartes.
+        if previousStatus == .dismissed, status == .seen || status == .new {
+            Self.removeLastDate(previousStatusAt, from: &dismissals, key: situationKey)
+            if let merchantKey {
+                Self.removeLastDate(previousStatusAt, from: &merchantDismissals, key: merchantKey)
+            }
+        }
+
+        entries[index].status = status
+        entries[index].statusAt = now
         switch status {
         case .dismissed:
             dismissals[situationKey, default: []].append(now)
@@ -382,6 +395,16 @@ public struct NyxMemory: Codable, Equatable, Sendable {
             if let merchantKey { merchantActions[merchantKey, default: []].append(now) }
         case .new, .seen:
             break
+        }
+    }
+
+    private static func removeLastDate(_ date: Date, from map: inout [String: [Date]], key: String) {
+        guard var list = map[key], let idx = list.lastIndex(of: date) else { return }
+        list.remove(at: idx)
+        if list.isEmpty {
+            map.removeValue(forKey: key)
+        } else {
+            map[key] = list
         }
     }
 
@@ -397,7 +420,10 @@ public struct NyxMemory: Codable, Equatable, Sendable {
         let historyCutoff = now.addingTimeInterval(-Double(Self.historyRetentionDays) * 86_400)
         let interruptionCutoff = now.addingTimeInterval(-Self.interruptionRetentionSeconds)
 
-        entries = Array(entries.filter { $0.observation.observedAt >= entryCutoff }.prefix(Self.maxEntries))
+        entries = Array(
+            entries.filter { $0.observation.observedAt >= entryCutoff && $0.observation.observedAt <= now }
+                .prefix(Self.maxEntries)
+        )
 
         func pruneHistory(_ map: [String: [Date]]) -> [String: [Date]] {
             var out: [String: [Date]] = [:]

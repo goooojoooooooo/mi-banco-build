@@ -67,10 +67,6 @@ actor BankSync {
 
     private var running = false
     private var queuedAfterConnect: [BankID: Bool] = [:]
-    /// Sesiones en las que Enable Banking devolvió 422 PSU aunque `GET /aspsps` no exigía nada nuevo:
-    /// se evita repetir cabeceras PSU en bucle hasta cambiar de sesión.
-    private var psuRejectedSessions: Set<String> = []
-
     nonisolated static var isEnabled: Bool {
         #if DEBUG
         if DemoMode.isActive { return false }
@@ -242,7 +238,7 @@ actor BankSync {
         guard let session = (try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank))) ?? nil else {
             return nil
         }
-        guard !psuRejectedSessions.contains(session.sessionID) else { return nil }
+        guard !session.isPSURejected(now: Date()) else { return nil }
         let required: [String]?
         if let stored = session.requiredPSUHeaders {
             required = stored
@@ -302,6 +298,16 @@ actor BankSync {
         try? KeychainVault.setCodable(current, for: item)
     }
 
+    /// Anota en la sesión del Llavero (mismo elemento, campo opcional) que el banco rechazó las cabeceras PSU con 422;
+    /// la marca sobrevive a un arranque en frío y caduca sola (`SyncPolicy.psuRejectionTTL`).
+    private func persistPSURejection(for bank: BankID, expectedSessionID: String, at: Date) {
+        let item = KeychainVault.session(for: bank)
+        guard var current = (try? KeychainVault.codable(StoredSession.self, for: item)) ?? nil,
+              current.sessionID == expectedSessionID else { return }
+        current.psuRejectedAt = at
+        try? KeychainVault.setCodable(current, for: item)
+    }
+
     /// `nil` = cancelada: ni éxito ni fallo, no se anota nada más y el banco no aparece en el resultado.
     private func sync(
         _ bank: BankID,
@@ -334,7 +340,7 @@ actor BankSync {
 
         // Revalidamos las cabeceras PSU contra la sesión viva (por si hubo una reconexión entre medias).
         let effectivePSU: [String: String]?
-        if let activePSU, !psuRejectedSessions.contains(session.sessionID), let required = session.requiredPSUHeaders {
+        if let activePSU, !session.isPSURejected(now: Date()), let required = session.requiredPSUHeaders {
             effectivePSU = psuHeaders(for: trigger, required: required, available: activePSU)
         } else {
             effectivePSU = nil
@@ -343,12 +349,29 @@ actor BankSync {
         // 1. El intento queda anotado antes de llamar (solo cuenta para el cupo diario de 4/24 h si va sin cabeceras PSU).
         let attemptAt = Date()
         let linkBeforeAttempt: BankLinkInfo?
+        var dateFrom = dateFrom
+        var strategy = strategy
         do {
-            linkBeforeAttempt = try store.update { ledger -> BankLinkInfo? in
+            let prepared = try store.update { ledger -> (link: BankLinkInfo, skip: SkipReason?, plan: (Date, TransactionStrategy)?)? in
                 guard let link = ledger.state.links[bank] else { return nil }
+                // Si la petición va a salir sin cabeceras PSU aunque se planificó con ellas, se decide otra vez como
+                // consulta de segundo plano (cupo de 4/24 h y 3 h) y se carga a ese cupo.
+                let redo = SyncPolicy.redecideIfPSUDropped(
+                    link, trigger: trigger, now: attemptAt, calendar: calendar,
+                    oldestPending: Ledger(state: ledger.state).oldestPendingBankRow(bank, now: attemptAt, calendar: calendar),
+                    plannedWithPSU: activePSU != nil, actualWithPSU: effectivePSU != nil)
+                var plan: (Date, TransactionStrategy)?
+                switch redo {
+                case .skip(let reason)?: return (link, reason, nil)
+                case .fetch(let from, let how)?: plan = (from, how)
+                case nil: break
+                }
                 ledger.setLink(bank, link.recordingAttempt(at: attemptAt, countsTowardDailyBudget: effectivePSU == nil))
-                return link
+                return (link, nil, plan)
             }
+            if let skip = prepared?.skip { return .skipped(skip) }
+            if let plan = prepared?.plan { (dateFrom, strategy) = plan }
+            linkBeforeAttempt = prepared?.link
         } catch {
             // Un fallo de disco no es del banco: sin resultado.
             return nil
@@ -432,12 +455,12 @@ actor BankSync {
             for: bank, session: session, aspspCache: &freshCache, forceNetwork: true)
         if let refreshed {
             if psuHeaders(for: trigger, required: refreshed, available: availablePSU) != nil {
-                psuRejectedSessions.insert(session.sessionID)
+                persistPSURejection(for: bank, expectedSessionID: session.sessionID, at: Date())
             }
         } else {
             persistRequiredPSUHeaders(nil, for: bank, expectedSessionID: session.sessionID)
             await BankSyncStatus.shared.updateRequiredPSUHeaders(bank, nil)
-            psuRejectedSessions.insert(session.sessionID)
+            persistPSURejection(for: bank, expectedSessionID: session.sessionID, at: Date())
         }
 
         let liveSession = (try? KeychainVault.codable(StoredSession.self, for: KeychainVault.session(for: bank))) ?? nil

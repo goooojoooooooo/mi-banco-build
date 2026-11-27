@@ -21,6 +21,8 @@ public enum SyncPolicy {
     public static let userPresentSpacing: TimeInterval = 120
     /// Espera tras «demasiadas peticiones».
     public static let backoff: TimeInterval = 21_600
+    /// Cuánto dura la marca «este banco rechazó nuestras cabeceras PSU con 422»: pasado este tiempo se vuelve a probar.
+    public static let psuRejectionTTL: TimeInterval = 7 * 24 * 3600
     public static let overlapDays = 7
     public static let firstHistoryDays = 365
     /// Un pendiente de hace más días que esto está atascado: la ventana no llega hasta él y, si una consulta completa ya
@@ -70,6 +72,18 @@ public enum SyncPolicy {
             if reach < from { from = reach }
         }
         return .fetch(dateFrom: from, strategy: link.historyLoaded ? .standard : .longest)
+    }
+
+    /// La decisión se tomó contando con cabeceras PSU, pero la petición real saldría sin ellas (la sesión viva ya no las
+    /// admite): se decide otra vez como consulta sin usuario presente, con el cupo de 4/24 h y las 3 h. `nil` = plan y
+    /// petición coinciden y la decisión anterior sigue valiendo.
+    public static func redecideIfPSUDropped(
+        _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar, oldestPending: Date? = nil,
+        plannedWithPSU: Bool, actualWithPSU: Bool
+    ) -> SyncDecision? {
+        guard plannedWithPSU, !actualWithPSU else { return nil }
+        return decide(link, trigger: trigger, now: now, calendar: calendar, oldestPending: oldestPending,
+                      hasPSUHeaders: false)
     }
 
     private static func dayStart(daysBefore days: Int, of date: Date, _ calendar: Calendar) -> Date {

@@ -71,6 +71,11 @@ public enum LockAuthPolicy {
         }
     }
 
+    /// El panel de confirmación de «desactivar el bloqueo» solo sobrevive mientras la pantalla siga en «sin código».
+    public static func keepsDisableConfirmation(for decision: LockAvailabilityDecision) -> Bool {
+        screenMode(for: decision) == .noPasscode
+    }
+
     /// Nunca se permite desbloquear en silencio.
     public static func allowsSilentUnlock(canEvaluateDeviceAuth: Bool) -> Bool {
         false
@@ -81,7 +86,7 @@ public enum LockAuthPolicy {
 public let lockAuthErrorDomain = "com.apple.LocalAuthentication"
 
 /// Valor numérico de `LAError.passcodeNotSet` (-5). Se fija aquí para clasificar sin importar `LocalAuthentication`;
-/// la app lo compara con el sistema real en `LockView.systemDeviceAuth`.
+/// la autoprueba DEBUG (`-MiBancoSelfTest`, paso 0) lo compara con el valor real del sistema y falla si difiere.
 public let lockPasscodeNotSetErrorCode = -5
 
 /// Clasifica el fallo de `canEvaluatePolicy` (SEC-08): solo el dominio de `LocalAuthentication` con `passcodeNotSet`

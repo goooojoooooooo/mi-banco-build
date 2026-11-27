@@ -235,7 +235,7 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         #expect(classify(pay("Operador Desconocido", isShop: true, mcc: "4899")) == .casa)
         // La categoría del dueño y la recordada siguen ganando a una suscripción.
         #expect(classify(pay("NETFLIX.COM", isShop: true, mcc: "4899", category: .ocio)) == .ocio)
-        #expect(classify(pay("NETFLIX.COM", isShop: true, mcc: "4899"), overrides: ["netflix.com": .ocio]) == .ocio)
+        #expect(classify(pay("NETFLIX.COM", isShop: true, mcc: "4899"), overrides: [normalizeMerchant("NETFLIX.COM"): .ocio]) == .ocio)
         #expect(classify(pay("Plataforma Rara", isShop: true, mcc: "4899", category: .ocio), subscriptions: ["plataforma rara"]) == .ocio)
     }
 

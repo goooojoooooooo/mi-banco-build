@@ -164,7 +164,7 @@ import Testing
         "Pago en Vinos Denominación 30,00 €",
     ])
     func palabrasDeIngresoDentroDelComercioSiguenSiendoPago(_ body: String) {
-        #expect(kind(parse(nil, body)) == .payment, "(body)")
+        #expect(kind(parse(nil, body)) == .payment, "\(body)")
     }
 
     // Ronda 1: solo la palabra «pendiente»/«pending» marca el aviso como pendiente.

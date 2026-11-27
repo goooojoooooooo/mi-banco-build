@@ -126,8 +126,8 @@ func conceptKeywordCategory(for merchant: String) -> SpendingCategory? {
     }?.category
 }
 
-/// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, el MCC (ISO 18245),
-/// el directorio (sobre el nombre limpio), las suscripciones y, después:
+/// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, las suscripciones
+/// reconocidas (directorio o cobro recurrente), el MCC (ISO 18245), el resto del directorio (sobre el nombre limpio) y, después:
 /// - en un pago a una persona (solo con prueba, ver `isPersonPayment`): la palabra de concepto o factura si la hay
 ///   («TRANSFERENCIA ALQUILER» -> casa) y si no, Personas. Las palabras de un local no cuentan: «Bizum a Juan Horno»
 ///   es un amigo, no una panadería;
@@ -141,12 +141,18 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
     let merchant = movement.merchant ?? ""
     let key = normalizeMerchant(merchant)
     if !key.isEmpty, let remembered = overrides[key] { return remembered }
-    if let fromMCC = mccCategory(movement.merchantCategoryCode) { return fromMCC }
+    // Una suscripción reconocida (cobro recurrente o entrada de suscripción del directorio) gana al MCC:
+    // Netflix con 4899 o Microsoft con 5734 siguen siendo suscripciones.
+    var directoryHit: SpendingCategory?
     if !key.isEmpty {
-        if let domain = merchantDomain(for: merchant, isShop: movement.isShop),
-           let fromDirectory = directoryCategory(forDomain: domain) { return fromDirectory }
         if subscriptionKeys.contains(key) { return .suscripciones }
+        if let domain = merchantDomain(for: merchant, isShop: movement.isShop) {
+            directoryHit = directoryCategory(forDomain: domain)
+            if directoryHit == .suscripciones { return .suscripciones }
+        }
     }
+    if let fromMCC = mccCategory(movement.merchantCategoryCode) { return fromMCC }
+    if let directoryHit { return directoryHit }
     if isPersonPayment(movement) {
         if !key.isEmpty, let concept = conceptKeywordCategory(for: merchant) { return concept }
         return .personas

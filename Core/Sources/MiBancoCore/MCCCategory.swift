@@ -52,7 +52,7 @@ public func mccCategory(_ raw: String?) -> SpendingCategory? {
 
     // Compras: hogar/bricolaje/ferretería/muebles/electrodomésticos, ropa/calzado (5611–5699), electrónica/informática/software/música,
     // deporte, librerías/papelerías, joyerías, videojuegos/juguetes (5945), regalos, marroquinería, cosmética/perfumería, floristería, estancos y mascotas.
-    case 5045, 5200, 5211, 5231, 5251, 5261,
+    case 5045, 5200, 5211, 5231, 5251, 5261, 5300, 5310, 5331,
          5611...5699,
          5712, 5713, 5714, 5718, 5719, 5722,
          5732, 5733, 5734, 5735,

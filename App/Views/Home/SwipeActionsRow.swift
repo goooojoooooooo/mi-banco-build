@@ -59,10 +59,20 @@ struct SwipeActionsRow<Content: View>: View {
     @State private var closeGeneration = 0
 
     /// Cada acción en tamaño normal es una cápsula de 64 pt, con 6 pt entre ellas y 10 pt de margen al borde.
-    /// Con texto de accesibilidad la fila va apilada y es muy alta: las dos cápsulas se apilan en vertical con 140 pt de
-    /// ancho para que «Nota» y «No es mío» se lean enteros, sin partirse a mitad de palabra («Not / a», «No / es…»).
+    /// Con texto de accesibilidad la fila va apilada y es muy alta: las dos cápsulas se apilan en vertical con un
+    /// ancho común que cabe el título más largo en una línea («No es mío» entero, sin «…» ni recorte).
     private static var actionWidth: CGFloat { 64 }
-    private static var stackedActionWidth: CGFloat { 140 }
+    /// Tope del ancho apilado: aunque el título sea larguísimo, la fila siempre deja algo a la vista.
+    private static var stackedWidthCap: CGFloat { 300 }
+    /// Mismo tamaño que `.titan(.meta)` (13 pt relativo a `footnote`) para medir el título tal como se dibuja.
+    @ScaledMetric(relativeTo: .footnote) private var metaSize: CGFloat = 13
+    /// Con texto de accesibilidad: ancho común de las dos cápsulas, calculado con el título MÁS ANCHO en una sola línea
+    /// (más el relleno de 8 pt por lado y 8 pt de holgura), con tope `stackedWidthCap`.
+    private var stackedActionWidth: CGFloat {
+        let font = UIFont.systemFont(ofSize: metaSize, weight: .semibold)
+        let widest = actions.map { ($0.title as NSString).size(withAttributes: [.font: font]).width }.max() ?? 0
+        return min(ceil(widest) + 24, Self.stackedWidthCap)
+    }
     private static var actionGap: CGFloat { 6 }
     private static var edgeMargin: CGFloat { 10 }
 
@@ -83,7 +93,7 @@ struct SwipeActionsRow<Content: View>: View {
 
     private var span: CGFloat {
         if usesStackedActions {
-            return Self.stackedActionWidth + Self.edgeMargin
+            return stackedActionWidth + Self.edgeMargin
         }
         return CGFloat(actions.count) * Self.actionWidth + CGFloat(max(actions.count - 1, 0)) * Self.actionGap + Self.edgeMargin
     }
@@ -167,14 +177,14 @@ struct SwipeActionsRow<Content: View>: View {
                     action.perform()
                     close()
                 } label: {
-                    // Con texto de accesibilidad el título va al tamaño pedido (sin tope ni encogerse): hasta dos líneas que solo
-                    // se parten entre palabras, en una cápsula de 140 pt.
+                    // Con texto de accesibilidad el título va al tamaño pedido (sin tope ni encogerse), en UNA línea y entero;
+                    // en tamaño normal, hasta dos líneas como siempre.
                     Text(action.title)
                         .titan(.meta)
                         .fontWeight(.semibold)
                         .foregroundStyle(action.warning ? Theme.warning : Theme.label)
                         .multilineTextAlignment(.center)
-                        .lineLimit(2)
+                        .lineLimit(stacked ? 1 : 2)
                         .minimumScaleFactor(stacked ? 1 : 0.8)
                         .allowsTightening(true)
                         .padding(.horizontal, stacked ? 8 : 4)

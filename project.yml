@@ -51,6 +51,8 @@ targets:
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CFBundleDisplayName: Onyx
         NSFaceIDUsageDescription: Para que solo tú veas tu dinero
+        NSMicrophoneUsageDescription: Para que puedas preguntarle a Nyx hablando. Lo que dices se transcribe en el iPhone.
+        NSSpeechRecognitionUsageDescription: Para que puedas preguntarle a Nyx hablando. Lo que dices se transcribe en el iPhone.
         NSSupportsLiveActivities: true
         # Actualización de bancos en segundo plano (tarea 10)
         UIBackgroundModes: [fetch]

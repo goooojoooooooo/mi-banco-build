@@ -332,10 +332,12 @@ private struct AppShellView: View {
                     }
                 case .background:
                     speaker.stop()
+                    briefing.resetConversation()
                     BackgroundRefresh.schedule() // tarea 10
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                 default:
                     speaker.stop()
+                    briefing.resetConversation()
                 }
             }
             // Avisos y voz al cambiar el ojo (SEC-06 y SEC-13):
@@ -384,6 +386,7 @@ private struct AppShellView: View {
             .onChange(of: shell.showsLock) { _, isLocked in
                 if isLocked {
                     speaker.stop()
+                    briefing.resetConversation()
                 } else {
                     runNyxOnOpenIfReady()
                 }

@@ -21,6 +21,8 @@ final class BriefingModel {
     private(set) var cards: [InterestCard] = []
     private(set) var chips: [AssistantChip] = []
     private(set) var lastAnswer: AssistantAnswer?
+    private(set) var lastReply: NyxReply?
+    private(set) var conversation = NyxConversation()
     private(set) var lastQuestion: String = ""
     private(set) var isAnswering = false
     private(set) var assistantPreferences: AssistantPreferences
@@ -104,11 +106,18 @@ final class BriefingModel {
     func setSheetVisible(_ visible: Bool) {
         isSheetVisible = visible
         if !visible {
-            askGeneration += 1
-            isAnswering = false
-            lastAnswer = nil
-            lastQuestion = ""
+            resetConversation()
         }
+    }
+
+    /// Borra la memoria breve de la conversación (al cerrar la hoja, bloquear o pasar a segundo plano; nunca va a disco).
+    func resetConversation() {
+        askGeneration += 1
+        isAnswering = false
+        conversation.reset()
+        lastReply = nil
+        lastAnswer = nil
+        lastQuestion = ""
     }
 
     func reloadPreferences() {
@@ -294,6 +303,8 @@ final class BriefingModel {
         self.prefetchedFocusChoice = nil
         self.prefetchTask?.cancel()
         self.prefetchTask = nil
+        self.conversation.reset()
+        self.lastReply = nil
         self.lastAnswer = nil
         self.lastQuestion = ""
         self.isAnswering = false
@@ -397,9 +408,10 @@ final class BriefingModel {
         NyxState.shared.updateMemory(memory)
     }
 
-    /// Responde a una pregunta con hechos calculados por Core (A2, A3, J21(d)). Nunca guarda la pregunta ni la respuesta.
+    /// Responde a una pregunta con hechos calculados por Core (`nyxAnswer`), recordando la última intención solo en
+    /// memoria mientras la hoja sigue abierta y respetando `privateMode` (`m-11`). Nunca guarda preguntas ni respuestas.
     func ask(_ question: String, state: LedgerState, portfolio: Portfolio?, book: AccountBook,
-             now: Date = Date()) async {
+             privateMode: Bool = false, now: Date = AppClock.now) async {
         let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -412,29 +424,49 @@ final class BriefingModel {
         let knownMerchants = Set(
             state.movements.flatMap { [$0.merchant, $0.bankMerchant].compactMap { $0 }.map(normalizeMerchant) }
         )
-        let routedIntent: AssistantIntent?
-        if isAdviceRequest(trimmed, portfolio: portfolio, knownMerchants: knownMerchants) {
-            routedIntent = nil
-        } else {
-            routedIntent = await writer.routeQuestion(
-                trimmed, now: now, calendar: cal, portfolio: portfolio, knownMerchants: knownMerchants
-            )
-        }
-
-        guard !Task.isCancelled, askGeneration == gen else { return }
-        let answer = answerQuestion(
+        let preRouted = nyxRouteQuestion(
             trimmed,
+            conversation: conversation,
             state: state,
             portfolio: portfolio,
-            book: book,
-            briefingInput: input,
-            modelIntent: routedIntent,
             now: now,
             calendar: cal
         )
-        lastAnswer = answer
-        if !answer.chips.isEmpty {
-            chips = answer.chips
+        let routedIntent: AssistantIntent?
+        if isAdviceRequest(trimmed, portfolio: portfolio, knownMerchants: knownMerchants) {
+            routedIntent = nil
+        } else if case .assistant(.unknown) = preRouted {
+            routedIntent = await writer.routeQuestion(
+                trimmed, now: now, calendar: cal, portfolio: portfolio, knownMerchants: knownMerchants
+            )
+        } else {
+            routedIntent = nil
+        }
+
+        let health = await NyxHealthProbe.current()
+        guard !Task.isCancelled, askGeneration == gen else { return }
+
+        let currentMemory = loadCurrentNyxMemory(state: state, now: now, calendar: cal)
+        let healthObs = nyxHealthObservations(state: state, health: health, memory: currentMemory, now: now, calendar: cal)
+        var nextConversation = conversation
+        let reply = nyxAnswer(
+            trimmed,
+            conversation: &nextConversation,
+            modelIntent: routedIntent,
+            memory: currentMemory,
+            health: healthObs,
+            state: state,
+            portfolio: portfolio,
+            book: book,
+            privateMode: privateMode,
+            now: now,
+            calendar: cal
+        )
+        conversation = nextConversation
+        lastReply = reply
+        lastAnswer = reply.answer
+        if !reply.answer.chips.isEmpty {
+            chips = reply.answer.chips
         }
         isAnswering = false
     }

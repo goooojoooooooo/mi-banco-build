@@ -33,6 +33,7 @@ struct BriefingSheet: View {
     @State private var dailyUpdateExpanded: Bool
     @State private var undoStates: [String: NyxUndoState] = [:]
     @State private var undoTasks: [String: Task<Void, Never>] = [:]
+    @State private var listener = NyxListener()
     @State private var questionDraft = ""
     @State private var askTask: Task<Void, Never>?
     @State private var feedbackTick = 0
@@ -245,6 +246,7 @@ struct BriefingSheet: View {
         }
         .onDisappear {
             askTask?.cancel()
+            listener.stop()
             for task in undoTasks.values { task.cancel() }
             undoTasks.removeAll()
             undoStates.removeAll()
@@ -254,7 +256,9 @@ struct BriefingSheet: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active {
                 questionFocused = false
+                listener.stop()
                 speaker.stop()
+                briefingModel.resetConversation()
             }
         }
         .onChange(of: speaker.activeTarget == .briefing) { _, speaking in
@@ -715,7 +719,7 @@ struct BriefingSheet: View {
     private func askBlock(scrollProxy: ScrollViewProxy) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                TextField("Pregúntame algo de tu dinero…", text: $questionDraft)
+                TextField("Pregúntame algo…", text: $questionDraft)
                     .titan(.body)
                     .foregroundStyle(Theme.label)
                     .autocorrectionDisabled()
@@ -726,6 +730,28 @@ struct BriefingSheet: View {
                     .padding(.leading, 14)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("assistant-question-field")
+
+                if NyxListener.isAvailable {
+                    Button {
+                        speaker.stop()
+                        listener.toggle(
+                            onUpdate: { partial in questionDraft = partial },
+                            onFinish: { finalText in
+                                questionDraft = ""
+                                submit(question: finalText, scrollProxy: scrollProxy)
+                            }
+                        )
+                    } label: {
+                        Image(systemName: listener.isListening ? "mic.fill" : "mic")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(listener.isListening ? Theme.warning : Theme.label2)
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.pressable)
+                    .accessibilityLabel(listener.isListening ? "Parar de escuchar" : "Hablar")
+                    .accessibilityIdentifier("nyx-mic")
+                }
 
                 let canSend = !questionDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !briefingModel.isAnswering
                 Button {
@@ -913,6 +939,7 @@ struct BriefingSheet: View {
 
     private func submit(question: String, scrollProxy: ScrollViewProxy) {
         questionFocused = false
+        listener.stop()
         speaker.stop()
         askTask?.cancel()
         AccessibilityNotification.Announcement("Estoy mirando tus datos…").post()
@@ -921,7 +948,9 @@ struct BriefingSheet: View {
                 question,
                 state: model.state,
                 portfolio: portfolio.portfolioForBackup,
-                book: accountBook.book
+                book: accountBook.book,
+                privateMode: preferences.privateMode,
+                now: AppClock.now
             )
             guard !Task.isCancelled else { return }
             // U85: se anuncia el dato pedido, no la nota fija ni la negativa.

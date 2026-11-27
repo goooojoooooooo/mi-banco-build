@@ -469,3 +469,109 @@ private func makeClient(_ transport: RecordingTransport) -> EnableBankingClient 
         #expect(pending == "Cabeceras PSU: Revolut pendiente de comprobar")
     }
 }
+
+// MARK: - Ronda 1: marca anti-422 persistente (m1) y decision coherente con el envio (m2)
+
+@Suite struct PSURejectionPersistenceTests {
+    private func session(rejectedAt: Date? = nil) -> StoredSession {
+        StoredSession(
+            sessionID: "s-1", accountUIDs: ["u-1"], validUntil: baseNow,
+            aspspName: "Revolut", aspspCountry: "ES", requiredPSUHeaders: ["Psu-User-Agent"],
+            psuRejectedAt: rejectedAt
+        )
+    }
+
+    @Test func legacyJSONWithoutRejectionMarkDecodesAsNotRejectedAndEncodesWithoutKey() throws {
+        let legacy = #"{"sessionID":"s-1","accountUIDs":["u-1"],"validUntil":"2027-05-19T10:00:00Z","aspspName":"Revolut","aspspCountry":"ES","requiredPSUHeaders":[]}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let decoded = try decoder.decode(StoredSession.self, from: Data(legacy.utf8))
+        #expect(decoded.psuRejectedAt == nil)
+        #expect(!decoded.isPSURejected(now: baseNow))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        #expect(!String(decoding: try encoder.encode(decoded), as: UTF8.self).contains("psuRejectedAt"))
+    }
+
+    @Test func rejectionMarkSurvivesEncodeDecodeRoundTrip() throws {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let mark = at(2026, 11, 20, 11)
+        let back = try decoder.decode(StoredSession.self, from: try encoder.encode(session(rejectedAt: mark)))
+        #expect(back.psuRejectedAt == mark)
+        #expect(back.requiredPSUHeaders == ["Psu-User-Agent"])
+        #expect(back.isPSURejected(now: baseNow))
+    }
+
+    @Test func rejectionExpiresAfterSevenDays() {
+        let mark = baseNow
+        let s = session(rejectedAt: mark)
+        #expect(SyncPolicy.psuRejectionTTL == 7 * 24 * 3600)
+        #expect(s.isPSURejected(now: mark))
+        #expect(s.isPSURejected(now: mark.addingTimeInterval(7 * 24 * 3600 - 1)))
+        #expect(!s.isPSURejected(now: mark.addingTimeInterval(7 * 24 * 3600)))
+        #expect(!s.isPSURejected(now: mark.addingTimeInterval(30 * 24 * 3600)))
+    }
+
+    @Test func markInTheFutureDueToClockChangeDoesNotBlockForever() {
+        let s = session(rejectedAt: baseNow.addingTimeInterval(3600))
+        #expect(!s.isPSURejected(now: baseNow))
+    }
+
+    @Test func sessionWithoutMarkIsNeverRejected() {
+        #expect(!session().isPSURejected(now: baseNow))
+    }
+}
+
+@Suite struct PSUDecisionAgreementTests {
+    private func exhaustedBudgetLink() -> BankLinkInfo {
+        var l = sampleLink()
+        l.fetchLog = (1...4).map { baseNow.addingTimeInterval(-Double($0) * 3600) }
+        l.lastSuccessAt = baseNow.addingTimeInterval(-4 * 3600)
+        l.lastAttemptAt = baseNow.addingTimeInterval(-3600)
+        return l
+    }
+
+    @Test func noRedecisionWhenPlanAndRequestAgree() {
+        let l = exhaustedBudgetLink()
+        #expect(SyncPolicy.redecideIfPSUDropped(
+            l, trigger: .appOpen, now: baseNow, calendar: madrid,
+            plannedWithPSU: true, actualWithPSU: true) == nil)
+        #expect(SyncPolicy.redecideIfPSUDropped(
+            l, trigger: .appOpen, now: baseNow, calendar: madrid,
+            plannedWithPSU: false, actualWithPSU: false) == nil)
+    }
+
+    @Test func requestGoingWithoutPSUAfterPlanWithPSUIsBlockedByBackgroundBudget() {
+        let l = exhaustedBudgetLink()
+        // Con PSU se habria saltado el cupo; sin PSU, el cupo de 4/24 h manda.
+        guard case .skip(.budgetUsed) = SyncPolicy.redecideIfPSUDropped(
+            l, trigger: .appOpen, now: baseNow, calendar: madrid,
+            plannedWithPSU: true, actualWithPSU: false) else {
+            Issue.record("debia saltarse por cupo agotado")
+            return
+        }
+    }
+
+    @Test func requestGoingWithoutPSUWithFreeBudgetIsChargedAsBackgroundFetch() {
+        var l = sampleLink()
+        l.lastSuccessAt = baseNow.addingTimeInterval(-4 * 3600)
+        let decision = SyncPolicy.redecideIfPSUDropped(
+            l, trigger: .appOpen, now: baseNow, calendar: madrid,
+            plannedWithPSU: true, actualWithPSU: false)
+        guard case .fetch = decision else {
+            Issue.record("con cupo libre y mas de 3 h debia consultar")
+            return
+        }
+    }
+
+    @Test func requestGoingWithoutPSURespects3HourSpacing() {
+        var l = sampleLink()
+        l.lastSuccessAt = baseNow.addingTimeInterval(-600)
+        #expect(SyncPolicy.redecideIfPSUDropped(
+            l, trigger: .appOpen, now: baseNow, calendar: madrid,
+            plannedWithPSU: true, actualWithPSU: false) == .skip(.fresh))
+    }
+}

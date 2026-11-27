@@ -3,7 +3,7 @@ import Foundation
 import Observation
 import MiBancoCore
 
-/// Lectura en voz alta del resumen o de una respuesta de Onyx (tarea 10, A5).
+/// Lectura en voz alta de la puesta al día o de una respuesta de Nyx (tarea 10, A5, N12).
 /// Usa la mejor voz `es-ES` instalada (premium > enhanced > defecto), atenúa otro audio (`.duckOthers`) y libera la
 /// sesión al terminar. Se detiene sin falta al cerrar la hoja, bloquear o salir de primer plano.
 @MainActor @Observable

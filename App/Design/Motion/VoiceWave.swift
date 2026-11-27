@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// B2: las 28 barras que se mueven mientras Onyx lee el resumen en voz alta (prototipo `openSpoken`). Solo se mueven
+/// B2: las 28 barras que se mueven mientras Nyx lee el resumen en voz alta (prototipo `openSpoken`). Solo se mueven
 /// mientras habla: su `TimelineView` está en pausa en cuanto `speaking` es falso, y entonces las barras se quedan bajas
 /// y quietas. Con Reducir movimiento, barras quietas a media altura (se ve que habla, sin movimiento). Solo escala
 /// vertical de cada barra: nada de maquetación. No tiene nada que leer para VoiceOver (el botón ya dice «Parar»).

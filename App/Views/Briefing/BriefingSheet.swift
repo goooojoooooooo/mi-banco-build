@@ -1,11 +1,11 @@
 import SwiftUI
 import MiBancoCore
 
-/// Hoja de «Tu resumen» y el asistente Onyx (Plan 4b, tareas 9, 10 y 13 ampliada A1–A6).
-/// Orden exacto (A1):
-/// 1. Resumen del día (saludo, apertura del catálogo, titular, secciones, consejo).
+/// Hoja de «Tu resumen» y el asistente Nyx (Plan 4b, tareas 9, 10 y 13 ampliada A1–A6; Nyx Fase 2 N9–N14).
+/// Orden exacto (A1 / §6.6):
+/// 1. Puesta al día (saludo, apertura del catálogo, titular, secciones, foco/consejo y «Lo que he visto»).
 /// 2. «Te puede interesar» (hasta 3 tarjetas con «Me interesa» / «No me interesa»).
-/// 3. «Pregúntame» (campo, fichas sugeridas y respuesta factual de Onyx).
+/// 3. «Pregúntame» (campo, micrófono local, fichas sugeridas y respuesta factual de Nyx).
 /// Vive en `RootSheet`: nunca aparece encima del bloqueo y se cierra al bloquear o salir de primer plano.
 struct BriefingSheet: View {
     let model: LedgerModel
@@ -296,8 +296,11 @@ struct BriefingSheet: View {
     // MARK: - Cabecera
 
     private func header(for briefing: Briefing) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 10) {
+        let topBarLayout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        return VStack(alignment: .leading, spacing: 14) {
+            topBarLayout {
                 HStack(spacing: 8) {
                     AppMark(size: 28)
                     Text(assistantName)
@@ -306,49 +309,60 @@ struct BriefingSheet: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(assistantName)
+                .accessibilityAddTraits(.isHeader)
                 .accessibilityIdentifier("nyx-sheet-title")
 
-                Spacer(minLength: 8)
+                if !typeSize.isAccessibilitySize {
+                    Spacer(minLength: 8)
+                }
 
-                let speakingBriefing = speaker.activeTarget == .briefing
-                Button {
-                    toggleBriefingSpeech(briefing)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: speakingBriefing ? "stop.fill" : "speaker.wave.2")
-                            .font(.system(size: 14, weight: .semibold))
-                            .accessibilityHidden(true)
-                        Text(speakingBriefing ? "Parar" : "Escuchar")
-                            .titan(.captionStrong)
+                HStack(spacing: 10) {
+                    let speakingBriefing = speaker.activeTarget == .briefing
+                    Button {
+                        toggleBriefingSpeech(briefing)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: speakingBriefing ? "stop.fill" : "speaker.wave.2")
+                                .font(.system(size: 14, weight: .semibold))
+                                .accessibilityHidden(true)
+                            Text(speakingBriefing ? "Parar" : "Escuchar")
+                                .titan(.captionStrong)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                        }
+                        .foregroundStyle(Theme.label)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: 44)
+                        .background(Theme.raised, in: Capsule())
+                        .contentShape(Capsule())
                     }
-                    .foregroundStyle(Theme.label)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: 44)
-                    .background(Theme.raised, in: Capsule())
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityLabel(speakingBriefing ? "Parar" : "Escuchar")
-                .accessibilityIdentifier("briefing-listen")
-                #if DEBUG
-                // Solo DEBUG, para las pruebas (B2): qué línea suena (el fondo de la hoja no se ve con ella delante).
-                .accessibilityValue(DemoMode.isActive ? (speaker.currentLine ?? "-") : "")
-                #endif
+                    .buttonStyle(.pressable)
+                    .accessibilityLabel(speakingBriefing ? "Parar" : "Escuchar")
+                    .accessibilityIdentifier("briefing-listen")
+                    #if DEBUG
+                    // Solo DEBUG, para las pruebas (B2): qué línea suena (el fondo de la hoja no se ve con ella delante).
+                    .accessibilityValue(DemoMode.isActive ? (speaker.currentLine ?? "-") : "")
+                    #endif
 
-                Button {
-                    speaker.stop()
-                    dismiss()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.label2)
-                        .frame(width: 44, height: 44)
-                        .background(Theme.raised, in: Circle())
-                        .contentShape(Circle())
+                    if typeSize.isAccessibilitySize {
+                        Spacer(minLength: 8)
+                    }
+
+                    Button {
+                        speaker.stop()
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Theme.label2)
+                            .frame(width: 44, height: 44)
+                            .background(Theme.raised, in: Circle())
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.pressable)
+                    .accessibilityLabel("Cerrar")
+                    .accessibilityIdentifier("briefing-close")
                 }
-                .buttonStyle(.pressable)
-                .accessibilityLabel("Cerrar")
-                .accessibilityIdentifier("briefing-close")
             }
 
             Text(briefing.greeting)
@@ -890,7 +904,7 @@ struct BriefingSheet: View {
 
     private var bottomDoneBar: some View {
         VStack(spacing: 0) {
-            // B2: mientras Onyx lee en voz alta, las 28 barras van encima de «Vale», DENTRO de la barra de abajo: la
+            // B2: mientras Nyx lee en voz alta, las 28 barras van encima de «Vale», DENTRO de la barra de abajo: la
             // lista reserva su alto (m-7: antes flotaban encima de «Lo que viene» y del borde de la fila siguiente).
             if waveInLayout {
                 VoiceWave(speaking: true)
@@ -1177,7 +1191,7 @@ extension AssistantTopic {
     }
 }
 
-/// B2: mientras Onyx lee en voz alta, la línea que suena va resaltada (un fondo suave) y las demás del resumen se
+/// B2: mientras Nyx lee en voz alta, la línea que suena va resaltada (un fondo suave) y las demás del resumen se
 /// apagan un poco; al callar, todas vuelven. Solo opacidad y color de fondo, con el fundido de `\.motion`. Con el ojo
 /// cerrado el resalte no añade nada que leer: la línea ya es su máscara.
 #if DEBUG

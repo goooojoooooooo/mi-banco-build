@@ -109,7 +109,7 @@ jobs:
             esac
             SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
           else
-            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests -skip-testing:MiBancoUITests/MotionTourHomeTests -skip-testing:MiBancoUITests/MotionTourScreensTests -skip-testing:MiBancoUITests/MotionTourShellTests -skip-testing:MiBancoUITests/MotionTourSecurityTests"
+            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests -skip-testing:MiBancoUITests/MotionTourHomeTests -skip-testing:MiBancoUITests/MotionTourScreensTests -skip-testing:MiBancoUITests/MotionTourShellTests -skip-testing:MiBancoUITests/MotionTourSecurityTests -skip-testing:MiBancoUITests/MotionTourNyxTests"
             # La bateria completa va en 2 simuladores salvo que se pida otro numero (experimento medido: mismas pruebas y
             # mismos resultados que en serie). Una clase sola sigue en serie, salvo que se pida `parallel_workers`.
             PARALLEL_WORKERS="${PARALLEL_WORKERS:-2}"

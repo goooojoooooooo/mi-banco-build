@@ -64,6 +64,7 @@ struct NyxMessageRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(undoState?.confirmationText ?? accessibleDescription)
         .accessibilityIdentifier(containerID ?? "nyx-message-\(entryID)")
+        .modifier(NyxDismissAccessibilityAction(enabled: showDismiss && undoState == nil, onDismiss: onDismiss))
     }
 
     private func undoContent(_ undo: NyxUndoState) -> some View {
@@ -89,24 +90,29 @@ struct NyxMessageRow: View {
     }
 
     private var messageContent: some View {
+        let headerLayout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         let buttonsLayout = typeSize.isAccessibilitySize
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
             : AnyLayout(HStackLayout(spacing: 8))
 
         return VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Circle()
-                    .fill(accentColor)
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
+            headerLayout {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Circle()
+                        .fill(accentColor)
+                        .frame(width: 7, height: 7)
+                        .accessibilityHidden(true)
 
-                Text(displayTitle)
-                    .titan(.cardTitle)
-                    .foregroundStyle(Theme.label)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentTransition(.identity)
-                    .privacySensitive()
+                    Text(displayTitle)
+                        .titan(.cardTitle)
+                        .foregroundStyle(Theme.label)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentTransition(.identity)
+                        .privacySensitive()
+                }
 
                 if let listenAction {
                     Button(action: listenAction) {
@@ -196,6 +202,19 @@ struct NyxMessageRow: View {
                 }
                 .padding(.top, 2)
             }
+        }
+    }
+}
+
+private struct NyxDismissAccessibilityAction: ViewModifier {
+    let enabled: Bool
+    let onDismiss: () -> Void
+
+    func body(content: Content) -> some View {
+        if enabled {
+            content.accessibilityAction(named: "Descartar", onDismiss)
+        } else {
+            content
         }
     }
 }

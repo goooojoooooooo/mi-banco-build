@@ -805,7 +805,7 @@ struct RootView: View {
         }
     }
 
-    // MARK: - Resumen diario y asistente Onyx
+    // MARK: - Resumen diario y asistente Nyx
 
     private func scheduleBriefingCheck(delay: Duration) {
         guard !suppressBriefingForActivation, routeTask == nil, router.pending == nil else { return }

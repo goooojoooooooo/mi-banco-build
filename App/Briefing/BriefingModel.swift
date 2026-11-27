@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import MiBancoCore
 
-/// Estado vivo del resumen diario y del asistente Onyx (Plan 4b, tareas 9, 10 y 13 ampliada A1–A6).
+/// Estado vivo del resumen diario y del asistente Nyx (Plan 4b, tareas 9, 10 y 13 ampliada A1–A6; Nyx Fase 2).
 /// - El registro `BriefingRecord` vive en `UserDefaults` (`"briefingRecord"`); en modo demo, solo en memoria.
 /// - Las preferencias de «Te puede interesar» viven en `AssistantPreferencesStore`; en modo demo, solo en memoria.
 /// - Las preguntas y respuestas de «Pregúntame» NUNCA se guardan en disco (A2).

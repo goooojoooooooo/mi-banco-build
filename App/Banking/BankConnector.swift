@@ -90,11 +90,16 @@ final class BankConnector {
     func refreshASPSPList() async {
         guard let client = try? BankingCredentials.client(),
               let list = try? await client.aspsps(country: BankingConstants.country) else { return }
-        cachedASPSPs = list
+        cacheASPSPs(list)
         NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
     }
 
-    // MARK: - Conectar
+    func cacheASPSPs(_ list: [EBASPSP]) {
+        cachedASPSPs = list
+        BankSyncStatus.shared.reloadRequiredPSUHeaders(cachedASPSPs: list)
+    }
+
+    // MARK: - Conecta
 
     func connect(_ bank: BankID, aspsp: EBASPSP? = nil) async {
         #if DEBUG
@@ -151,7 +156,8 @@ final class BankConnector {
         }
         let until = consentValidUntil(for: chosen, now: Date())
         let pending = PendingAuth(
-            state: state, bank: bank, aspspName: chosen.name, aspspCountry: chosen.country, startedAt: Date())
+            state: state, bank: bank, aspspName: chosen.name, aspspCountry: chosen.country, startedAt: Date(),
+            requiredPSUHeaders: chosen.requiredPSUHeaders ?? [])
         do { try KeychainVault.setCodable(pending, for: .pendingAuth) } catch {
             fail(bank, ConnectMessage.storeFailed)
             return
@@ -207,6 +213,7 @@ final class BankConnector {
         closeWebSession()
         deletePending()
         cachedASPSPs = nil
+        BankSyncStatus.shared.clearRequiredPSUHeaders()
         run(flow.handle(.forgetAll))
     }
 
@@ -290,9 +297,14 @@ final class BankConnector {
         let fallback = EBASPSP(name: pending.aspspName, country: pending.aspspCountry)
         let now = Date()
         let until = session.validUntil ?? requestedUntil ?? consentValidUntil(for: fallback, now: now)
+        let resolvedRequiredPSU: [String]? = pending.requiredPSUHeaders
+            ?? cachedASPSPs.flatMap {
+                findASPSP(name: pending.aspspName, country: pending.aspspCountry, bank: bank, in: $0)
+            }.map { $0.requiredPSUHeaders ?? [] }
         let stored = StoredSession(
             sessionID: session.sessionID, accountUIDs: accounts.map(\.uid), validUntil: until,
-            aspspName: pending.aspspName, aspspCountry: pending.aspspCountry)
+            aspspName: pending.aspspName, aspspCountry: pending.aspspCountry,
+            requiredPSUHeaders: resolvedRequiredPSU)
         // La sesión que funcionaba hasta ahora (si la hay) se guarda: si algo falla se deja todo como estaba.
         let item = KeychainVault.session(for: bank)
         let previous = (try? KeychainVault.codable(StoredSession.self, for: item)) ?? nil
@@ -322,6 +334,7 @@ final class BankConnector {
         }
         authURL = nil
         requestedUntil = nil
+        BankSyncStatus.shared.updateRequiredPSUHeaders(bank, resolvedRequiredPSU)
         flow.handle(.succeeded(bank))
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
@@ -331,7 +344,7 @@ final class BankConnector {
         }
     }
 
-    // MARK: - Desconectar
+    // MARK: - Desconecta
 
     func disconnect(_ bank: BankID) async {
         #if DEBUG
@@ -358,6 +371,7 @@ final class BankConnector {
                     }
                 }
                 await MainActor.run {
+                    BankSyncStatus.shared.updateRequiredPSUHeaders(bank, nil)
                     NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
                     NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
                 }
@@ -432,7 +446,7 @@ final class BankConnector {
             }
         }
         session.prefersEphemeralWebBrowserSession = true
-        session.presentationContextProvider = anchorProvider
+        session.presentationContextProvider = anchorProvide
         webSession = session
         if session.start() {
             flow.handle(.webOpened(bank))

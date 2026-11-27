@@ -74,8 +74,8 @@ private struct AppShellView: View {
         return ShellState(lockApplies: setting.applies, relocksOnBackground: setting.relocks)
     }
 
-    /// La fase de escena con la que se decide la tapa, leída del entorno en este mismo instante (la tapa tiene que estar
-    /// puesta en la misma actualización en que cambia la fase). En la demo la fase no cuenta (parpadea en el simulador
+    /// La fase de escena con la que se decide la tapa, leída del entorno en este mismo instante (la tapa tiene que esta
+    /// puesta en la misma actualización en que cambia la fase). En la demo la fase no cuenta (parpadea en el simulado
     /// de CI): activa siempre, salvo cuando una prueba pide simular «inactiva tras desbloquear».
     private var coverScene: ShellState.Scene {
         #if DEBUG
@@ -190,7 +190,7 @@ private struct AppShellView: View {
                 }
                 if layers.contains(.cover) {
                     // De golpe, al ponerse y al quitarse: nunca se funde con el bloqueo ni deja un destello.
-                    privacyCover
+                    privacyCove
                         .transition(transition(of: .cover))
                         .zIndex(ShellState.zIndex(of: .cover))
                 }
@@ -202,8 +202,8 @@ private struct AppShellView: View {
                 shell.apply(.safetyFired)
             }
             .task {
-                // Arranque en frío (tarea 10): puede que no haya cambio de escena que lo dispare.
-                await MainActor.run { BankSync.refreshOnOpen() }
+                // Arranque en frío (tarea 10): solo tras superar el bloqueo y en primer plano.
+                await MainActor.run { BankSync.refreshOnOpen(isUnlocked: !shell.showsLock) }
                 await logos.prewarm(domains: [])
                 #if DEBUG
                 if DemoMode.isActive {
@@ -243,7 +243,8 @@ private struct AppShellView: View {
             // Bancos (tarea 10): una conexión cambió (conectar, renovar, desconectar).
             .onReceive(NotificationCenter.default.publisher(for: .bankLinkDidChange)) { note in
                 let bank = (note.userInfo?["bank"] as? String).flatMap(BankID.init(rawValue:))
-                Task { await BankSync.shared.linkDidChange(bank) }
+                let unlocked = !shell.showsLock
+                Task { await BankSync.shared.linkDidChange(bank, isUnlocked: unlocked) }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Conexión bancaria (tarea 9): el conector decide con su propio estado; el bloqueo no interviene.
@@ -272,7 +273,7 @@ private struct AppShellView: View {
                         book: accountBook.book,
                         privateMode: preferences.privateMode
                     )
-                    BankSync.refreshOnOpen() // tarea 10
+                    BankSync.refreshOnOpen(isUnlocked: !shell.showsLock) // tarea 10
                     Task { await portfolio.refreshPrices(force: false) }
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
@@ -300,7 +301,11 @@ private struct AppShellView: View {
                 }
             }
             .onChange(of: shell.showsLock) { _, isLocked in
-                if isLocked { speaker.stop() }
+                if isLocked {
+                    speaker.stop()
+                } else if scenePhase == .active {
+                    BankSync.refreshOnOpen(isUnlocked: true)
+                }
             }
             // La marca de la barra de Inicio se esconde mientras vuela la del arranque (`LaunchAnchor.flying`, que ponen
             // y quitan las propias capas que vuelan). Respaldo: sin ninguna de esas capas, nunca se queda escondida.
@@ -339,7 +344,7 @@ private struct AppShellView: View {
             }
         }
 
-    /// El bloqueo solo escribe `false` aquí (la autenticación ha salido bien), dentro de su animación de salida. Bloquear
+    /// El bloqueo solo escribe `false` aquí (la autenticación ha salido bien), dentro de su animación de salida. Bloquea
     /// lo decide `ShellState` al ir a segundo plano. En esa misma transacción se da por terminado el arranque: su capa
     /// nunca asoma entre el bloqueo e Inicio.
     private var unlockBinding: Binding<Bool> {
@@ -464,7 +469,7 @@ private struct MotionStyleReporter: View {
     @Environment(\.motion) private var motion
 
     var body: some View {
-        Color.clear
+        Color.clea
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
             .accessibilityHidden(true)

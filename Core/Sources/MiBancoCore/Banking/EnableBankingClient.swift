@@ -29,7 +29,7 @@ public struct TransactionFetch: Equatable, Sendable {
 /// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 300 s.
 public struct EnableBankingClient: Sendable {
     private let transport: any HTTPTransport
-    private let signer: any JWTSigner
+    private let signer: any JWTSigne
     private let appID: String
     private let now: @Sendable () -> Date
 
@@ -38,7 +38,7 @@ public struct EnableBankingClient: Sendable {
         now: @escaping @Sendable () -> Date
     ) {
         self.transport = transport
-        self.signer = signer
+        self.signer = signe
         self.appID = appID
         self.now = now
     }
@@ -73,18 +73,22 @@ public struct EnableBankingClient: Sendable {
         return try decode(EBSession.self, from: data)
     }
 
-    public func balances(accountUID: String) async throws -> [EBBalance] {
+    public func balances(
+        accountUID: String, psuHeaders: [String: String]? = nil
+    ) async throws -> [EBBalance] {
         struct Response: Decodable { let balances: [EBBalance] }
-        let data = try await call("GET", "/accounts/\(escape(accountUID))/balances")
+        let data = try await call("GET", "/accounts/\(escape(accountUID))/balances", psuHeaders: psuHeaders)
         return try decode(Response.self, from: data).balances
     }
 
     /// Sigue `continuation_key` hasta agotarlo; más de `maxPages` páginas es `.tooManyPages`.
     /// `dateFrom` es `yyyy-MM-dd` (lo formatea quien llama). Quien quiera quedarse con lo recibido usa `fetchTransactions`.
     public func transactions(
-        accountUID: String, dateFrom: String, strategy: TransactionStrategy
+        accountUID: String, dateFrom: String, strategy: TransactionStrategy,
+        psuHeaders: [String: String]? = nil
     ) async throws -> [EBTransaction] {
-        let fetch = try await fetchTransactions(accountUID: accountUID, dateFrom: dateFrom, strategy: strategy)
+        let fetch = try await fetchTransactions(
+            accountUID: accountUID, dateFrom: dateFrom, strategy: strategy, psuHeaders: psuHeaders)
         guard fetch.complete else { throw BankingClientError.tooManyPages }
         return fetch.transactions
     }
@@ -92,7 +96,8 @@ public struct EnableBankingClient: Sendable {
     /// Como `transactions`, pero con el límite de páginas o una clave de continuación repetida (el banco da vueltas) se
     /// para y devuelve lo recibido con `complete == false`, en vez de tirarlo. Un fallo de red o de la API sí se propaga.
     public func fetchTransactions(
-        accountUID: String, dateFrom: String, strategy: TransactionStrategy
+        accountUID: String, dateFrom: String, strategy: TransactionStrategy,
+        psuHeaders: [String: String]? = nil
     ) async throws -> TransactionFetch {
         struct Page: Decodable {
             let transactions: [EBTransaction]?
@@ -108,7 +113,8 @@ public struct EnableBankingClient: Sendable {
         for _ in 0..<BankingConstants.maxPages {
             var query = [("date_from", dateFrom), ("strategy", strategy.rawValue)]
             if let key { query.append(("continuation_key", key)) }
-            let data = try await call("GET", "/accounts/\(escape(accountUID))/transactions", query: query)
+            let data = try await call(
+                "GET", "/accounts/\(escape(accountUID))/transactions", query: query, psuHeaders: psuHeaders)
             let page = try decode(Page.self, from: data)
             all += page.transactions ?? []
             guard let next = page.continuationKey, !next.isEmpty else {
@@ -130,7 +136,8 @@ public struct EnableBankingClient: Sendable {
     // MARK: - Interno
 
     private func call(
-        _ method: String, _ path: String, query: [(String, String)] = [], body: Data? = nil
+        _ method: String, _ path: String, query: [(String, String)] = [], body: Data? = nil,
+        psuHeaders: [String: String]? = nil
     ) async throws -> Data {
         let token: String
         do {
@@ -144,14 +151,17 @@ public struct EnableBankingClient: Sendable {
             text += "?" + query.map { "\(escape($0.0))=\(escape($0.1))" }.joined(separator: "&")
         }
         guard let url = URL(string: text) else { throw BankingClientError.badResponse }
-        let request = HTTPRequest(
-            method: method, url: url,
-            headers: [
-                "Accept": "application/json",
-                "Authorization": "Bearer " + token,
-                "Content-Type": "application/json",
-            ],
-            body: body)
+        var headers: [String: String] = [
+            "Accept": "application/json",
+            "Authorization": "Bearer " + token,
+            "Content-Type": "application/json",
+        ]
+        if let psuHeaders {
+            for (name, value) in sanitizePSUHeaders(psuHeaders) {
+                headers[name] = value
+            }
+        }
+        let request = HTTPRequest(method: method, url: url, headers: headers, body: body)
         let response: HTTPResponse
         do {
             response = try await transport.send(request)

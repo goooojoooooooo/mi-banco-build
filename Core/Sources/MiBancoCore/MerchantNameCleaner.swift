@@ -39,7 +39,7 @@ private func foldKeepingSeparators(_ raw: String) -> String {
     var lastWasSpace = true
     for ch in raw.lowercased() {
         if ch == "'" || ch == "’" || ch == "`" || ch == "´" { continue }
-        let mapped: Characte
+        let mapped: Character
         if let plain = cleanerAccentFree[ch] {
             mapped = plain
         } else if ch.isASCII && (ch.isLetter || ch.isNumber || ch == "*" || ch == "/" || ch == "_" || ch == "." || ch == "#") {

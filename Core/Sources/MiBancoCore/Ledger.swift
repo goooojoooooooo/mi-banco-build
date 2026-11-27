@@ -91,7 +91,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.note = note
         self.flaggedNotMine = flaggedNotMine
         self.category = category
-        self.ownTransfer = ownTransfe
+        self.ownTransfer = ownTransfer
         self.bankRef = bankRef
         self.statementRef = statementRef
         self.bankStatus = bankStatus
@@ -108,7 +108,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
-        case note, flaggedNotMine, category, ownTransfe
+        case note, flaggedNotMine, category, ownTransfer
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
         case firstSeenStatus, bookedDay, personPayment, merchantCategoryCode
     }
@@ -163,7 +163,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
     /// true = la lectura es solo de lo contabilizado: los movimientos pendientes del banco siguen sumando encima y el
     /// resultado es siempre estimado.
     public var countsPending: Bool
-    /// true = la lectura mezcla cuentas con saldo disponible y cuentas solo contabilizadas: se suma tal cual (sin suma
+    /// true = la lectura mezcla cuentas con saldo disponible y cuentas solo contabilizadas: se suma tal cual (sin sumar
     /// pendientes, que duplicarían las cuentas disponibles) pero nunca es exacta.
     public var forcedEstimate: Bool
     /// Inicio (en Madrid) del día D cuando la lectura es el cierre de un día ya pasado (R49): lo de D y antes ya está
@@ -756,7 +756,7 @@ public struct Ledger: Sendable {
 
     /// Saldo justo después de cada movimiento de `bank` ("Te quedaban"). `movements` va de más nuevo a más antiguo.
     /// Parte de `current` (lo que da `balance`) y resta lo que se suma después de cada fila, con el mismo criterio
-    /// (`rowsAddingToReading`); una fila que la lectura ya incluía y cae justo en su hora también tiene saldo. Lo anterio
+    /// (`rowsAddingToReading`); una fila que la lectura ya incluía y cae justo en su hora también tiene saldo. Lo anterior
     /// a la hora de la lectura se desconoce (se para), sea cual sea la clase de lectura: `current` ya incluye los
     /// pendientes viejos, y a las filas con cifra les resta exactamente lo que `balance` sumó después de ellas. Con un
     /// cierre del día D la hora es el final de D: tienen cifra las filas posteriores a D.
@@ -769,7 +769,7 @@ public struct Ledger: Sendable {
             if m.date < reading.setAt { break }
             let adds = adding.contains(m.id)
             guard adds || (m.date == reading.setAt && isBalanceEligible(m, origin: reading.origin)) else { continue }
-            out[m.id] = current - late
+            out[m.id] = current - later
             later += m.amountCents
         }
         return out

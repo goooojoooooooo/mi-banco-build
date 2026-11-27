@@ -203,7 +203,7 @@ extension Ledger {
     /// Capturados (aviso o Cartera) que el banco debería haber confirmado ya y no lo han hecho. Dos fuentes de cobertura:
     /// - Banco conectado: más de 7 días antes de la última consulta con éxito, y no antes del primer movimiento con clave
     ///   del banco (ahí empieza lo que se ve).
-    /// - Extractos importados (también de un banco sin conexión): los periodos guardados en `statementCoverage`, uno po
+    /// - Extractos importados (también de un banco sin conexión): los periodos guardados en `statementCoverage`, uno por
     ///   importación (R38); un día cuenta solo dentro de uno de ellos, así que el hueco entre dos extractos no está
     ///   cubierto, y el día en que se importó tampoco. Dentro de un periodo, más de 7 días antes de `now`.
     /// Comparación por día de Madrid (las filas de solo día se guardan a mediodía).
@@ -231,7 +231,7 @@ extension Ledger {
         return ids
     }
 
-    /// Fila propia del banco (apuntada, sin enlazar a nada) que es el mismo pago que un capturado que acaba de perde
+    /// Fila propia del banco (apuntada, sin enlazar a nada) que es el mismo pago que un capturado que acaba de perder
     /// su pendiente: mismo banco e importe, con el día del banco entre 1 día antes y 5 días después del capturado.
     /// Gana la de menor distancia en días y luego en tiempo. Solo vale una fila cuya clave viene en el lote que se está
     /// conciliando: un apuntado de otra consulta no es la pareja de este pendiente.

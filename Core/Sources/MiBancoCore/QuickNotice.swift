@@ -229,8 +229,8 @@ private func detectBankFromContent(_ lines: [String]) -> BankID? {
     return nil
 }
 
-/// Frase propia de Revolut («Paid €5.50 at …» / «Paid 5,50 € at …»), compilada una sola vez. Se busca en texto ya plegado.
-private let revolutPaidPattern = #/\bpaid\s+(?:€|eur)\s*\d|\bpaid\s+\d+(?:[.,]\d+)*\s*(?:€|eur)/#
+/// Frase propia de Revolut («Paid €5.50 at …» / «Paid 5,50 € at …»), compilada una sola vez (inmutable: `Regex` no es Sendable). Se busca en texto ya plegado.
+nonisolated(unsafe) private let revolutPaidPattern = #/\bpaid\s+(?:€|eur)\s*\d|\bpaid\s+\d+(?:[.,]\d+)*\s*(?:€|eur)/#
 
 /// Un aviso del que no se puede deducir el banco no se tira: si tiene pinta de movimiento o no se entiende, se guarda
 /// para que el dueño lo vea (sin saldo ni guía de ningún banco). Lo que el lector ignora (códigos, aprobaciones,

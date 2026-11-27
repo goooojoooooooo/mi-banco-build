@@ -36,10 +36,10 @@ extension DemoMode {
         return min(seconds, 60)
     }
 
-    /// `-MiBancoDemoCloseEyeAfter <s>`: a los `s` segundos de arrancar, el ojo se cierra solo (para grabar el cierre
+    /// `-MiBancoDemoCloseEyeOverRoll <s>`: a los `s` segundos de arrancar, el ojo se cierra solo (para grabar el cierre
     /// sobre una cifra que rueda). Como mucho 60 s.
     static var closeEyeAfterSeconds: Double? {
-        guard isActive, let seconds = value(after: "-MiBancoDemoCloseEyeAfter").flatMap(Double.init), seconds.isFinite,
+        guard isActive, let seconds = value(after: "-MiBancoDemoCloseEyeOverRoll").flatMap(Double.init), seconds.isFinite,
               seconds > 0 else { return nil }
         return min(seconds, 60)
     }
@@ -47,6 +47,9 @@ extension DemoMode {
     /// `-MiBancoDemoLockFadeWithoutDelay`: el defecto de antes de la ronda 1 (el bloqueo se funde a la vez que se apagan
     /// sus textos), solo para que la prueba demuestre que lo ve (ronda 2, N-1).
     static var lockFadeWithoutDelay: Bool { isActive && arguments.contains("-MiBancoDemoLockFadeWithoutDelay") }
+
+    /// `-MiBancoDemoHideTabsDuringCurtain`: las pestañas desaparecen 0,2 s a mitad del tapado de la barra (N-9).
+    static var hidesTabsDuringCurtain: Bool { isActive && arguments.contains("-MiBancoDemoHideTabsDuringCurtain") }
 
     /// `-MiBancoDemoNotMineFails`: «No es mío» desde el aviso dentro de la app no se guarda (M-2: el aviso se queda y lo
     /// dice).
@@ -66,6 +69,22 @@ extension DemoMode {
 
     /// `-MiBancoDemoTabSwitch <s>`: a los `s` segundos reales de arrancar, la app cambia sola de Inicio a Gasto (para
     /// grabar la entrada de la pestaña desde ANTES del cambio: un toque de la prueba espera a que la app quede quieta).
+    /// `-MiBancoDemoFlightNoDestination` (lote final p2, ronda 1, I-4): el vuelo de la tarjeta no espera a la cabecera
+    /// (hace como si no apuntara su sitio) y la copia se funde donde está. Solo para ver en rojo la prueba del vuelo.
+    static var flightIgnoresDestination: Bool { isActive && arguments.contains("-MiBancoDemoFlightNoDestination") }
+
+    /// `-MiBancoDemoBankStaysOverTabs` (ronda 1, I-1): vuelve el defecto de antes, el banco encima de Inicio no se
+    /// cierra al cambiar de pestaña. Solo para ver en rojo su prueba.
+    static var bankStaysOverTabs: Bool { isActive && arguments.contains("-MiBancoDemoBankStaysOverTabs") }
+
+    /// `-MiBancoDemoHomeReadableUnderBank` (ronda 1, I-6): vuelve el defecto de antes, Inicio sigue en el árbol de
+    /// accesibilidad con el banco encima. Solo para ver en rojo su prueba.
+    static var homeReadableUnderBank: Bool { isActive && arguments.contains("-MiBancoDemoHomeReadableUnderBank") }
+
+    /// `-MiBancoDemoHeldGroupsStayLocked` (lote final p2, ronda 1): los grupos del detalle a la vista no reciben toques
+    /// (el defecto de la batería 46005608063). Solo para ver en rojo su prueba.
+    static var heldGroupsStayLocked: Bool { isActive && arguments.contains("-MiBancoDemoHeldGroupsStayLocked") }
+
     static var tabSwitchSeconds: Double? {
         guard isActive, let seconds = value(after: "-MiBancoDemoTabSwitch").flatMap(Double.init), seconds.isFinite,
               seconds > 0 else { return nil }
@@ -154,10 +173,18 @@ extension DemoMode {
     /// Lote final: cuándo se tapó y cuándo empezó a destaparse la barra de pestañas en el último montaje (s desde 1970).
     var tabBarCoveredAt: Double?
     var tabBarUncoveredAt: Double?
+    /// C8: cuántas tarjetas han aterrizado en la cabecera de su banco.
+    var cardLandings = 0
+    /// Lote final p2, ronda 1 (I-4): cuántas copias se fundieron donde estaban porque la cabecera no apuntó su sitio.
+    var cardFadesWithoutDestination = 0
+    /// Lote final p2, ronda 1 (m-3): cuántas veces la demo quitó las pestañas con la barra tapada por el velo.
+    var tabsRemovedWhileCovered = 0
+    /// Lote final p2, ronda 1 (m-4): la pestaña marcada ahora («home», «spending», «alerts», «settings»).
+    var currentTab = "home"
     /// Ronda 1: «No es mío» desde el aviso que no se ha podido guardar (M-2) y cuándo se han ido los textos del bloqueo
     /// y empezó su fundido (I-1).
     var notMineFailures = 0
-    /// Ronda 1: cuándo se cerrará solo el ojo (`-MiBancoDemoCloseEyeAfter`).
+    /// Ronda 1: cuándo se cerrará solo el ojo (`-MiBancoDemoCloseEyeOverRoll`).
     var eyeClosesAt: Double?
     /// I-4 (ronda 1): cuándo se cerrará sola la hoja del movimiento (`-MiBancoDemoAutoCloseDetail`).
     var detailCloseAt: Double?
@@ -200,7 +227,9 @@ extension DemoMode {
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
             "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "lineaDibujada=\(drawnLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
-            "llegadas=\(arrivals)", "ojoCierraEn=\(eyeClosesAt.map { String(format: "%.3f", $0) } ?? "-")", "cierreDetalle=\(detailCloseAt.map { String(format: "%.3f", $0) } ?? "-")", "noEsMioFallos=\(notMineFailures)",
+            "llegadas=\(arrivals)", "aterrizajesTarjeta=\(cardLandings)", "vuelosSinDestino=\(cardFadesWithoutDestination)",
+            "pestanasQuitadasTapada=\(tabsRemovedWhileCovered)", "pestana=\(currentTab)",
+            "ojoCierraEn=\(eyeClosesAt.map { String(format: "%.3f", $0) } ?? "-")", "cierreDetalle=\(detailCloseAt.map { String(format: "%.3f", $0) } ?? "-")", "noEsMioFallos=\(notMineFailures)",
             "textosFuera=\(lockTextsGoneAt.map { String(format: "%.3f", $0) } ?? "-")",
             "fundidoBloqueo=\(lockFadeBeganAt.map { String(format: "%.3f", $0) } ?? "-")",
             "barraTapada=\(tabBarCoveredAt.map { String(format: "%.3f", $0) } ?? "-")",

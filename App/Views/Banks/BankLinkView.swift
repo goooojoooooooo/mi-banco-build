@@ -362,11 +362,13 @@ struct BankLinkView: View {
                 importPreview = try? model.previewImport(DemoMode.sampleRevolutStatementData(), bank: .rev)
             }
             #endif
-            // Solo espera a la tarjeta si de verdad se pidió un vuelo hacia ESTE banco y aún no ha aterrizado. El plazo
-            // (0,9 s del kit) garantiza que la cabecera nunca se queda escondida si el vuelo no llega.
+            // Solo espera a la tarjeta si de verdad se pidió un vuelo hacia ESTE banco y aún no ha aterrizado. La
+            // cabecera entra cuando la tarjeta aterriza (`CardFlight.landed`, lo pone `CardFlightLayer`); el plazo es
+            // solo un respaldo para que nunca se quede escondida si el vuelo no llega (línea C, C8: era 0,9 s y
+            // ganaba al aterrizaje; ahora 2 s, más que todo el vuelo).
             if let request = flight?.request, request.bank == bank, flight?.landed != true, !flightTimedOut {
                 awaitsFlight = true
-                let deadline = motion.seconds(0.9)
+                let deadline = motion.seconds(2.0)
                 Task {
                     try? await Task.sleep(for: .seconds(deadline))
                     withAnimation(motion.fade) { flightTimedOut = true }

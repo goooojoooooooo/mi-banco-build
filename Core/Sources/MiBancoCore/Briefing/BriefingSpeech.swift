@@ -170,7 +170,9 @@ public enum AudioOutputKind: Equatable, Sendable {
 /// distinguir de un altavoz). Si sigue saliendo por lo mismo de antes, no se para.
 public func speechStops(_ change: AudioRouteChange, previous: [AudioOutputKind], current: [AudioOutputKind]) -> Bool {
     if change.stopsSpeech { return true }
-    return current.contains { !$0.isPrivate && $0 != .speaker && !previous.contains($0) }
+    // N-12: el altavoz solo se exime si la salida de antes tampoco era privada (de auriculares al altavoz, se para).
+    let wasPrivate = previous.contains(where: \.isPrivate)
+    return current.contains { !$0.isPrivate && !previous.contains($0) && ($0 != .speaker || wasPrivate) }
 }
 
 public func spokenBriefingLines(_ briefing: Briefing, input: BriefingInput, privateMode: Bool, calendar: Calendar) -> SpokenBriefing {

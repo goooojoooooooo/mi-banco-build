@@ -121,14 +121,27 @@ import Testing
         #expect(store.load().isEmpty)
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
         #expect(try Data(contentsOf: fileURL) == corruptBytes)
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            _ = try store.loadThrowing()
+        }
 
         let newMove = sampleMove(amount: 42_000)
-        #expect(throws: Error.self) {
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            try store.add(newMove)
+        }
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            try store.remove(newMove.id)
+        }
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+
+        #expect(throws: PendingMovesStoreError.corrupt) {
             try store.save([newMove])
         }
         #expect(try Data(contentsOf: fileURL) == corruptBytes)
 
-        #expect(throws: Error.self) {
+        #expect(throws: PendingMovesStoreError.corrupt) {
             try store.save([])
         }
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
@@ -160,14 +173,41 @@ import Testing
         let store = PendingMovesStore(directory: dir)
         #expect(store.load().isEmpty)
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(throws: PendingMovesStoreError.unreadable) {
+            _ = try store.loadThrowing()
+        }
 
         let newMove = sampleMove(amount: 15_000)
-        #expect(throws: Error.self) {
+        #expect(throws: PendingMovesStoreError.unreadable) {
+            try store.add(newMove)
+        }
+        #expect(throws: PendingMovesStoreError.unreadable) {
             try store.save([newMove])
         }
-        #expect(throws: Error.self) {
+        #expect(throws: PendingMovesStoreError.unreadable) {
             try store.save([])
         }
         #expect(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    @Test func missingFileDistinguishesFromCorruptAndAllowsAddAndRemove() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = PendingMovesStore(directory: dir)
+        #expect(try store.loadThrowing().isEmpty)
+
+        let first = sampleMove(amount: 12_000)
+        let second = sampleMove(amount: 34_000)
+        try store.add(first)
+        try store.add(second)
+        #expect(try store.loadThrowing() == [second, first])
+
+        try store.remove(second.id)
+        #expect(try store.loadThrowing() == [first])
+
+        try store.remove(first.id)
+        #expect(try store.loadThrowing().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(PendingMovesStore.fileName).path))
     }
 }

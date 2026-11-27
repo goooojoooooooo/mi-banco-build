@@ -20,11 +20,13 @@ public func sanitizeWalletAmount(_ raw: String, maxLength: Int = InputLimits.wal
 }
 
 /// Limpia y acota el nombre de comercio antes de guardarlo en el libro: una sola línea, sin caracteres de control
-/// ni de formato Unicode, espacios colapsados y como mucho `maxLength` caracteres (`nil` si queda vacío).
+/// ni de formato Unicode (salvo `U+200D` para no partir emojis compuestos), espacios colapsados y como mucho
+/// `maxLength` caracteres (`nil` si queda vacío).
 public func sanitizeMerchant(_ raw: String?, maxLength: Int = InputLimits.merchantMaxLength) -> String? {
     guard let raw else { return nil }
     let cleaned = sanitizeSingleLine(raw, maxLength: maxLength)
-    return cleaned.isEmpty ? nil : cleaned
+    guard !cleaned.isEmpty, !cleaned.unicodeScalars.allSatisfy({ $0.value == 0x200D }) else { return nil }
+    return cleaned
 }
 
 /// Sanea todos los campos de un `IngestInput` antes de analizarlos o guardarlos.
@@ -83,7 +85,8 @@ private func sanitizeScalars(_ raw: String, allowNewlines: Bool, maxLength: Int)
             continue
         }
         let category = scalar.properties.generalCategory
-        if category == .control || category == .format {
+        // Conserva U+200D (ZWJ) para no partir emojis compuestos; sigue eliminando controles y demás formato (bidi, BOM, ZWSP) (M-8).
+        if category == .control || (category == .format && scalar.value != 0x200D) {
             continue
         }
         out.append(scalar)

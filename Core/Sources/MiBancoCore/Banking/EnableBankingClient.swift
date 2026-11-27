@@ -159,6 +159,8 @@ public struct EnableBankingClient: Sendable {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
+        } catch let error as URLError where error.code == .dataLengthExceedsMaximum {
+            throw BankingClientError.badResponse
         } catch {
             throw BankingClientError.offline
         }

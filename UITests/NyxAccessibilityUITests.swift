@@ -137,7 +137,7 @@ final class NyxAccessibilityUITests: XCTestCase {
     /// el botón «Escuchar» del foco pasa debajo del título sin recorte horizontal y las acciones de los mensajes
     /// son tocables sin salirse de la pantalla.
     func testTamanoDeLetraDeAccesibilidad() throws {
-        let axArgs = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge"]
+        let axArgs = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
 
         // 1. Puesta al día con foco en AX-XXXL: botón «Escuchar» debajo del título y sin recorte horizontal.
         launch(["-MiBancoDemoBriefing", "busy", "-MiBancoDemoNyx", "daily-focus"] + axArgs)

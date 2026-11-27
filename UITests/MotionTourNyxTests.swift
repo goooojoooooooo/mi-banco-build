@@ -120,7 +120,7 @@ final class MotionTourNyxTests: MotionTourCase {
         app.terminate()
         launch([
             "-MiBancoDemoScreen", "ajustes",
-            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityExtraExtraExtraLarge",
+            "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
         ], scale: 2)
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No cargó Ajustes en AX-XXXL")
         let talkAX = app.buttons["nyx-talk-whenItMatters"]

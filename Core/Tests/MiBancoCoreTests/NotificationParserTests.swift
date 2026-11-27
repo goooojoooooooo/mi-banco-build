@@ -167,6 +167,33 @@ import Testing
         #expect(kind(parse(nil, body)) == .payment, "\(body)")
     }
 
+    // Ronda 3 (N-3): el comercio delante del importe o en su propia línea tampoco da ingreso; «Pago de nómina» sí.
+    @Test(arguments: [
+        "Pago en Payroll Cafe 9,99 €",
+        "Compra en Nómina Express por 12,00 €",
+        "Paid at Salary Bar €9.99",
+        "Compra
+Payroll Cafe
+9,99 €",
+        "Compra con tarjeta
+Salario Bar
+9,99 €",
+    ])
+    func comercioConPalabraDeIngresoEnOtraPosicionSiguiendoSiendoPago(_ body: String) {
+        #expect(kind(parse(nil, body)) == .payment, "\(body)")
+    }
+
+    @Test(arguments: [
+        "Pago de nómina 1.500,00 €",
+        "Nómina ACME 1.500,00 €",
+        "Transferencia recibida 1.500,00 € · Nómina",
+        "Transferencia recibida 1.500,00 € · Nómina ACME",
+        "Transferencia recibida: 1.500,00 € de ACME",
+    ])
+    func ingresosPorNominaOTransferenciaRecibidaSiguenSiendoIngreso(_ body: String) {
+        #expect(kind(parse(nil, body)) == .income, "\(body)")
+    }
+
     // Ronda 1: solo la palabra «pendiente»/«pending» marca el aviso como pendiente.
     @Test func soloLosPendientesLlevanLaMarca() {
         if case .movement(let m) = parse(nil, "Has pagado 12,50 € en Mercadona") { #expect(!m.isPending) } else { Issue.record("movimiento") }

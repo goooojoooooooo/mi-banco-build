@@ -484,3 +484,62 @@ import Testing
         }
     }
 }
+
+// MARK: Avisos rápidos, ronda 3
+
+@Suite struct QuickNoticeRound3Tests {
+    private let t0 = Date(timeIntervalSinceReferenceDate: 1_800_000_000)
+
+    private func notice(_ body: String) -> IngestInput {
+        .notification(bank: .rev, title: nil, subtitle: nil, body: body)
+    }
+
+    private func isStored(_ outcome: IngestOutcome) -> Bool {
+        if case .stored = outcome { return true }
+        return false
+    }
+
+    // R2-1: dos cafés del mismo importe, el primero con tarjeta (pendiente y cargado) y el segundo con Apple Pay en otro
+    // sitio justo después del cargo: son DOS pagos y los dos avisan («Has pagado»).
+    @Test func segundoCafeConCarteraTrasElCargoNoSeAbsorbe() {
+        var ledger = Ledger()
+        ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        #expect(isStored(ledger.ingest(notice("Pago pendiente de 2,50 € en Café Sol"), now: t0)))
+        #expect(ledger.ingest(notice("Has pagado 2,50 € en Café Sol"), now: t0 + 600) == .duplicate)
+        let second = ledger.ingest(.wallet(bank: .rev, amount: "2,50 €", merchant: "Panadería Luna"), now: t0 + 660)
+        #expect(isStored(second))
+        #expect(ledger.state.movements.count == 2)
+        #expect(ledger.balance(.rev)?.cents == 19_000)
+    }
+
+    // La reentrega (regla 3) del texto de un pendiente solo vale en su ventana de 60 s alrededor del cargo.
+    @Test func otroPendienteConElMismoTextoTrasElCargoNoSeTomaPorReentrega() {
+        var ledger = Ledger()
+        ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        let wallet = IngestInput.wallet(bank: .rev, amount: "2,50 €", merchant: "Café Sol")
+        _ = ledger.ingest(wallet, now: t0)
+        _ = ledger.ingest(notice("Pago pendiente de 2,50 € en Café Sol"), now: t0 + 20)
+        #expect(ledger.ingest(notice("Has pagado 2,50 € en Café Sol"), now: t0 + 400) == .duplicate)
+        // Otro café con tarjeta, con el mismo texto de pendiente, 100 s después del cargo: otro pago.
+        #expect(isStored(ledger.ingest(notice("Pago pendiente de 2,50 € en Café Sol"), now: t0 + 500)))
+        #expect(ledger.state.movements.count == 2)
+    }
+
+    // N-2: Cartera absorbe el pendiente aunque su comercio se llame distinto o no traiga ninguno.
+    @Test func carteraConOtroNombreOSinNombreCuentaUnaVez() {
+        for merchant in [Optional("MERCADONA VALENCIA"), nil] {
+            var ledger = Ledger()
+            ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+            _ = ledger.ingest(.wallet(bank: .rev, amount: "12,50 €", merchant: merchant), now: t0)
+            #expect(ledger.ingest(notice("Pago pendiente de 12,50 € en Mercadona"), now: t0 + 20) == .duplicate)
+            #expect(ledger.ingest(notice("Has pagado 12,50 € en Mercadona"), now: t0 + 400) == .duplicate)
+            #expect(ledger.state.movements.count == 1, "\(merchant ?? "sin comercio")")
+            #expect(ledger.balance(.rev)?.cents == 18_750, "\(merchant ?? "sin comercio")")
+        }
+    }
+
+    @Test func movimientoSinCampoDeComercioPendienteNoLoEscribe() throws {
+        let m = Movement(bank: .rev, amountCents: -1250, merchant: "Mercadona", kind: .payment, source: .wallet, date: t0)
+        #expect(!String(decoding: try JSONEncoder().encode(m), as: UTF8.self).contains("pendingMerchantKey"))
+    }
+}

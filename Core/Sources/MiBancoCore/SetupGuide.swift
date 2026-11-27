@@ -26,7 +26,9 @@ public enum GuideNames {
     public static let blankAutomation = "Nueva automatización en blanco"
     public static let addAction = "Añadir acción"
     public static let shortcutInput = "Entrada de atajo"
-    /// Los de nuestras acciones se comprueban en CI contra los intents (`guideNoticeIntentNames`, `guideWalletIntentNames`).
+    /// Los de nuestras acciones se comprueban contra los intents (`guideQuickNoticeIntentNames`, `guideNoticeIntentNames`, `guideWalletIntentNames`).
+    public static let quickNoticeAction = "Pasar aviso a Onyx"
+    public static let notificationField = "Notificación"
     public static let noticeAction = "Registrar aviso"
     public static let walletAction = "Registrar pago con Cartera"
     public static let bankField = "Banco"
@@ -55,13 +57,18 @@ public enum GuideNames {
     public static let unverified: [String] = [
         automationTab, newAutomation, appField, ok, runImmediately, notifyWhenRun, next,
         blankAutomation, addAction, shortcutInput,
-        propertyTitle, propertySubtitle, propertyBody, propertyAmount, propertyMerchant,
+        propertyAmount, propertyMerchant,
     ]
 }
 
 // Los nombres de nuestras acciones y parámetros: CI comprueba que los intents los usan tal cual
 // (`@Parameter(title: "…")` y el título de la acción). El primero de cada lista es la acción; el resto, sus parámetros.
 // Una cadena por línea y el `]` en la primera columna: el script de CI lee estas listas tal cual.
+public let guideQuickNoticeIntentNames: [String] = [
+    "Pasar aviso a Onyx",
+    "Notificación",
+]
+
 public let guideNoticeIntentNames: [String] = [
     "Registrar aviso",
     "Banco",
@@ -77,10 +84,10 @@ public let guideWalletIntentNames: [String] = [
     "Comercio",
 ]
 
-/// Todos los nombres sin repetir, en el orden en que aparecen.
+/// Todos los nombres usados en la guía sin repetir, en el orden en que aparecen.
 public let guideIntentNames: [String] = {
     var seen = Set<String>()
-    return (guideNoticeIntentNames + guideWalletIntentNames).filter { seen.insert($0).inserted }
+    return (guideQuickNoticeIntentNames + guideWalletIntentNames).filter { seen.insert($0).inserted }
 }()
 
 /// Una guía por pantalla de la lista. OJO: `rawValue` es una clave de persistencia (el registro `guideSightings` del libro
@@ -111,7 +118,7 @@ public enum GuideTrack: String, CaseIterable, Sendable {
     public var bank: BankID {
         switch self {
         case .revolut, .walletRevolut: .rev
-        case .tradeRepublic, .walletTradeRepublic: .tr
+        case .tradeRepublic, .walletTradeRepublic: .t
         case .walletImagin: .ima
         }
     }
@@ -131,6 +138,7 @@ public enum GuideIllustration: String, Sendable {
     case blankAutomation
     case addActionButton, addActionSearch, addActionType, addAction
     case bankPicker, bankChoice, variablePicker, done
+    case quickTrigger, quickRun, quickAction, quickNoticeInput, quickDone
 }
 
 /// Qué hay que hacer en la pantalla: tocar algo, escribir en el buscador o tocar el buscador.
@@ -148,7 +156,7 @@ public let guideHelpTail = "Si tu pantalla se ve distinta, toca la opción con e
 
 /// Qué guía hacer, en líneas cortas (encima de la lista).
 public let guideListAdvice: [String] = [
-    "Revolut y Trade Republic: haz la guía que lleva su nombre. La de Apple Pay es opcional, por si un aviso no llega.",
+    "Revolut y Trade Republic: 6 pasos en 1 minuto. Un solo atajo vale para los dos; Apple Pay es opcional, por si un aviso no llega.",
     "imagin: solo funciona con la guía de Apple Pay.",
 ]
 
@@ -235,8 +243,66 @@ public func guideResumeLine(index: Int, total: Int) -> String {
 
 private typealias N = GuideNames
 
-/// Una sola acción por pantalla: cada instrucción pide un solo toque (o escribir), nombrado entre «».
+/// Pasos de la guía: 6 pasos rápidos para notificaciones de Revolut y Trade Republic (con «Pasar aviso a Onyx»),
+/// y 20 pasos de un toque por pantalla para Apple Pay (imagin obligatorio; Revolut y Trade Republic opcionales).
 public func guideSteps(for track: GuideTrack) -> [GuideStep] {
+    if !track.isApplePay {
+        return quickBankGuideSteps(for: track)
+    }
+    return applePayGuideSteps(for: track)
+}
+
+private func quickBankGuideSteps(for track: GuideTrack) -> [GuideStep] {
+    var out: [GuideStep] = []
+    func add(_ part: Int, _ title: String, _ instruction: String, _ tap: String, _ place: String,
+             _ picture: GuideIllustration, _ help: String, gesture: GuideGesture = .tap, focus: String = "") {
+        out.append(GuideStep(id: "\(track.rawValue)-\(out.count + 1)", title: title, instruction: instruction,
+                             tapTarget: tap, place: place, illustration: picture, help: "\(help) \(guideHelpTail)",
+                             part: part, gesture: gesture, focus: focus))
+    }
+
+    let bank = track.bankName
+    let otherBank = track == .revolut ? BankID.tr.displayName : BankID.rev.displayName
+
+    // 1. Crear la automatización (pasos 1 y 2)
+    add(1, "Crea una automatización",
+        "Abre «\(N.shortcutsApp)», ve a «\(N.automationTab)», toca «\(N.plus)» y elige «\(N.notificationTrigger)».",
+        N.notificationTrigger, "en la lista de disparadores de \(N.shortcutsApp)", .quickTrigger,
+        "Usa el botón «Abrir \(N.shortcutsApp)» de abajo. Si no tienes \(N.shortcutsApp), descárgala gratis del App Store: es de Apple. Si nunca has creado ninguna automatización, el botón dice «\(N.newAutomation)».")
+    add(1, "Elige \(bank)",
+        "Toca «\(N.appField)», elige «\(bank)» en la lista y confirma con «\(N.ok)».",
+        bank, "en la lista de aplicaciones", .appPicker,
+        "Si «\(bank)» no sale, abre la app de \(bank) una vez y vuelve a \(N.shortcutsApp). Deja los demás filtros en blanco para no perder ningún pago.")
+
+    // 2. Que funcione sola (paso 3)
+    add(2, "Que vaya sola",
+        "Marca «\(N.runImmediately)», apaga «\(N.notifyWhenRun)» si sale y toca «\(N.next)».",
+        N.runImmediately, "en el centro de la pantalla", .quickRun,
+        "Así funciona sola sin preguntarte ni enseñarte un aviso de \(N.shortcutsApp) cada vez. Si «\(N.notifyWhenRun)» no aparece o ya está gris, sigue sin tocarlo.")
+
+    // 3. Añadir la acción (paso 4)
+    add(3, "Elige «\(N.quickNoticeAction)»",
+        "Toca «\(N.blankAutomation)», busca «\(guideAppName)» y toca «\(N.quickNoticeAction)».",
+        N.quickNoticeAction, "en la lista de acciones de \(guideAppName)", .quickAction,
+        "Si ves sugerencias antes del buscador, toca primero «\(N.blankAutomation)» y luego «\(N.addAction)». Si no aparece «\(N.quickNoticeAction)», comprueba que has escrito «\(guideAppName)» sin errores.")
+
+    // 4. Rellenar los datos (pasos 5 y 6)
+    add(4, "Pasa «\(N.notificationField)»",
+        "Toca «\(N.notificationField)» y elige la ficha «\(N.notificationVariable)» que sale abajo: \(guideAppName) detecta el banco solo.",
+        N.notificationVariable, "en la barra que se abre debajo del campo", .quickNoticeInput,
+        "Solo hay que rellenar este campo. Si en vez de «\(N.notificationVariable)» ves «\(N.shortcutInput)», tócala: lleva el aviso entero.",
+        focus: N.notificationField)
+    add(4, "Guarda y suma \(otherBank)",
+        "Toca «\(N.ok)» arriba a la derecha. Para saber si funciona, mira la lista de guías después del próximo aviso de \(bank). Si usas \(otherBank), súmalo al mismo atajo.",
+        N.ok, "arriba a la derecha", .quickDone,
+        "En iOS 27 puedes apilar el aviso de \(otherBank) en este mismo atajo para tener los dos en 1 minuto. Si tu versión no te deja apilarlos, repite estos pasos eligiendo «\(otherBank)».")
+
+    return out
+}
+
+/// Una sola acción por pantalla para las guías de Apple Pay (Cartera): cada instrucción pide un solo toque (o escribir),
+/// nombrado entre «».
+private func applePayGuideSteps(for track: GuideTrack) -> [GuideStep] {
     var out: [GuideStep] = []
     var part = 1
     func add(_ title: String, _ instruction: String, _ tap: String, _ place: String, _ picture: GuideIllustration,
@@ -247,7 +313,7 @@ public func guideSteps(for track: GuideTrack) -> [GuideStep] {
     }
 
     let bank = track.bankName
-    let trigger = track.isApplePay ? N.transactionTrigger : N.notificationTrigger
+    let trigger = N.transactionTrigge
     let center = "en el centro de la pantalla"
     let list = "en la lista"
     let results = "en la lista de resultados"
@@ -263,21 +329,11 @@ public func guideSteps(for track: GuideTrack) -> [GuideStep] {
         "Si nunca has creado ninguna, el botón dice «\(N.newAutomation)».")
     add("Busca «\(trigger)»", "Escribe «\(trigger)» en el buscador.", trigger, "arriba", .triggerType,
         "El buscador está arriba, con una lupa. Escribe solo esa palabra.", gesture: .type)
-    add("Elige «\(trigger)»",
-        track.isApplePay ? "Toca «\(trigger)» en la lista (es la de \(N.walletApp))." : "Toca «\(trigger)» en la lista.",
-        trigger, results, .triggerSearch,
-        track.isApplePay ? "Tiene el icono de \(N.walletApp)." : "Si no aparece, comprueba que has escrito «\(trigger)» sin errores.")
-    if track.isApplePay {
-        add("Tu tarjeta de \(bank)", "Marca la tarjeta de «\(bank)».", bank, "en la lista de tarjetas", .walletCards,
-            "La reconocerás por el nombre o por los últimos números. Si tienes dos tarjetas de «\(bank)», marca las dos. Si alguna otra aparece marcada, tócala para quitarle la marca. Si no tienes tarjeta de «\(bank)» en \(N.walletApp), sáltate esta guía.")
-        add("Sigue", "Toca «\(N.next)».", N.next, "abajo", .walletNext, "Si no está abajo, mira arriba a la derecha.")
-    } else {
-        add("Elige la app", "Toca «\(N.appField)».", N.appField, center, .appField, "Si no la ves, desliza la pantalla hacia arriba con el dedo.")
-        add("Elige \(bank)", "Toca «\(bank)» en la lista.", bank, list, .appPicker,
-            "Si «\(bank)» no sale, abre la app de \(bank) una vez y vuelve a \(N.shortcutsApp).")
-        add("Confirma", "Toca «\(N.ok)» arriba a la derecha.", N.ok, "arriba a la derecha", .appOK,
-            "Está arriba a la derecha, junto al título.")
-    }
+    add("Elige «\(trigger)»", "Toca «\(trigger)» en la lista (es la de \(N.walletApp)).",
+        trigger, results, .triggerSearch, "Tiene el icono de \(N.walletApp).")
+    add("Tu tarjeta de \(bank)", "Marca la tarjeta de «\(bank)».", bank, "en la lista de tarjetas", .walletCards,
+        "La reconocerás por el nombre o por los últimos números. Si tienes dos tarjetas de «\(bank)», marca las dos. Si alguna otra aparece marcada, tócala para quitarle la marca. Si no tienes tarjeta de «\(bank)» en \(N.walletApp), sáltate esta guía.")
+    add("Sigue", "Toca «\(N.next)».", N.next, "abajo", .walletNext, "Si no está abajo, mira arriba a la derecha.")
 
     // 2. Que funcione sola
     part = 2
@@ -290,7 +346,7 @@ public func guideSteps(for track: GuideTrack) -> [GuideStep] {
 
     // 3. Añadir la acción
     part = 3
-    let action = track.isApplePay ? N.walletAction : N.noticeAction
+    let action = N.walletAction
     let typeHelp = "Si no aparece nada, comprueba que lo has escrito sin errores."
     let addHelp = "Si no aparece, borra lo que has escrito y escríbelo otra vez."
     add("Empieza en blanco", "Toca «\(N.blankAutomation)».", N.blankAutomation, center, .blankAutomation,
@@ -307,19 +363,15 @@ public func guideSteps(for track: GuideTrack) -> [GuideStep] {
     part = 4
     add("Elige el banco", "Toca «\(N.bankField)».", N.bankField, "en la tarjeta de la acción", .bankPicker, nothingToType)
     if track == .walletImagin {
-        add("Elige \(bank)",
-            "Toca «\(bank)» en la lista.", bank, list,
-            .bankChoice, nothingToType)
-    } else if track.isApplePay {
+        add("Elige \(bank)", "Toca «\(bank)» en la lista.", bank, list, .bankChoice, nothingToType)
+    } else {
         add("Elige \(bank)", "Toca «\(bank)» en la lista: esta automatización es solo de sus tarjetas.", bank, list,
             .bankChoice, nothingToType)
-    } else {
-        add("Elige \(bank)", "Toca «\(bank)» en la lista.", bank, list, .bankChoice, nothingToType)
     }
 
-    // Cada campo se rellena eligiendo de qué parte del aviso (o del pago) sale. Nombres SIN VERIFICAR en iOS 27.
-    let chip = track.isApplePay ? N.transactionVariable : N.notificationVariable
-    let intro = track.isApplePay ? "Aquí eliges de qué parte del pago sale cada dato. " : "Aquí eliges de qué parte del aviso sale cada dato. "
+    // Cada campo se rellena eligiendo de qué parte del pago sale. Nombres SIN VERIFICAR en iOS 27.
+    let chip = N.transactionVariable
+    let intro = "Aquí eliges de qué parte del pago sale cada dato. "
     var first = true
     func field(_ name: String) {
         add("Rellena «\(name)»",
@@ -328,20 +380,11 @@ public func guideSteps(for track: GuideTrack) -> [GuideStep] {
             "Si solo ves «\(N.shortcutInput)», tócala y busca «\(name)» dentro.", focus: name)
         first = false
     }
-    if track.isApplePay {
-        field(N.amountField)
-        field(N.merchantField)
-        add("Listo",
-            "Toca «\(N.ok)» arriba a la derecha. Para saber si funciona, mira la lista de guías después de tu próximo pago con Apple Pay de \(bank).",
-            N.ok, "arriba a la derecha", .done, "Para otro banco, repite su guía de Apple Pay.")
-    } else {
-        field(N.titleField)
-        field(N.subtitleField)
-        field(N.bodyField)
-        add("Listo",
-            "Toca «\(N.ok)» arriba a la derecha. Para saber si funciona, mira la lista de guías después del próximo aviso de \(bank).",
-            N.ok, "arriba a la derecha", .done, "Está arriba a la derecha, junto al título.")
-    }
+    field(N.amountField)
+    field(N.merchantField)
+    add("Listo",
+        "Toca «\(N.ok)» arriba a la derecha. Para saber si funciona, mira la lista de guías después de tu próximo pago con Apple Pay de \(bank).",
+        N.ok, "arriba a la derecha", .done, "Para otro banco, repite su guía de Apple Pay.")
     return out
 }
 

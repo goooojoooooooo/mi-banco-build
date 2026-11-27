@@ -39,10 +39,24 @@ private func fold(_ s: String) -> String {
     s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
 }
 
-/// Palabras enteras que indican que el aviso no es un movimiento hecho (código, 3-D Secure, aprobación, pendiente).
+/// Palabras enteras que indican que el aviso no es un movimiento hecho (código/OTP, 3-D Secure, aprobación, fallo).
+/// «pendiente»/«pending» NO están aquí: un pago pendiente con importe se registra como movimiento normal; solo se
+/// ignoran las solicitudes de aprobación/confirmación pendientes o los avisos pendientes sin importe.
 private let ignoredWords: Set<Substring> = [
-    "code", "codigo", "confirma", "aprueba", "autoriza", "approve", "confirm", "pendiente", "pending",
+    "code", "codigo", "otp",
+    "confirma", "confirmar", "aprueba", "aprobar", "autoriza", "autorizar",
+    "approve", "confirm", "failed",
 ]
+
+/// Frases de aprobación o verificación pendiente (no son un pago realizado).
+private let ignoredPhrases = [
+    "pendiente de aprob", "pendiente de confirm", "pendiente de autoriz", "pendiente de verific",
+    "pending approval", "pending confirmation", "pending authorization", "pending verification",
+    "awaiting approval", "awaiting confirmation", "awaiting authorization",
+]
+
+/// Raíces de rechazo, fallo, fondos insuficientes o autorización caducada.
+private let ignoredStems = ["rechaz", "deneg", "declin", "fallid", "insuficien", "insufficient", "caducad", "expirad", "expired"]
 
 /// Palabras enteras de un envío a otra persona en el cuerpo de un aviso: las de `personPaymentWords` más las que en un
 /// aviso hablan de la operación («envío realizado», «enviaste», «sent»). También vale cualquier palabra que empiece
@@ -55,7 +69,22 @@ private let incomeStems = [
     "has recibido", "recibido", "recibiste", "received", "te han enviado", "te ha enviado", "bizum de",
     "ingreso", "reembolso", "devoluci", "devuelto", "refund", "abono de",
 ]
-private let genericPaymentStems = ["pagado", "pago en", "paid", "compra", "cargo", "retirada", "retirado", "spent", "payment"]
+private let genericPaymentStems = [
+    "pagado", "pagaste", "pago en", "pago pendiente", "pago de ", "autorizacion pendiente",
+    "paid", "compra", "cargo", "retirada", "retirado", "spent", "payment",
+]
+
+/// Prefijos que anuncian una línea de saldo disponible (se comparan tras quitar emojis/símbolos iniciales).
+private let balancePrefixes = [
+    "saldo disponible", "saldo", "balance disponible", "balance",
+    "disponible", "available balance", "available", "remaining balance", "te quedan",
+]
+
+/// Quita emojis, símbolos, puntuación y espacios iniciales de una línea plegada para reconocer prefijos de saldo
+/// aunque lleven un icono delante (p. ej. «💰 Available balance: €120.40» o «💳 Saldo disponible: 120,40 €»).
+private func strippingLeadingNonAlphanumerics(_ s: String) -> Substring {
+    s.drop(while: { !$0.isLetter && !$0.isNumber })
+}
 
 /// Signo según el texto (ya plegado), o nil si no dice nada.
 private func sign(of text: String) -> MovementKind? {
@@ -89,7 +118,8 @@ public func parseNotification(bank: BankID, title: String?, subtitle: String?, b
     let everything = folded.joined(separator: "\n")
     // Palabras enteras: "Barcode" no es un código y "confirmado" no es una petición de confirmar.
     let words = everything.split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-    if ["rechaz", "deneg", "declin"].contains(where: { everything.contains($0) })
+    if ignoredStems.contains(where: { everything.contains($0) })
+        || ignoredPhrases.contains(where: { everything.contains($0) })
         || words.contains(where: { ignoredWords.contains($0) }) { return .ignore }
 
     var payment: (index: Int, line: String, cents: Int, range: Range<String.Index>)?
@@ -98,7 +128,8 @@ public func parseNotification(bank: BankID, title: String?, subtitle: String?, b
     var signCandidates: [Int] = []
     for (index, (line, f)) in zip(lines, folded).enumerated() {
         if f.contains("gastado hoy") || f.contains("spent today") { continue }
-        if ["saldo", "balance", "disponible", "available", "te quedan"].contains(where: { f.hasPrefix($0) }) {
+        let balanceHead = strippingLeadingNonAlphanumerics(f)
+        if balancePrefixes.contains(where: { balanceHead.hasPrefix($0) }) {
             if balance == nil, !containsForeignAmount(line) { balance = firstAmount(in: line)?.cents }
             continue
         }

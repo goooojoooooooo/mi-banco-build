@@ -261,6 +261,57 @@ private struct MockActionCard: View {
     }
 }
 
+/// Tarjeta de la acción rápida «Pasar aviso a Onyx» con su único campo «Notificación».
+private struct MockQuickActionCard: View {
+    var filled = false
+    var tray: String?
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                AppMark(size: 18)
+                Text(GuideNames.quickNoticeAction)
+                    .font(Mock.text).foregroundStyle(Theme.label).lineLimit(1).minimumScaleFactor(0.6)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 6) {
+                Text(GuideNames.notificationField).font(Mock.text).foregroundStyle(Theme.label2)
+                Spacer(minLength: 0)
+                if filled {
+                    Text(GuideNames.notificationVariable)
+                        .font(Mock.small).foregroundStyle(Theme.label)
+                        .padding(.horizontal, 6).frame(height: 18)
+                        .background(Mock.bar, in: Capsule())
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                } else {
+                    Capsule().fill(Mock.bar).frame(width: 44, height: 6)
+                }
+            }
+            .padding(.horizontal, 8)
+            .frame(height: 30)
+            .background(Mock.screen, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .pulse(!filled && tray == nil, radius: 9)
+
+            if let tray {
+                HStack(spacing: 6) {
+                    Text(tray)
+                        .font(Mock.small).foregroundStyle(Theme.label)
+                        .padding(.horizontal, 8).frame(height: 22)
+                        .background(Mock.bar, in: Capsule())
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                        .pulse(true, radius: 11)
+                    Capsule().fill(Mock.bar).frame(width: 44, height: 22)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            }
+        }
+        .padding(8)
+        .background(Mock.row, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
 private struct MockButton: View {
     let text: String
     var highlighted = false
@@ -520,6 +571,52 @@ struct GuideIllustrationView: View {
             VStack(spacing: 8) {
                 MockNavBar(title: GuideNames.newAutomation, trailing: GuideNames.ok, trailingHighlighted: true)
                 MockActionCard(track: track, highlight: "", allFilled: true)
+                Spacer(minLength: 0)
+            }
+        case .quickTrigger:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation, trailing: GuideNames.plus)
+                MockRow(text: GuideNames.notificationTrigger, symbol: "bell.badge", highlighted: true)
+                MockRow()
+                MockRow()
+                Spacer(minLength: 0)
+                MockTabBar(highlighted: 1)
+            }
+        case .quickRun:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation)
+                MockRow(text: GuideNames.runImmediately, checked: true, highlighted: true)
+                MockToggleRow(text: GuideNames.notifyWhenRun, isOn: false)
+                Spacer(minLength: 0)
+                MockButton(text: GuideNames.next)
+            }
+        case .quickAction:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.addAction)
+                MockRow(text: guideAppName, symbol: "magnifyingglass")
+                HStack(spacing: 6) {
+                    AppMark(size: 18)
+                    Text(guideAppName).font(Mock.small).foregroundStyle(Theme.label2)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+                MockRow(text: GuideNames.quickNoticeAction, symbol: "bolt.fill", highlighted: true)
+                Spacer(minLength: 0)
+            }
+        case .quickNoticeInput:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation)
+                MockQuickActionCard(filled: false, tray: target)
+                Spacer(minLength: 0)
+            }
+        case .quickDone:
+            VStack(spacing: 8) {
+                MockNavBar(title: GuideNames.newAutomation, trailing: GuideNames.ok, trailingHighlighted: true)
+                MockQuickActionCard(filled: true)
+                VStack(spacing: 5) {
+                    MockRow(text: BankID.rev.displayName, symbol: "bell.badge", checked: true)
+                    MockRow(text: BankID.tr.displayName, symbol: "bell.badge", checked: true)
+                }
                 Spacer(minLength: 0)
             }
         }

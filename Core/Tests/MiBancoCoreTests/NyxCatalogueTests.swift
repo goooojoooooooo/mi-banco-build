@@ -169,9 +169,11 @@ private func everySituationFixture() -> [NyxObservation] {
             let open = render(m.open, .plain)
             for text in [open, m.closed, m.neutral] {
                 #expect(!text.contains("te cobran "), "\(diff): \(text)")
-                #expect(!text.contains("se queda"), "\(diff): \(text)")
+                #expect(!text.contains("se queda") && !text.contains("se quedó"), "\(diff): \(text)")
+                #expect(text.contains("no cabía"), "\(diff): \(text)")
                 #expect(text.contains("te cobraron") || text.contains("tuviste"), "\(diff): \(text)")
             }
+            #expect(m.title == "Un cobro que no cabía" && m.closedTitle == "Un cobro que no cabía", "\(diff): \(m.title)")
             // Con el ojo abierto no hay oferta de traspaso calculada con un saldo viejo.
             #expect(!open.contains("traspaso") && !open.contains("pásale") && !open.contains("tienes"), "\(diff): \(open)")
             #expect(!m.actions.contains(where: isTransfer), "\(diff)")
@@ -181,6 +183,7 @@ private func everySituationFixture() -> [NyxObservation] {
         var future = base
         future.day = nov(28)
         let fm = msg(.shortfall, future, now: nov(26, 12))
+        #expect(fm.title == "Un cobro que no cabe")
         #expect(render(fm.open, .plain).contains("te cobran") && render(fm.open, .plain).contains("traspaso"))
         #expect(fm.actions.contains(where: isTransfer))
     }
@@ -193,6 +196,8 @@ private func everySituationFixture() -> [NyxObservation] {
             let m = msg(.shortfall, f, now: nov(26, 12))
             let notif = nyxNotificationText(m, hidden: true)
             #expect(!notif.body.contains { $0.isNumber } && !notif.body.contains("te cobran "), "\(day): \(notif.body)")
+            #expect(!notif.title.contains { $0.isNumber } && notif.title == "Un cobro que no cabía", "\(day): \(notif.title)")
+            #expect(notif.body.contains("no cabía") && !notif.body.contains("se quedó"), "\(day): \(notif.body)")
             #expect(notif.body != "Tengo algo que contarte.")
         }
     }

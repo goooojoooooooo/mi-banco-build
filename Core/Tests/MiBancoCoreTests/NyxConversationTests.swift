@@ -170,6 +170,12 @@ private func follow(_ q: String, _ prev: AssistantIntent) -> AssistantIntent? {
         let money1 = nyxRouteQuestion("¿Cuántos pagos tengo este mes?", conversation: conv, state: s, portfolio: nil,
                                       now: nov(26), calendar: cal)
         #expect(money1 != .appStatus && money1 != .seen)
+        for question in ["¿Has visto los pagos de este mes?", "¿Has visto los pagos de Netflix?",
+                         "¿Has visto si tengo pagos pendientes?", "¿Me he perdido algún pago de Revolut?",
+                         "¿Qué pagos hay en las cuentas conectadas?"] {
+            let routed = nyxRouteQuestion(question, conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal)
+            #expect(routed != .appStatus && routed != .seen, "\(question) -> \(routed)")
+        }
         let money2 = nyxRouteQuestion("¿Has visto cuánto llevo pagado?", conversation: conv, state: s, portfolio: nil,
                                       now: nov(26), calendar: cal)
         #expect(money2 != .appStatus && money2 != .seen)

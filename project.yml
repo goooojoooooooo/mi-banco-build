@@ -19,8 +19,11 @@ targets:
         excludes:
           - Info.plist
           - "*.entitlements"
+          - PrivacyInfo.xcprivacy
           - Resources/Logos
           - Resources/Logos/**
+      - path: App/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - Shared/MovementActivityAttributes.swift
       # Logos de comercios y bancos (tools/fetch_logos.py): carpeta "Logos" dentro del paquete.
       - path: App/Resources/Logos
@@ -82,6 +85,9 @@ targets:
         excludes:
           - Info.plist
           - "*.entitlements"
+          - PrivacyInfo.xcprivacy
+      - path: NotificationExt/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - App/Theme.swift
       - App/Logos/BundledLogos.swift
       - path: App/Resources/Logos
@@ -124,6 +130,9 @@ targets:
         excludes:
           - Info.plist
           - "*.entitlements"
+          - PrivacyInfo.xcprivacy
+      - path: Widgets/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - Shared/MovementActivityAttributes.swift
       - App/Theme.swift
       - App/Logos/BundledLogos.swift

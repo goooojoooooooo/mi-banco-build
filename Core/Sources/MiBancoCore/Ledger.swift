@@ -500,7 +500,8 @@ public struct Ledger: Sendable {
         body(&state.alertSettings)
     }
 
-    public mutating func ingest(_ input: IngestInput, now: Date) -> IngestOutcome {
+    public mutating func ingest(_ rawInput: IngestInput, now: Date) -> IngestOutcome {
+        let input = sanitizeIngestInput(rawInput)
         state.recordGuideSighting(for: input, now: now)
         let bank: BankID
         let parsed: ParsedMovement
@@ -515,7 +516,13 @@ public struct Ledger: Sendable {
             case .unreadable:
                 return storeUnread(bank: b, text: [title, subtitle, body].compactMap { $0 }.joined(separator: "\n"), now: now)
             case .movement(let m):
-                parsed = m
+                parsed = ParsedMovement(
+                    kind: m.kind,
+                    amountCents: m.amountCents,
+                    merchant: sanitizeMerchant(m.merchant),
+                    reportedBalanceCents: m.reportedBalanceCents,
+                    merchantIsShop: m.merchantIsShop
+                )
             }
         case let .wallet(b, amount, merchant):
             bank = b
@@ -523,8 +530,9 @@ public struct Ledger: Sendable {
             guard let cents = parseAmountToCents(Substring(amount)) else {
                 return storeUnread(bank: b, text: amount, now: now)
             }
+            let cleanMerchant = sanitizeMerchant(merchant)
             // Apple Pay con comercio: siempre una compra en una tienda.
-            parsed = ParsedMovement(kind: .payment, amountCents: cents, merchant: merchant, merchantIsShop: !(merchant ?? "").isEmpty)
+            parsed = ParsedMovement(kind: .payment, amountCents: cents, merchant: cleanMerchant, merchantIsShop: cleanMerchant != nil)
         }
 
         let signed = parsed.kind == .payment ? -parsed.amountCents : parsed.amountCents
@@ -597,18 +605,19 @@ public struct Ledger: Sendable {
     /// comercio antiguo tenía una categoría «para todo el comercio» y la nueva no tiene ninguna, la categoría pasa al propio
     /// movimiento para no perderla con el cambio de clave.
     mutating func setMerchantKeepingCategory(_ merchant: String?, at i: Int) {
+        let clean = sanitizeMerchant(merchant)
         let oldKey = normalizeMerchant(state.movements[i].merchant ?? "")
-        let newKey = normalizeMerchant(merchant ?? "")
+        let newKey = normalizeMerchant(clean ?? "")
         if oldKey != newKey, !oldKey.isEmpty, state.movements[i].category == nil,
            let inherited = state.categoryOverrides[oldKey], state.categoryOverrides[newKey] == nil {
             state.movements[i].category = inherited
         }
-        state.movements[i].merchant = merchant
+        state.movements[i].merchant = clean
     }
 
     /// Un aviso sin leer idéntico dentro de la ventana de reentrega no se guarda dos veces.
     private mutating func storeUnread(bank: BankID, text raw: String, now: Date) -> IngestOutcome {
-        let text = String(raw.prefix(Self.unreadTextLimit))
+        let text = sanitizeNoticeField(raw, maxLength: Self.unreadTextLimit) ?? ""
         let repeated = state.unread.contains {
             $0.bank == bank && $0.text == text && abs($0.date.timeIntervalSince(now)) <= Self.redeliveryWindow
         }

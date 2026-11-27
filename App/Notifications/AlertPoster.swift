@@ -3,7 +3,7 @@ import UserNotifications
 import MiBancoCore
 
 enum AlertPoster {
-    static let category = "MOVEMENT"
+    static let category = AlertCategoryID.movement
 
     /// Una vez al arrancar: permiso y categoría (sin acciones) para la vista expandida.
     static func setup() async {
@@ -23,7 +23,7 @@ enum AlertPoster {
     /// `merchantMonth`: compras y gasto de este mes en ese comercio (con este pago). `todaySpentCents`: gastado hoy.
     static func post(movement m: Movement, balance: Int?, estimated: Bool, balances: [String: Int], previousBalance: Int?,
                      merchantMonth: MerchantHistory? = nil, todaySpentCents: Int? = nil) async {
-        // Ojo cerrado al componerlo: ni importe ni saldo en el texto plegado (decisión del dueño).
+        // Ojo cerrado al componerlo: ni importe ni saldo en el texto plegado ni en `userInfo` (SEC-06).
         let hidden = eyeClosed
         let text = alertText(for: m, balance: balance, estimated: estimated, hidden: hidden)
         let content = UNMutableNotificationContent()
@@ -33,23 +33,38 @@ enum AlertPoster {
         content.categoryIdentifier = category
         content.threadIdentifier = m.bank.rawValue
         content.interruptionLevel = .active
-        var info: [String: Any] = ["bank": m.bank.rawValue, "amountCents": m.amountCents, "balances": balances, "isShop": m.isShop]
-        if let merchant = m.merchant { info["merchant"] = merchant }
-        if let previousBalance { info["previousBalance"] = previousBalance }
-        // Claves añadidas en Titanio (las anteriores no cambian): la vista ampliada y el toque en el aviso.
-        info[AlertRoute.Keys.route] = AlertRoute.Keys.movementRoute
-        info[AlertRoute.Keys.movementID] = m.id.uuidString
-        info["estimated"] = estimated
-        if let merchantMonth, merchantMonth.countThisMonth > 0 {
-            info["monthCount"] = merchantMonth.countThisMonth
-            info["monthCents"] = merchantMonth.totalThisMonthCents
-        }
-        if let todaySpentCents { info["todaySpent"] = todaySpentCents }
-        // I-2 (N1): el ojo de la app en el momento del aviso (clave nueva; las de arriba no cambian). La vista ampliada
-        // dibuja máscaras si esto o la suite compartida dicen ojo cerrado.
-        info[SharedPrivacy.key] = hidden
-        content.userInfo = info
+        content.userInfo = movementNotificationUserInfo(
+            movement: m,
+            balances: balances,
+            previousBalance: previousBalance,
+            estimated: estimated,
+            merchantMonth: merchantMonth,
+            todaySpentCents: todaySpentCents,
+            hidden: hidden,
+            routeKey: AlertRoute.Keys.route,
+            routeValue: AlertRoute.Keys.movementRoute,
+            movementIDKey: AlertRoute.Keys.movementID
+        )
         await add(content, id: m.id.uuidString)
+    }
+
+    /// Retira del Centro de Notificaciones los avisos ya entregados que pueden llevar cifras (`MOVEMENT` e `INSIGHT`),
+    /// dejando intactos los demás (`BRIEFING`, `BANK_CONSENT`, avisos sin leer).
+    static func removeDeliveredSensitiveNotifications() async {
+        let center = UNUserNotificationCenter.current()
+        let delivered = await center.deliveredNotifications()
+        let descriptors = delivered.map {
+            DeliveredAlertDescriptor(
+                identifier: $0.request.identifier,
+                categoryIdentifier: $0.request.content.categoryIdentifier
+            )
+        }
+        let ids = deliveredAlertIdentifiersToRemoveForPrivacy(
+            descriptors,
+            sensitiveCategories: [AlertPoster.category, InsightNotifier.category]
+        )
+        guard !ids.isEmpty else { return }
+        center.removeDeliveredNotifications(withIdentifiers: ids)
     }
 
     /// El ojo de la app ahora mismo (la fuente de verdad: el almacén de `AppPreferences`), para componer avisos.

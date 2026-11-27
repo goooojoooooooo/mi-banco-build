@@ -9,17 +9,27 @@ private extension MovementActivityAttributes.ContentState {
     var isIncome: Bool { kind == MovementKind.income.rawValue }
     /// I-2: el ojo de la app estaba cerrado (un estado viejo sin el campo: abierto).
     var isHidden: Bool { hidden ?? false }
+    var isNegativeAmount: Bool { lastAmountCents.map { $0 < 0 } ?? !isIncome }
+    var isPositiveAmount: Bool { lastAmountCents.map { $0 > 0 } ?? isIncome }
+    var showsBalance: Bool { balanceCents != nil || (hasBalance ?? false) }
     var signedAmount: String {
-        if isHidden { return AmountMask.text(negative: lastAmountCents < 0, showsPlus: lastAmountCents > 0) }
-        return (lastAmountCents < 0 ? "−" : "+") + formatEUR(abs(lastAmountCents))
+        guard !isHidden, let cents = lastAmountCents else {
+            return AmountMask.text(negative: isNegativeAmount, showsPlus: isPositiveAmount)
+        }
+        return (cents < 0 ? "−" : "+") + formatEUR(abs(cents))
     }
-    /// Con el ojo cerrado la cifra no rueda (no hay cifra): sin transición numérica.
-    var amountTransition: ContentTransition { isHidden ? .identity : .numericText(value: Double(lastAmountCents)) }
+    /// Con el ojo cerrado (o sin cifra en el estado) la cifra no rueda: sin transición numérica.
+    var amountTransition: ContentTransition {
+        guard !isHidden, let cents = lastAmountCents else { return .identity }
+        return .numericText(value: Double(cents))
+    }
     /// Para la Dynamic Island compacta (55-65 pt): sin "€" y, desde 100 €, sin céntimos ("−12,50", "+1.450").
     var compactAmount: String {
-        if isHidden { return (lastAmountCents < 0 ? "−" : "+") + "•••" }
-        let sign = lastAmountCents < 0 ? "−" : "+"
-        let magnitude = abs(lastAmountCents)
+        guard !isHidden, let cents = lastAmountCents else {
+            return (isNegativeAmount ? "−" : "+") + "•••"
+        }
+        let sign = cents < 0 ? "−" : "+"
+        let magnitude = abs(cents)
         var text = formatEUR(magnitude >= 10_000 ? (magnitude + 50) / 100 * 100 : magnitude)
             .replacingOccurrences(of: "\u{00A0}€", with: "")
         if magnitude >= 10_000 { text = text.replacingOccurrences(of: ",00", with: "") }
@@ -29,21 +39,26 @@ private extension MovementActivityAttributes.ContentState {
     var headline: String { merchant ?? (isIncome ? "Ingreso" : "Pago") }
     var amountColor: Color { isIncome ? Theme.income : Theme.label }
     var balanceText: String {
-        guard let cents = balanceCents else { return "Saldo sin configurar" }
-        return isHidden ? AmountMask.text(negative: false, showsPlus: false) : formatEUR(cents)
+        guard showsBalance else { return "Saldo sin configurar" }
+        guard !isHidden, let cents = balanceCents else {
+            return AmountMask.text(negative: false, showsPlus: false)
+        }
+        return formatEUR(cents)
     }
     var balanceTransition: ContentTransition {
         guard let cents = balanceCents, !isHidden else { return .identity }
         return .numericText(value: Double(cents))
     }
     var spokenAmount: String {
-        "\(lastAmountCents < 0 ? "pago de" : "ingreso de") \(isHidden ? "importe oculto" : formatEUR(abs(lastAmountCents)))"
+        let prefix = isNegativeAmount ? "pago de" : "ingreso de"
+        guard !isHidden, let cents = lastAmountCents else { return "\(prefix) importe oculto" }
+        return "\(prefix) \(formatEUR(abs(cents)))"
     }
     /// Solo con saldo: "estimado" marca que sale de sumar movimientos, no del banco.
-    var showsEstimated: Bool { estimated && balanceCents != nil }
+    var showsEstimated: Bool { estimated && showsBalance }
     var spokenBalance: String {
-        guard balanceCents != nil else { return "Saldo de \(bankName) sin configurar" }
-        if isHidden { return "Te quedan importe oculto en \(bankName)" }
+        guard showsBalance else { return "Saldo de \(bankName) sin configurar" }
+        if isHidden || balanceCents == nil { return "Te quedan importe oculto en \(bankName)" }
         return "Te quedan \(showsEstimated ? "unos " : "")\(balanceText) en \(bankName)"
     }
     var material: CardMaterial { bankID?.material ?? .all }
@@ -117,8 +132,9 @@ struct MovementLiveActivity: Widget {
                     Text(state.signedAmount)
                         .font(Theme.font(size: 17, weight: .semibold))
                         .foregroundStyle(stale ? Theme.label2 : state.amountColor)
+                        .privacySensitive()
                         .contentTransition(state.amountTransition)
-                    .animation(liveSpring, value: state.lastAmountCents)
+                        .animation(liveSpring, value: state.lastAmountCents)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
                         .padding(.trailing, 4)
@@ -134,15 +150,16 @@ struct MovementLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        if state.balanceCents != nil {
+                        if state.showsBalance {
                             Text("Te quedan\(state.showsEstimated ? " unos" : "")")
                                 .font(Theme.font(size: 13))
                                 .foregroundStyle(Theme.label2)
                         }
                         Text(state.balanceText)
-                            .font(Theme.font(size: state.balanceCents == nil ? 15 : 26, weight: .semibold))
-                            .tracking(state.balanceCents == nil ? 0 : -0.5)
-                            .foregroundStyle(stale || state.balanceCents == nil ? Theme.label2 : Theme.label)
+                            .font(Theme.font(size: state.showsBalance ? 26 : 15, weight: .semibold))
+                            .tracking(state.showsBalance ? -0.5 : 0)
+                            .foregroundStyle(stale || !state.showsBalance ? Theme.label2 : Theme.label)
+                            .privacySensitive()
                             .contentTransition(state.balanceTransition)
                             .animation(liveSpring, value: state.balanceCents)
                             .lineLimit(1)
@@ -168,6 +185,7 @@ struct MovementLiveActivity: Widget {
                 Text(state.compactAmount)
                     .font(Theme.font(size: 14, weight: .semibold))
                     .foregroundStyle(state.amountColor)
+                    .privacySensitive()
                     .contentTransition(state.amountTransition)
                     .animation(liveSpring, value: state.lastAmountCents)
                     .lineLimit(1)
@@ -209,26 +227,28 @@ private struct LockScreenView: View {
                 Text(state.signedAmount)
                     .font(Theme.font(size: 20, weight: .semibold))
                     .foregroundStyle(stale ? Theme.label2 : state.amountColor)
+                    .privacySensitive()
                     .contentTransition(state.amountTransition)
                     .animation(liveSpring, value: state.lastAmountCents)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if state.balanceCents != nil {
+                if state.showsBalance {
                     Text("Te quedan\(state.showsEstimated ? " unos" : "")")
                         .font(Theme.font(size: 13))
                         .foregroundStyle(Theme.card2)
                 }
                 Text(state.balanceText)
-                    .font(Theme.font(size: state.balanceCents == nil ? 17 : 30, weight: .semibold))
-                    .tracking(state.balanceCents == nil ? 0 : -0.6)
-                    .foregroundStyle(stale || state.balanceCents == nil ? Theme.label2 : Theme.label)
+                    .font(Theme.font(size: state.showsBalance ? 30 : 17, weight: .semibold))
+                    .tracking(state.showsBalance ? -0.6 : 0)
+                    .foregroundStyle(stale || !state.showsBalance ? Theme.label2 : Theme.label)
+                    .privacySensitive()
                     .contentTransition(state.balanceTransition)
-                            .animation(liveSpring, value: state.balanceCents)
+                    .animation(liveSpring, value: state.balanceCents)
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
-                if state.balanceCents != nil {
+                if state.showsBalance {
                     Text("en \(state.bankName)")
                         .font(Theme.font(size: 13))
                         .foregroundStyle(Theme.card2)

@@ -6,7 +6,7 @@ import MiBancoCore
 /// "No usar este logo" lo recuerda por comercio y vuelve al monograma.
 @MainActor @Observable
 final class MerchantLogos {
-    /// Clave de @AppStorage del ajuste; sin valor guardado cuenta como activo.
+    /// Clave de @AppStorage del ajuste; sin valor guardado cuenta como desactivado (opt-in, SEC-07).
     static let downloadsKey = "logoDownloads"
     private static let blockedKey = "logoBlocked"
 
@@ -22,7 +22,15 @@ final class MerchantLogos {
 
     init() {
         blocked = Set(UserDefaults.standard.stringArray(forKey: Self.blockedKey) ?? [])
-        downloadsEnabled = UserDefaults.standard.object(forKey: Self.downloadsKey) as? Bool ?? true
+        downloadsEnabled = UserDefaults.standard.object(forKey: Self.downloadsKey) as? Bool
+            ?? LogoCachePolicy.defaultDownloadsEnabled
+        let fetcher = self.fetcher
+        Task {
+            #if DEBUG
+            if DemoMode.isActive { return }
+            #endif
+            await fetcher.cleanLegacyCache()
+        }
     }
 
     func setDownloadsEnabled(_ enabled: Bool) {

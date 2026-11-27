@@ -1,8 +1,20 @@
 import Foundation
 
+/// Error claro al superar los topes defensivos de una tabla CSV (SEC-11).
+/// Tipo separado de `StatementError` para no romper `switch` exhaustivos en vistas existentes.
+public enum CSVLimitError: Error, Equatable, Sendable {
+    case tooManyRows(limit: Int)
+    case tooManyColumns(limit: Int)
+    case cellTooLong(limit: Int)
+}
+
 /// Una tabla CSV leída tal cual: cabeceras y filas de texto. Las columnas se buscan por nombre (con alias), nunca por
 /// posición, y las desconocidas se ignoran: ningún formato de banco está confirmado con un fichero real.
 public struct CSVTable: Equatable, Sendable {
+    public static let maxRows = 50_000
+    public static let maxColumns = 64
+    public static let maxCellLength = 4_096
+
     public let headers: [String]
     /// Solo las filas con tantas celdas como la cabecera: una fila con más o menos nunca se lee por posición desplazada.
     public let rows: [[String]]
@@ -26,7 +38,13 @@ public struct CSVTable: Equatable, Sendable {
         guard let text = decodeCSVText(data) else { throw StatementError.unreadable }
         let scalars = Array(text.unicodeScalars)
         let delimiter = detectDelimiter(scalars)
-        let records = try splitRecords(scalars, delimiter: delimiter)
+        let records = try splitRecords(
+            scalars,
+            delimiter: delimiter,
+            maxRows: maxRows,
+            maxColumns: maxColumns,
+            maxCellLength: maxCellLength
+        )
         guard let header = records.first else { throw StatementError.empty }
         let body = records.dropFirst()
         let names = header.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -137,23 +155,48 @@ private func detectDelimiter(_ scalars: [Unicode.Scalar]) -> Unicode.Scalar {
     return best
 }
 
-private func splitRecords(_ scalars: [Unicode.Scalar], delimiter: Unicode.Scalar) throws -> [[String]] {
+private func splitRecords(
+    _ scalars: [Unicode.Scalar],
+    delimiter: Unicode.Scalar,
+    maxRows: Int,
+    maxColumns: Int,
+    maxCellLength: Int
+) throws -> [[String]] {
     var records: [[String]] = []
     var row: [String] = []
     var field = String.UnicodeScalarView()
+    var fieldLength = 0
     var inQuotes = false
     var quoted = false
     var blankWasQuoted = false
 
-    func endField() {
+    func appendScalar(_ scalar: Unicode.Scalar) throws {
+        fieldLength += 1
+        if fieldLength > maxCellLength {
+            throw CSVLimitError.cellTooLong(limit: maxCellLength)
+        }
+        field.append(scalar)
+    }
+
+    func endField() throws {
+        if row.count >= maxColumns {
+            throw CSVLimitError.tooManyColumns(limit: maxColumns)
+        }
         row.append(String(field))
         field = String.UnicodeScalarView()
+        fieldLength = 0
         quoted = false
     }
-    func endRecord() {
-        endField()
+    func endRecord() throws {
+        try endField()
         // Línea en blanco: un solo campo vacío sin comillas.
-        if !(row.count == 1 && row[0].isEmpty && !blankWasQuoted) { records.append(row) }
+        if !(row.count == 1 && row[0].isEmpty && !blankWasQuoted) {
+            // La primera fila no vacía es la cabecera; a partir de ahí se admiten como mucho `maxRows` filas de datos.
+            if records.count > maxRows {
+                throw CSVLimitError.tooManyRows(limit: maxRows)
+            }
+            records.append(row)
+        }
         row = []
         blankWasQuoted = false
     }
@@ -163,30 +206,30 @@ private func splitRecords(_ scalars: [Unicode.Scalar], delimiter: Unicode.Scalar
         if inQuotes {
             if s == "\"" {
                 if i + 1 < scalars.count, scalars[i + 1] == "\"" {
-                    field.append("\"")
+                    try appendScalar("\"")
                     i += 1
                 } else {
                     inQuotes = false
                 }
             } else {
-                field.append(s)
+                try appendScalar(s)
             }
         } else if s == "\"" && field.isEmpty && !quoted {
             inQuotes = true
             quoted = true
             blankWasQuoted = true
         } else if s == delimiter {
-            endField()
+            try endField()
         } else if s == "\n" || s == "\r" {
             if s == "\r", i + 1 < scalars.count, scalars[i + 1] == "\n" { i += 1 }
-            endRecord()
+            try endRecord()
         } else {
-            field.append(s)
+            try appendScalar(s)
         }
         i += 1
     }
     // Una comilla abierta que no se cierra: el fichero está cortado y lo que quedó dentro no es de fiar.
     if inQuotes { throw StatementError.unreadable }
-    if !field.isEmpty || !row.isEmpty || quoted { endRecord() }
+    if !field.isEmpty || !row.isEmpty || quoted { try endRecord() }
     return records
 }

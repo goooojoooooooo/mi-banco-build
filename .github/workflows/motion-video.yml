@@ -9,7 +9,9 @@ on:
         default: "MotionTourTests MotionTourHomeTests MotionTourScreensTests MotionTourShellTests"
       runner:
         description: "Runner macOS (por defecto Namespace Apple silicon)"
-        type: string
+        type: choice
+        options:
+          - namespace-profile-onyx
         default: "namespace-profile-onyx"
 permissions:
   contents: read
@@ -18,7 +20,7 @@ jobs:
     runs-on: ${{ inputs.runner || 'namespace-profile-onyx' }}
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
         run: |
           ls -d /Applications/Xcode*.app
@@ -28,7 +30,8 @@ jobs:
           sudo xcode-select -s "$XCODE"
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
           xcodebuild -version
-      - run: brew install xcodegen && xcodegen
+      - name: Generar proyecto Xcode (XcodeGen 2.49.0 verificado)
+        run: bash .github/scripts/install_xcodegen.sh
       - name: Crear y arrancar el simulador (maximo 10 min)
         timeout-minutes: 14
         run: |
@@ -130,8 +133,8 @@ jobs:
           test -f build/attachments/manifest.json
       - name: Hojas de contacto
         run: |
-          if ! which ffmpeg; then brew install ffmpeg; fi
-          ffmpeg -version | head -n 1
+          FFMPEG="$(bash .github/scripts/install_ffmpeg.sh)"
+          "$FFMPEG" -version | head -n 1
           mkdir -p build/frames build/sheets
           # Agrupa por rafaga y falla si falta un fotograma, sobra uno, o una clase elegida no dejo ninguna rafaga.
           python3 -I .github/scripts/motion_sheets.py group --attachments build/attachments --frames build/frames --classes "$TOUR_LIST"
@@ -140,26 +143,26 @@ jobs:
             n=$(ls "$dir"/f*.png | wc -l | tr -d ' ')
             cols=8; if [ "$n" -lt 8 ]; then cols=$n; fi
             rows=$(( (n + 7) / 8 ))
-            ffmpeg -y -loglevel error -framerate 1 -i "$dir/f%03d.png" \
+            "$FFMPEG" -y -loglevel error -framerate 1 -i "$dir/f%03d.png" \
               -vf "scale=330:-1,tile=${cols}x${rows}:padding=4:margin=4:color=0x303030" -frames:v 1 "build/sheets/$name.png"
             cp "$dir/times.txt" "build/sheets/$name.times.txt"
           done
           ls -l build/sheets
           # Una hoja por rafaga, ni una menos ni una mas.
           python3 -I .github/scripts/motion_sheets.py verify --frames build/frames --sheets build/sheets
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: motion
           path: build/sheets
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: motion-tour
           path: build/tour.mp4
           if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure()
         with:
           name: motion-debug

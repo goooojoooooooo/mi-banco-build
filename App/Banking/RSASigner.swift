@@ -8,18 +8,22 @@ enum RSASignerError: Error, Equatable {
 }
 
 /// Firma RS256 (RSASSA-PKCS1-v1_5 con SHA-256) con Security.framework.
-/// Guarda los bytes de la clave y crea la `SecKey` en cada firma: no queda ningún objeto de clave en memoria.
-struct RSASigner: JWTSigner, CustomStringConvertible, CustomDebugStringConvertible {
-    private let pkcs1DER: Data
+/// Conserva únicamente la referencia `SecKey` (preferiblemente del Llavero, `kSecClassKey`): nunca retiene bytes DER
+/// en el heap de Swift (SEC-10). `SecKey` es inmutable y seguro entre hilos según Security.framework.
+struct RSASigner: JWTSigner, @unchecked Sendable, CustomStringConvertible, CustomDebugStringConvertible {
+    private let key: SecKey
 
-    /// Falla si los bytes no son una clave RSA privada PKCS#1 utilizable.
+    /// Crea un firmante a partir de una referencia `SecKey` (p. ej. obtenida del Llavero con `kSecReturnRef`).
+    init(key: SecKey) {
+        self.key = key
+    }
+
+    /// Valida bytes RSA PKCS#1 DER y construye una `SecKey` sin retener los bytes DER.
     init(pkcs1DER: Data) throws {
-        _ = try Self.makeKey(pkcs1DER)
-        self.pkcs1DER = pkcs1DER
+        self.key = try Self.makeKey(pkcs1DER)
     }
 
     func signRS256(_ message: Data) throws -> Data {
-        let key = try Self.makeKey(pkcs1DER)
         var error: Unmanaged<CFError>?
         guard let signature = SecKeyCreateSignature(
             key, .rsaSignatureMessagePKCS1v15SHA256, message as CFData, &error) else {
@@ -33,7 +37,7 @@ struct RSASigner: JWTSigner, CustomStringConvertible, CustomDebugStringConvertib
     var description: String { "RSASigner" }
     var debugDescription: String { "RSASigner" }
 
-    private static func makeKey(_ der: Data) throws -> SecKey {
+    static func makeKey(_ der: Data) throws -> SecKey {
         let attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeRSA,
             kSecAttrKeyClass: kSecAttrKeyClassPrivate,

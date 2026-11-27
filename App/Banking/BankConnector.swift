@@ -269,12 +269,13 @@ final class BankConnector {
             fail(bank, ConnectMessage.missingCredentials)
             return
         }
-        let session: EBSession
-        do { session = try await client.createSession(code: code) } catch {
+        let authorization: EBSessionAuthorization
+        do { authorization = try await client.authorizeSession(code: code) } catch {
             guard attempt == mine else { return }
             fail(bank, connectMessage(for: error))
             return
         }
+        let session = authorization.session
         // Desde aquí hasta escribir no hay más `await`: lo que se comprueba ahora sigue valiendo al escribir.
         guard attempt == mine, flow.phase == .finishing(bank) else {
             try? await client.deleteSession(id: session.sessionID)
@@ -322,6 +323,11 @@ final class BankConnector {
         }
         authURL = nil
         requestedUntil = nil
+        // IBAN propio (si vino validado e inequívoco): va directo a la libreta del Llavero solo si estaba vacío,
+        // nunca a `StoredSession`, `ledger.json` ni Trade Republic.
+        if bank != .tr, let iban = authorization.primaryEuroIBAN {
+            _ = AccountBookStore.fillIBANIfEmpty(iban, for: bank)
+        }
         flow.handle(.succeeded(bank))
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])

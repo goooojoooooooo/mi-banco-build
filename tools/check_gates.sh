@@ -200,6 +200,41 @@ check_nombre() {
   fi
 }
 
+# h) Manifiestos de privacidad (SEC-01): deben existir en la app y en las dos extensiones, declarados en project.yml.
+PRIVACY_MANIFESTS=(
+  App/PrivacyInfo.xcprivacy
+  NotificationExt/PrivacyInfo.xcprivacy
+  Widgets/PrivacyInfo.xcprivacy
+)
+
+check_privacy_manifests() {
+  [ -f project.yml ] || return 0
+  local m faltan=() sin_declarar=() incompletos=() key
+  for m in "${PRIVACY_MANIFESTS[@]}"; do
+    if [ ! -s "$m" ]; then
+      faltan+=("$m")
+      continue
+    fi
+    if ! grep -qF "$m" project.yml; then
+      sin_declarar+=("$m")
+    fi
+    for key in NSPrivacyTracking NSPrivacyTrackingDomains NSPrivacyCollectedDataTypes NSPrivacyAccessedAPITypes; do
+      if ! grep -qF "<key>${key}</key>" "$m"; then
+        incompletos+=("$m (falta $key)")
+      fi
+    done
+  done
+  if [ ${#faltan[@]} -gt 0 ]; then
+    fallo "Falta PrivacyInfo.xcprivacy en uno o mas targets" "${faltan[@]}"
+  fi
+  if [ ${#sin_declarar[@]} -gt 0 ]; then
+    fallo "PrivacyInfo.xcprivacy no declarado en project.yml" "${sin_declarar[@]}"
+  fi
+  if [ ${#incompletos[@]} -gt 0 ]; then
+    fallo "PrivacyInfo.xcprivacy sin claves obligatorias" "${incompletos[@]}"
+  fi
+}
+
 resumen() {
   if [ "$FALLOS" -eq 0 ]; then
     echo "Comprobaciones: OK"
@@ -218,6 +253,7 @@ ejecutar_todo() {
   check_higiene
   check_demomode
   check_nombre
+  check_privacy_manifests
 }
 
 # --self-test: cada regla debe detectar su caso en un directorio temporal fuera del repo.
@@ -278,19 +314,28 @@ self_test() {
   esperar "comentario con el esquema permitido" "$o" 'App/Views/Nombre\.swift:6$' 0
   esperar "CFBundleDisplayName viejo" "$o" '^  project\.yml:6$'
   esperar "CFBundleDisplayName igual al de Core permitido" "$o" '^  project\.yml:5$' 0
+  esperar "manifiesto ausente en App" "$o" 'App/PrivacyInfo\.xcprivacy$'
+  esperar "manifiesto ausente en NotificationExt" "$o" 'NotificationExt/PrivacyInfo\.xcprivacy$'
+  esperar "manifiesto ausente en Widgets" "$o" 'Widgets/PrivacyInfo\.xcprivacy$'
   esperar "resumen con fallos" "$o" 'Comprobaciones: [0-9]+ fallo'
 
   printf 'UIPasteboard.general\n' > App/MoveMoney/Pasteboard.swift
+  mkdir -p NotificationExt Widgets
+  printf '<plist><dict><key>NSPrivacyTracking</key><false/></dict></plist>\n' > App/PrivacyInfo.xcprivacy
   o=$(correr)
   esperar "portapapeles permitido en Pasteboard.swift" "$o" 'Pasteboard\.swift:1:' 0
   esperar "portapapeles prohibido fuera de Pasteboard.swift" "$o" 'Clip\.swift:2:'
+  esperar "manifiesto incompleto detectado" "$o" 'App/PrivacyInfo\.xcprivacy \(falta NSPrivacyAccessedAPITypes\)'
 
   # Caso limpio: sin falsos positivos.
-  rm -r App Core .github Redirect crlf.txt project.yml
-  mkdir -p App Core/Sources/MiBancoCore .github/workflows
+  rm -r App Core .github Redirect crlf.txt project.yml NotificationExt Widgets
+  mkdir -p App NotificationExt Widgets Core/Sources/MiBancoCore .github/workflows
   printf 'public let appDisplayName = "Onyx"\n' > Core/Sources/MiBancoCore/AppName.swift
   printf 'let k = "com.mibanco.banking"\nlet s = "mibanco"\nlet t = AppIdentity.displayName\n' > App/Ids.swift
-  printf 'targets:\n  A:\n    info:\n      properties:\n        CFBundleDisplayName: Onyx\n' > project.yml
+  printf 'targets:\n  A:\n    sources:\n      - path: App/PrivacyInfo.xcprivacy\n      - path: NotificationExt/PrivacyInfo.xcprivacy\n      - path: Widgets/PrivacyInfo.xcprivacy\n    info:\n      properties:\n        CFBundleDisplayName: Onyx\n' > project.yml
+  for m in App/PrivacyInfo.xcprivacy NotificationExt/PrivacyInfo.xcprivacy Widgets/PrivacyInfo.xcprivacy; do
+    printf '<plist><dict><key>NSPrivacyTracking</key><false/><key>NSPrivacyTrackingDomains</key><array/><key>NSPrivacyCollectedDataTypes</key><array/><key>NSPrivacyAccessedAPITypes</key><array/></dict></plist>\n' > "$m"
+  done
   printf '#if DEBUG\nenum DemoMode {}\n#endif\n' > App/DemoMode.swift
   printf '#if DEBUG\nlet a = DemoMode.on\n#endif\nlet i = "icon@2x.png"\nlet c = "a@example.com b@users.noreply.github.com"\nlet r = footprint(3)\n' > App/Ok.swift
   printf 'runs-on: namespace-profile-onyx\n# NO usar macos-15-intel\n' > .github/workflows/ok.yml

@@ -5,7 +5,7 @@ import MiBancoCore
 /// Avisos de ideas (`immediateAlerts`): uno por aviso, nunca dos veces el mismo id. Todo en el iPhone, sin push.
 /// No se registra nada (ni importes, ni comercios, ni textos).
 enum InsightNotifier {
-    static let category = "INSIGHT"
+    static let category = AlertCategoryID.insight
     private static let postedKey = "postedInsightIDs"
     private static let postedLimit = 200
 

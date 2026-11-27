@@ -49,7 +49,7 @@ final class NyxState {
 
     private init() {}
 
-    func apply(memory: NyxMemory, decisions: [NyxDecision], posted: [(title: String, body: String)]) {
+    func apply(memory: NyxMemory, decisions: [NyxDecision], posted: [NyxPostedAlert]) {
         self.memory = memory
         if let banner = decisions.first(where: { $0.delivery == .banner }) {
             self.lastBannerDecision = banner
@@ -117,7 +117,7 @@ actor NyxEngine {
 
         guard let state = try? SharedStore.make().load() else { return [] }
         let book = AccountBookStore.load()
-        let prefs = SharedStore.makeAssistantPreferencesStore().load()
+        let prefs = SharedStore.makeAssistantPreferencesStore().loadRecovering()
         let health = await NyxHealthProbe.current()
         let memoryStore = SharedStore.makeNyxMemoryStore()
 
@@ -228,7 +228,7 @@ actor NyxEngine {
         return (decisions, memory)
     }
 
-    private func publish(memory: NyxMemory, decisions: [NyxDecision], posted: [(title: String, body: String)]) async {
+    private func publish(memory: NyxMemory, decisions: [NyxDecision], posted: [NyxPostedAlert]) async {
         let banners = decisions.filter { $0.delivery == .banner }
         await MainActor.run {
             NyxState.shared.apply(memory: memory, decisions: decisions, posted: posted)

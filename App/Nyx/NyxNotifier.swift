@@ -2,6 +2,12 @@ import Foundation
 import UserNotifications
 import MiBancoCore
 
+/// Resumen en memoria de un aviso de Nyx recién compuesto (sin registros).
+struct NyxPostedAlert: Sendable {
+    let title: String
+    let body: String
+}
+
 /// Publica los avisos locales propios de Nyx y programa el recordatorio único de caducidad de SideStore (`nyx.expiry`).
 /// Respeta siempre el ojo cerrado (`hidden`) y nunca registra datos.
 enum NyxNotifier {
@@ -48,10 +54,10 @@ enum NyxNotifier {
         hidden: Bool = AlertPoster.eyeClosed,
         now: Date = AppClock.now,
         calendar: Calendar = DateText.madridCalendar
-    ) async -> [(title: String, body: String)] {
+    ) async -> [NyxPostedAlert] {
         let requests = decisions.compactMap { makeRequest(for: $0, hidden: hidden, now: now, calendar: calendar) }
         guard !requests.isEmpty else { return [] }
-        let composed = requests.map { ($0.content.title, $0.content.body) }
+        let composed = requests.map { NyxPostedAlert(title: $0.content.title, body: $0.content.body) }
         #if DEBUG
         if DemoMode.isActive {
             return composed

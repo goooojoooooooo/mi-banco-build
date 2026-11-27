@@ -160,7 +160,7 @@ private struct AppShellView: View {
                 #endif
                 RootView(model: model, portfolio: portfolio, accountBook: accountBook,
                          briefing: briefing, speaker: speaker,
-                         isLocked: shell.showsLock, revealToken: homeRevealToken,
+                         isLocked: shell.showsLock, isLaunching: shell.showsLaunch || shell.lockFading, revealToken: homeRevealToken,
                          // C6: el aviso dentro de la app lo decide `ShellState` (nunca con el bloqueo ni fuera de
                          // primer plano); se calcula con la fase de escena de este instante, como la tapa.
                          bannerID: coverScene == .active ? shell.shownBanner : nil,

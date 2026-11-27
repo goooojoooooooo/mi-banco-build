@@ -82,6 +82,9 @@ struct GuideStepView: View {
             controls
         }
         .background(Theme.canvas.ignoresSafeArea())
+        .nyxButtonHidden(true)
+        .onAppear { NyxState.shared.guideStepVisibleCount += 1 }
+        .onDisappear { NyxState.shared.guideStepVisibleCount = max(0, NyxState.shared.guideStepVisibleCount - 1) }
         .navigationTitle("Avisos al instante")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: pendingStep) { _, target in

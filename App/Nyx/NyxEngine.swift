@@ -24,6 +24,7 @@ final class NyxState {
     var newCount: Int { memory.newCount }
     var entries: [NyxEntry] { memory.entries }
     private(set) var lastBannerDecision: NyxDecision?
+    var guideStepVisibleCount = 0
 
     #if DEBUG
     private(set) var runs = 0

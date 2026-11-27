@@ -68,11 +68,14 @@ final class NyxEngineUITests: XCTestCase {
         let probeEl = element("nyx-engine-probe")
         XCTAssertTrue(probeEl.waitForExistence(timeout: 15), "Falta la sonda del motor de Nyx")
 
-        // Tras desbloquear, Nyx corre `.open` y apunta exactamente 1 cosa nueva (`shortfall`).
+        // Tras desbloquear, Nyx corre `.open` y apunta exactamente 1 cosa nueva (`shortfall`), encendiendo el punto.
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "No se desbloqueó Inicio")
         XCTAssertTrue(waitUntil(12) { self.nyxProbe()["nuevas"] == "1" && (Int(self.nyxProbe()["corridas"] ?? "0") ?? 0) >= 1 },
                       "Nyx no apuntó exactamente 1 cosa nueva tras desbloquear: \(nyxProbe())")
         XCTAssertEqual(nyxProbe()["situaciones"], "shortfall", "La situación apuntada debe ser shortfall: \(nyxProbe())")
+        let nyxButton = app.buttons["nyx-button"]
+        XCTAssertTrue(nyxButton.waitForExistence(timeout: 8), "Falta nyx-button tras desbloquear")
+        XCTAssertEqual(value(nyxButton), "1 cosa nueva", "El valor de nyx-button debe indicar 1 cosa nueva: \(value(nyxButton))")
     }
 
     /// N8: relanzar en el mismo escenario conservando la memoria no duplica la observación (`nuevas` sigue siendo 1).
@@ -97,6 +100,9 @@ final class NyxEngineUITests: XCTestCase {
                       "El motor de Nyx no corrió en el segundo arranque: \(nyxProbe())")
         XCTAssertEqual(nyxProbe()["nuevas"], "1", "El segundo arranque duplicó la observación: \(nyxProbe())")
         XCTAssertEqual(nyxProbe()["total"], "1", "El total de entradas en memoria debe seguir en 1: \(nyxProbe())")
+        let nyxButton = app.buttons["nyx-button"]
+        XCTAssertTrue(nyxButton.waitForExistence(timeout: 8), "Falta nyx-button en el segundo arranque")
+        XCTAssertEqual(value(nyxButton), "1 cosa nueva", "El valor de nyx-button cambió tras relanzar: \(value(nyxButton))")
     }
 
     /// N8 (privacidad ojo cerrado): un aviso local de Nyx compuesto con el ojo cerrado no lleva ningún dígito ni «€».

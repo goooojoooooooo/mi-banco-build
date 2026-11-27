@@ -12,6 +12,8 @@ struct RootView: View {
     let speaker: BriefingSpeaker
     /// Con el bloqueo delante, Inicio no suena ni habla aunque llegue un movimiento.
     var isLocked = false
+    /// Mientras corre el arranque, no se muestra el botón de Nyx ni se piden avisos dentro de la app.
+    var isLaunching = false
     /// Sube al arrancar y al desbloquear: Inicio se monta por capas y la barra llega la última.
     var revealToken = 0
     /// C6: el aviso dentro de la app que deja enseñar la carcasa ahora (`ShellState.shownBanner`; nil con el bloqueo,
@@ -89,6 +91,10 @@ struct RootView: View {
     /// C6: la llegada que enseña el aviso dentro de la app, y el número de aviso que le dio la carcasa.
     @State private var bannerArrival: Arrival?
     @State private var bannerFor: Int?
+    /// N10: aviso propio de Nyx dentro de la app (comparte la misma ranura de `ShellState`) y ocultación del botón en guías.
+    @State private var nyxBannerDecision: NyxDecision?
+    @State private var nyxBannerFor: Int?
+    @State private var nyxButtonHiddenByChild = false
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
@@ -116,6 +122,10 @@ struct RootView: View {
                     },
                     onNotMine: { markNotMine(arrival.id, banner: id) },
                     onFinished: { dismissBanner(id) })
+                    .id(id)
+                    .transition(.identity)
+            } else if let id = bannerID, let decision = nyxBannerDecision, nyxBannerFor == id {
+                nyxBannerView(id: id, decision: decision)
                     .id(id)
                     .transition(.identity)
             }
@@ -230,12 +240,27 @@ struct RootView: View {
             // Ronda 1 (m-6): con el banco encima de Inicio, Inicio está tapado y no lo cuenta: se pide el aviso.
             guard let arrival, tab != .home || bankOverHome != nil, sheet == nil, !isLocked,
                   scenePhase == .active else { return }
+            nyxBannerDecision = nil
+            nyxBannerFor = nil
             bannerArrival = arrival
             requestBanner()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .nyxDidDecide)) { _ in
+            consumePendingNyxBannerIfReady()
+        }
+        .onChange(of: isLaunching) { _, launching in
+            if !launching { consumePendingNyxBannerIfReady() }
+        }
         .onChange(of: bannerID) { old, new in
-            // El número del aviso que acaba de pedirse es el de esta llegada.
-            if let new, new != old, bannerArrival != nil { bannerFor = new }
+            // El número del aviso que acaba de pedirse es el de esta llegada o el de este aviso de Nyx.
+            if let new, new != old {
+                if bannerArrival != nil { bannerFor = new }
+                if nyxBannerDecision != nil { nyxBannerFor = new }
+            }
+            if new == nil {
+                nyxBannerDecision = nil
+                nyxBannerFor = nil
+            }
         }
         .onChange(of: isLocked) { _, locked in
             gate.isLocked = locked
@@ -243,10 +268,14 @@ struct RootView: View {
                 closeEverything()
             } else {
                 applyRoute()
+                consumePendingNyxBannerIfReady()
                 if tab == .alerts { seen.markSeen(warnings) }
             }
         }
-        .onAppear(perform: applyRoute)
+        .onAppear {
+            applyRoute()
+            consumePendingNyxBannerIfReady()
+        }
         #if DEBUG
         .onAppear(perform: applyDemoTab)
         .modifier(DemoRootTasks(tab: $tab, sheet: $sheet))
@@ -388,6 +417,7 @@ struct RootView: View {
                 .modifier(MinimizesTabBarOnScroll(enabled: !keepsTabBarExpanded))
                 // Para Pantallas (16.1): una pantalla empujada puede pedir que la barra no se encoja al desplazar.
                 .onPreferenceChange(KeepsTabBarExpandedKey.self) { keepsTabBarExpanded = $0 }
+                .onPreferenceChange(NyxButtonHiddenPreferenceKey.self) { nyxButtonHiddenByChild = $0 }
                 .overlay(alignment: .bottom) {
                     TabBarCurtain(token: activeRevealToken, covered: $tabBarCovered)
                 }
@@ -395,6 +425,20 @@ struct RootView: View {
                 // tarjeta vuela hasta su cabecera.
                 .overlay { bankOverHomeLayer }
                 .overlay { CardFlightLayer(flight: cardFlight, blocked: flightBlocked) }
+                // N10: botón de presencia de Nyx flotando sobre la barra de pestañas (nunca en guía, hojas, bloqueo o arranque).
+                .overlay(alignment: .bottomTrailing) {
+                    if showsNyxButton {
+                        NyxPresenceButton(
+                            newCount: NyxState.shared.newCount,
+                            hidden: preferences.privateMode,
+                            onTap: { openNyx(.ask) }
+                        )
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 84)
+                        .transition(.opacity)
+                    }
+                }
+                .animation(motion.fade, value: showsNyxButton)
                 .transition(.opacity)
             }
         }
@@ -835,6 +879,61 @@ struct RootView: View {
         briefingRouteWaiting = false
         sheet = .briefing(rec)
         rescheduleMorningReminder()
+    }
+
+    private var showsNyxButton: Bool {
+        !isLocked && !isLaunching && !model.needsOnboarding && sheet == nil
+            && !nyxButtonHiddenByChild && NyxState.shared.guideStepVisibleCount == 0 && !tabBarCovered
+    }
+
+    private func consumePendingNyxBannerIfReady() {
+        guard !isLocked, !isLaunching, !model.needsOnboarding, sheet == nil, isForeground,
+              let decision = NyxState.shared.consumeBannerDecision() else { return }
+        bannerArrival = nil
+        bannerFor = nil
+        nyxBannerDecision = decision
+        requestBanner()
+    }
+
+    @ViewBuilder
+    private func nyxBannerView(id: Int, decision: NyxDecision) -> some View {
+        let message = nyxMessage(for: decision.observation, now: AppClock.now, calendar: DateText.madridCalendar)
+        let available = nyxAvailableActions(message, state: model.state)
+        let titles = NyxActionHandler.titles(for: available, in: message, hidden: preferences.privateMode)
+        let primaryAction = available.first
+        let primaryTitle = titles.first
+        NyxBanner(
+            message: message,
+            hidden: preferences.privateMode,
+            primaryActionTitle: primaryTitle,
+            onOpen: {
+                dismissBanner(id)
+                nyxBannerDecision = nil
+                nyxBannerFor = nil
+                openNyx(.message(decision.observation.id))
+            },
+            onAction: {
+                dismissBanner(id)
+                nyxBannerDecision = nil
+                nyxBannerFor = nil
+                if let primaryAction {
+                    briefing.markNyxEntry(decision.observation.id, status: .done)
+                    handleNyxAction(primaryAction, entryID: decision.observation.id)
+                } else {
+                    openNyx(.message(decision.observation.id))
+                }
+            },
+            onDismiss: {
+                dismissBanner(id)
+                nyxBannerDecision = nil
+                nyxBannerFor = nil
+            },
+            onFinished: {
+                dismissBanner(id)
+                nyxBannerDecision = nil
+                nyxBannerFor = nil
+            }
+        )
     }
 
     private func openNyx(_ entry: NyxSheetEntry) {

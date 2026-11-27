@@ -64,9 +64,9 @@ private extension MovementActivityAttributes.ContentState {
     var material: CardMaterial { bankID?.material ?? .all }
 }
 
-/// N2: las cifras de la Live Activity cambian con el muelle `snap` del kit (0,46 / 0,74), sobre `numericText`.
-private let liveSpring = Animation.spring(response: Theme.Motion.snapSpec.response,
-                                          dampingFraction: Theme.Motion.snapSpec.dampingFraction)
+/// N2: las cifras de la Live Activity cambian con el muelle `snap` del kit, sobre `numericText`. m-11: a intensidad
+/// Expresivo, como el resto de las extensiones (la Live Activity no tiene `\.motion`).
+private let liveSpring = Theme.Motion.expressive(Theme.Motion.snapSpec)
 
 /// Logo del comercio (si va en la app) o, si no, el del banco; sin ninguno, una ficha con el símbolo del pago.
 private struct ActivityLogo: View {

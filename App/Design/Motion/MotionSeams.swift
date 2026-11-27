@@ -30,6 +30,13 @@ import MiBancoCore
     }
 
     var flying: Flying?
+
+    /// Lote final (ojo de diseño 18.1, para la línea B): el marco de la marca de la bienvenida del primer arranque. Si
+    /// la bienvenida lo apunta (`.launchWelcomeMark()`), la marca del arranque vuela hasta ella y aterriza encima; si
+    /// no, se apaga sobre el negro como antes.
+    var welcomeMarkFrame: CGRect?
+    /// La marca del arranque va volando hacia la de la bienvenida: la de la bienvenida no se dibuja hasta que aterriza.
+    var flyingToWelcome = false
 }
 
 /// El vuelo de una tarjeta desde el abanico de Inicio hasta la cabecera de la pantalla del banco.
@@ -121,6 +128,13 @@ extension View {
         modifier(LaunchBrandSlot(markSide: markSide, gap: gap))
     }
 
+    /// Para la línea B (bienvenida, 18.1): apunta el marco de la marca de la bienvenida en
+    /// `LaunchAnchor.welcomeMarkFrame` y no la dibuja mientras la del arranque vuela hacia ella (aterriza justo encima
+    /// y en ese instante esta vuelve a dibujarse: nunca dos). Solo una máscara: VoiceOver y la maquetación no cambian.
+    func launchWelcomeMark() -> some View {
+        modifier(LaunchWelcomeMark())
+    }
+
     /// Apunta el marco de esta tarjeta como posible origen de un vuelo (`CardFlight.sources`).
     func cardFlightSource(bank: BankID, card: AccountCard) -> some View {
         modifier(CardFlightSource(source: CardFlight.Source(bank: bank, card: card)))
@@ -134,6 +148,17 @@ extension View {
     /// Apunta el marco del importe de la fila de este movimiento (`DetailAmountFrames.frames[id]`).
     func detailAmountSource(id: UUID) -> some View {
         modifier(DetailAmountSource(id: id))
+    }
+}
+
+private struct LaunchWelcomeMark: ViewModifier {
+    @Environment(\.launchAnchor) private var anchor
+
+    func body(content: Content) -> some View {
+        content
+            .mask { Color.black.opacity(anchor?.flyingToWelcome == true ? 0 : 1) }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { anchor?.welcomeMarkFrame = $0 }
+            .onDisappear { anchor?.welcomeMarkFrame = nil }
     }
 }
 

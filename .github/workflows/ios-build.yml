@@ -73,6 +73,11 @@ jobs:
           if plutil -p "$APP/Info.plist" | grep aps-environment >/dev/null; then echo "Info.plist menciona aps-environment"; exit 1; fi
           if grep aps-environment App/MiBanco.entitlements >/dev/null; then echo "entitlements mencionan aps-environment"; exit 1; fi
           if codesign -d --entitlements - "$APP" 2>&1 | grep aps-environment >/dev/null; then echo "binario con aps-environment"; exit 1; fi
+          # 120 Hz en iPhone (lote final p2): la clave tiene que llegar al Info.plist de la app.
+          echo "App/Info.plist generado:"; grep -A1 CADisableMinimumFrameDurationOnPhone App/Info.plist || true
+          if ! plutil -extract CADisableMinimumFrameDurationOnPhone raw "$APP/Info.plist" | grep -qx true; then
+            echo "Falta CADisableMinimumFrameDurationOnPhone = YES en el Info.plist de la app (60 Hz en iPhone)"; exit 1
+          fi
           for manifest in "$APP/PrivacyInfo.xcprivacy" "$APP/PlugIns/MiBancoNotification.appex/PrivacyInfo.xcprivacy" "$APP/PlugIns/MiBancoWidgets.appex/PrivacyInfo.xcprivacy"; do
             test -s "$manifest" || { echo "Falta $manifest en el paquete"; exit 1; }
             plutil -lint "$manifest"

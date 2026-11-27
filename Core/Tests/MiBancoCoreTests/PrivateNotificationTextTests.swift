@@ -229,6 +229,38 @@ private func noDigits(_ text: String) -> Bool { !text.contains { $0.isNumber } }
         #expect(duplicate?.body == "Dos cargos iguales en pocos minutos", "el detalle sin cifras se queda")
     }
 
+    /// N-A (re-revisión): en lo que produce el generador, los campos dicen lo mismo que el título abierto. Si `up` se
+    /// invirtiera, el aviso cerrado diría lo contrario que el abierto y esto falla.
+    @Test func theFactsAgreeWithTheOpenTitle() {
+        let all = generatedInsights()
+        var checked: Set<InsightKind> = []
+        for i in all {
+            switch i.kind {
+            case .subscriptionPriceChange:
+                #expect(i.facts.up == i.title.contains(" ha subido "), "«\(i.title)» con up = \(String(describing: i.facts.up))")
+                checked.insert(i.kind)
+            case .spendingPace:
+                #expect(i.facts.up == i.title.contains(" por encima "), "«\(i.title)» con up = \(String(describing: i.facts.up))")
+                checked.insert(i.kind)
+            case .subscriptionUpcoming:
+                let when = i.facts.when ?? "∅"
+                #expect(i.title.contains(" se cobra \(when): "), "«\(i.title)» con when = \(when)")
+                checked.insert(i.kind)
+            case .budgetWarning, .budgetExceeded:
+                let scope = i.facts.budgetScope ?? "∅"
+                #expect(i.title.hasSuffix("presupuesto \(scope)"), "«\(i.title)» con ámbito = \(scope)")
+                checked.insert(i.kind)
+            default:
+                break
+            }
+        }
+        // Las dos direcciones de cada sentido salen del generador.
+        let ups = all.filter { $0.kind == .subscriptionPriceChange }.compactMap(\.facts.up)
+        let paces = all.filter { $0.kind == .spendingPace }.compactMap(\.facts.up)
+        #expect(Set(ups) == [true, false] && Set(paces) == [true, false])
+        #expect(checked == [.subscriptionPriceChange, .spendingPace, .subscriptionUpcoming, .budgetWarning, .budgetExceeded])
+    }
+
     /// El sentido (sube/baja, encima/debajo) sale de los campos, no del texto: cambiar la redacción del título no le da
     /// la vuelta al aviso cerrado.
     @Test func theDirectionComesFromTheFactsNotTheTitle() {

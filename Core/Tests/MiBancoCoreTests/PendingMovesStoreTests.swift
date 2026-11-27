@@ -210,4 +210,36 @@ import Testing
         #expect(try store.loadThrowing().isEmpty)
         #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(PendingMovesStore.fileName).path))
     }
+
+    @Test func clearLegacyIfPersistedKeepsKeyWhileLegacyMovesAreNotInFile() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let store = PendingMovesStore(directory: dir)
+        let legacyMove = sampleMove(amount: 1_000)
+        let other = sampleMove(amount: 2_000)
+        let legacyData = try JSONEncoder().encode([legacyMove])
+        try store.add(other)
+
+        var cleared = 0
+        store.clearLegacyIfPersisted(readLegacy: { legacyData }, clearLegacy: { cleared += 1 })
+        #expect(cleared == 0)
+
+        // Quitar el propio traspaso heredado también permite limpiar la clave (ya no debe resucitar).
+        store.clearLegacyIfPersisted(ignoring: legacyMove.id, readLegacy: { legacyData }, clearLegacy: { cleared += 1 })
+        #expect(cleared == 1)
+
+        try store.add(legacyMove)
+        store.clearLegacyIfPersisted(readLegacy: { legacyData }, clearLegacy: { cleared += 1 })
+        #expect(cleared == 2)
+    }
+
+    @Test func clearLegacyIfPersistedKeepsKeyWhenFileIsCorrupt() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try Data("corrupt".utf8).write(to: dir.appendingPathComponent(PendingMovesStore.fileName))
+        let legacyData = try JSONEncoder().encode([sampleMove()])
+        var cleared = 0
+        PendingMovesStore(directory: dir).clearLegacyIfPersisted(readLegacy: { legacyData }, clearLegacy: { cleared += 1 })
+        #expect(cleared == 0)
+    }
 }

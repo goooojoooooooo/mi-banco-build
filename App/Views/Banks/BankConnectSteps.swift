@@ -30,11 +30,12 @@ struct BankConnectedFlash: View {
                     DrawnCheck(lineWidth: 3, color: .black)
                         .frame(width: 24, height: 24)
                 }
-                // A media escala: el aro del kit (hasta 100 pt de radio) cruzaba el nombre del banco y el título y se
-                // salía por el borde izquierdo; así se queda alrededor del ✓ (lote 3, m-2). El título entra cuando el aro
-                // ya está casi apagado (0,45 s).
+                // A 0,38 de escala: el aro del kit (hasta 100 pt de radio) llega como mucho a ~38 pt del centro del ✓ (que
+                // está a 50 pt del borde izquierdo): no se sale de la pantalla y pasa a pocos puntos por debajo del logo del
+                // banco, sin cruzarlo ni cruzar el nombre (lote 3, m-2 y su re-revisión; a 0,5 aún pisaba el logo y tocaba el
+                // borde). El título entra cuando el aro ya está casi apagado (0,45 s).
                 SuccessBurst(trigger: burst)
-                    .scaleEffect(0.5)
+                    .scaleEffect(0.38)
             }
             .frame(width: 52, height: 52)
             .scaleEffect(popped || motion.reduce ? 1 : 0.4)

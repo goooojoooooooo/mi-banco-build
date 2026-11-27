@@ -45,6 +45,10 @@ public struct ShellState: Equatable, Hashable, Sendable {
         case lockFadeFinished(id: Int)
         /// El estilo de movimiento de ahora: `true` = solo fundidos (Sutil o Reducir movimiento), sin marca que vuele.
         case motionStyle(fadesOnly: Bool)
+        /// Lote final: el bloqueo que se está fundiendo se lleva su marca dibujada (`true`: nada la recoge para volar,
+        /// sea por el estilo, porque no hay de dónde o adónde volar) o la ha entregado a la que vuela (`false`). Lo
+        /// cuenta el bloqueo en la misma actualización en que empieza a fundirse.
+        case lockKeepsItsMark(Bool)
         /// C6: ha llegado un movimiento con la app delante (en otra pestaña): se pide el aviso dentro de la app.
         case bannerRequested
         /// C6: el aviso `id` se ha ido (se recogió solo, se tocó o se cerró).
@@ -95,6 +99,9 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public internal(set) var fadeCount = 0
     /// El movimiento es solo de fundidos (Sutil o Reducir movimiento): al desbloquear, la marca no vuela.
     public internal(set) var fadesOnly = false
+    /// El bloqueo que se funde lleva su marca dibujada (ver `Event.lockKeepsItsMark`). Mientras no lo diga el bloqueo,
+    /// lo que se espera del estilo: con solo fundidos, sí.
+    public internal(set) var lockKeepsItsMark = false
     /// C6: el aviso dentro de la app que está puesto (su número) y cuántos se han pedido.
     public internal(set) var banner: Int?
     public internal(set) var bannerCount = 0
@@ -165,10 +172,11 @@ public struct ShellState: Equatable, Hashable, Sendable {
     public var homeTakesTouches: Bool { !showsLock && !lockFading }
 
     /// La ranura de la marca de la barra de Inicio no se dibuja (ni su nombre) porque el bloqueo se está fundiendo con
-    /// la suya: con solo fundidos nada vuela, y si la ranura apareciera a la vez que el bloqueo se va se verían dos
-    /// marcas a medias. Aparece, de una vez, cuando del bloqueo ya no queda nada (`lockFadeFinished`). Con piezas la
-    /// ranura la esconde la marca que vuela (`LaunchAnchor.flying`), no esto.
-    public var hidesBrandSlot: Bool { fadesOnly && lockFading && !showsLock }
+    /// la suya: si la ranura apareciera a la vez que el bloqueo se va se verían dos marcas a medias. Lote final: atado
+    /// a «el bloqueo se funde con su marca» (`lockKeepsItsMark`), no al estilo: vale también con piezas cuando nada
+    /// recoge la marca. Aparece, de una vez, cuando del bloqueo ya no queda nada (`lockFadeFinished`). Si la marca vuela,
+    /// la ranura la esconde la que vuela (`LaunchAnchor.flying`), no esto.
+    public var hidesBrandSlot: Bool { lockKeepsItsMark && lockFading && !showsLock }
 
     /// C6: el aviso dentro de la app que se dibuja ahora. Nunca con el bloqueo delante ni mientras se funde, nunca fuera
     /// de primer plano (se cierra al salir y al bloquear), y nunca es una hoja: va dentro de Inicio (capa `.home`), por
@@ -240,6 +248,7 @@ public struct ShellState: Equatable, Hashable, Sendable {
             if scene == .active {
                 // El bloqueo se funde sobre Inicio y la marca echa a volar en este instante.
                 lockFading = true
+                lockKeepsItsMark = fadesOnly
                 fadeCount += 1
                 startExit(cold: cold)
             } else {
@@ -302,9 +311,14 @@ public struct ShellState: Equatable, Hashable, Sendable {
         case .motionStyle(let fades):
             fadesOnly = fades
 
+        case .lockKeepsItsMark(let keeps):
+            guard lockFading else { return }
+            lockKeepsItsMark = keeps
+
         case .bannerRequested:
-            // Solo con la app delante, desbloqueada y sin el bloqueo fundiéndose; si no, no se pone (no se guarda).
-            guard !showsLock, !lockFading, scene == .active else { return }
+            // Solo con la app delante, desbloqueada, sin el bloqueo fundiéndose y con el arranque acabado (con el
+            // bloqueo apagado, el arranque es lo que se ve); si no, no se pone (no se guarda).
+            guard !showsLock, !lockFading, !showsLaunch, scene == .active else { return }
             bannerCount += 1
             banner = bannerCount
 

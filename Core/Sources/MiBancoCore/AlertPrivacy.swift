@@ -32,6 +32,32 @@ public func deliveredAlertIdentifiersToRemoveForPrivacy(
         .map(\.identifier)
 }
 
+/// Efectos de seguridad al cambiar el modo privado (ojo):
+/// solo al cerrar el ojo (`false -> true`) se retiran avisos ya entregados con cifras (`SEC-06`)
+/// y se detiene de inmediato la lectura en voz alta del resumen (`SEC-13`).
+/// Abrir el ojo (`true -> false`) o repetir el mismo estado no dispara ninguno de los dos.
+public struct PrivateModeTransitionEffects: Equatable, Sendable {
+    public let removeDeliveredSensitiveAlerts: Bool
+    public let stopBriefingSpeech: Bool
+
+    public init(removeDeliveredSensitiveAlerts: Bool, stopBriefingSpeech: Bool) {
+        self.removeDeliveredSensitiveAlerts = removeDeliveredSensitiveAlerts
+        self.stopBriefingSpeech = stopBriefingSpeech
+    }
+
+    /// Al volver a primer plano con el ojo ya cerrado también se retiran los avisos con cifras (por si la app murió justo
+    /// después de cerrar el ojo, antes de que la retirada se ejecutara). Es idempotente.
+    public static func removesDeliveredAlertsOnBecomingActive(eyeClosed: Bool) -> Bool { eyeClosed }
+
+    public static func evaluate(wasHidden: Bool, isHidden: Bool) -> PrivateModeTransitionEffects {
+        let justClosed = !wasHidden && isHidden
+        return PrivateModeTransitionEffects(
+            removeDeliveredSensitiveAlerts: justClosed,
+            stopBriefingSpeech: justClosed
+        )
+    }
+}
+
 /// Construye el diccionario `userInfo` de un aviso de movimiento.
 /// - Con `hidden == false` (ojo abierto): incluye los campos de siempre sin cambiar ni un byte.
 /// - Con `hidden == true` (ojo cerrado): omite `amountCents`, `balances`, `previousBalance`, `monthCents` y `todaySpent`,

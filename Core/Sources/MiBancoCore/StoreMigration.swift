@@ -4,12 +4,18 @@ import Foundation
 /// en `Application Support` es más nuevo y distinto que el destino del App Group (I-1: cero pérdida de datos).
 public let storeMigrationRescueBackupTag = ".antes-de-rescate-"
 
+/// Etiqueta del respaldo protegido del ORIGEN heredado cuando es distinto del destino pero no más nuevo
+/// (misma fecha, más viejo o reloj retrocedido): el destino sigue vigente y el origen se conserva aquí antes de quitarlo.
+public let storeMigrationSourceBackupTag = ".origen-heredado-"
+
 /// Migra un fichero del almacén desde la carpeta heredada (`Application Support`) al contenedor del App Group
 /// y elimina el origen huérfano SOLO cuando no puede perderse ningún dato:
 /// - Si el destino no existe: copia atómicamente con protección, verifica lectura y validación, y borra el origen.
 /// - Si el destino ya existe y es válido:
 ///   - si origen y destino son idénticos byte a byte, borra el origen;
-///   - si el origen es igual de antiguo o más viejo (`<=`) que el destino, borra el origen sin pisar el destino;
+///   - si el origen es distinto y NO más nuevo (`<=`, incluidas fechas iguales o reloj retrocedido), el destino sigue
+///     vigente y el origen se aparta en un respaldo protegido verificado (`<nombre>.origen-heredado-<timestamp>.bak`)
+///     ANTES de quitarlo; si el respaldo no se puede escribir y verificar, el origen no se toca;
 ///   - si el origen es más nuevo y distinto y pasa la validación, aparta el destino antiguo sin borrarlo en un
 ///     archivo de respaldo protegido (`<nombre>.antes-de-rescate-<timestamp>.bak`), promueve atómicamente el origen
 ///     al destino, verifica lectura/validación de ambos y solo entonces borra el origen;
@@ -84,6 +90,18 @@ private func reconcileExistingTarget(
     }
 
     if legacyDate <= targetDate {
+        // Los bytes difieren: nunca se borra contenido del dueño sin respaldo verificado (la fecha no es fiable).
+        let backupURL = rescueBackupURL(
+            in: targetDirectory,
+            fileName: fileName,
+            targetDate: legacyDate,
+            tag: storeMigrationSourceBackupTag
+        )
+        guard writeProtectedAndVerify(legacyData, to: backupURL, directory: targetDirectory, validate: validate) else {
+            // Solo se quita el intento fallido que acabamos de crear (la ruta no existía): el origen queda intacto.
+            try? fm.removeItem(at: backupURL)
+            return false
+        }
         try? fm.removeItem(at: legacy)
         return true
     }
@@ -127,13 +145,18 @@ private func fileModificationDate(of url: URL) -> Date? {
     (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
 }
 
-private func rescueBackupURL(in directory: URL, fileName: String, targetDate: Date) -> URL {
+private func rescueBackupURL(
+    in directory: URL,
+    fileName: String,
+    targetDate: Date,
+    tag: String = storeMigrationRescueBackupTag
+) -> URL {
     let stamp = rescueUTCTimestamp(targetDate)
     let fm = FileManager.default
-    var candidate = directory.appendingPathComponent("\(fileName)\(storeMigrationRescueBackupTag)\(stamp).bak")
+    var candidate = directory.appendingPathComponent("\(fileName)\(tag)\(stamp).bak")
     var suffix = 2
     while fm.fileExists(atPath: candidate.path) {
-        candidate = directory.appendingPathComponent("\(fileName)\(storeMigrationRescueBackupTag)\(stamp)-\(suffix).bak")
+        candidate = directory.appendingPathComponent("\(fileName)\(tag)\(stamp)-\(suffix).bak")
         suffix += 1
     }
     return candidate

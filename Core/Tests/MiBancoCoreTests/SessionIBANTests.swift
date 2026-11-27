@@ -550,15 +550,18 @@ private actor IBANFixtureTransport: HTTPTransport {
     }
 
     @Test func accountBookDecodesLegacyJSONAndOmitsEmptyDismissedKey() throws {
-        // Libreta antigua sin la clave `autoIBANDismissed`.
-        let legacyJSON = #"""
-        {
-          "ibans": { "ima": "ES9121000418450200051332" },
-          "floors": { "rev": 15000 },
-          "payees": []
+        // Libreta antigua (sin la clave `autoIBANDismissed`), codificada con el formato exacto de versiones previas.
+        struct LegacyAccountBook: Encodable {
+            let ibans: [BankID: String]
+            let floors: [BankID: Int]
+            let payees: [Payee]
         }
-        """#
-        let decoded = try JSONDecoder().decode(AccountBook.self, from: Data(legacyJSON.utf8))
+        let legacyData = try JSONEncoder().encode(
+            LegacyAccountBook(ibans: [.ima: esIBAN], floors: [.rev: 15_000], payees: [])
+        )
+        #expect(!String(decoding: legacyData, as: UTF8.self).contains("autoIBANDismissed"))
+
+        let decoded = try JSONDecoder().decode(AccountBook.self, from: legacyData)
         var expected = AccountBook()
         expected.ibans[.ima] = esIBAN
         expected.floors[.rev] = 15_000

@@ -521,7 +521,8 @@ public struct Ledger: Sendable {
                     amountCents: m.amountCents,
                     merchant: sanitizeMerchant(m.merchant),
                     reportedBalanceCents: m.reportedBalanceCents,
-                    merchantIsShop: m.merchantIsShop
+                    merchantIsShop: m.merchantIsShop,
+                    personPayment: m.personPayment
                 )
             }
         case let .wallet(b, amount, merchant):

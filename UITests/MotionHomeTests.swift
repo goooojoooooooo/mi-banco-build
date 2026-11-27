@@ -1274,7 +1274,7 @@ final class MotionHomeTests: XCTestCase {
             XCTAssertNotNil(noteInk, "No se pudo medir la tinta de «Nota»")
             XCTAssertNotNil(flagInk, "No se pudo medir la tinta de «No es mío»")
             if let noteInk, let flagInk {
-                XCTAssertGreaterThanOrEqual(flagInk, noteInk * 0.8,
+                XCTAssertGreaterThanOrEqual(Double(flagInk), Double(noteInk) * 0.8,
                                             "«No es mío» se lee encogida: primera línea de \(flagInk) px frente a \(noteInk) px de «Nota»")
             }
             XCTAssertFalse(note.frame.intersects(flag.frame), "Las cápsulas de acción se solapan: \(note.frame) vs \(flag.frame)")

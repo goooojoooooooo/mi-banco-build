@@ -1316,8 +1316,11 @@ final class MotionHomeTests: XCTestCase {
                 let fullWidth = ("No es mío" as NSString).size(withAttributes: [.font: refFont]).width
                 XCTAssertGreaterThanOrEqual(Double(ink.width), Double(fullWidth * ink.scale) * 0.75,
                                             "«No es mío» sale cortado o en dos líneas: \(ink.width) px de tinta frente a \(fullWidth * ink.scale) px del título entero")
-                XCTAssertGreaterThanOrEqual(flag.frame.width, fullWidth,
-                                            "La cápsula «No es mío» no cabe el título entero: \(flag.frame.width) pt frente a \(fullWidth) pt")
+                // La cápsula deja el relleno de 8 pt por lado alrededor de la tinta (si no, el texto iría apretado o cortado).
+                let capsulePx = flag.frame.width * ink.scale
+                let neededPx = CGFloat(ink.width) + 16 * ink.scale - 1
+                XCTAssertGreaterThanOrEqual(capsulePx, neededPx,
+                                            "La cápsula «No es mío» no deja relleno alrededor del título: \(capsulePx) px para \(ink.width) px de tinta")
             } else {
                 XCTFail("No se pudo medir el ancho de tinta de «No es mío»")
             }

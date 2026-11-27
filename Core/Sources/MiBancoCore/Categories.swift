@@ -71,8 +71,8 @@ private let keywordRules: [KeywordRule] = {
                        "autoescuela", "taller mecanico", "neumaticos", "itv"]),
         (.casa, ["luz", "agua", "iberdrola", "endesa", "naturgy", "alquiler", "comunidad", "seguro", "seguros",
                  "movistar", "vodafone", "fibra", "lavanderia", "tintoreria"]),
-        (.salud, ["farmacia", "clinica", "dentista", "optica", "hospital", "fisio", "fisioterapia",
-                  "herbolario", "parafarmacia", "ortopedia", "veterinario", "veterinaria"]),
+        (.salud, ["farmacia", "farmacias", "clinica", "dentista", "optica", "hospital", "fisio", "fisioterapia",
+                  "herbolario", "parafarmacia", "parafarmacias", "botica", "ortopedia", "veterinario", "veterinaria"]),
         (.viajes, ["hotel", "hostal", "airbnb", "booking", "vueling", "iberia", "ryanair", "aeropuerto"]),
         (.ocio, ["cine", "teatro", "concierto", "entradas", "gimnasio", "gym", "museo"]),
         (.efectivo, ["cajero", "retirada", "atm", "reintegro"]),
@@ -100,9 +100,9 @@ private func containsRun(_ tokens: [String], _ words: [String]) -> Bool {
     return false
 }
 
-/// Categoría por palabras enteras del nombre del comercio ("Bar Manolo" -> comer fuera); nil si ninguna casa.
+/// Categoría por palabras enteras del nombre limpio del comercio ("Bar Manolo" -> comer fuera); nil si ninguna casa.
 public func keywordCategory(for merchant: String) -> SpendingCategory? {
-    let tokens = foldedWords(merchant)
+    let tokens = cleanMerchantName(merchant).split(separator: " ").map(String.init)
     guard !tokens.isEmpty else { return nil }
     return keywordRules.first { containsRun(tokens, $0.words) }?.category
 }
@@ -126,12 +126,12 @@ func conceptKeywordCategory(for merchant: String) -> SpendingCategory? {
     }?.category
 }
 
-/// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, el directorio,
-/// las suscripciones y, después:
+/// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, el MCC (ISO 18245),
+/// el directorio (sobre el nombre limpio), las suscripciones y, después:
 /// - en un pago a una persona (solo con prueba, ver `isPersonPayment`): la palabra de concepto o factura si la hay
 ///   («TRANSFERENCIA ALQUILER» -> casa) y si no, Personas. Las palabras de un local no cuentan: «Bizum a Juan Horno»
 ///   es un amigo, no una panadería;
-/// - en cualquier otro pago: las palabras clave de siempre, en su orden de siempre, y por último sin categoría.
+/// - en cualquier otro pago: las palabras clave de siempre (sobre el nombre limpio), en su orden de siempre, y por último sin categoría.
 /// Un comercio que no se conoce NO es una persona: el bar del barrio cuyo nombre en la tarjeta es el de su dueño va a
 /// «Sin categoría» hasta que el dueño lo elija.
 public func spendingCategory(of movement: Movement, overrides: [String: SpendingCategory],
@@ -141,6 +141,7 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
     let merchant = movement.merchant ?? ""
     let key = normalizeMerchant(merchant)
     if !key.isEmpty, let remembered = overrides[key] { return remembered }
+    if let fromMCC = mccCategory(movement.merchantCategoryCode) { return fromMCC }
     if !key.isEmpty {
         if let domain = merchantDomain(for: merchant, isShop: movement.isShop),
            let fromDirectory = directoryCategory(forDomain: domain) { return fromDirectory }

@@ -59,6 +59,9 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     /// transferencia del banco, «Transfer»/«To X» del extracto de Revolut). nil = sin señal (los libros de antes no lo
     /// traen). Al enlazar fuentes, un true no se pierde. Ver `isPersonPayment`.
     public var personPayment: Bool?
+    /// Código de categoría de comercio ISO 18245 (4 dígitos) que da el banco o el extracto (p. ej. «5812» restaurante,
+    /// «5945» juguetería/videojuegos). nil = no llegó (los libros de antes no lo traen y no se escribe si es nil).
+    public var merchantCategoryCode: String?
 
     /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
     public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
@@ -73,7 +76,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
                 importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
                 excludedFromSpending: Bool = false, linkedAt: Date? = nil, firstSeenStatus: BankStatus? = nil,
-                bookedDay: Date? = nil, personPayment: Bool? = nil) {
+                bookedDay: Date? = nil, personPayment: Bool? = nil, merchantCategoryCode: String? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -88,7 +91,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.note = note
         self.flaggedNotMine = flaggedNotMine
         self.category = category
-        self.ownTransfer = ownTransfer
+        self.ownTransfer = ownTransfe
         self.bankRef = bankRef
         self.statementRef = statementRef
         self.bankStatus = bankStatus
@@ -100,13 +103,14 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.firstSeenStatus = firstSeenStatus
         self.bookedDay = bookedDay
         self.personPayment = personPayment
+        self.merchantCategoryCode = merchantCategoryCode
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
-        case note, flaggedNotMine, category, ownTransfer
+        case note, flaggedNotMine, category, ownTransfe
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
-        case firstSeenStatus, bookedDay, personPayment
+        case firstSeenStatus, bookedDay, personPayment, merchantCategoryCode
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -138,6 +142,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         firstSeenStatus = try c.decodeIfPresent(BankStatus.self, forKey: .firstSeenStatus)
         bookedDay = try c.decodeIfPresent(Date.self, forKey: .bookedDay)
         personPayment = try c.decodeIfPresent(Bool.self, forKey: .personPayment)
+        merchantCategoryCode = try c.decodeIfPresent(String.self, forKey: .merchantCategoryCode)
     }
 }
 
@@ -158,7 +163,7 @@ public struct ManualBalance: Codable, Equatable, Sendable {
     /// true = la lectura es solo de lo contabilizado: los movimientos pendientes del banco siguen sumando encima y el
     /// resultado es siempre estimado.
     public var countsPending: Bool
-    /// true = la lectura mezcla cuentas con saldo disponible y cuentas solo contabilizadas: se suma tal cual (sin sumar
+    /// true = la lectura mezcla cuentas con saldo disponible y cuentas solo contabilizadas: se suma tal cual (sin suma
     /// pendientes, que duplicarían las cuentas disponibles) pero nunca es exacta.
     public var forcedEstimate: Bool
     /// Inicio (en Madrid) del día D cuando la lectura es el cierre de un día ya pasado (R49): lo de D y antes ya está
@@ -751,7 +756,7 @@ public struct Ledger: Sendable {
 
     /// Saldo justo después de cada movimiento de `bank` ("Te quedaban"). `movements` va de más nuevo a más antiguo.
     /// Parte de `current` (lo que da `balance`) y resta lo que se suma después de cada fila, con el mismo criterio
-    /// (`rowsAddingToReading`); una fila que la lectura ya incluía y cae justo en su hora también tiene saldo. Lo anterior
+    /// (`rowsAddingToReading`); una fila que la lectura ya incluía y cae justo en su hora también tiene saldo. Lo anterio
     /// a la hora de la lectura se desconoce (se para), sea cual sea la clase de lectura: `current` ya incluye los
     /// pendientes viejos, y a las filas con cifra les resta exactamente lo que `balance` sumó después de ellas. Con un
     /// cierre del día D la hora es el final de D: tienen cifra las filas posteriores a D.
@@ -764,7 +769,7 @@ public struct Ledger: Sendable {
             if m.date < reading.setAt { break }
             let adds = adding.contains(m.id)
             guard adds || (m.date == reading.setAt && isBalanceEligible(m, origin: reading.origin)) else { continue }
-            out[m.id] = current - later
+            out[m.id] = current - late
             later += m.amountCents
         }
         return out

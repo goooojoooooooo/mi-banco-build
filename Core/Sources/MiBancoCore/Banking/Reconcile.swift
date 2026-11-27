@@ -88,8 +88,9 @@ extension Ledger {
                     changed = true
                 }
                 if applyName(r.merchant, to: i) { changed = true }
-                // La señal de persona solo se añade (como `isShop`); no cuenta como cambio en el informe.
+                // La señal de persona y el MCC solo se añaden/conservan (como `isShop`); no cuentan como cambio en el informe.
                 if r.personPayment { state.movements[i].personPayment = true }
+                if let mcc = r.merchantCategoryCode { state.movements[i].merchantCategoryCode = mcc }
                 if changed { report.updated += 1 } else { report.unchanged += 1 }
                 continue
             }
@@ -106,6 +107,7 @@ extension Ledger {
                 state.movements[i].bookedDay = r.bookedDay
                 _ = applyName(r.merchant, to: i)
                 if r.personPayment { state.movements[i].personPayment = true }
+                if let mcc = r.merchantCategoryCode { state.movements[i].merchantCategoryCode = mcc }
                 report.updated += 1
                 continue
             }
@@ -131,6 +133,9 @@ extension Ledger {
                     state.movements[i].isShop = state.movements[i].isShop || r.isShop
                 }
                 if r.personPayment { state.movements[i].personPayment = true }
+                if let mcc = r.merchantCategoryCode, state.movements[i].merchantCategoryCode == nil || channel == .bank {
+                    state.movements[i].merchantCategoryCode = mcc
+                }
                 state.movements[i].excludedFromSpending = state.movements[i].excludedFromSpending || r.excludedFromSpending
                 report.linked += 1
                 continue
@@ -143,7 +148,8 @@ extension Ledger {
                 bankRef: channel == .bank ? r.ref : nil, statementRef: channel == .statement ? r.ref : nil,
                 bankStatus: channel == .bank ? r.status : .booked, importedAt: now, dayOnly: !r.timing.isExact,
                 excludedFromSpending: r.excludedFromSpending, firstSeenStatus: channel == .bank ? r.status : nil,
-                bookedDay: channel == .bank ? r.bookedDay : nil, personPayment: r.personPayment ? true : nil)
+                bookedDay: channel == .bank ? r.bookedDay : nil, personPayment: r.personPayment ? true : nil,
+                merchantCategoryCode: r.merchantCategoryCode)
             state.movements.append(movement)
             report.added += 1
             if r.excludedFromSpending { report.addedInvestments += 1 }
@@ -179,6 +185,7 @@ extension Ledger {
                         if let name = row.merchant, !name.isEmpty { state.movements[i].bankMerchant = name }
                         state.movements[i].isShop = state.movements[i].isShop || row.isShop
                         if row.personPayment == true { state.movements[i].personPayment = true }
+                        if let mcc = row.merchantCategoryCode { state.movements[i].merchantCategoryCode = mcc }
                         state.movements[i].excludedFromSpending =
                             state.movements[i].excludedFromSpending || row.excludedFromSpending
                         toDelete.insert(row.id)
@@ -196,7 +203,7 @@ extension Ledger {
     /// Capturados (aviso o Cartera) que el banco debería haber confirmado ya y no lo han hecho. Dos fuentes de cobertura:
     /// - Banco conectado: más de 7 días antes de la última consulta con éxito, y no antes del primer movimiento con clave
     ///   del banco (ahí empieza lo que se ve).
-    /// - Extractos importados (también de un banco sin conexión): los periodos guardados en `statementCoverage`, uno por
+    /// - Extractos importados (también de un banco sin conexión): los periodos guardados en `statementCoverage`, uno po
     ///   importación (R38); un día cuenta solo dentro de uno de ellos, así que el hueco entre dos extractos no está
     ///   cubierto, y el día en que se importó tampoco. Dentro de un periodo, más de 7 días antes de `now`.
     /// Comparación por día de Madrid (las filas de solo día se guardan a mediodía).
@@ -224,7 +231,7 @@ extension Ledger {
         return ids
     }
 
-    /// Fila propia del banco (apuntada, sin enlazar a nada) que es el mismo pago que un capturado que acaba de perder
+    /// Fila propia del banco (apuntada, sin enlazar a nada) que es el mismo pago que un capturado que acaba de perde
     /// su pendiente: mismo banco e importe, con el día del banco entre 1 día antes y 5 días después del capturado.
     /// Gana la de menor distancia en días y luego en tiempo. Solo vale una fila cuya clave viene en el lote que se está
     /// conciliando: un apuntado de otra consulta no es la pareja de este pendiente.

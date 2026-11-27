@@ -36,7 +36,12 @@ enum BankHeaderMath {
     static let holdUntil: CGFloat = 0.25
 
     /// Con la hoja subida más de un 5 % la barra de pestañas se esconde (13.1, variante del lote 3 m-5).
-    static func hidesTabBar(_ p: CGFloat) -> Bool { unit(p) > 0.05 }
+    /// Con histéresis (lote de cierre): se esconde al pasar del 5 % y no vuelve hasta bajar del 2 %, así un dedo quieto
+    /// justo en el umbral no la hace parpadear.
+    /// La regla vive en Core (`BankTabBarRule`, con sus pruebas).
+    static func hidesTabBar(_ p: CGFloat, hiddenNow: Bool) -> Bool {
+        BankTabBarRule.hides(progress: Double(p), hiddenNow: hiddenNow)
+    }
 
     /// La cabecera sigue entera hasta p = 0,25, se apaga mientras la hoja sube y ha desaparecido en p = 0,62.
     static func headerOpacity(_ p: CGFloat) -> CGFloat { unit(1 - (unit(p) - holdUntil) / (headerGone - holdUntil)) }
@@ -97,6 +102,8 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
     @State private var scrollIdle = true
     /// La hoja ha subido: la barra de pestañas se esconde.
     @State private var tabBarHidden = false
+    /// La hoja tapa la cabecera entera: lo que se mueve en ella (el arco de los pasos) se para.
+    @State private var headerCovered = false
 
     private static var sheetID: String { "bank-sheet" }
 
@@ -104,6 +111,7 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
         ScrollView {
             VStack(spacing: 0) {
                 BankHeaderLayer(scroll: scroll, shown: headerShown, entered: entered) { header }
+                    .environment(\.stepsCovered, headerCovered)
                     .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { scroll.dock = max(1, $0) }
                 BankSheetLayer(scroll: scroll, entered: entered) { sheet }
                     .id(Self.sheetID)
@@ -115,8 +123,10 @@ struct BankHeaderSheet<Header: View, Sheet: View>: View {
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentOffset.y + $0.contentInsets.top } action: { _, new in
             scroll.offset = new
             // Solo cambia al cruzar el umbral: no se redibuja la pantalla en cada paso del dedo.
-            let hide = BankHeaderMath.hidesTabBar(scroll.progress)
+            let hide = BankHeaderMath.hidesTabBar(scroll.progress, hiddenNow: tabBarHidden)
             if hide != tabBarHidden { tabBarHidden = hide }
+            let covered = scroll.progress > 0.95
+            if covered != headerCovered { headerCovered = covered }
         }
         .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height - $0.contentInsets.top - $0.contentInsets.bottom } action: { _, new in
             scroll.viewport = max(0, new)

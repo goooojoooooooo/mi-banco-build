@@ -221,6 +221,15 @@ final class BankConnector {
 
     // MARK: - La vuelta del banco
 
+    /// SEC-11: comprueba síncronamente si una URL externa de `onOpenURL` corresponde a una conexión pendiente.
+    /// Si no hay intento pendiente, se ignora de inmediato sin lanzar flujo, tarea ni error.
+    func shouldHandleExternalCallback(_ url: URL) -> Bool {
+        #if DEBUG
+        if DemoMode.isActive { return false }
+        #endif
+        return shouldHandleIncomingBankCallback(url, pending: pendingCheck())
+    }
+
     func handle(url: URL, fromWebSession: Bool = false) async {
         #if DEBUG
         if DemoMode.isActive { return }
@@ -234,6 +243,8 @@ final class BankConnector {
         // vuelta falsa por `onOpenURL` no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora);
         // si vino del propio cierre de la hoja web (`fromWebSession: true`), falla con `foreignLink` (R43).
         let pending = loadPending()
+        // SEC-11: sin intento pendiente, una vuelta externa (`onOpenURL`) se ignora de inmediato sin tocar el flujo ni mostrar error.
+        if !fromWebSession, pending == nil { return }
         let check: PendingCheck
         if let pending {
             check = pending.isExpired(now: Date()) ? .expired(pending.bank) : .valid(pending.bank)
@@ -269,12 +280,13 @@ final class BankConnector {
             fail(bank, ConnectMessage.missingCredentials)
             return
         }
-        let session: EBSession
-        do { session = try await client.createSession(code: code) } catch {
+        let authorization: EBSessionAuthorization
+        do { authorization = try await client.authorizeSession(code: code) } catch {
             guard attempt == mine else { return }
             fail(bank, connectMessage(for: error))
             return
         }
+        let session = authorization.session
         // Desde aquí hasta escribir no hay más `await`: lo que se comprueba ahora sigue valiendo al escribir.
         guard attempt == mine, flow.phase == .finishing(bank) else {
             try? await client.deleteSession(id: session.sessionID)
@@ -322,6 +334,11 @@ final class BankConnector {
         }
         authURL = nil
         requestedUntil = nil
+        // IBAN propio (si vino validado e inequívoco): va directo a la libreta del Llavero solo si estaba vacío,
+        // nunca a `StoredSession`, `ledger.json` ni Trade Republic.
+        if bank != .tr, let iban = authorization.primaryEuroIBAN {
+            _ = AccountBookStore.fillIBANIfEmpty(iban, for: bank)
+        }
         flow.handle(.succeeded(bank))
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])

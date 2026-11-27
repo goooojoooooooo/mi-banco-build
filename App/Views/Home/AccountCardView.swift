@@ -351,10 +351,14 @@ private struct CardFront: View {
 
     @ViewBuilder
     private var header: some View {
-        HStack(spacing: Theme.Space.small) {
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4))
+            : AnyLayout(HStackLayout(spacing: Theme.Space.small))
+        layout {
             if card == .investments {
                 Text("Inversiones").titan(.cardTitle)
-                Spacer(minLength: 0)
+                if !stacked { Spacer(minLength: 0) }
                 let count = portfolioSummary?.positions.count ?? 0
                 Text(count == 1 ? "1 posición" : "\(count) posiciones")
                     .titan(.meta)
@@ -362,9 +366,11 @@ private struct CardFront: View {
             } else if let bank = card.bank {
                 HStack(spacing: 10) {
                     BankLogo(bank: bank, size: 30)
-                    Text(bank.displayName).titan(.cardTitle)
+                    Text(bank.displayName)
+                        .titan(.cardTitle)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 0)
+                if !stacked { Spacer(minLength: 0) }
                 if let info = balances[bank] {
                     if info.estimated {
                         Text("estimado")
@@ -374,22 +380,26 @@ private struct CardFront: View {
                             .padding(.vertical, 4)
                             .overlay(Capsule().strokeBorder(.white.opacity(0.22), lineWidth: 1))
                     } else {
-                        Text(DateText.balanceStatus(info)).titan(.meta).foregroundStyle(secondary)
+                        Text(DateText.balanceStatus(info))
+                            .titan(.meta)
+                            .foregroundStyle(secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 } else {
                     Text("sin saldo").titan(.meta).foregroundStyle(secondary)
                 }
             } else {
                 Text("Todo").titan(.cardTitle)
-                Spacer(minLength: 0)
+                if !stacked { Spacer(minLength: 0) }
                 Text("3 cuentas").titan(.meta).foregroundStyle(secondary)
             }
         }
-        .frame(minHeight: 32)
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
     }
 
     private var banks: some View {
-        let layout = typeSize.isAccessibilitySize
+        let stacked = typeSize.isAccessibilitySize
+        let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
             : AnyLayout(HStackLayout(alignment: .top, spacing: 10))
         return layout {
@@ -397,7 +407,9 @@ private struct CardFront: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack(spacing: 6) {
                         BankLogo(bank: bank, size: 16)
-                        Text(bank.shortName).lineLimit(1)
+                        Text(bank.shortName)
+                            .lineLimit(stacked ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: stacked)
                     }
                     .titan(.meta)
                     .foregroundStyle(secondary)
@@ -411,7 +423,8 @@ private struct CardFront: View {
                         Text(DateText.balanceStatus(info))
                             .titan(.caption)
                             .foregroundStyle(secondary)
-                            .lineLimit(1)
+                            .lineLimit(stacked ? nil : 1)
+                            .fixedSize(horizontal: false, vertical: stacked)
                             .padding(.top, 2)
                     } else {
                         Text("—").titan(.cardBalance).padding(.top, 5)
@@ -437,6 +450,7 @@ private struct CardBack: View {
     let onImportInvestments: () -> Void
 
     @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.motion) private var motion
     @State private var refreshing = false
     @State private var refreshedCheck = false
@@ -492,14 +506,17 @@ private struct CardBack: View {
 
                     Spacer(minLength: 16)
 
-                    HStack(alignment: .bottom, spacing: Theme.Space.row) {
+                    let footerLayout = typeSize.isAccessibilitySize
+                        ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                        : AnyLayout(HStackLayout(alignment: .bottom, spacing: Theme.Space.row))
+                    footerLayout {
                         VStack(alignment: .leading, spacing: 3) {
                             Text("Gastado este mes").titan(.meta).foregroundStyle(secondary)
                             RollingAmount(cents: monthSpent, revealed: flipped)
                                 .titan(.cardTitle)
                                 .accessibilityIdentifier("card-month-\(card.rawValue)")
                         }
-                        Spacer(minLength: 0)
+                        if !typeSize.isAccessibilitySize { Spacer(minLength: 0) }
                         trailingActionButton(liveLines: liveLines)
                     }
                 }

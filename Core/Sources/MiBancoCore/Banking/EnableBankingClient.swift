@@ -6,6 +6,8 @@ public enum BankingConstants {
     public static let callbackScheme = "mibanco"
     public static let country = "ES"
     public static let maxPages = 50
+    public static let maxResponseBytes = 10 * 1024 * 1024
+    public static let jwtLifetime: TimeInterval = enableBankingDefaultJWTLifetime
 }
 
 public enum TransactionStrategy: String, Sendable {
@@ -24,7 +26,7 @@ public struct TransactionFetch: Equatable, Sendable {
     }
 }
 
-/// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 3600 s.
+/// Cliente de solo lectura (AIS) de Enable Banking. Cada petición lleva un JWT nuevo de 300 s.
 public struct EnableBankingClient: Sendable {
     private let transport: any HTTPTransport
     private let signer: any JWTSigner
@@ -67,8 +69,14 @@ public struct EnableBankingClient: Sendable {
     }
 
     public func createSession(code: String) async throws -> EBSession {
+        try await authorizeSession(code: code).session
+    }
+
+    /// Crea la sesión con el banco y extrae aparte (sin tocar `EBSession` ni `EBAccount`) el IBAN principal en euros, si es inequívoco.
+    public func authorizeSession(code: String) async throws -> EBSessionAuthorization {
         let data = try await call("POST", "/sessions", body: try jsonBody(["code": code]))
-        return try decode(EBSession.self, from: data)
+        let session = try decode(EBSession.self, from: data)
+        return EBSessionAuthorization(session: session, primaryEuroIBAN: extractPrimaryEuroIBAN(fromSessionData: data))
     }
 
     public func balances(accountUID: String) async throws -> [EBBalance] {
@@ -132,7 +140,7 @@ public struct EnableBankingClient: Sendable {
     ) async throws -> Data {
         let token: String
         do {
-            token = try enableBankingJWT(appID: appID, now: now(), lifetime: 3600, signer: signer)
+            token = try enableBankingJWT(appID: appID, now: now(), lifetime: BankingConstants.jwtLifetime, signer: signer)
         } catch {
             // La firma falla cuando la clave guardada no sirve.
             throw BankingClientError.api(.keyRejected, code: nil)
@@ -157,6 +165,8 @@ public struct EnableBankingClient: Sendable {
             throw CancellationError()
         } catch let error as URLError where error.code == .cancelled {
             throw CancellationError()
+        } catch let error as URLError where error.code == .dataLengthExceedsMaximum {
+            throw BankingClientError.badResponse
         } catch {
             throw BankingClientError.offline
         }

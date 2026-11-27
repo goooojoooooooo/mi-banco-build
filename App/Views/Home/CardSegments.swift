@@ -9,8 +9,26 @@ struct CardSegments: View {
     let motion: HomeMotion
 
     @Environment(\.motion) private var kit
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// Con tamaños de accesibilidad los segmentos en anchura fija se montaban unos sobre otros («Revolutimagin»,
+    /// «Trade…»): en una tira horizontal desplazable cada cápsula se lee entera y conserva 44 pt de alto mínimo.
+    private var scrollsHorizontally: Bool {
+        #if DEBUG
+        if DemoMode.oldHomeAX { return false }
+        #endif
+        return typeSize.isAccessibilitySize
+    }
 
     var body: some View {
+        if scrollsHorizontally {
+            accessibilityBar
+        } else {
+            standardBar
+        }
+    }
+
+    private var standardBar: some View {
         HStack(spacing: 0) {
             ForEach(cards, id: \.self) { card in
                 Button {
@@ -40,6 +58,60 @@ struct CardSegments: View {
             }
         }
         .padding(.horizontal, Theme.Space.gutter)
+    }
+
+    private var accessibilityBar: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 8) {
+                    ForEach(cards, id: \.self) { card in
+                        let selected = (selection ?? .all) == card
+                        Button {
+                            select(card)
+                        } label: {
+                            Text(card.segmentTitle)
+                                .titan(.subtitle)
+                                .fontWeight(.medium)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .foregroundStyle(selected ? Theme.label : Theme.label3)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .frame(minHeight: 44)
+                                .background {
+                                    if selected {
+                                        Color.clear.glassSurface(Capsule())
+                                    }
+                                }
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .id(card)
+                        .accessibilityAddTraits(selected ? [.isSelected] : [])
+                    }
+                }
+                .padding(.leading, Theme.Space.gutter)
+                .padding(.trailing, Theme.Space.gutter + 16)
+            }
+            .scrollIndicators(.hidden)
+            .overlay(alignment: .trailing) {
+                LinearGradient(
+                    colors: [.clear, Theme.canvas],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: 24)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            .onChange(of: selection) { _, new in
+                guard let new else { return }
+                withAnimation(kit.reduce ? nil : kit.animation(.snap)) {
+                    proxy.scrollTo(new, anchor: .center)
+                }
+            }
+        }
+        .animation(kit.fade, value: selection)
     }
 
     private func select(_ card: AccountCard) {

@@ -219,11 +219,14 @@ final class InvestmentsUITests: XCTestCase {
         // U12 + U19: en modo privado el campo abre sin foco y su valor de accesibilidad debe ser «importe oculto».
         XCTAssertEqual(field.value as? String, "importe oculto", "U12/U19: el campo en privado debe abrir como importe oculto")
 
-        // U75 (A-I3): al enfocarlo el valor deja de ser «importe oculto» (se edita a la vista); al quitar el foco con «Hecho»
-        // del teclado (que NO guarda), vuelve a «importe oculto». Sin condiciones ni plan B.
+        // SEC-05 (autorizado por el dueño): con el ojo cerrado, tocar el campo sin teclear lo abre VACÍO y su valor hablado sigue
+        // siendo «importe oculto»; tras teclear un dígito el valor es solo lo tecleado, nunca el importe oculto anterior.
         field.tap()
-        XCTAssertTrue(waitFor(NSPredicate(format: "value != 'importe oculto'"), field, timeout: 5),
-                      "U12/U19: con el foco dentro el campo debe dejar de decir «importe oculto»")
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5), "SEC-05: el campo no abrió el teclado")
+        XCTAssertEqual(field.value as? String, "importe oculto", "SEC-05: al enfocar sin teclear el campo debe seguir diciendo «importe oculto»")
+        field.typeText("7")
+        XCTAssertTrue(waitFor(NSPredicate(format: "value == '7'"), field, timeout: 5),
+                      "SEC-05: tras teclear un dígito el valor debe ser solo lo tecleado: \((field.value as? String) ?? "")")
         let keyboardDone = app.buttons["manualPriceKeyboardDone"]
         XCTAssertTrue(keyboardDone.waitForExistence(timeout: 5), "U75: falta «Hecho» encima del teclado decimal")
         keyboardDone.tap()

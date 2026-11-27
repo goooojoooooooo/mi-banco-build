@@ -18,6 +18,14 @@ struct HomeTopBar: View {
     @Namespace private var glass
     @ScaledMetric(relativeTo: .subheadline) private var nameSize: CGFloat = 15
 
+    private var usesLegacyFade: Bool {
+        #if DEBUG
+        return DemoMode.oldHomeAX
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
         let hidden = preferences.privateMode
         GlassGroup(spacing: 10) {
@@ -29,13 +37,15 @@ struct HomeTopBar: View {
                             .titan(.callout)
                             .fontWeight(.medium)
                             .foregroundStyle(Theme.label)
+                            .lineLimit(1)
                             .padding(.horizontal, 16)
-                            .frame(height: 44)
+                            .frame(minHeight: 44)
                             .glassSurface(Capsule())
                             .glassID("cancel", in: glass)
                             .contentShape(Capsule())
                     }
                     .buttonStyle(.pressable)
+                    .dynamicTypeSize(...DynamicTypeSize.accessibility2)
                     .transition(.opacity.combined(with: .scale(scale: 0.8, anchor: .trailing)))
                 } else {
                     brand
@@ -80,14 +90,31 @@ struct HomeTopBar: View {
         .padding(.top, 6)
         .padding(.bottom, 10)
         .background(alignment: .top) {
-            TopEdgeFade(motion: motion)
-                .padding(.bottom, -36)
-                .ignoresSafeArea(edges: .top)
+            if usesLegacyFade {
+                TopEdgeFade(motion: motion, legacy: true)
+                    .padding(.bottom, -36)
+                    .ignoresSafeArea(edges: .top)
+            } else {
+                // La barra superior siempre lleva negro opaco de borde a borde: ningún contenido desplazado («Mover dinero»,
+                // tarjetas…) se transparenta detrás de «ONYX» ni de los botones de cristal.
+                Theme.canvas
+                    .ignoresSafeArea(edges: .top)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if !usesLegacyFade {
+                TopEdgeFade(motion: motion)
+                    .frame(height: 16)
+                    .offset(y: 16)
+            }
         }
         .sensoryFeedback(Haptics.toggle, trigger: hidden)
         .onChange(of: searching) { _, on in
             fieldFocused = on
         }
+        #if DEBUG
+        .onAppear { HomeProbe.shared.opaqueTopBar = !usesLegacyFade }
+        #endif
     }
 
     /// La ranura de la marca: la pieza negra de 30 pt y el nombre en mayúsculas, 15 pt seminegrita con 0,18 em entre
@@ -102,6 +129,7 @@ struct HomeTopBar: View {
                     .tracking(nameSize * 0.18)
                     .foregroundStyle(Theme.label)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .launchBrandSlot()
             .padding(.trailing, 8)
@@ -145,9 +173,10 @@ struct HomeTopBar: View {
             }
         }
         .padding(.horizontal, 14)
-        .frame(height: 44)
+        .frame(minHeight: 44)
         .glassSurface(Capsule())
         .glassID("search", in: glass)
+        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .trailing)))
         .onAppear { fieldFocused = true }
     }

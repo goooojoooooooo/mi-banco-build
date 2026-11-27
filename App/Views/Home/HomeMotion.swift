@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import MiBancoCore
 
 /// Medidas que cambian en cada fotograma (posición del carrusel, desplazamiento de la lista).
 /// Viven aquí, fuera del entorno y del `body` de Inicio: solo las leen modificadores pequeños
@@ -19,12 +20,34 @@ final class HomeMotion {
     /// El carrusel se está deslizando por programa (segmentado, llegada): las tarjetas por las que solo pasa no
     /// empiezan a contar su cifra.
     @ObservationIgnored var carouselAnimating = false
+    #if DEBUG
+    /// Solo pruebas: con Reducir movimiento, la ventana en la que la tarjeta no se ve en un cambio de tarjeta: desde que
+    /// empieza a fundirse hasta que la nueva pasa de la mitad de su fundido de entrada (lo apunta `CardCarousel`).
+    @ObservationIgnored var carouselHiddenFrom = Date.distantFuture
+    @ObservationIgnored var carouselHiddenUntil = Date.distantPast
+    /// ¿Está la tarjeta en esa ventana ahora?
+    var carouselHiddenNow: Bool {
+        let now = Date()
+        return now >= carouselHiddenFrom && now < carouselHiddenUntil
+    }
+    #endif
     /// Dónde está en pantalla la tarjeta de delante (de ahí sale el abanico). Se lee al abrirlo, nunca al dibujar.
     @ObservationIgnored var carouselFrame = CGRect.zero
     #if DEBUG
     /// Solo demo (`-MiBancoDemoCardMoment`): sube al tocar el segmento que ya está elegido.
     var demoMomentTick = 0
     #endif
+}
+
+/// El fundido de Reducir movimiento del cambio de tarjeta (s, a velocidad real; × cámara lenta con `kit.pause`). Una sola
+/// constante: la usan el carrusel (se funde, salta y vuelve) y la lista (espera a que la tarjeta vuelva). Vale lo mismo
+/// que `MotionContext.fade` del kit (0,22 s), que no publica su duración.
+enum ReduceCardSwap {
+    static let fade = 0.22
+
+    static func animation(_ motion: MotionContext) -> Animation {
+        .easeOut(duration: motion.pause(fade))
+    }
 }
 
 /// Constantes del carrusel: tarjetas de 376 pt en 440 (32 de margen, se ven los vecinos) y 10 entre ellas.
@@ -101,7 +124,9 @@ struct HomeEntrance: ViewModifier {
         // Una sola cifra: la que recibe `.opacity` es la misma que apunta la sonda de las pruebas (`DrawnOpacity`).
         let drawn = listOpacity * (waiting ? opacityWhileWaiting : 1)
         content
-            .modifier(DrawnOpacity(value: drawn, measured: entrance.scope == .list && waiting))
+            // Se mide mientras la lista cambia: la lista atenuada, o una pieza de la lista nueva esperando su turno.
+            .modifier(DrawnOpacity(value: drawn, measured: listOpacity < 1 || (entrance.scope == .list && waiting),
+                                   newListPiece: entrance.scope == .list && waiting))
             .scaleEffect(waiting && !motion.reduce ? (plan?.scale ?? 1) : 1)
             .offset(y: waiting ? motion.distance(plan?.rise ?? 0) : 0)
             .onAppear(perform: land)
@@ -134,21 +159,33 @@ extension View {
     }
 }
 
+extension View {
+    /// Una pieza de la lista de Inicio que no entra escalonada (traspasos pendientes, posiciones): su opacidad pasa por
+    /// el mismo valor único que se dibuja y se mide (`DrawnOpacity`).
+    func listOpacity(_ value: Double) -> some View {
+        modifier(DrawnOpacity(value: value, measured: value < 1, newListPiece: false))
+    }
+}
+
 /// Aplica la opacidad de una pieza de Inicio y, solo en DEBUG, apunta ESE MISMO valor en la sonda del cambio de lista
 /// (`fondoLista`, la menor de las piezas de la lista nueva mientras esperan su turno). Así la prueba ve lo que se dibuja:
 /// cambiar la opacidad de las piezas obliga a pasar por aquí.
 private struct DrawnOpacity: ViewModifier {
     let value: Double
-    /// La pieza es de la lista nueva de un cambio de tarjeta y aún espera su turno.
+    /// Se mide: la lista está cambiando (atenuada, o la pieza es de la lista nueva y espera su turno).
     let measured: Bool
+    /// La pieza es de la lista nueva de un cambio de tarjeta y aún espera su turno (cuenta aparte: así se sabe que la
+    /// lista nueva SÍ pasa por aquí, no solo la vieja atenuada).
+    let newListPiece: Bool
 
     func body(content: Content) -> some View {
         #if DEBUG
         content
             .opacity(value)
-            .onChange(of: DrawnSample(value: value, measured: measured), initial: true) { _, sample in
+            .onChange(of: DrawnSample(value: value, measured: measured, newListPiece: newListPiece), initial: true) { _, sample in
                 guard sample.measured else { return }
                 HomeProbe.shared.listSwapFloor = min(HomeProbe.shared.listSwapFloor, Int((sample.value * 100).rounded()))
+                if sample.newListPiece { HomeProbe.shared.newListSamples += 1 }
             }
         #else
         content.opacity(value)
@@ -160,6 +197,7 @@ private struct DrawnOpacity: ViewModifier {
 private struct DrawnSample: Equatable {
     let value: Double
     let measured: Bool
+    let newListPiece: Bool
 }
 #endif
 
@@ -200,23 +238,28 @@ struct CarouselParallax: ViewModifier {
         // Resistencia: crece rápido al principio y se frena (nunca pasa del 4 %).
         let stretch: CGFloat = 0.04 * (1 - 1 / (pull / 120 + 1))
         content
-            .offset(y: y * 0.32)
+            .offset(y: min(y * 0.32, 96))
             .scaleEffect(1 - min(y / 1_400, 0.06) + stretch, anchor: .top)
             .opacity(1 - min(y / 420, 0.45))
     }
 }
 
-/// Degradado negro bajo la barra superior: solo aparece cuando hay contenido pasando por debajo.
+/// Degradado negro bajo la barra superior: solo aparece cuando hay contenido pasando por debajo. La barra en sí lleva
+/// fondo `Theme.canvas` opaco, así que el contenido desplazado nunca se transparenta detrás de «ONYX».
 struct TopEdgeFade: View {
     let motion: HomeMotion
+    var legacy = false
     @Environment(\.motion) private var kit
 
     var body: some View {
-        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.55), .init(color: .black.opacity(0), location: 1)],
-                       startPoint: .top, endPoint: .bottom)
+        let stops: [Gradient.Stop] = legacy
+            ? [.init(color: .black, location: 0), .init(color: .black, location: 0.55), .init(color: .black.opacity(0), location: 1)]
+            : [.init(color: Theme.canvas, location: 0), .init(color: Theme.canvas.opacity(0), location: 1)]
+        LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
             .opacity(motion.listOffset > 8 ? 1 : 0)
             .animation(kit.fade, value: motion.listOffset > 8)
             .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -279,6 +322,25 @@ private struct DrawnTextRecorder: ViewModifier {
             .onChange(of: text) { _, new in DrawnTextAudit.shared.record(new, hidden: hidden) }
     }
 }
+#endif
+
+extension View {
+    /// Solo DEBUG (`-MiBancoDemoDrawnText`): registra en `DrawnTextAudit` una cadena de importe pintada dentro de un
+    /// `Text` compuesto (p. ej. la frase de «Este mes»). En Release no hace nada.
+    @ViewBuilder func auditDrawnAmount(_ text: String?, hidden: Bool) -> some View {
+        #if DEBUG
+        if let text {
+            modifier(DrawnTextRecorder(text: text, hidden: hidden))
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
+#if DEBUG
 
 /// El elemento invisible que publica `DrawnTextAudit.summary` (identificador `drawn-text-audit`).
 struct DrawnTextAuditProbe: View {
@@ -319,6 +381,16 @@ struct DrawnTextAuditProbe: View {
     /// (opacidad de la lista × la de su entrada): nunca 0 con movimiento (la pantalla no se queda en negro entre las
     /// dos listas). -1 = aún no ha habido cambio.
     var listSwapFloor = -1
+    /// Cambios de lista hechos con la tarjeta también fundida a 0 (Reducir movimiento): nada bajo el selector.
+    var blankSwaps = 0
+    /// Muestras de opacidad de piezas de la lista NUEVA mientras esperan su turno (la sonda de arriba las incluye).
+    var newListSamples = 0
+    /// Veces que el importe de una fila deslizada ha llegado a apagarse del todo al abrirla.
+    var rowAmountHidden = 0
+    /// Veces que «Gastado en 7 días» quedó esperando a contar con el ojo cerrado (se quedaría invisible al abrirlo).
+    var weekCountsWhileHidden = 0
+    /// Veces que las fichas de «Desde» cambiaron de cifra a la vez que el importe tecleado (antes de que entre el dígito).
+    var chipsEarly = 0
     /// 1 mientras alguna fila está marcada como recién llegada (fondo y, si es un ingreso, ✓ verde).
     var freshRows = 0
     /// Llegadas anunciadas (aterricen o no).
@@ -327,13 +399,35 @@ struct DrawnTextAuditProbe: View {
     /// (`PreparedMark`, el paso «listo» de «Mover dinero»).
     var successMarks = 0
     var preparedMarks = 0
+    /// Cabecera de Inicio con texto grande: si la barra superior lleva fondo opaco y si «Este mes» va en un solo bloque.
+    var opaqueTopBar = true
+    var paceSingleBlock = true
+    /// m-7 punto 9: sonda de opacidad dibujada durante la apertura del abanico con Reducir movimiento.
+    /// No observado al escribir (se actualiza en cada fotograma dibujado); `fanReduceSettled` avisa al terminar.
+    @ObservationIgnored var fanReduceAudit = FanReduceAudit()
+    var fanReduceSettled = 0
+
+    func resetFanReduceProbe() {
+        fanReduceAudit = FanReduceAudit()
+    }
+
+    func recordFanFrame(layer: FanReduceAudit.Layer, opacity: Double) {
+        fanReduceAudit.record(layer: layer, opacity: opacity)
+    }
+
+    func finishFanReduceProbe() {
+        fanReduceSettled += 1
+    }
 
     var summary: String {
         [
             "montajes=\(assemblies)", "inclinacion=\(tiltRunning ? 1 : 0)", "tirones=\(refreshes)", "alDia=\(refreshesDone)",
             "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
-            "insignias=\(arrivalBadges)", "nueva=\(freshRows)", "anunciadas=\(arrivalsAnnounced)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)",
+            "insignias=\(arrivalBadges)", "nueva=\(freshRows)", "anunciadas=\(arrivalsAnnounced)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)", "vacios=\(blankSwaps)", "muestrasNueva=\(newListSamples)", "importeOculto=\(rowAmountHidden)", "cuentaOculta=\(weekCountsWhileHidden)", "fichasAntes=\(chipsEarly)",
             "exitos=\(successMarks)", "preparados=\(preparedMarks)",
+            "barraOpaca=\(opaqueTopBar ? 1 : 0)", "ritmoBloque=\(paceSingleBlock ? 1 : 0)",
+            "abanicoMin=\(fanReduceAudit.minVisiblePermille)", "abanicoSolapes=\(fanReduceAudit.overlapFrames)",
+            "abanicoMuestras=\(fanReduceAudit.samples)", "abanicoListo=\(fanReduceSettled)",
         ].joined(separator: ";")
     }
 }

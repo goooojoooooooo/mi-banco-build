@@ -21,7 +21,7 @@ struct SettingsView: View {
     var importTradeRepublic: () -> Void = {}
 
     @AppStorage("lockEnabled") private var lockEnabled = true
-    @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
+    @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = LogoCachePolicy.defaultDownloadsEnabled
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
     /// El movimiento tal como lo ve el kit: la fila «Animaciones» dice el nivel que de verdad está en uso.
@@ -44,6 +44,9 @@ struct SettingsView: View {
     @State private var pushedBank: BankID?
     @State private var showConnectionGuide = false
     @FocusState private var focused: BankID?
+    #if DEBUG
+    @State private var demoTimersArmed = false
+    #endif
     #if DEBUG
     /// Demo (`-MiBancoDemoAlertsGuide`): abre la guía de avisos nada más aparecer Ajustes.
     @State private var demoOpensGuide = false
@@ -192,11 +195,8 @@ struct SettingsView: View {
                     }
                     .toggleStyle(TitanToggleStyle())
                     .listRowBackground(Theme.grouped)
-                    Toggle(isOn: privacyBinding) {
-                        OptionLabel(title: "Modo privado", detail: "Oculta los importes en toda la app", systemImage: "eye.slash")
-                    }
-                    .toggleStyle(TitanToggleStyle())
-                    .listRowBackground(Theme.grouped)
+                    privacyToggle
+                        .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Privacidad")
                 } footer: {
@@ -227,15 +227,20 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $logoDownloads) {
-                        OptionLabel(title: "Descargar logos que falten", detail: "Para tiendas que la app no conoce", systemImage: "arrow.down.to.line")
+                        OptionLabel(
+                            title: "Descargar logos que falten",
+                            detail: "Si lo activas, consulta el nombre del comercio en Google. Nunca envía importes.",
+                            systemImage: "arrow.down.to.line"
+                        )
                     }
                     .toggleStyle(TitanToggleStyle())
+                    .accessibilityIdentifier("settings-logo-downloads")
                     .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Logos")
                 } footer: {
                     VStack(alignment: .leading, spacing: Theme.Space.gutter) {
-                        SettingsFooter("\(AppIdentity.displayName) busca en internet el logo de las tiendas donde pagas y que no conoce. El servicio de logos ve la web de la tienda, nunca tus importes ni a quién envías dinero.")
+                        SettingsFooter("Si lo activas, \(AppIdentity.displayName) consulta en Google el nombre de las tiendas que no conoce para buscar su logo. Nunca envía tus importes, tus saldos ni a quién envías dinero.")
                         Text(diagnostics)
                             .titan(.caption)
                             .foregroundStyle(Theme.label3)
@@ -298,6 +303,14 @@ struct SettingsView: View {
         .onChange(of: gate?.isLocked) { _, locked in
             if locked == true { focused = nil }
         }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            if on { releaseAmountFocus() }
+        }
+        // (Demo: `-MiBancoDemoCloseEyeAfter` y `-MiBancoDemoFocusBalanceAfter` cuentan desde que aparece el interruptor
+        // «Modo privado», ver `armDemoTimers`.)
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
         .sensoryFeedback(.success, trigger: saveCount)
@@ -329,14 +342,62 @@ struct SettingsView: View {
         }
     }
 
+    /// «Modo privado» (aparte: dentro de la lista, el `#if DEBUG` hacía que el compilador no pudiera con la expresión).
+    private var privacyToggle: some View {
+        let toggle = Toggle(isOn: privacyBinding) {
+            OptionLabel(title: "Modo privado", detail: "Oculta los importes en toda la app", systemImage: "eye.slash")
+        }
+        .toggleStyle(TitanToggleStyle())
+        .accessibilityIdentifier("settings-private-mode")
+        #if DEBUG
+        return toggle.onAppear { armDemoTimers() }
+        #else
+        return toggle
+        #endif
+    }
+
+    #if DEBUG
+    /// Solo demo: arma, una vez, el cierre del ojo (`-MiBancoDemoCloseEyeAfter`, por el mismo camino que el interruptor)
+    /// y el foco del saldo de Trade Republic (`-MiBancoDemoFocusBalanceAfter`, como un toque), para grabarlos desde antes.
+    private func armDemoTimers() {
+        guard !demoTimersArmed else { return }
+        demoTimersArmed = true
+        if let seconds = DemoMode.closesEyeAfterSeconds {
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                privacyBinding.wrappedValue = true
+            }
+        }
+        if let seconds = DemoMode.focusesBalanceAfterSeconds {
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                focused = .tr
+            }
+        }
+    }
+    #endif
+
+    /// Suelta el foco de un saldo en edición sin animación (ver `onChange(of: preferences.privateMode)`).
+    private func releaseAmountFocus() {
+        #if DEBUG
+        if DemoMode.keepsFocusOnEyeClose { return }
+        #endif
+        guard focused != nil else { return }
+        var still = Transaction()
+        still.disablesAnimations = true
+        withTransaction(still) { focused = nil }
+    }
+
     private var motionLevelBinding: Binding<MotionLevel> {
         Binding(get: { preferences.motionLevel }, set: { preferences.motionLevel = $0 })
     }
 
-    /// El interruptor y el ojo de Inicio son el mismo estado, con la misma animación.
+    /// El interruptor y el ojo de Inicio son el mismo estado. Cerrar el ojo NO se anima (como en Inicio): las cifras se
+    /// cambian por la máscara en el acto, sin ningún fotograma con un dígito apagándose. Abrirlo, un fundido corto.
     private var privacyBinding: Binding<Bool> {
         Binding(get: { preferences.privateMode }, set: { on in
-            withAnimation(motion.reduce ? nil : motion.calmAnimation(.enter)) { preferences.privateMode = on }
+            if on { releaseAmountFocus() }
+            withAnimation(on || motion.reduce ? nil : motion.fade) { preferences.privateMode = on }
         })
     }
 
@@ -498,17 +559,15 @@ private struct BalanceRow: View {
                         .accessibilityLabel("Saldo de \(bank.displayName): \(spoken)")
                 } else {
                     let isEditing = focused.wrappedValue == bank
-                    // Con el ojo cerrado (y sin editar) el saldo no se dibuja: en su sitio va la máscara del kit.
-                    let masked = hidden && !isEditing && !text.isEmpty
+                    // Con el ojo cerrado el saldo guardado no se dibuja nunca (ni al editarlo): `MaskedAmountTextField`.
                     HStack(spacing: 8) {
                         if saved {
                             SavedCheck()
                                 .transition(.opacity)
                         }
-                        TextField("0,00 €", text: $text)
+                        MaskedAmountTextField(placeholder: "0,00 €", text: $text, hidden: hidden, editing: isEditing)
                             .titan(.option)
                             .fontWeight(.semibold)
-                            .maskedAmountField(masked, alignment: stacked ? .leading : .trailing)
                             .multilineTextAlignment(stacked ? .leading : .trailing)
                             .keyboardType(.numbersAndPunctuation)
                             .submitLabel(.done)
@@ -519,7 +578,6 @@ private struct BalanceRow: View {
                             .background(Theme.fieldFill.opacity(isEditing ? 1 : 0), in: .rect(cornerRadius: Theme.Radius.field))
                             .animation(motion.fade, value: isEditing)
                             .accessibilityLabel("Saldo de \(bank.displayName)")
-                            .accessibilityValue(masked ? "importe oculto" : text)
                     }
                 }
             }
@@ -592,39 +650,6 @@ struct SavedCheck: View {
             }
             .onAppear { landed += 1 }
             .accessibilityLabel("Guardado")
-    }
-}
-
-/// Un campo de importe con el ojo cerrado: el texto del campo no se dibuja (transparente) y encima va la máscara del
-/// kit, así que no hay ninguna cifra en pantalla, ni tapada. Al editar (o con el ojo abierto) es el campo de siempre.
-private struct MaskedAmountField: ViewModifier {
-    let masked: Bool
-    let alignment: Alignment
-
-    func body(content: Content) -> some View {
-        content
-            .foregroundStyle(masked ? Color.clear : Theme.label)
-            .overlay(alignment: alignment) {
-                if masked {
-                    Text(maskedEUR(0, sign: false))
-                        .titan(.option)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Theme.label)
-                        .lineLimit(1)
-                        .fixedSize()
-                        .allowsHitTesting(false)
-                        .accessibilityLabel("importe oculto")
-                        .accessibilityHidden(true)
-                }
-            }
-            .privacySensitive()
-    }
-}
-
-extension View {
-    /// Ver MaskedAmountField. Va justo después del estilo de letra del campo (hereda su letra).
-    func maskedAmountField(_ masked: Bool, alignment: Alignment) -> some View {
-        modifier(MaskedAmountField(masked: masked, alignment: alignment))
     }
 }
 

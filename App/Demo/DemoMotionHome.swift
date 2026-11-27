@@ -60,6 +60,34 @@ extension DemoMode {
     /// lista: la lista nueva parte de invisible (pantalla en negro bajo el selector). La sonda tiene que dar 0.
     static var listSwapBlanks: Bool { isActive && arguments.contains("-MiBancoDemoListBlanks") }
 
+    /// `-MiBancoDemoEyeOpensMidBuild` (solo con `-MiBancoDemo`): con el ojo cerrado, se abre 0,3 s (× intensidad y
+    /// cámara lenta) después de empezar el montaje de Inicio (para fotografiar el ojo abierto a mitad del montaje).
+    static var eyeOpensMidBuild: Bool { isActive && arguments.contains("-MiBancoDemoEyeOpensMidBuild") }
+
+    // Solo para probar las pruebas: cada una repone el comportamiento de antes de su arreglo y la prueba vigilante,
+    // lanzada con ella dentro de `XCTExpectFailure` estricto, tiene que fallar.
+    /// `-MiBancoDemoOldSwipe`: la fila deslizada de antes (siempre al 40 %, el importe sin apagarse).
+    static var oldSwipe: Bool { isActive && arguments.contains("-MiBancoDemoOldSwipe") }
+    /// `-MiBancoDemoFullSwipe`: la fila deslizada de antes del lote de cierre (se aparta entera: el nombre se sale).
+    static var fullSwipe: Bool { isActive && arguments.contains("-MiBancoDemoFullSwipe") }
+    /// `-MiBancoDemoOldReduceSwap`: con Reducir movimiento, la lista cambia sin esperar a que vuelva la tarjeta.
+    static var oldReduceSwap: Bool { isActive && arguments.contains("-MiBancoDemoOldReduceSwap") }
+    /// `-MiBancoDemoOldKeypadMask`: con el ojo cerrado, la máscara del teclado vacío igual que la de un importe tecleado.
+    static var oldKeypadMask: Bool { isActive && arguments.contains("-MiBancoDemoOldKeypadMask") }
+    /// `-MiBancoDemoOldWeekCount`: «Gastado en 7 días» espera a contar aunque el ojo esté cerrado.
+    static var oldWeekCount: Bool { isActive && arguments.contains("-MiBancoDemoOldWeekCount") }
+    /// `-MiBancoDemoOldChips`: las fichas de «Desde» cambian de cifra a la vez que el importe tecleado.
+    static var oldChips: Bool { isActive && arguments.contains("-MiBancoDemoOldChips") }
+    /// `-MiBancoDemoOldHomeAX`: repone la maquetación vieja de Inicio con texto grande (barra superior traslúcida,
+    /// paralaje activo, segmentado apretado y «Este mes» en columnas estrechas) para ver en rojo la prueba de AX-XXXL.
+    static var oldHomeAX: Bool { isActive && arguments.contains("-MiBancoDemoOldHomeAX") }
+    /// `-MiBancoDemoOldSwipeClose`: repone el desmontaje inmediato al cerrar y las cápsulas estrechas de 64 pt con
+    /// texto grande (N-1 / N-2), para ver en rojo las pruebas de la fila deslizada.
+    static var oldSwipeClose: Bool { isActive && arguments.contains("-MiBancoDemoOldSwipeClose") }
+    /// `-MiBancoDemoOldReduceFan`: repone el solape de antes en el abanico con Reducir movimiento (sin retardo entre el
+    /// telón negro y la entrada del abanico) para ver en rojo la prueba de m-7 punto 9.
+    static var oldReduceFan: Bool { isActive && arguments.contains("-MiBancoDemoOldReduceFan") }
+
     /// `-MiBancoDemoArrivalIncome` (con `-MiBancoDemoArrival`): lo que llega es dinero que entra, no un pago.
     static var arrivalIsIncome: Bool { arguments.contains("-MiBancoDemoArrivalIncome") }
 

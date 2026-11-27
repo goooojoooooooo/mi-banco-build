@@ -18,7 +18,11 @@ final class BriefingSpeaker {
     /// progreso REAL de la voz (`willSpeakRangeOfSpeechString`). nil cuando no suena ninguna línea (el saludo, entre
     /// frases o callada). Con el modo privado no hay líneas (la voz no lee ninguna).
     private(set) var currentLine: String?
-    private var lines: [SpokenBriefing.Line] = []
+    /// Lo que lee la voz ahora, con sus líneas (rangos del texto que lee: `SpokenBriefing.trimmed`).
+    private var spoken = SpokenBriefing(text: "", lines: [])
+    /// m-7: se quitan en `deinit` (no aislado: por eso `nonisolated(unsafe)`; solo se escriben en `init`).
+    @ObservationIgnored nonisolated(unsafe) private var interruptionObserver: (any NSObjectProtocol)?
+    @ObservationIgnored nonisolated(unsafe) private var routeObserver: (any NSObjectProtocol)?
 
     private let synthesizer = AVSpeechSynthesizer()
     private let delegateProxy: DelegateProxy
@@ -29,6 +33,47 @@ final class BriefingSpeaker {
         let proxy = DelegateProxy()
         self.delegateProxy = proxy
         synthesizer.delegate = proxy
+        // m-9: una llamada, Siri o una alarma interrumpe el audio: la lectura se para del todo (botón y resalte
+        // incluidos), en vez de quedarse «leyendo» sin sonido.
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let began = (note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt)
+                .flatMap(AVAudioSession.InterruptionType.init(rawValue:)) == .began
+            guard began else { return }
+            MainActor.assumeIsolated { self?.stop() }
+        }
+        // I-6 (privacidad): si la salida pasa a ser menos privada (se desconectan los auriculares, se fuerza el
+        // altavoz), la voz que lee saldos se para y no vuelve sola. La regla está en Core (`AudioRouteChange`).
+        routeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+            let previous = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?
+                .outputs.map { Self.kind(of: $0.portType) } ?? []
+            let current = AVAudioSession.sharedInstance().currentRoute.outputs.map { Self.kind(of: $0.portType) }
+            // Ronda 2 (N-4): también al aparecer una salida nueva que no es privada (Bluetooth, coche, AirPlay…).
+            guard speechStops(AudioRouteChange(rawReason: raw), previous: previous, current: current) else { return }
+            MainActor.assumeIsolated { self?.stop() }
+        }
+    }
+
+    /// El grupo de una salida de audio (ronda 2, N-4).
+    nonisolated private static func kind(of port: AVAudioSession.Port) -> AudioOutputKind {
+        switch port {
+        case .headphones: .headphones
+        case .builtInReceiver: .receiver
+        case .builtInSpeaker: .speaker
+        case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP: .bluetooth
+        case .carAudio: .car
+        case .airPlay: .airPlay
+        default: .other
+        }
+    }
+
+    deinit {
+        if let interruptionObserver { NotificationCenter.default.removeObserver(interruptionObserver) }
+        if let routeObserver { NotificationCenter.default.removeObserver(routeObserver) }
     }
 
     func toggle(_ text: String, target: Target = .briefing) {
@@ -49,8 +94,8 @@ final class BriefingSpeaker {
     }
 
     func speak(_ text: String, target: Target = .briefing, lines: [SpokenBriefing.Line] = []) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
+        let spoken = SpokenBriefing(text: text, lines: lines).trimmed()
+        guard !spoken.text.isEmpty else {
             stop()
             return
         }
@@ -58,17 +103,24 @@ final class BriefingSpeaker {
         generation += 1
         let token = generation
         activeTarget = target
-        // Los rangos son del texto entero; si se recorta por delante, se corrigen (en la práctica no hay nada que
-        // recortar: el texto empieza por el saludo).
-        let shift = text.utf16.count - text.drop(while: { $0.isWhitespace }).utf16.count
-        self.lines = lines.map { .init(id: $0.id, range: ($0.range.lowerBound - shift)..<($0.range.upperBound - shift)) }
+        // La voz lee el texto recortado; los rangos de las líneas son de ese texto (`SpokenBriefing.trimmed`).
+        self.spoken = spoken
 
         #if DEBUG
         if DemoMode.isActive {
             // En el simulador de CI no hay salida de audio fiable: simulamos una lectura activa hasta «Parar» o cierre,
             // y que la voz va pasando por las líneas (1,6 s cada una, a la cámara lenta de las grabaciones) para poder
             // grabar y probar el resalte. En el iPhone manda el progreso real de la voz.
-            let steps = self.lines
+            let steps = spoken.lines
+            if let seconds = DemoMode.routeChangeSeconds {
+                // I-6, solo demo: a los `s` segundos se desconectan unos auriculares «de mentira».
+                Task {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    NotificationCenter.default.post(
+                        name: AVAudioSession.routeChangeNotification, object: nil,
+                        userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue])
+                }
+            }
             demoTimer = Task { [weak self] in
                 for line in steps {
                     guard let self, !Task.isCancelled, self.generation == token else { return }
@@ -88,7 +140,7 @@ final class BriefingSpeaker {
         try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
         try? session.setActive(true)
 
-        let utterance = AVSpeechUtterance(string: trimmed)
+        let utterance = AVSpeechUtterance(string: spoken.text)
         utterance.voice = Self.preferredVoice()
         utterance.rate = AVSpeechUtteranceDefaultSpeechRate
 
@@ -102,7 +154,7 @@ final class BriefingSpeaker {
         } progress: { [weak self] location in
             Task { @MainActor [weak self] in
                 guard let self, self.generation == token else { return }
-                let now = self.lines.first { $0.range.contains(location) }?.id
+                let now = self.spoken.line(at: location)
                 if now != self.currentLine { self.currentLine = now }
             }
         }

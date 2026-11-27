@@ -176,6 +176,17 @@ private func follow(_ q: String, _ prev: AssistantIntent) -> AssistantIntent? {
             let routed = nyxRouteQuestion(question, conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal)
             #expect(routed != .appStatus && routed != .seen, "\(question) -> \(routed)")
         }
+        // La barrera de dinero solo ignora «pago(s)»: el resto de palabras de dinero la mantienen.
+        for question in ["¿Has visto cuánto llevo en pagos raros?", "¿Has visto el saldo y los avisos de los pagos?"] {
+            let routed = nyxRouteQuestion(question, conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal)
+            #expect(routed != .appStatus && routed != .seen, "\(question) -> \(routed)")
+        }
+        #expect(nyxRouteQuestion("¿Has visto algún pago raro?", conversation: conv, state: s, portfolio: nil,
+                                 now: nov(26), calendar: cal) == .seen)
+        // «cuentas conectadas» en plural es un complemento, no una pregunta sobre el estado de la app.
+        let connected = nyxRouteQuestion("¿Qué hay en las cuentas conectadas?", conversation: conv, state: s, portfolio: nil,
+                                         now: nov(26), calendar: cal)
+        #expect(connected != .appStatus && connected != .seen, "\(connected)")
         let money2 = nyxRouteQuestion("¿Has visto cuánto llevo pagado?", conversation: conv, state: s, portfolio: nil,
                                       now: nov(26), calendar: cal)
         #expect(money2 != .appStatus && money2 != .seen)

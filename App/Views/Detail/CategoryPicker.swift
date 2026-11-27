@@ -13,7 +13,6 @@ struct CategoryPickerRow: View {
     let current: SpendingCategory
     let model: LedgerModel
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     /// D2: la ficha blanca de la elegida es UNA sola pieza que se desliza a la nueva al elegir.
@@ -26,6 +25,11 @@ struct CategoryPickerRow: View {
     @State private var bounces: [SpendingCategory: Int] = [:]
     @State private var errorTick = 0
     @State private var failed = false
+    /// Ronda 2 (I-3): «Quitar mi categoría…» se decide al ABRIR la rejilla y no cambia mientras está abierta: elegir una
+    /// categoría no inserta un botón que empuja las filas hacia abajo justo antes de plegarse.
+    @State private var resetShown = false
+    /// El pliegue que espera tras elegir; se cancela si la fila desaparece.
+    @State private var foldTask: Task<Void, Never>?
 
     init(movement: Movement, current: SpendingCategory, model: LedgerModel) {
         self.movement = movement
@@ -61,7 +65,26 @@ struct CategoryPickerRow: View {
         return "Volver a la categoría automática"
     }
 
-    private var fold: Animation { reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.reveal }
+    /// I-3 (ronda 1): el pliegue va con `\.motion` (intensidad, cámara lenta y el Reducir de la app; con Reducir es un
+    /// fundido), y lo que entra o sale DENTRO de la rejilla se encadena a él con el mismo reloj.
+    private var fold: Animation { motion.animation(.row) }
+
+    /// Cuándo se VE acabado el pliegue (s): las filas de debajo ya no se mueven.
+    private var foldSettle: Double {
+        guard !motion.reduce else { return motion.fadeDuration }
+        return MotionMath.visibleSettle(
+            MotionMath.scaled(SpringToken.row.base, level: motion.level, timeMultiplier: motion.timeMultiplier))
+    }
+
+    /// Lo que aparece (la rejilla, «Quitar mi categoría…») entra cuando el pliegue ya ha hecho sitio, solo con opacidad;
+    /// lo que se va, se va en 80 ms y el pliegue empieza DESPUÉS de esos 80 ms (`choose`): nada sube encima de un texto
+    /// que aún se ve.
+    private var sequencedFade: AnyTransition {
+        guard !motion.reduce else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.animation(.easeOut(duration: motion.seconds(0.18)).delay(foldSettle)),
+            removal: .opacity.animation(.easeIn(duration: motion.seconds(0.08))))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,7 +100,9 @@ struct CategoryPickerRow: View {
 
             if expanded {
                 picker
-                    .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+                    // m-2 (lote final): sin doble exposición. Al desplegar, la rejilla se funde cuando las filas de
+                    // debajo ya han bajado; al plegar, se va en 80 ms, antes de que suban. Solo opacidad.
+                    .transition(sequencedFade)
             }
             if failed {
                 SaveErrorText()
@@ -89,23 +114,26 @@ struct CategoryPickerRow: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 16)
         }
+        .onDisappear { foldTask?.cancel() }
         .sensoryFeedback(Haptics.detent, trigger: selectTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
 
     private var chip: some View {
         Button {
+            if !expanded { resetShown = model.hasChosenCategory(movement.id) }
             withAnimation(fold) { expanded.toggle() }
         } label: {
             HStack(spacing: 7) {
                 Image(systemName: current.symbolName)
                     .font(.system(size: 15, weight: .medium))
                     .frame(width: 20)
-                    .contentTransition(reduceMotion ? .opacity : .symbolEffect(.replace))
-                    .symbolEffect(.bounce, value: reduceMotion ? 0 : selectTick)
+                    .contentTransition(motion.reduce ? .opacity : .symbolEffect(.replace))
+                    .symbolEffect(.bounce, value: motion.reduce ? 0 : selectTick)
                 Text(current.displayName)
                     .fontWeight(.medium)
-                    .contentTransition(.opacity)
+                    // Ronda 2 (I-3): el nombre cambia de una vez (un fundido cruzado dejaba «Ocio» encima de «Supermercado»).
+                    .contentTransition(.identity)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Theme.label3)
@@ -118,7 +146,7 @@ struct CategoryPickerRow: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.pressable)
-        .animation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.morph, value: current)
+        .animation(motion.animation(.snap), value: current)
         .accessibilityIdentifier("category-chip")
         .accessibilityLabel("Categoría: \(current.displayName)")
         .accessibilityHint(expanded ? "Toca para cerrar la lista" : "Toca para cambiarla")
@@ -135,7 +163,7 @@ struct CategoryPickerRow: View {
                     }
                 }
             }
-            if model.hasChosenCategory(movement.id) {
+            if resetShown {
                 Button(action: resetToAutomatic) {
                     Text(resetTitle)
                         .titan(.option)
@@ -148,6 +176,7 @@ struct CategoryPickerRow: View {
                 }
                 .buttonStyle(.pressable)
                 .accessibilityIdentifier("category-automatic")
+                .transition(sequencedFade)
             }
             if let merchant = merchantName {
                 Toggle(isOn: $applyToMerchant) {
@@ -179,9 +208,18 @@ struct CategoryPickerRow: View {
             }
             selectTick += 1
             if !motion.reduce { bounces[category, default: 0] += 1 }
-            withAnimation(fold.delay(motion.reduce ? 0 : motion.seconds(0.32))) {
-                failed = false
-                expanded = false
+            failed = false
+            // Ronda 2 (I-3): la ficha blanca llega a la elegida y DESPUÉS se pliega todo junto: se retrasa el cambio de
+            // estado (no solo su animación), así la salida de la rejilla y el pliegue empiezan en el mismo instante y
+            // no queda el hueco de la rejilla esperando.
+            // N-10: la rejilla empieza a irse a los 0,24 s (su salida dura 80 ms) y el pliegue, cuando ya se ha ido.
+            let exit = motion.reduce ? 0 : motion.seconds(0.08)
+            let wait = motion.reduce ? 0 : motion.seconds(0.32) - exit
+            foldTask?.cancel()
+            foldTask = Task { @MainActor in
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+                guard !Task.isCancelled else { return }
+                withAnimation(fold.delay(exit)) { expanded = false }
             }
         } catch {
             errorTick += 1
@@ -218,9 +256,10 @@ private struct CategoryTile: View {
     let bounce: Int
     let action: () -> Void
 
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motion) private var motion
     @State private var shown = false
+    /// Ronda 2 (I-3): el Reducir de la app (`\.motion`), no el del sistema.
+    private var reduceMotion: Bool { motion.reduce }
 
     private let shape = RoundedRectangle(cornerRadius: 16, style: .continuous)
 
@@ -264,14 +303,15 @@ private struct CategoryTile: View {
             .contentShape(shape)
         }
         .buttonStyle(.pressable)
-        .animation(reduceMotion ? .easeOut(duration: 0.2) : .spring(duration: 0.4, bounce: 0.35), value: selected)
+        // N-11: la ficha blanca se desliza con el muelle de los indicadores (no se pasa de largo).
+        .animation(motion.animation(.indicator), value: selected)
         // Entrada escalonada de la rejilla (30 ms por ficha); con Reducir movimiento, solo un fundido.
         .opacity(shown ? 1 : 0)
         .scaleEffect(shown || reduceMotion ? 1 : 0.86)
         .offset(y: shown || reduceMotion ? 0 : 6)
         .onAppear {
             guard !shown else { return }
-            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : Theme.Motion.assemble.delay(Double(index) * 0.03)) {
+            withAnimation(motion.animation(.enter).delay(reduceMotion ? 0 : motion.seconds(Double(index) * 0.03))) {
                 shown = true
             }
         }

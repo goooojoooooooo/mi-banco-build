@@ -455,7 +455,56 @@ final class MotionTourScreensTests: MotionTourCase {
 
     /// Con Reducir movimiento: el porcentaje salta de tope en tope con un fundido, los nodos se funden y el ✓ sigue.
     func testBankConnectedReduce() throws {
-        bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion"], frames: 28)
+        // «conectado» se cierra solo (como con «Listo») 8 s después de aparecer: la segunda ráfaga empieza ANTES de ese
+        // cierre y lo graba entero (lote de cierre, ronda 1, m-2).
+        bankConnected("bank-connected-reduce", extra: ["-MiBancoReduceMotion", "-MiBancoDemoConnectedDoneAfter", "8"], frames: 28)
+        // Y «Listo» con Reducir movimiento: «conectado» se va y vuelve la cabecera de siempre en el acto, sin recorrido
+        // de la hoja.
+        burst("bank-connected-reduce-listo", frames: 20, every: 0.5)
+        XCTAssertTrue(element("bank-header-balance").waitForExistence(timeout: 8), "«Listo» no volvió a la cabecera")
+    }
+
+    /// Cerrar el ojo con el interruptor de Ajustes, mirando los saldos (lote de cierre): ningún fotograma tras el toque
+    /// enseña una cifra; los saldos son la máscara en el acto.
+    func testSettingsEyeClose() throws {
+        // El ojo se cierra solo, por el mismo camino que el interruptor, 9 s después de que el interruptor aparezca en
+        // pantalla; la ráfaga empieza antes: los primeros fotogramas son el control (cifras a la vista) y después el
+        // cierre, fotograma a fotograma (lote de cierre, ronda 1, m-2: antes empezaba después del toque).
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoSettingsCloseEyeAfter", "9"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let toggle = element("settings-private-mode")
+        scrollDown(to: toggle)
+        XCTAssertTrue(toggle.waitForExistence(timeout: 8), "Falta el interruptor «Modo privado»")
+        // El cierre llega 9 s después de que el interruptor aparezca: la ráfaga (8 s) empieza antes.
+        burst("settings-eye-close", frames: 32, every: 0.25)
+    }
+
+    /// Editar un saldo con el ojo cerrado (decisión del dueño): Ajustes enfoca el saldo de Trade Republic solo, 9 s
+    /// después de que aparezca el interruptor (como un toque) y la ráfaga empieza antes: el campo pasa de la máscara a vacío, nunca a la cifra guardada.
+    func testSettingsEditEye() throws {
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoPrivate", "-MiBancoDemoFocusBalanceAfter", "9"])
+        XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
+        let toggle = element("settings-private-mode")
+        scrollDown(to: toggle)
+        XCTAssertTrue(app.textFields["Saldo de Trade Republic"].exists, "Falta el saldo de Trade Republic")
+        // El foco llega 9 s después de que el interruptor aparezca: la ráfaga (8 s) empieza antes.
+        burst("settings-edit-eye", frames: 32, every: 0.25)
+    }
+
+    /// La pantalla de una categoría con el ojo cerrado (lote de cierre, ronda 1, I-2): total y comparación con máscara.
+    func testCategoryDetailEye() throws {
+        launch(["-MiBancoDemoScreen", "gasto", "-MiBancoDemoCategory", "compras", "-MiBancoDemoPrivate"])
+        XCTAssertTrue(element("categoria.total").waitForExistence(timeout: 20), "No se abrió la categoría")
+        burst("category-detail-eye", frames: 12, every: 0.25)
+    }
+
+    /// La entrada de la pestaña Gasto (lote de cierre, ronda 1, m-5): se ensaya con Avisos y, ya en Inicio, se toca Gasto.
+    func testSpendingTabEntrance() throws {
+        launch([], scale: 10)
+        rehearse(tab: "Avisos", until: app.navigationBars["Avisos"])
+        press(tab: "Gasto")
+        burst("spending-tab-entrance", frames: 16, every: 0.3)
+        XCTAssertTrue(element("gasto.total").waitForExistence(timeout: 10), "La ráfaga no es de Gasto")
     }
 
     /// De cerca, el remate (ojo de diseño 14.1–14.3): el tercer paso en marcha, la conexión termina de verdad, la cifra
@@ -543,6 +592,35 @@ final class MotionTourScreensTests: MotionTourCase {
         super.launch(["-MiBancoDemoOnboarding", "1", "-MiBancoReduceMotion"])
         burst("welcome-reduce", frames: 14, every: 0.3)
         XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
+    }
+
+    /// Primer arranque aterrizando en la bienvenida (`.launchWelcomeMark()`) a cámara lenta ×8: marca montada, «ONYX»
+    /// se apaga al despegar, la marca vuela hasta la ranura de 58 pt de la bienvenida y aterriza sin relevo doble ni
+    /// hueco (una sola marca en cada fotograma).
+    func testWelcomeLaunchLanding() throws {
+        super.launch(["-MiBancoDemoOnboarding", "1", "-MiBancoDemoLaunchHold", "25"], scale: 8)
+        let probe = element("launch-probe")
+        var startsAt: Double?
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            let text = (probe.value as? String) ?? ""
+            for pair in text.split(separator: ";") {
+                let parts = pair.split(separator: "=", maxSplits: 1)
+                if parts.count == 2, parts[0] == "empieza", let t = Double(parts[1]) {
+                    startsAt = t
+                }
+            }
+            if startsAt != nil { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        let start = try XCTUnwrap(startsAt, "La app no publicó cuándo empieza el arranque de la bienvenida")
+        // A ×8 en Expresivo: brillo ~5,7 s, assembleAt ~7,0 s, despegue ~7,7 s, aterrizaje ~10,8 s.
+        let wait = start + 5.5 - Date().timeIntervalSince1970
+        XCTAssertGreaterThan(wait, 0, "La espera del arranque se quedó corta (\(wait) s)")
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst("welcome-launch", frames: 32, every: 0.25)
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no llegó a la bienvenida")
+        XCTAssertFalse(app.staticTexts["ONYX"].exists, "Quedó el texto «ONYX» en la bienvenida")
     }
 
     /// La guía de avisos: «Siguiente» desliza la página 70 pt hacia el lado al que se avanza y, medio segundo después,

@@ -66,12 +66,15 @@ public struct AmountReveal: Equatable, Sendable {
             guard nowHidden != hidden else { return .none }
             hidden = nowHidden
             generation += 1
+            // Ronda 1 (m-4): al CERRAR el ojo no hay barajado, ni con movimiento: con el ojo cerrado no se ve ningún
+            // dígito, ni al azar, ni un instante. Salen los puntos, todos a la vez.
+            if nowHidden {
+                scramblePending = false
+                drawn = .dots
+                return .showDots
+            }
             if reduceMotion {
                 scramblePending = false
-                if nowHidden {
-                    drawn = .dots
-                    return .showDots
-                }
                 drawn = .real
                 target = latest
                 return .crossFadeTo(latest)
@@ -96,7 +99,7 @@ public struct AmountReveal: Equatable, Sendable {
     /// Lo que se dibuja ahora mismo si la vista ya sabe que el ojo está cerrado (`hiddenInput`) pero el evento aún no
     /// ha llegado (el primer fotograma tras tocar el ojo): una cifra real no se dibuja nunca con el ojo cerrado.
     public func displayed(hiddenInput: Bool, reduceMotion: Bool) -> Drawn {
-        if hiddenInput, drawn == .real { return reduceMotion ? .dots : .scramble }
+        if hiddenInput, drawn != .dots { return .dots }
         return drawn
     }
 }

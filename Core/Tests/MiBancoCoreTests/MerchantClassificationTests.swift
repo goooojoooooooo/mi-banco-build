@@ -194,11 +194,12 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         let byMCC = pay("Inversiones del Norte", isShop: true, mcc: "5812")
         #expect(classify(byMCC) == .comerFuera)
 
-        // El MCC (paso 3) gana sobre el directorio (paso 4) y sobre las suscripciones (paso 5).
+        // El MCC (paso 4) gana sobre el directorio (paso 5).
         let mccOverDir = pay("El Corte Inglés", isShop: true, mcc: "5411")
         #expect(classify(mccOverDir) == .supermercado)
-        let mccOverSub = pay("Tienda Misteriosa", isShop: true, mcc: "5945")
-        #expect(classify(mccOverSub, subscriptions: ["tienda misteriosa"]) == .compras)
+        // Una suscripción reconocida (paso 3) gana al MCC (paso 4), ver `suscripcionReconocidaGanaAlMCC`.
+        let subOverMCC = pay("Tienda Misteriosa", isShop: true, mcc: "5945")
+        #expect(classify(subOverMCC, subscriptions: ["tienda misteriosa"]) == .suscripciones)
 
         // La categoría recordada para el comercio (paso 2) gana sobre el MCC (paso 3).
         #expect(classify(byMCC, overrides: ["inversiones del norte": .ocio]) == .ocio)
@@ -218,6 +219,34 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         #expect(classify(transfer4829) == .personas)
         let transfer6540 = pay("Pepe Sánchez", isShop: false, mcc: "6540", personPayment: true)
         #expect(classify(transfer6540) == .personas)
+    }
+
+    @Test func suscripcionReconocidaGanaAlMCC() {
+        // Plataformas de vídeo con MCC 4899 (que por sí solo es «Casa») siguen en Suscripciones.
+        for name in ["NETFLIX.COM", "HBO MAX", "DAZN", "Disney+"] {
+            #expect(classify(pay(name, isShop: true, mcc: "4899")) == .suscripciones, "\(name)")
+        }
+        // Software con MCC 5734/5735 (que por sí solo es «Compras»), reconocido como suscripción por el directorio.
+        #expect(classify(pay("MICROSOFT*365", isShop: true, mcc: "5734")) == .suscripciones)
+        #expect(classify(pay("ADOBE SYSTEMS", isShop: true, mcc: "5735")) == .suscripciones)
+        // Una suscripción detectada como cobro recurrente también gana al MCC.
+        #expect(classify(pay("Plataforma Rara", isShop: true, mcc: "4899"), subscriptions: ["plataforma rara"]) == .suscripciones)
+        // Un comercio desconocido con 4899 y sin señal de suscripción sigue la categoría del MCC.
+        #expect(classify(pay("Operador Desconocido", isShop: true, mcc: "4899")) == .casa)
+        // La categoría del dueño y la recordada siguen ganando a una suscripción.
+        #expect(classify(pay("NETFLIX.COM", isShop: true, mcc: "4899", category: .ocio)) == .ocio)
+        #expect(classify(pay("NETFLIX.COM", isShop: true, mcc: "4899"), overrides: ["netflix.com": .ocio]) == .ocio)
+        #expect(classify(pay("Plataforma Rara", isShop: true, mcc: "4899", category: .ocio), subscriptions: ["plataforma rara"]) == .ocio)
+    }
+
+    @Test func mccDeBazaresYTiendasDeTodoANivelCompras() {
+        for code in ["5300", "5310", "5331"] {
+            #expect(mccCategory(code) == .compras, "\(code)")
+        }
+        // Bazar con el nombre del titular en la tarjeta: tienda por MCC, no Personas ni sin categoría.
+        #expect(classify(pay("CHEN LI SL", isShop: true, mcc: "5331")) == .compras)
+        // Sin MCC y sin señal de persona no es Personas.
+        #expect(classify(pay("CHEN LI SL", isShop: true)) != .personas)
     }
 
     @Test func mccSePropagaDesdeEnableBankingYTradeRepublicYSeConservaAlReconciliar() throws {

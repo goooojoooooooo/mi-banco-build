@@ -48,7 +48,15 @@ final class BriefingModel {
         #if DEBUG
         if DemoMode.isActive {
             self.record = nil
-            self.assistantPreferences = AssistantPreferences()
+            if DemoMode.persistsNyxMemory {
+                let demoPrefs = AssistantPreferencesStore(directory: DemoMode.nyxDemoDirectory)
+                if DemoMode.resetsNyxMemory {
+                    try? demoPrefs.save(AssistantPreferences())
+                }
+                self.assistantPreferences = demoPrefs.loadRecovering()
+            } else {
+                self.assistantPreferences = AssistantPreferences()
+            }
             return
         }
         #endif
@@ -530,6 +538,53 @@ final class BriefingModel {
         if !enabled {
             cards.removeAll { $0.topic == topic }
         }
+        return true
+    }
+
+    private func activePreferencesStore() -> AssistantPreferencesStore {
+        #if DEBUG
+        if DemoMode.isActive && DemoMode.persistsNyxMemory {
+            return AssistantPreferencesStore(directory: DemoMode.nyxDemoDirectory)
+        }
+        #endif
+        return preferencesStore
+    }
+
+    @discardableResult
+    func setNyxTalkLevel(_ level: NyxTalkLevel) -> Bool {
+        #if DEBUG
+        if DemoMode.isActive && !DemoMode.persistsNyxMemory {
+            if DemoMode.prefsFail { return false }
+            assistantPreferences.nyxTalkLevel = level
+            return true
+        }
+        #endif
+        guard let updated = try? activePreferencesStore().update({ current -> AssistantPreferences in
+            current.nyxTalkLevel = level
+            return current
+        }) else {
+            return false
+        }
+        assistantPreferences = updated
+        return true
+    }
+
+    @discardableResult
+    func setNyxReadAloudWithHeadphones(_ enabled: Bool) -> Bool {
+        #if DEBUG
+        if DemoMode.isActive && !DemoMode.persistsNyxMemory {
+            if DemoMode.prefsFail { return false }
+            assistantPreferences.nyxReadAloudWithHeadphones = enabled
+            return true
+        }
+        #endif
+        guard let updated = try? activePreferencesStore().update({ current -> AssistantPreferences in
+            current.nyxReadAloudWithHeadphones = enabled
+            return current
+        }) else {
+            return false
+        }
+        assistantPreferences = updated
         return true
     }
 

@@ -224,7 +224,7 @@ struct SettingsView: View {
 
                 InvestmentsSection(portfolio: portfolio, importTradeRepublic: importTradeRepublic)
 
-                AssistantSettingsSection(briefing: briefing)
+                AssistantSettingsSection(briefing: briefing, present: present)
 
                 BackupSection(model: model, portfolio: portfolio, present: present, importBackup: importBackup)
 

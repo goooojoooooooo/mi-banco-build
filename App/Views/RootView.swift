@@ -353,6 +353,19 @@ struct RootView: View {
                 },
                 onCancel: { sheet = nil }
             )
+        case .confirmForgetNyx:
+            BankConfirmSheet(
+                title: "Olvidar lo que he aprendido",
+                message: "Nyx olvidará lo que ha visto y lo que ha aprendido de ti. Tus movimientos no se tocan.",
+                confirmTitle: "Olvidar",
+                confirmID: "nyx-forget-confirm",
+                cancelID: "nyx-forget-cancel",
+                onConfirm: {
+                    briefing.forgetNyxMemory()
+                    sheet = nil
+                },
+                onCancel: { sheet = nil }
+            )
         }
     }
 
@@ -1136,6 +1149,7 @@ enum RootSheet: Identifiable {
     case restore(RestorePreview)
     case confirmDisconnect(BankID)
     case confirmForget
+    case confirmForgetNyx
 
     var id: String {
         switch self {
@@ -1148,6 +1162,7 @@ enum RootSheet: Identifiable {
         case .restore(let preview): "restore-\(preview.id)"
         case .confirmDisconnect(let bank): "confirm-disconnect-\(bank.rawValue)"
         case .confirmForget: "confirm-forget"
+        case .confirmForgetNyx: "confirm-forget-nyx"
         }
     }
 }
@@ -1158,6 +1173,8 @@ private struct BankConfirmSheet: View {
     let title: String
     let message: String
     let confirmTitle: String
+    var confirmID: String? = nil
+    var cancelID: String? = nil
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
@@ -1188,6 +1205,7 @@ private struct BankConfirmSheet: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
+                .optionalAccessibilityID(confirmID)
 
                 Button(role: .cancel, action: onCancel) {
                     Text("Cancelar")
@@ -1198,6 +1216,7 @@ private struct BankConfirmSheet: View {
                         .contentShape(Capsule())
                 }
                 .buttonStyle(.pressable)
+                .optionalAccessibilityID(cancelID)
             }
             Spacer(minLength: 0)
         }
@@ -1212,6 +1231,16 @@ private struct BankConfirmSheet: View {
         }
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+    }
+}
+
+private extension View {
+    @ViewBuilder func optionalAccessibilityID(_ id: String?) -> some View {
+        if let id {
+            self.accessibilityIdentifier(id)
+        } else {
+            self
+        }
     }
 }
 

@@ -318,7 +318,7 @@ struct SettingsView: View {
         .onChange(of: preferences.privateMode) { _, on in
             if on { releaseAmountFocus() }
         }
-        // (Demo: `-MiBancoDemoCloseEyeAfter` y `-MiBancoDemoFocusBalanceAfter` cuentan desde que aparece el interruptor
+        // (Demo: `-MiBancoDemoSettingsCloseEyeAfter` y `-MiBancoDemoFocusBalanceAfter` cuentan desde que aparece el interruptor
         // «Modo privado», ver `armDemoTimers`.)
         .onDisappear { for bank in dirty { commit(bank) } }
         .onChange(of: logoDownloads) { _, on in logos.setDownloadsEnabled(on) }
@@ -366,7 +366,7 @@ struct SettingsView: View {
     }
 
     #if DEBUG
-    /// Solo demo: arma, una vez, el cierre del ojo (`-MiBancoDemoCloseEyeAfter`, por el mismo camino que el interruptor)
+    /// Solo demo: arma, una vez, el cierre del ojo (`-MiBancoDemoSettingsCloseEyeAfter`, por el mismo camino que el interruptor)
     /// y el foco del saldo de Trade Republic (`-MiBancoDemoFocusBalanceAfter`, como un toque), para grabarlos desde antes.
     private func armDemoTimers() {
         guard !demoTimersArmed else { return }

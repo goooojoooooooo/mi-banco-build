@@ -1193,6 +1193,65 @@ final class MotionHomeTests: XCTestCase {
 
     // MARK: Lote de cierre — ronda 1
 
+    /// Alto, en píxeles de la captura, de la primera banda de filas con tinta dentro de un botón (su primera línea de
+    /// texto). El fondo se toma del píxel central de la fila superior; «tinta» es lo que difiere claramente de él.
+    /// Se ignora el 15 % de cada lado para no leer las esquinas redondeadas. `nil` si no hay captura o no hay tinta.
+    private func firstInkBandHeight(of element: XCUIElement) -> Int? {
+        guard let cg = element.screenshot().image.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 20, h > 8 else { return nil }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let bgAt = (3 * w + w / 2) * 4
+        let bg = (Int(px[bgAt]), Int(px[bgAt + 1]), Int(px[bgAt + 2]))
+        func hasInk(row y: Int) -> Bool {
+            for x in (w * 15 / 100)..<(w * 85 / 100) {
+                let i = (y * w + x) * 4
+                let d = abs(Int(px[i]) - bg.0) + abs(Int(px[i + 1]) - bg.1) + abs(Int(px[i + 2]) - bg.2)
+                if d > 120 { return true }
+            }
+            return false
+        }
+        var start: Int?
+        for y in 0..<h {
+            if hasInk(row: y) {
+                if start == nil { start = y }
+            } else if let s = start {
+                return y - s
+            }
+        }
+        return start.map { h - $0 }
+    }
+
+    /// Ancho, en píxeles de la captura, de toda la tinta de un botón (de su primer a su último píxel con tinta, en la
+    /// franja central de alto para no leer las esquinas redondeadas). Un título cortado con «…» sale mucho más estrecho
+    /// que el texto entero. `nil` si no hay captura o no hay tinta.
+    private func inkWidth(of element: XCUIElement) -> (width: Int, scale: CGFloat)? {
+        let image = element.screenshot().image
+        guard let cg = image.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 20, h > 8 else { return nil }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let bgAt = (3 * w + w / 2) * 4
+        let bg = (Int(px[bgAt]), Int(px[bgAt + 1]), Int(px[bgAt + 2]))
+        var minX = w, maxX = -1
+        for y in (h * 20 / 100)..<(h * 80 / 100) {
+            for x in 0..<w {
+                let i = (y * w + x) * 4
+                let d = abs(Int(px[i]) - bg.0) + abs(Int(px[i + 1]) - bg.1) + abs(Int(px[i + 2]) - bg.2)
+                if d > 120 { minX = min(minX, x); maxX = max(maxX, x) }
+            }
+        }
+        return maxX >= minX ? (maxX - minX + 1, image.scale) : nil
+    }
+
     /// La fila abierta: el importe se apaga (nunca a la vez que las acciones) y, a tamaño normal, el nombre sigue a la
     /// vista. Con texto de accesibilidad la fila va apilada y el importe está debajo del nombre, a la izquierda.
     private func assertOpenRow(_ extra: [String], largeText: Bool) {
@@ -1232,6 +1291,39 @@ final class MotionHomeTests: XCTestCase {
                                         "Con texto grande la cápsula «No es mío» es demasiado estrecha y parte el título: \(flag.frame)")
             XCTAssertGreaterThanOrEqual(note.frame.height, 44, "La cápsula «Nota» no llega a 44 pt de alto: \(note.frame)")
             XCTAssertGreaterThanOrEqual(flag.frame.height, 44, "La cápsula «No es mío» no llega a 44 pt de alto: \(flag.frame)")
+            // I-1 (Fila): los títulos NO se encogen ni se topan. El botón no expone su texto como hijo, así que se mide
+            // lo DIBUJADO: alto de la primera línea de tinta (la mayúscula «N», sin descendentes) en la captura de cada
+            // cápsula, frente a la altura de mayúscula de la fuente `footnote` al tamaño pedido (AX-XXXL), en píxeles.
+            // Con el tope AX2 o el 60 % de antes salía al 60 % o menos.
+            let axXXXL = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+            let expectedCap = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: axXXXL).capHeight
+                * (inkWidth(of: note)?.scale ?? 3)
+            let noteInk = firstInkBandHeight(of: note)
+            let flagInk = firstInkBandHeight(of: flag)
+            XCTAssertNotNil(noteInk, "No se pudo medir la tinta de «Nota»")
+            XCTAssertNotNil(flagInk, "No se pudo medir la tinta de «No es mío»")
+            if let noteInk, let flagInk {
+                XCTAssertGreaterThanOrEqual(Double(noteInk), Double(expectedCap) * 0.8,
+                                            "«Nota» se lee encogida: \(noteInk) px de tinta frente a \(expectedCap) px esperados")
+                XCTAssertGreaterThanOrEqual(Double(flagInk), Double(expectedCap) * 0.8,
+                                            "«No es mío» se lee encogida: \(flagInk) px de tinta frente a \(expectedCap) px esperados")
+            }
+            // Ronda 1: el título entero, sin «…» ni recorte (cortado sale a ~0,6 de la cadena entera; entero, a ~0,85). Se compara la tinta dibujada de «No es mío» con el ancho de la
+            // cadena entera en `footnote` semibold a AX-XXXL (referencia), y la cápsula tiene que ser más ancha que ella.
+            if let ink = inkWidth(of: flag) {
+                let refFont = UIFont.systemFont(
+                    ofSize: UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: axXXXL).pointSize, weight: .semibold)
+                let fullWidth = ("No es mío" as NSString).size(withAttributes: [.font: refFont]).width
+                XCTAssertGreaterThanOrEqual(Double(ink.width), Double(fullWidth * ink.scale) * 0.75,
+                                            "«No es mío» sale cortado o en dos líneas: \(ink.width) px de tinta frente a \(fullWidth * ink.scale) px del título entero")
+                // La cápsula deja el relleno de 8 pt por lado alrededor de la tinta (si no, el texto iría apretado o cortado).
+                let capsulePx = flag.frame.width * ink.scale
+                let neededPx = CGFloat(ink.width) + 16 * ink.scale - 1
+                XCTAssertGreaterThanOrEqual(capsulePx, neededPx,
+                                            "La cápsula «No es mío» no deja relleno alrededor del título: \(capsulePx) px para \(ink.width) px de tinta")
+            } else {
+                XCTFail("No se pudo medir el ancho de tinta de «No es mío»")
+            }
             XCTAssertFalse(note.frame.intersects(flag.frame), "Las cápsulas de acción se solapan: \(note.frame) vs \(flag.frame)")
             XCTAssertLessThanOrEqual(note.frame.maxY, flag.frame.minY + 1,
                                      "Con texto grande las cápsulas deben apilarse en vertical: \(note.frame) vs \(flag.frame)")

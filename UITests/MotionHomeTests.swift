@@ -1193,6 +1193,39 @@ final class MotionHomeTests: XCTestCase {
 
     // MARK: Lote de cierre — ronda 1
 
+    /// Alto, en píxeles de la captura, de la primera banda de filas con tinta dentro de un botón (su primera línea de
+    /// texto). El fondo se toma del píxel central de la fila superior; «tinta» es lo que difiere claramente de él.
+    /// Se ignora el 15 % de cada lado para no leer las esquinas redondeadas. `nil` si no hay captura o no hay tinta.
+    private func firstInkBandHeight(of element: XCUIElement) -> Int? {
+        guard let cg = element.screenshot().image.cgImage else { return nil }
+        let w = cg.width, h = cg.height
+        guard w > 20, h > 8 else { return nil }
+        var px = [UInt8](repeating: 0, count: w * h * 4)
+        guard let ctx = CGContext(data: &px, width: w, height: h, bitsPerComponent: 8, bytesPerRow: w * 4,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: w, height: h))
+        let bgAt = (3 * w + w / 2) * 4
+        let bg = (Int(px[bgAt]), Int(px[bgAt + 1]), Int(px[bgAt + 2]))
+        func hasInk(row y: Int) -> Bool {
+            for x in (w * 15 / 100)..<(w * 85 / 100) {
+                let i = (y * w + x) * 4
+                let d = abs(Int(px[i]) - bg.0) + abs(Int(px[i + 1]) - bg.1) + abs(Int(px[i + 2]) - bg.2)
+                if d > 120 { return true }
+            }
+            return false
+        }
+        var start: Int?
+        for y in 0..<h {
+            if hasInk(row: y) {
+                if start == nil { start = y }
+            } else if let s = start {
+                return y - s
+            }
+        }
+        return start.map { h - $0 }
+    }
+
     /// La fila abierta: el importe se apaga (nunca a la vez que las acciones) y, a tamaño normal, el nombre sigue a la
     /// vista. Con texto de accesibilidad la fila va apilada y el importe está debajo del nombre, a la izquierda.
     private func assertOpenRow(_ extra: [String], largeText: Bool) {
@@ -1232,26 +1265,17 @@ final class MotionHomeTests: XCTestCase {
                                         "Con texto grande la cápsula «No es mío» es demasiado estrecha y parte el título: \(flag.frame)")
             XCTAssertGreaterThanOrEqual(note.frame.height, 44, "La cápsula «Nota» no llega a 44 pt de alto: \(note.frame)")
             XCTAssertGreaterThanOrEqual(flag.frame.height, 44, "La cápsula «No es mío» no llega a 44 pt de alto: \(flag.frame)")
-            // I-1 (Fila): los títulos NO se encogen. Tope AX2 en las cápsulas: la altura de línea sin escalar sale de
-            // la fuente del sistema (`footnote`, semibold) a ese tamaño. «Nota» siempre cabe en una línea; «No es mío» o
-            // cabe en una (con el ancho de la fuente entera) o se parte entre palabras en dos líneas enteras. Encogida al
-            // 60 % saldría de ~1,2 líneas con poco ancho: no cumple ninguna de las dos.
-            let ax2 = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraLarge)
-            let base = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: ax2)
-            let font = UIFont.systemFont(ofSize: base.pointSize, weight: .semibold)
-            let lineHeight = font.lineHeight
-            let noteText = note.staticTexts.firstMatch
-            let flagText = flag.staticTexts.firstMatch
-            XCTAssertTrue(noteText.exists && flagText.exists, "Las cápsulas no exponen su texto: \(note.debugDescription)")
-            XCTAssertGreaterThanOrEqual(noteText.frame.height, lineHeight * 0.8,
-                                        "«Nota» se lee encogida (alto \(noteText.frame.height) pt, línea entera \(lineHeight) pt)")
-            let fullWidth = ("No es mío" as NSString).size(withAttributes: [.font: font]).width
-            if flagText.frame.height < lineHeight * 1.5 {
-                XCTAssertGreaterThanOrEqual(flagText.frame.width, fullWidth * 0.9,
-                                            "«No es mío» en una línea se lee encogida (ancho \(flagText.frame.width) pt de \(fullWidth) pt)")
-            } else {
-                XCTAssertGreaterThanOrEqual(flagText.frame.height, lineHeight * 1.8,
-                                            "«No es mío» en dos líneas se lee encogida (alto \(flagText.frame.height) pt, dos líneas \(lineHeight * 2) pt)")
+            // I-1 (Fila): los títulos NO se encogen. El botón no expone su texto como hijo, así que se mide lo
+            // DIBUJADO: alto de la primera línea de tinta (mayúscula «N»; el acento de «í» sube a lo sumo un poco) en la
+            // captura de cada cápsula. «Nota» cabe siempre entera; «No es mío» no puede salir por debajo del 80 % de ella.
+            // Encogida al 60 % saldría al 60 %.
+            let noteInk = firstInkBandHeight(of: note)
+            let flagInk = firstInkBandHeight(of: flag)
+            XCTAssertNotNil(noteInk, "No se pudo medir la tinta de «Nota»")
+            XCTAssertNotNil(flagInk, "No se pudo medir la tinta de «No es mío»")
+            if let noteInk, let flagInk {
+                XCTAssertGreaterThanOrEqual(flagInk, noteInk * 0.8,
+                                            "«No es mío» se lee encogida: primera línea de \(flagInk) px frente a \(noteInk) px de «Nota»")
             }
             XCTAssertFalse(note.frame.intersects(flag.frame), "Las cápsulas de acción se solapan: \(note.frame) vs \(flag.frame)")
             XCTAssertLessThanOrEqual(note.frame.maxY, flag.frame.minY + 1,

@@ -183,11 +183,47 @@ struct LockView: View {
             .padding(16)
             .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
 
-            Button { confirmingDisable = true } label: {
-                Text(LockAuthPolicy.disableLockButtonTitle)
+            if confirmingDisable {
+                disableConfirmation
+            } else {
+                Button { confirmingDisable = true } label: {
+                    Text(LockAuthPolicy.disableLockButtonTitle)
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.label)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(Theme.raised, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("lock-disable-button")
+            }
+        }
+    }
+
+    /// SEC-08 (m-3): confirmación en el propio bloqueo (la regla U55 solo permite presentaciones en `RootView`, que queda
+    /// por debajo del bloqueo). Explica que Onyx se abrirá sin protección; Cancelar deja el bloqueo puesto.
+    private var disableConfirmation: some View {
+        VStack(spacing: 12) {
+            Text(LockAuthPolicy.disableConfirmationTitle)
+                .titan(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.label)
+                .multilineTextAlignment(.center)
+            Text(LockAuthPolicy.disableConfirmationMessage)
+                .titan(.callout)
+                .foregroundStyle(Theme.label)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("lock-disable-confirmation-message")
+            Button(action: disableLockAndUnlock) {
+                Text(LockAuthPolicy.disableConfirmationButtonTitle)
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .foregroundStyle(Theme.label)
+                    .foregroundStyle(Theme.warning)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 14)
@@ -196,16 +232,20 @@ struct LockView: View {
                     .contentShape(Capsule())
             }
             .buttonStyle(.pressable)
-            .accessibilityIdentifier("lock-disable-button")
-        }
-        .confirmationDialog(LockAuthPolicy.disableConfirmationTitle, isPresented: $confirmingDisable, titleVisibility: .visible) {
-            Button(LockAuthPolicy.disableConfirmationButtonTitle, role: .destructive, action: disableLockAndUnlock)
-            Button("Cancelar", role: .cancel) {}
-        } message: {
-            Text(LockAuthPolicy.disableConfirmationMessage)
+            .accessibilityIdentifier("lock-confirm-disable-button")
+            Button { confirmingDisable = false } label: {
+                Text("Cancelar")
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("lock-cancel-disable-button")
         }
     }
-
     /// Solo dibujo: espera a que las piezas encajen (golpe háptico) y a que la marca quede montada, y para el reloj.
     /// Los tiempos salen del guion por el multiplicador de grabación (intensidad, Reducir movimiento, cámara lenta).
     private func assembleMark(_ timeline: LaunchTimeline) async {
@@ -269,7 +309,7 @@ struct LockView: View {
     }
 
     /// Lo que contesta el sistema real: solo `LAError.passcodeNotSet` cuenta como «sin código».
-    static func systemDeviceAuth() -> DeviceAuthAvailability {
+    nonisolated static func systemDeviceAuth() -> DeviceAuthAvailability {
         let context = LAContext()
         var error: NSError?
         if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) { return .available }

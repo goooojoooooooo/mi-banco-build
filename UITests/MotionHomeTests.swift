@@ -1265,17 +1265,22 @@ final class MotionHomeTests: XCTestCase {
                                         "Con texto grande la cápsula «No es mío» es demasiado estrecha y parte el título: \(flag.frame)")
             XCTAssertGreaterThanOrEqual(note.frame.height, 44, "La cápsula «Nota» no llega a 44 pt de alto: \(note.frame)")
             XCTAssertGreaterThanOrEqual(flag.frame.height, 44, "La cápsula «No es mío» no llega a 44 pt de alto: \(flag.frame)")
-            // I-1 (Fila): los títulos NO se encogen. El botón no expone su texto como hijo, así que se mide lo
-            // DIBUJADO: alto de la primera línea de tinta (mayúscula «N»; el acento de «í» sube a lo sumo un poco) en la
-            // captura de cada cápsula. «Nota» cabe siempre entera; «No es mío» no puede salir por debajo del 80 % de ella.
-            // Encogida al 60 % saldría al 60 %.
+            // I-1 (Fila): los títulos NO se encogen ni se topan. El botón no expone su texto como hijo, así que se mide
+            // lo DIBUJADO: alto de la primera línea de tinta (la mayúscula «N», sin descendentes) en la captura de cada
+            // cápsula, frente a la altura de mayúscula de la fuente `footnote` al tamaño pedido (AX-XXXL), en píxeles.
+            // Con el tope AX2 o el 60 % de antes salía al 60 % o menos.
+            let axXXXL = UITraitCollection(preferredContentSizeCategory: .accessibilityExtraExtraExtraLarge)
+            let expectedCap = UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: axXXXL).capHeight
+                * UIScreen.main.scale
             let noteInk = firstInkBandHeight(of: note)
             let flagInk = firstInkBandHeight(of: flag)
             XCTAssertNotNil(noteInk, "No se pudo medir la tinta de «Nota»")
             XCTAssertNotNil(flagInk, "No se pudo medir la tinta de «No es mío»")
             if let noteInk, let flagInk {
-                XCTAssertGreaterThanOrEqual(Double(flagInk), Double(noteInk) * 0.8,
-                                            "«No es mío» se lee encogida: primera línea de \(flagInk) px frente a \(noteInk) px de «Nota»")
+                XCTAssertGreaterThanOrEqual(Double(noteInk), Double(expectedCap) * 0.8,
+                                            "«Nota» se lee encogida: \(noteInk) px de tinta frente a \(expectedCap) px esperados")
+                XCTAssertGreaterThanOrEqual(Double(flagInk), Double(expectedCap) * 0.8,
+                                            "«No es mío» se lee encogida: \(flagInk) px de tinta frente a \(expectedCap) px esperados")
             }
             XCTAssertFalse(note.frame.intersects(flag.frame), "Las cápsulas de acción se solapan: \(note.frame) vs \(flag.frame)")
             XCTAssertLessThanOrEqual(note.frame.maxY, flag.frame.minY + 1,

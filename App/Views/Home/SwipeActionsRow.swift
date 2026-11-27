@@ -59,10 +59,10 @@ struct SwipeActionsRow<Content: View>: View {
     @State private var closeGeneration = 0
 
     /// Cada acción en tamaño normal es una cápsula de 64 pt, con 6 pt entre ellas y 10 pt de margen al borde.
-    /// Con texto de accesibilidad la fila va apilada y es muy alta: las dos cápsulas se apilan en vertical con 140 pt de
+    /// Con texto de accesibilidad la fila va apilada y es muy alta: las dos cápsulas se apilan en vertical con 124 pt de
     /// ancho para que «Nota» y «No es mío» se lean enteros, sin partirse a mitad de palabra («Not / a», «No / es…»).
     private static var actionWidth: CGFloat { 64 }
-    private static var stackedActionWidth: CGFloat { 140 }
+    private static var stackedActionWidth: CGFloat { 124 }
     private static var actionGap: CGFloat { 6 }
     private static var edgeMargin: CGFloat { 10 }
 
@@ -173,7 +173,7 @@ struct SwipeActionsRow<Content: View>: View {
                         .foregroundStyle(action.warning ? Theme.warning : Theme.label)
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
-                        .minimumScaleFactor(stacked ? 1 : 0.8)
+                        .minimumScaleFactor(stacked ? 0.6 : 0.8)
                         .allowsTightening(true)
                         .padding(.horizontal, stacked ? 8 : 4)
                         .frame(maxWidth: .infinity, minHeight: 44, maxHeight: .infinity)

@@ -29,3 +29,12 @@ import Testing
         #expect(lockAvailability(errorDomain: "", errorCode: -5) == .unavailable)
     }
 }
+
+/// N-3: el panel de confirmación de desactivar solo se conserva en la pantalla «sin código».
+@Suite struct LockDisableConfirmationTests {
+    @Test func soloSeConservaEnSinCodigo() {
+        #expect(LockAuthPolicy.keepsDisableConfirmation(for: .requirePasscodeSetup) == true)
+        #expect(LockAuthPolicy.keepsDisableConfirmation(for: .evaluateDeviceAuth) == false)
+        #expect(LockAuthPolicy.keepsDisableConfirmation(for: .retryAuthentication) == false)
+    }
+}

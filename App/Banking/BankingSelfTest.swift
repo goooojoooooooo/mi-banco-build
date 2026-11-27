@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import LocalAuthentication
 import MiBancoCore
 import Security
 import SwiftUI
@@ -14,6 +15,10 @@ enum BankingSelfTest {
         func step(_ name: String) async {
             if let onStep { await onStep(name) }
         }
+        await step("0-LocalAuthentication")
+        // SEC-08: las constantes de Core que clasifican el error del sistema coinciden con las reales de LocalAuthentication.
+        guard LAError.Code.passcodeNotSet.rawValue == lockPasscodeNotSetErrorCode, LAError.errorDomain == lockAuthErrorDomain
+        else { return failure("LocalAuthentication (constantes de bloqueo)") }
         await step("1-clave")
         // 1. Clave RSA-2048 en memoria (no permanente) y su PKCS#1.
         let attributes: [CFString: Any] = [

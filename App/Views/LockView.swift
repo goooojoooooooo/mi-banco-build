@@ -331,7 +331,7 @@ struct LockView: View {
         let decision = LockAuthPolicy.decision(for: availability)
         screenMode = LockAuthPolicy.screenMode(for: decision)
         // Al salir de «sin código» el panel de confirmación vuelve a su primer paso (no queda el consentimiento a medias).
-        if screenMode != .noPasscode { confirmingDisable = false }
+        if !LockAuthPolicy.keepsDisableConfirmation(for: decision) { confirmingDisable = false }
         if LockAuthPolicy.proceedsToEvaluate(decision) { return true }
         // Al volver de Ajustes del iPhone (o tras un fallo pasajero), permite volver a comprobar.
         autoAttempted = false

@@ -9,12 +9,14 @@ import FoundationModels
 /// una pregunta en una intención conocida con parámetros validados por el Core. Nada sale del iPhone.
 protocol BriefingWriter: Sendable {
     func openingChoice(for briefing: Briefing) async -> Int?
+    func focusChoice(for candidates: [NyxObservation]) async -> Int?
     func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?, knownMerchants: Set<String>) async -> AssistantIntent?
 }
 
 /// Respaldo determinista sin modelo: el catálogo rota por día y las preguntas van al enrutador por reglas del Core.
 struct RuleBriefingWriter: BriefingWriter {
     func openingChoice(for briefing: Briefing) async -> Int? { nil }
+    func focusChoice(for candidates: [NyxObservation]) async -> Int? { nil }
     func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?, knownMerchants: Set<String>) async -> AssistantIntent? { nil }
 }
 
@@ -54,6 +56,20 @@ struct ModelBriefingWriter: BriefingWriter {
             return nil
         }
         return MiBancoCore.openingChoice(from: raw, count: count)
+    }
+
+    func focusChoice(for candidates: [NyxObservation]) async -> Int? {
+        guard candidates.count >= 2, isModelReady() else { return nil }
+        let prompt = nyxFocusPrompt(candidates)
+        guard let raw = await runPrompt(
+            instructions: nyxFocusInstructions,
+            prompt: prompt,
+            temperature: 0.3,
+            maxTokens: 16
+        ) else {
+            return nil
+        }
+        return nyxFocusChoice(from: raw, count: candidates.count)
     }
 
     func routeQuestion(_ question: String, now: Date, calendar: Calendar, portfolio: Portfolio?, knownMerchants: Set<String>) async -> AssistantIntent? {

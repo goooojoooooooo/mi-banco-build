@@ -260,9 +260,15 @@ actor NyxEngine {
         case .banner:
             state = DemoMode.nyxShortfallLedger(now: now, calendar: calendar)
             effectiveInput = .open(appActive: true)
-        case .seenList, .dailyFocus:
-            state = DemoMode.state(now: now)
-            effectiveInput = input
+        case .seenList:
+            if demoMemory.entries.isEmpty {
+                demoMemory = DemoMode.nyxSeenListMemory(state: DemoMode.state(now: now), now: now, calendar: calendar)
+            }
+            await publish(memory: demoMemory, decisions: [], posted: [])
+            return []
+        case .dailyFocus:
+            await publish(memory: demoMemory, decisions: [], posted: [])
+            return []
         }
 
         let book = DemoMode.accountBook()

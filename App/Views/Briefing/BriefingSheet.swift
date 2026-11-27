@@ -13,7 +13,9 @@ struct BriefingSheet: View {
     let accountBook: AccountBookModel
     let briefingModel: BriefingModel
     let speaker: BriefingSpeaker
+    var entry: NyxSheetEntry = .dailyUpdate
     let onAction: (BriefingAction) -> Void
+    var onNyxAction: (NyxAction, String) -> Void = { _, _ in }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
@@ -28,6 +30,9 @@ struct BriefingSheet: View {
     @State private var entranceCompleted = false
     /// true solo si el dueño tocó durante la entrada para terminarla al instante (corta también la cuenta de 0,9 s).
     @State private var userSkippedEntrance = false
+    @State private var dailyUpdateExpanded: Bool
+    @State private var undoStates: [String: NyxUndoState] = [:]
+    @State private var undoTasks: [String: Task<Void, Never>] = [:]
     @State private var questionDraft = ""
     @State private var askTask: Task<Void, Never>?
     @State private var feedbackTick = 0
@@ -46,12 +51,38 @@ struct BriefingSheet: View {
     @State private var waveInLayout = false
     @State private var waveShown = false
 
+    init(
+        model: LedgerModel,
+        portfolio: PortfolioModel,
+        accountBook: AccountBookModel,
+        briefingModel: BriefingModel,
+        speaker: BriefingSpeaker,
+        entry: NyxSheetEntry = .dailyUpdate,
+        onAction: @escaping (BriefingAction) -> Void,
+        onNyxAction: @escaping (NyxAction, String) -> Void = { _, _ in }
+    ) {
+        self.model = model
+        self.portfolio = portfolio
+        self.accountBook = accountBook
+        self.briefingModel = briefingModel
+        self.speaker = speaker
+        self.entry = entry
+        self.onAction = onAction
+        self.onNyxAction = onNyxAction
+        _dailyUpdateExpanded = State(initialValue: entry == .dailyUpdate)
+    }
+
     /// El resumen que enseña la hoja (en la demo, retenido mientras `-MiBancoDemoBriefingDelay` lo diga).
     private var shownBriefing: Briefing? { demoBriefingHeld ? nil : briefingModel.briefing }
 
+    private var highlightedEntryID: String? {
+        if case .message(let id) = entry, !id.isEmpty { return id }
+        return nil
+    }
+
     private var demoKeepsVisible: Bool {
         #if DEBUG
-        return DemoMode.isActive && DemoMode.briefingMode != nil
+        return DemoMode.isActive && (DemoMode.briefingMode != nil || DemoMode.nyxScenario != nil)
         #else
         return false
         #endif
@@ -72,24 +103,59 @@ struct BriefingSheet: View {
                                     .modifier(BriefingReveal(stage: 1, completed: entranceCompleted, token: entranceToken))
                             }
 
-                            BriefingLineView(
-                                parts: briefing.headline,
-                                role: .sheetTitle,
-                                color: Theme.label
+                            if dailyUpdateExpanded {
+                                BriefingLineView(
+                                    parts: briefing.headline,
+                                    role: .sheetTitle,
+                                    color: Theme.label
+                                )
+                                .modifier(SpokenHighlight(id: "headline", current: speaker.currentLine))
+                                .modifier(BriefingReveal(stage: 2, completed: entranceCompleted, token: entranceToken))
+
+                                ForEach(Array(briefing.sections.enumerated()), id: \.element.id) { index, section in
+                                    sectionCard(section)
+                                        .modifier(BriefingReveal(stage: 3 + min(index, 5), completed: entranceCompleted, token: entranceToken))
+                                }
+
+                                if let focus = briefingModel.dailyUpdate?.focus {
+                                    focusBlock(focus)
+                                        .modifier(SpokenHighlight(id: "nyx-focus", current: speaker.currentLine))
+                                        .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
+                                } else if let tip = briefing.tip {
+                                    tipCard(tip)
+                                        .modifier(SpokenHighlight(id: tip.id, current: speaker.currentLine))
+                                        .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
+                                }
+
+                                if let seenText = nyxSeenLine(briefingModel.seenSinceLastLookCount, hidden: preferences.privateMode) {
+                                    seenSummaryRow(text: seenText, scrollProxy: proxy)
+                                        .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
+                                }
+                            } else {
+                                collapsedDailyUpdateButton
+                                    .modifier(BriefingReveal(stage: 2, completed: entranceCompleted, token: entranceToken))
+                            }
+
+                            NyxSeenList(
+                                entries: briefingModel.nyxEntries,
+                                initialNewIDs: briefingModel.initialNewEntryIDs,
+                                state: model.state,
+                                hidden: preferences.privateMode,
+                                undoStates: undoStates,
+                                highlightedEntryID: highlightedEntryID,
+                                now: briefingModel.input?.now ?? AppClock.now,
+                                onAction: { action, entry in
+                                    handleMessageAction(action, entryID: entry.id, previousStatus: entry.status)
+                                },
+                                onDismiss: { entry in
+                                    dismissEntry(entry)
+                                },
+                                onUndo: { id in
+                                    performUndo(for: id)
+                                }
                             )
-                            .modifier(SpokenHighlight(id: "headline", current: speaker.currentLine))
-                            .modifier(BriefingReveal(stage: 2, completed: entranceCompleted, token: entranceToken))
-
-                            ForEach(Array(briefing.sections.enumerated()), id: \.element.id) { index, section in
-                                sectionCard(section)
-                                    .modifier(BriefingReveal(stage: 3 + min(index, 5), completed: entranceCompleted, token: entranceToken))
-                            }
-
-                            if let tip = briefing.tip {
-                                tipCard(tip)
-                                    .modifier(SpokenHighlight(id: tip.id, current: speaker.currentLine))
-                                    .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
-                            }
+                            .id("nyx-seen-list")
+                            .modifier(BriefingReveal(stage: 8, completed: entranceCompleted, token: entranceToken))
 
                             if !briefingModel.cards.isEmpty {
                                 interestCardsBlock
@@ -123,6 +189,24 @@ struct BriefingSheet: View {
                             try? await Task.sleep(for: .milliseconds(180))
                             withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
                                 proxy.scrollTo("assistant-input-anchor", anchor: .center)
+                            }
+                        }
+                    }
+                    .task(id: entry) {
+                        guard entry != .dailyUpdate else { return }
+                        try? await Task.sleep(for: .milliseconds(120))
+                        guard !Task.isCancelled else { return }
+                        completeEntrance()
+                        withAnimation(motion.reduce ? nil : motion.animation(.enter)) {
+                            switch entry {
+                            case .dailyUpdate:
+                                break
+                            case .ask:
+                                proxy.scrollTo("assistant-input-anchor", anchor: .center)
+                            case .seen:
+                                proxy.scrollTo("nyx-seen-list", anchor: .top)
+                            case .message(let id):
+                                proxy.scrollTo(id.isEmpty ? "nyx-seen-list" : "nyx-row-\(id)", anchor: .center)
                             }
                         }
                     }
@@ -161,6 +245,9 @@ struct BriefingSheet: View {
         }
         .onDisappear {
             askTask?.cancel()
+            for task in undoTasks.values { task.cancel() }
+            undoTasks.removeAll()
+            undoStates.removeAll()
             speaker.stop()
             briefingModel.setSheetVisible(false)
         }
@@ -197,12 +284,13 @@ struct BriefingSheet: View {
             HStack(spacing: 10) {
                 HStack(spacing: 8) {
                     AppMark(size: 28)
-                    Text(AppIdentity.displayName)
+                    Text(assistantName)
                         .titan(.captionStrong)
                         .foregroundStyle(Theme.label2)
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel(AppIdentity.displayName)
+                .accessibilityLabel(assistantName)
+                .accessibilityIdentifier("nyx-sheet-title")
 
                 Spacer(minLength: 8)
 
@@ -329,6 +417,98 @@ struct BriefingSheet: View {
         } else {
             content
         }
+    }
+
+    // MARK: - Foco de Nyx («Para tener en cuenta») y novedades
+
+    private func focusBlock(_ focus: NyxMessage) -> some View {
+        let available = nyxAvailableActions(focus, state: model.state)
+        let titles = NyxActionHandler.titles(for: available, in: focus, hidden: preferences.privateMode)
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(nyxFocusHeader)
+                .titan(.header)
+                .foregroundStyle(Theme.label3)
+                .padding(.horizontal, 6)
+                .accessibilityAddTraits(.isHeader)
+
+            NyxMessageRow(
+                entryID: focus.id,
+                message: focus,
+                delivery: nil,
+                hidden: preferences.privateMode,
+                actions: available,
+                actionTitles: titles,
+                undoState: undoStates[focus.id],
+                showDismiss: false,
+                isHighlighted: true,
+                containerID: "nyx-focus",
+                onAction: { action in
+                    handleMessageAction(action, entryID: focus.id, previousStatus: .seen)
+                },
+                onDismiss: {},
+                onUndo: { performUndo(for: focus.id) }
+            )
+        }
+    }
+
+    private func seenSummaryRow(text: String, scrollProxy: ScrollViewProxy) -> some View {
+        let layout = typeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 12))
+        return layout {
+            Text(text)
+                .titan(.callout)
+                .foregroundStyle(Theme.label2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentTransition(.identity)
+                .accessibilityLabel(text)
+                .accessibilityIdentifier("nyx-seen-line")
+
+            Button {
+                withAnimation(motion.reduce ? nil : motion.animation(.enter)) {
+                    scrollProxy.scrollTo("nyx-seen-list", anchor: .top)
+                }
+            } label: {
+                Text("Ver lo que he visto")
+                    .titan(.captionStrong)
+                    .foregroundStyle(Theme.label)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(Theme.raised, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityLabel("Ver lo que he visto")
+            .accessibilityIdentifier("nyx-see-what-i-saw")
+        }
+        .padding(16)
+        .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+    }
+
+    private var collapsedDailyUpdateButton: some View {
+        Button {
+            withAnimation(motion.reduce ? motion.fade : motion.animation(.enter)) {
+                dailyUpdateExpanded = true
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Text("Ver la puesta al día de hoy")
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.label3)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 50)
+            .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+        }
+        .buttonStyle(.pressable)
+        .accessibilityIdentifier("nyx-expand-daily-update")
     }
 
     // MARK: - Consejo
@@ -758,6 +938,107 @@ struct BriefingSheet: View {
     private func trigger(_ action: BriefingAction) {
         speaker.stop()
         onAction(action)
+    }
+
+    private func handleMessageAction(_ action: NyxAction, entryID: String, previousStatus: NyxEntryStatus) {
+        if NyxActionHandler.isInline(action) {
+            applyInlineAction(action, entryID: entryID, previousStatus: previousStatus)
+            return
+        }
+        speaker.stop()
+        briefingModel.markNyxEntry(entryID, status: .done)
+        onNyxAction(action, entryID)
+    }
+
+    private func applyInlineAction(_ action: NyxAction, entryID: String, previousStatus: NyxEntryStatus) {
+        let undoState: NyxUndoState
+        do {
+            switch action {
+            case .markNotMine(let movementID):
+                try model.setFlaggedNotMine(true, for: movementID)
+                undoState = NyxUndoState(
+                    entryID: entryID,
+                    confirmationText: "Marcado como no es mío",
+                    outcome: .markedNotMine(entryID: entryID, movementID: movementID, previousStatus: previousStatus)
+                )
+            case .muteMerchant(let merchant):
+                try model.setMuted(true, merchant: merchant)
+                undoState = NyxUndoState(
+                    entryID: entryID,
+                    confirmationText: "Comercio silenciado",
+                    outcome: .mutedMerchant(entryID: entryID, merchant: merchant, previousStatus: previousStatus)
+                )
+            case .turnOffAlert(let alertSwitch):
+                let previous = model.state.alertSettings
+                try model.updateAlertSettings { $0 = alertSwitch.turnedOff($0) }
+                undoState = NyxUndoState(
+                    entryID: entryID,
+                    confirmationText: "Aviso apagado",
+                    outcome: .turnedOffAlert(entryID: entryID, previousSettings: previous, previousStatus: previousStatus)
+                )
+            default:
+                return
+            }
+        } catch {
+            errorTick += 1
+            return
+        }
+        feedbackTick += 1
+        briefingModel.markNyxEntry(entryID, status: .done)
+        startUndoWindow(undoState)
+    }
+
+    private func dismissEntry(_ entry: NyxEntry) {
+        feedbackTick += 1
+        briefingModel.markNyxEntry(entry.id, status: .dismissed)
+        startUndoWindow(NyxUndoState(
+            entryID: entry.id,
+            confirmationText: "Descartado",
+            outcome: .dismissed(entryID: entry.id, previousStatus: entry.status)
+        ))
+    }
+
+    private func startUndoWindow(_ state: NyxUndoState) {
+        let id = state.entryID
+        undoTasks[id]?.cancel()
+        withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
+            undoStates[id] = state
+        }
+        undoTasks[id] = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
+                undoStates.removeValue(forKey: id)
+            }
+            undoTasks.removeValue(forKey: id)
+        }
+    }
+
+    private func performUndo(for entryID: String) {
+        guard let state = undoStates[entryID] else { return }
+        undoTasks[entryID]?.cancel()
+        undoTasks.removeValue(forKey: entryID)
+        do {
+            switch state.outcome {
+            case .dismissed(let id, let previous):
+                briefingModel.markNyxEntry(id, status: previous)
+            case .markedNotMine(let id, let movementID, let previous):
+                try model.setFlaggedNotMine(false, for: movementID)
+                briefingModel.markNyxEntry(id, status: previous)
+            case .mutedMerchant(let id, let merchant, let previous):
+                try model.setMuted(false, merchant: merchant)
+                briefingModel.markNyxEntry(id, status: previous)
+            case .turnedOffAlert(let id, let previousSettings, let previous):
+                try model.updateAlertSettings { $0 = previousSettings }
+                briefingModel.markNyxEntry(id, status: previous)
+            }
+            feedbackTick += 1
+            withAnimation(motion.reduce ? motion.fade : motion.animation(.row)) {
+                undoStates.removeValue(forKey: entryID)
+            }
+        } catch {
+            errorTick += 1
+        }
     }
 }
 

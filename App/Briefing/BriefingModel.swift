@@ -12,8 +12,12 @@ final class BriefingModel {
 
     private(set) var record: BriefingRecord?
     private(set) var briefing: Briefing?
+    private(set) var dailyUpdate: NyxDailyUpdate?
     private(set) var input: BriefingInput?
     private(set) var openingText: String = ""
+    private(set) var nyxEntries: [NyxEntry] = []
+    private(set) var initialNewEntryIDs: Set<String> = []
+    private(set) var seenSinceLastLookCount: Int = 0
     private(set) var cards: [InterestCard] = []
     private(set) var chips: [AssistantChip] = []
     private(set) var lastAnswer: AssistantAnswer?
@@ -22,15 +26,22 @@ final class BriefingModel {
     private(set) var assistantPreferences: AssistantPreferences
 
     private let preferencesStore: AssistantPreferencesStore
+    private let nyxMemoryStore: NyxMemoryStore
     private let writer: any BriefingWriter
     private var prefetchedChoice: (situation: OpeningSituation, choice: Int)?
+    private var prefetchedFocusChoice: (ids: [String], choice: Int)?
     private var prefetchTask: Task<Void, Never>?
     private var isSheetVisible = false
     private var askGeneration = 0
+    #if DEBUG
+    private var demoNyxMemory: NyxMemory?
+    #endif
 
     init(preferencesStore: AssistantPreferencesStore = SharedStore.makeAssistantPreferencesStore(),
+         nyxMemoryStore: NyxMemoryStore = SharedStore.makeNyxMemoryStore(),
          writer: any BriefingWriter = makeDefaultBriefingWriter()) {
         self.preferencesStore = preferencesStore
+        self.nyxMemoryStore = nyxMemoryStore
         self.writer = writer
         #if DEBUG
         if DemoMode.isActive {
@@ -121,16 +132,34 @@ final class BriefingModel {
             state: state, portfolio: portfolio, book: book, record: due,
             isFirst: record == nil, now: now, calendar: cal
         )
-        let candidateBriefing = makeBriefing(computed, calendar: cal)
-        if prefetchedChoice?.situation == candidateBriefing.situation { return }
+        let candidateBriefing = makeNyxBriefing(computed, calendar: cal)
+        let memory = nyxMemoryStore.loadRecovering()
+        let currentObs = nyxMoneyObservations(
+            state: state, book: book,
+            newMovementIDs: nyxNewMovementIDs(in: state, since: memory.lastLookAt, now: now),
+            moment: .open, now: now, calendar: cal
+        )
+        let focusCandidates = nyxFocusCandidates(
+            current: currentObs, memory: memory, briefing: candidateBriefing,
+            input: computed, now: now, calendar: cal
+        )
+        let candidateIDs = focusCandidates.map(\.id)
+        let needOpening = prefetchedChoice?.situation != candidateBriefing.situation
+        let needFocus = focusCandidates.count >= 2 && prefetchedFocusChoice?.ids != candidateIDs
+        if !needOpening && !needFocus { return }
 
         prefetchTask?.cancel()
         let situation = candidateBriefing.situation
         let currentWriter = writer
         prefetchTask = Task { [weak self] in
-            let chosen = await currentWriter.openingChoice(for: candidateBriefing)
-            guard !Task.isCancelled, let self, !self.isSheetVisible, let chosen else { return }
-            self.prefetchedChoice = (situation, chosen)
+            if needOpening, let chosen = await currentWriter.openingChoice(for: candidateBriefing) {
+                guard !Task.isCancelled, let self, !self.isSheetVisible else { return }
+                self.prefetchedChoice = (situation, chosen)
+            }
+            if needFocus, let focusChosen = await currentWriter.focusChoice(for: focusCandidates) {
+                guard !Task.isCancelled, let self, !self.isSheetVisible else { return }
+                self.prefetchedFocusChoice = (candidateIDs, focusChosen)
+            }
         }
     }
 
@@ -161,23 +190,108 @@ final class BriefingModel {
         )
         #endif
 
-        let built = makeBriefing(computedInput, calendar: cal)
-        let candidateCount = openingCandidateCount(for: built.situation)
+        let nyxNow = computedInput.now
+        var memory = loadCurrentNyxMemory(state: state, now: nyxNow, calendar: cal)
+        let focusCandidates: [NyxObservation]
+        #if DEBUG
+        if DemoMode.isActive {
+            switch DemoMode.nyxScenario {
+            case .dailyFocus:
+                focusCandidates = [DemoMode.nyxDemoShortfallObservation(now: nyxNow, calendar: cal)]
+            case .seenList:
+                let baseBriefing = makeNyxBriefing(computedInput, calendar: cal)
+                focusCandidates = nyxFocusCandidates(
+                    current: [], memory: memory, briefing: baseBriefing,
+                    input: computedInput, now: nyxNow, calendar: cal
+                )
+            case .shortfall, .shortfallBg, .banner:
+                let baseBriefing = makeNyxBriefing(computedInput, calendar: cal)
+                focusCandidates = nyxFocusCandidates(
+                    current: [], memory: memory, briefing: baseBriefing,
+                    input: computedInput, now: nyxNow, calendar: cal
+                )
+            case nil:
+                focusCandidates = []
+            }
+        } else {
+            let baseBriefing = makeNyxBriefing(computedInput, calendar: cal)
+            let currentObs = nyxMoneyObservations(
+                state: state, book: book,
+                newMovementIDs: nyxNewMovementIDs(in: state, since: memory.lastLookAt, now: now),
+                moment: .open, now: now, calendar: cal
+            ) + nyxLearningObservations(
+                memory: memory, alertSettings: state.alertSettings,
+                mutedMerchants: state.mutedMerchants, now: now, calendar: cal
+            )
+            focusCandidates = nyxFocusCandidates(
+                current: currentObs, memory: memory, briefing: baseBriefing,
+                input: computedInput, now: now, calendar: cal
+            )
+        }
+        #else
+        let baseBriefing = makeNyxBriefing(computedInput, calendar: cal)
+        let currentObs = nyxMoneyObservations(
+            state: state, book: book,
+            newMovementIDs: nyxNewMovementIDs(in: state, since: memory.lastLookAt, now: now),
+            moment: .open, now: now, calendar: cal
+        ) + nyxLearningObservations(
+            memory: memory, alertSettings: state.alertSettings,
+            mutedMerchants: state.mutedMerchants, now: now, calendar: cal
+        )
+        focusCandidates = nyxFocusCandidates(
+            current: currentObs, memory: memory, briefing: baseBriefing,
+            input: computedInput, now: now, calendar: cal
+        )
+        #endif
+
+        let preliminaryBriefing = makeNyxBriefing(computedInput, calendar: cal)
+        let candidateCount = openingCandidateCount(for: preliminaryBriefing.situation)
         let validModelChoice: Int?
         if !privateMode, let pre = prefetchedChoice,
-           pre.situation == built.situation,
+           pre.situation == preliminaryBriefing.situation,
            candidateCount > 0, (1...candidateCount).contains(pre.choice) {
             validModelChoice = pre.choice
         } else {
             validModelChoice = nil
         }
 
-        self.input = computedInput
-        self.briefing = built
-        self.openingText = openingLine(
-            briefing: built, choice: validModelChoice, day: now, privateMode: privateMode
+        let candidateIDs = focusCandidates.map(\.id)
+        let validFocusChoice: Int?
+        if !privateMode, let preFocus = prefetchedFocusChoice,
+           preFocus.ids == candidateIDs,
+           (1...max(1, focusCandidates.count)).contains(preFocus.choice) {
+            validFocusChoice = preFocus.choice
+        } else {
+            validFocusChoice = nil
+        }
+
+        let newIDsBeforeOpen = Set(memory.entries.filter { $0.status == .new }.map(\.id))
+        let newCountBeforeOpen = newIDsBeforeOpen.count
+
+        let builtUpdate = nyxDailyUpdate(
+            input: computedInput,
+            candidates: focusCandidates,
+            focusChoice: validFocusChoice,
+            openingChoice: validModelChoice,
+            seenSinceLastLook: newCountBeforeOpen,
+            privateMode: privateMode,
+            calendar: cal
         )
+
+        if newCountBeforeOpen > 0 {
+            memory.markAllSeen(now: nyxNow)
+            persistNyxMemory(memory)
+        }
+
+        self.input = computedInput
+        self.dailyUpdate = builtUpdate
+        self.briefing = builtUpdate.briefing
+        self.openingText = builtUpdate.opening
+        self.initialNewEntryIDs = newIDsBeforeOpen
+        self.seenSinceLastLookCount = newCountBeforeOpen
+        self.nyxEntries = memory.entries
         self.prefetchedChoice = nil
+        self.prefetchedFocusChoice = nil
         self.prefetchTask?.cancel()
         self.prefetchTask = nil
         self.lastAnswer = nil
@@ -188,6 +302,99 @@ final class BriefingModel {
             preferences: assistantPreferences
         )
         self.chips = suggestedAssistantChips(state: state, portfolio: portfolio, now: now, calendar: cal)
+    }
+
+    /// Cambia el estado de una entrada de «Lo que he visto» (`dismissed`, `done`, `seen` al deshacer) y lo guarda.
+    func markNyxEntry(_ id: String, status: NyxEntryStatus, now: Date = AppClock.now) {
+        #if DEBUG
+        if DemoMode.isActive && !DemoMode.persistsNyxMemory {
+            var current = demoNyxMemory ?? NyxState.shared.memory
+            current.mark(id, status, now: now)
+            demoNyxMemory = current
+            nyxEntries = current.entries
+            NyxState.shared.updateMemory(current)
+            return
+        }
+        #endif
+        let store = activeNyxMemoryStore()
+        if let updated = try? store.update({ memory -> NyxMemory in
+            memory.mark(id, status, now: now)
+            return memory
+        }) {
+            nyxEntries = updated.entries
+            NyxState.shared.updateMemory(updated)
+        } else {
+            var fallback = store.loadRecovering()
+            fallback.mark(id, status, now: now)
+            nyxEntries = fallback.entries
+            NyxState.shared.updateMemory(fallback)
+        }
+    }
+
+    /// Borra por completo la memoria de Nyx («Olvidar lo que he aprendido»).
+    func forgetNyxMemory() {
+        #if DEBUG
+        if DemoMode.isActive {
+            demoNyxMemory = NyxMemory()
+            if DemoMode.persistsNyxMemory {
+                try? NyxMemoryStore(directory: DemoMode.nyxDemoDirectory).delete()
+            }
+            nyxEntries = []
+            initialNewEntryIDs = []
+            seenSinceLastLookCount = 0
+            NyxState.shared.updateMemory(NyxMemory())
+            return
+        }
+        #endif
+        try? nyxMemoryStore.delete()
+        nyxEntries = []
+        initialNewEntryIDs = []
+        seenSinceLastLookCount = 0
+        NyxState.shared.updateMemory(NyxMemory())
+    }
+
+    private func activeNyxMemoryStore() -> NyxMemoryStore {
+        #if DEBUG
+        if DemoMode.isActive && DemoMode.persistsNyxMemory {
+            return NyxMemoryStore(directory: DemoMode.nyxDemoDirectory)
+        }
+        #endif
+        return nyxMemoryStore
+    }
+
+    private func loadCurrentNyxMemory(state: LedgerState, now: Date, calendar: Calendar) -> NyxMemory {
+        #if DEBUG
+        if DemoMode.isActive {
+            if let existing = demoNyxMemory { return existing }
+            if DemoMode.persistsNyxMemory {
+                return NyxMemoryStore(directory: DemoMode.nyxDemoDirectory).loadRecovering()
+            }
+            switch DemoMode.nyxScenario {
+            case .seenList:
+                let seeded = DemoMode.nyxSeenListMemory(state: state, now: now, calendar: calendar)
+                demoNyxMemory = seeded
+                NyxState.shared.updateMemory(seeded)
+                return seeded
+            case .shortfall, .shortfallBg, .banner:
+                return NyxState.shared.memory
+            case .dailyFocus, nil:
+                return NyxMemory()
+            }
+        }
+        #endif
+        return nyxMemoryStore.loadRecovering()
+    }
+
+    private func persistNyxMemory(_ memory: NyxMemory) {
+        #if DEBUG
+        if DemoMode.isActive && !DemoMode.persistsNyxMemory {
+            demoNyxMemory = memory
+            NyxState.shared.updateMemory(memory)
+            return
+        }
+        #endif
+        try? activeNyxMemoryStore().save(memory)
+        NyxState.shared.updateMemory(memory)
     }
 
     /// Responde a una pregunta con hechos calculados por Core (A2, A3, J21(d)). Nunca guarda la pregunta ni la respuesta.

@@ -6,6 +6,8 @@ import MiBancoCore
 /// o salir) y traza un ✓. Los límites y las medias salen del snapshot; esta vista no calcula nada de gasto.
 struct BudgetsView: View {
     let model: LedgerModel
+    /// Petición opcional desde Nyx («Poner un presupuesto»): desplaza a esa categoría y rellena el importe sugerido.
+    var prefill: BudgetPrefillRequest? = nil
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -13,6 +15,8 @@ struct BudgetsView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var texts: [BudgetScope: String] = [:]
     @State private var dirty: Set<BudgetScope> = []
+    @State private var prefilledScope: BudgetScope?
+    @State private var appliedPrefillToken: UUID?
     @State private var errors: [BudgetScope: String] = [:]
     @State private var savedFlash: Set<BudgetScope> = []
     @State private var saveTick = 0
@@ -26,43 +30,50 @@ struct BudgetsView: View {
 
     var body: some View {
         let snapshot = model.snapshot
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                VStack(spacing: 0) {
-                    ForEach(Array(Self.scopes.enumerated()), id: \.element) { i, scope in
-                        row(scope, index: i, snapshot: snapshot)
-                        if i < Self.scopes.count - 1 {
-                            // Desde el texto de la fila (o el borde, en tamaños de accesibilidad) hasta el margen de 16 pt.
-                            Rectangle().fill(Theme.separator).frame(height: 0.5)
-                                .padding(.leading, typeSize.isAccessibilitySize ? 16 : 70)
-                                .padding(.trailing, 16)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    VStack(spacing: 0) {
+                        ForEach(Array(Self.scopes.enumerated()), id: \.element) { i, scope in
+                            row(scope, index: i, snapshot: snapshot)
+                                .id(scope)
+                            if i < Self.scopes.count - 1 {
+                                // Desde el texto de la fila (o el borde, en tamaños de accesibilidad) hasta el margen de 16 pt.
+                                Rectangle().fill(Theme.separator).frame(height: 0.5)
+                                    .padding(.leading, typeSize.isAccessibilitySize ? 16 : 70)
+                                    .padding(.trailing, 16)
+                            }
                         }
                     }
-                }
-                .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
-                .padding(.horizontal, 16)
-                .padding(.top, Theme.Space.small)
+                    .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+                    .padding(.horizontal, 16)
+                    .padding(.top, Theme.Space.small)
 
-                Text("Deja el campo vacío para quitar el límite. Te avisamos al 80 % y cuando te pasas. El aviso llega con los pagos al instante (notificaciones y Wallet); lo que solo entra por una importación o una sincronización cuenta en las barras, pero no avisa.")
-                    .titan(.caption)
-                    .foregroundStyle(Theme.label3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 36)
-                    .padding(.top, Theme.Space.row)
-                    .accessibilityIdentifier("presupuestos.pie")
+                    Text("Deja el campo vacío para quitar el límite. Te avisamos al 80 % y cuando te pasas. El aviso llega con los pagos al instante (notificaciones y Wallet); lo que solo entra por una importación o una sincronización cuenta en las barras, pero no avisa.")
+                        .titan(.caption)
+                        .foregroundStyle(Theme.label3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 36)
+                        .padding(.top, Theme.Space.row)
+                        .accessibilityIdentifier("presupuestos.pie")
+                }
+                .padding(.bottom, Theme.Space.section)
             }
-            .padding(.bottom, Theme.Space.section)
-        }
-        .scrollIndicators(.hidden)
-        .scrollDismissesKeyboard(.interactively)
-        .background(Theme.canvas.ignoresSafeArea())
-        .navigationTitle("Presupuestos")
-        .navigationBarTitleDisplayMode(.large)
-        .assemblesOnFirstAppear()
-        .onAppear {
-            restoreDrafts()
-            refreshUntouched()
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .background(Theme.canvas.ignoresSafeArea())
+            .navigationTitle("Presupuestos")
+            .navigationBarTitleDisplayMode(.large)
+            .assemblesOnFirstAppear()
+            .onAppear {
+                restoreDrafts()
+                refreshUntouched()
+                applyPrefill(proxy: proxy)
+            }
+            .onChange(of: prefill?.token) { _, _ in
+                applyPrefill(proxy: proxy)
+            }
         }
         .onChange(of: model.state.budgets) { _, _ in refreshUntouched() }
         .onChange(of: focused) { old, _ in
@@ -205,11 +216,29 @@ struct BudgetsView: View {
     }
 
     private func refreshUntouched() {
-        for scope in Self.scopes where !dirty.contains(scope) && focused != scope { refresh(scope) }
+        for scope in Self.scopes where !dirty.contains(scope) && focused != scope && prefilledScope != scope { refresh(scope) }
+    }
+
+    private func applyPrefill(proxy: ScrollViewProxy) {
+        guard let prefill, appliedPrefillToken != prefill.token else { return }
+        appliedPrefillToken = prefill.token
+        let scope = BudgetScope.category(prefill.category)
+        if let suggested = prefill.suggestedCents, suggested > 0 {
+            texts[scope] = formatEUR(suggested)
+            errors[scope] = nil
+            prefilledScope = scope
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            withAnimation(reduceMotion ? nil : Theme.Motion.quick) {
+                proxy.scrollTo(scope, anchor: .center)
+            }
+        }
     }
 
     private func commit(_ scope: BudgetScope) {
-        guard dirty.contains(scope) else { return refresh(scope) }
+        guard dirty.contains(scope) || prefilledScope == scope else { return refresh(scope) }
+        prefilledScope = nil
         let text = (texts[scope] ?? "").trimmingCharacters(in: .whitespaces)
         // Vacío, 0 o un texto sin cifras («€», « €», «,») quita el presupuesto (R32).
         let cents: Int?

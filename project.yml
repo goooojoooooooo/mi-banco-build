@@ -59,7 +59,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: com.mibanco.app.callback
             CFBundleURLSchemes: [mibanco]
-        LSApplicationQueriesSchemes: [revolut, imagin, traderepublic, shortcuts]
+        LSApplicationQueriesSchemes: [revolut, imagin, traderepublic, shortcuts, sidestore]
         ALTAppGroups: [group.com.mibanco.shared]
         UIUserInterfaceStyle: Dark
         # 120 Hz en los iPhone con ProMotion: sin esta clave, las animaciones propias (Core Animation, SwiftUI,

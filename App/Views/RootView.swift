@@ -24,7 +24,9 @@ struct RootView: View {
     @State private var settingsScroll: String?
     @State private var openAccountsRequest = false
     @State private var openBankRequest: BankID?
+    @State private var openGuideTrackRequest: GuideTrack?
     @State private var openBudgetsRequest = false
+    @State private var budgetPrefillRequest: BudgetPrefillRequest?
     @State private var selectHomeCard: AccountCard?
     /// La única hoja de la app: un movimiento, una posición, mover dinero, el resumen/asistente, compartir o restaurar.
     @State private var sheet: RootSheet?
@@ -275,7 +277,20 @@ struct RootView: View {
                 accountBook: accountBook,
                 briefingModel: briefing,
                 speaker: speaker,
-                onAction: handleBriefingAction
+                entry: .dailyUpdate,
+                onAction: handleBriefingAction,
+                onNyxAction: handleNyxAction
+            )
+        case .nyx(let entry):
+            BriefingSheet(
+                model: model,
+                portfolio: portfolio,
+                accountBook: accountBook,
+                briefingModel: briefing,
+                speaker: speaker,
+                entry: entry,
+                onAction: handleBriefingAction,
+                onNyxAction: handleNyxAction
             )
         case .share(let share):
             ShareSheet(item: share, onFinish: { sheet = nil })
@@ -346,7 +361,8 @@ struct RootView: View {
                     Tab("Gasto", systemImage: "chart.bar", value: AppTab.spending) {
                         SpendingView(model: model, accountBook: accountBook, isVisible: tab == .spending && !isLocked,
                                      openDetail: { openDetail($0) }, openMoveMoney: openMoveMoney,
-                                     openBudgetsRequest: $openBudgetsRequest)
+                                     openBudgetsRequest: $openBudgetsRequest,
+                                     budgetPrefillRequest: $budgetPrefillRequest)
                             .modifier(FadedTabContent(entrance: entrance(for: .spending)))
                     }
                     Tab("Avisos", systemImage: "bell", value: AppTab.alerts) {
@@ -360,6 +376,7 @@ struct RootView: View {
                             SettingsView(model: model, portfolio: portfolio, accountBook: accountBook, briefing: briefing,
                                          focusRequest: $settingsFocus, openAccountsRequest: $openAccountsRequest,
                                          openBankRequest: $openBankRequest,
+                                         openGuideTrackRequest: $openGuideTrackRequest,
                                          present: present,
                                          requestImport: startImport,
                                          importBackup: { startImport(.backup) },
@@ -712,11 +729,12 @@ struct RootView: View {
             briefingTask?.cancel()
             briefingTask = nil
             openBankSettings(bank)
-        case .nyx:
+        case .nyx(let entryID):
             briefingRouteWaiting = false
             suppressBriefingForActivation = true
             briefingTask?.cancel()
             briefingTask = nil
+            openNyx(entryID.isEmpty ? .seen : .message(entryID))
         }
         if let id = route.movementID {
             // Tras el cambio de pestaña, para que la hoja suba sobre la pantalla buena.
@@ -817,6 +835,88 @@ struct RootView: View {
         briefingRouteWaiting = false
         sheet = .briefing(rec)
         rescheduleMorningReminder()
+    }
+
+    private func openNyx(_ entry: NyxSheetEntry) {
+        guard gate.canPresent, !isLocked, isForeground, !importing, sheet == nil, !model.needsOnboarding,
+              !BankConnector.shared.isActive else { return }
+        let now = AppClock.now
+        let rec = briefing.manualRecord(now: now)
+        let isFirst = briefing.record == nil
+        briefing.prepare(
+            record: rec,
+            isFirst: isFirst,
+            state: model.state,
+            portfolio: portfolio.portfolioForBackup,
+            book: accountBook.book,
+            privateMode: preferences.privateMode,
+            now: now
+        )
+        sheet = .nyx(entry)
+    }
+
+    private func handleNyxAction(_ action: NyxAction, entryID: String) {
+        speaker.stop()
+        let gen = gate.generation
+        switch action {
+        case let .prepareTransfer(from, to, cents):
+            sheet = nil
+            briefingActionTask?.cancel()
+            briefingActionTask = Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled, gate.generation == gen, gate.canPresent, !isLocked, isForeground else { return }
+                openMoveMoney(MoveRequest(from: from, target: .own(to), amountCents: cents))
+            }
+        case let .setBudget(category, suggestedCents):
+            sheet = nil
+            budgetPrefillRequest = BudgetPrefillRequest(category: category, suggestedCents: suggestedCents)
+            tab = .spending
+        case .openBudgets:
+            sheet = nil
+            openBudgetsRequest = true
+            tab = .spending
+        case .openMovement(let id):
+            sheet = nil
+            briefingActionTask?.cancel()
+            briefingActionTask = Task {
+                try? await Task.sleep(for: .milliseconds(350))
+                guard !Task.isCancelled, gate.generation == gen, gate.canPresent, !isLocked, isForeground else { return }
+                openDetail(id)
+            }
+        case .renewBank(let bank):
+            sheet = nil
+            openBankSettings(bank)
+        case .refreshBank(let bank):
+            sheet = nil
+            Task { _ = await BankSync.shared.refresh(trigger: .manual, only: bank) }
+        case .openGuide(let trackRaw):
+            sheet = nil
+            if let track = GuideTrack(rawValue: trackRaw) {
+                openGuideTrackRequest = track
+            }
+            tab = .settings
+        case .openBankApp(let bank):
+            sheet = nil
+            Task { @MainActor in
+                if let message = await NyxActionHandler.openBankApp(bank) {
+                    showImportNotice(message)
+                }
+            }
+        case .openNotificationSettings:
+            sheet = nil
+            Task { @MainActor in
+                await NyxActionHandler.openNotificationSettings()
+            }
+        case .openSideStore:
+            sheet = nil
+            Task { @MainActor in
+                if let message = await NyxActionHandler.openSideStore() {
+                    showImportNotice(message)
+                }
+            }
+        case .muteMerchant, .markNotMine, .turnOffAlert:
+            break
+        }
     }
 
     private func handleBriefingAction(_ action: BriefingAction) {
@@ -932,6 +1032,7 @@ enum RootSheet: Identifiable {
     case position(String)
     case moveMoney(MoveRequest)
     case briefing(BriefingRecord)
+    case nyx(NyxSheetEntry)
     case share(ShareItem)
     case restore(RestorePreview)
     case confirmDisconnect(BankID)
@@ -943,6 +1044,7 @@ enum RootSheet: Identifiable {
         case .position(let instrument): "position-\(instrument)"
         case .moveMoney(let request): "move-\(request.id)"
         case .briefing(let record): "briefing-\(record.shownAt.timeIntervalSince1970)"
+        case .nyx(let entry): "nyx-\(entry)"
         case .share(let item): "share-\(item.id)"
         case .restore(let preview): "restore-\(preview.id)"
         case .confirmDisconnect(let bank): "confirm-disconnect-\(bank.rawValue)"

@@ -11,6 +11,7 @@ struct SpendingView: View {
     var openDetail: (UUID) -> Void = { _ in }
     var openMoveMoney: (MoveRequest) -> Void = { _ in }
     @Binding var openBudgetsRequest: Bool
+    @Binding var budgetPrefillRequest: BudgetPrefillRequest?
 
     /// El movimiento del kit: intensidad, cámara lenta y Reducir movimiento (el del sistema o el forzado para grabar).
     @Environment(\.motion) private var motion
@@ -20,6 +21,7 @@ struct SpendingView: View {
     @State private var entrance = Entrance()
     @State private var tick = 0
     @State private var path: [SpendingRoute] = []
+    @State private var activeBudgetPrefill: BudgetPrefillRequest?
     /// La hoja única de `RootView` está abierta y tapa Gasto: sus barras no avisan (necesidad del lote 2, ya en el kit).
     @Environment(\.singleSheetOpen) private var singleSheetOpen
     /// El cambio de pestaña que anuncia `RootView`: juega la entrada de Gasto.
@@ -141,7 +143,7 @@ struct SpendingView: View {
                 Group {
                     switch route {
                     case let .category(category, month): CategoryDetailView(model: model, category: category, month: month, openDetail: openDetail)
-                    case .budgets: BudgetsView(model: model)
+                    case .budgets: BudgetsView(model: model, prefill: activeBudgetPrefill)
                     case .transfers: TransfersView(model: model, openDetail: openDetail)
                     case .subscriptions: SubscriptionsView(model: model)
                     case .hiddenSubscriptions: HiddenSubscriptionsView(model: model)
@@ -185,6 +187,13 @@ struct SpendingView: View {
         .onChange(of: openBudgetsRequest, initial: true) { _, open in
             guard open else { return }
             openBudgetsRequest = false
+            activeBudgetPrefill = nil
+            path = [.budgets]
+        }
+        .onChange(of: budgetPrefillRequest, initial: true) { _, request in
+            guard let request else { return }
+            budgetPrefillRequest = nil
+            activeBudgetPrefill = request
             path = [.budgets]
         }
         // Al elegir la pestaña (`tabEntrance` de `RootView`, no `isVisible`): el selector de mes y el total entran con la

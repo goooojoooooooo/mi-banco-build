@@ -61,5 +61,82 @@ extension DemoMode {
         ]
         return LedgerState(balances: balances, movements: movements, unread: [], budgets: Budgets(), links: [:])
     }
+
+    /// Candidata de foco para el escenario `daily-focus`: cobro de Netflix mañana (13,99 € en Revolut, saldo 9,20 €,
+    /// traspaso sugerido de 10,00 € desde imagin).
+    static func nyxDemoShortfallObservation(now: Date = DemoMode.now, calendar: Calendar = DateText.madridCalendar) -> NyxObservation {
+        let startOfToday = calendar.startOfDay(for: now)
+        let tomorrow = calendar.date(byAdding: .day, value: 1, to: startOfToday) ?? now
+        return NyxObservation(
+            situation: .shortfall,
+            subject: "rev|netflix|demo",
+            priority: .urgent,
+            observedAt: now.addingTimeInterval(-300),
+            facts: NyxFacts(
+                merchant: "Netflix",
+                bank: .rev,
+                otherBank: .ima,
+                cents: 1_399,
+                balanceCents: 920,
+                suggestedCents: 1_000,
+                day: tomorrow
+            )
+        )
+    }
+
+    /// Memoria poblada para el escenario `seen-list` con entradas reales sobre los movimientos de `DemoMode.state()`.
+    static func nyxSeenListMemory(state: LedgerState, now: Date = DemoMode.now, calendar: Calendar = DateText.madridCalendar) -> NyxMemory {
+        let zaraID = state.movements.first(where: { $0.merchant == "Zara" && abs($0.amountCents) == 4_995 })?.id
+        let amazonID = state.movements.first(where: { $0.merchant == "Amazon" && abs($0.amountCents) == 2_499 })?.id
+
+        let shortfallObs = nyxDemoShortfallObservation(now: now, calendar: calendar)
+        let unusualObs = NyxObservation(
+            situation: .unusualPayment,
+            subject: "zara-demo",
+            priority: .normal,
+            observedAt: now.addingTimeInterval(-1_800),
+            facts: NyxFacts(
+                merchant: "Zara",
+                bank: .tr,
+                movementID: zaraID,
+                cents: 4_995,
+                usualCents: 1_800
+            )
+        )
+        let categoryObs = NyxObservation(
+            situation: .categoryAboveNormal,
+            subject: "compras-demo",
+            priority: .quiet,
+            observedAt: now.addingTimeInterval(-7_200),
+            facts: NyxFacts(
+                usualCents: 8_500,
+                spentCents: 14_000,
+                category: .compras
+            )
+        )
+        let largeObs = NyxObservation(
+            situation: .largePayment,
+            subject: "amazon-demo",
+            priority: .normal,
+            observedAt: now.addingTimeInterval(-10_800),
+            facts: NyxFacts(
+                merchant: "Amazon",
+                bank: .ima,
+                movementID: amazonID,
+                cents: 2_499
+            )
+        )
+
+        var memory = NyxMemory()
+        memory.firstUseAt = now.addingTimeInterval(-14 * 86_400)
+        memory.lastLookAt = now.addingTimeInterval(-3_600)
+        memory.entries = [
+            NyxEntry(observation: shortfallObs, delivery: .banner, status: .new, statusAt: shortfallObs.observedAt),
+            NyxEntry(observation: unusualObs, delivery: .notification, status: .new, statusAt: unusualObs.observedAt),
+            NyxEntry(observation: categoryObs, delivery: .list, status: .seen, statusAt: categoryObs.observedAt),
+            NyxEntry(observation: largeObs, delivery: .viaAvisos, status: .seen, statusAt: largeObs.observedAt),
+        ]
+        return memory
+    }
 }
 #endif

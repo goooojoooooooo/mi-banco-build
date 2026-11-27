@@ -14,6 +14,8 @@ struct SettingsView: View {
     @Binding var openAccountsRequest: Bool
     /// Pedido desde un aviso de consentimiento, el resumen o el reverso de una tarjeta: abre ese banco en «Bancos».
     @Binding var openBankRequest: BankID?
+    /// Pedido desde Nyx («Abrir la guía»): abre la guía de avisos de ese banco en su último paso guardado.
+    @Binding var openGuideTrackRequest: GuideTrack?
     /// Copia de seguridad e importación: abren la hoja raíz y el selector de archivos único (U55).
     var present: (RootSheet) -> Void = { _ in }
     var requestImport: (ImportKind) -> Void = { _ in }
@@ -42,6 +44,7 @@ struct SettingsView: View {
     @State private var dirty: Set<BankID> = []
     @State private var showAccounts = false
     @State private var pushedBank: BankID?
+    @State private var pushedGuideTrack: GuideTrack?
     @State private var showConnectionGuide = false
     @FocusState private var focused: BankID?
     #if DEBUG
@@ -259,6 +262,9 @@ struct SettingsView: View {
             .navigationDestination(item: $pushedBank) { bank in
                 BankLinkView(model: model, portfolio: portfolio, bank: bank, present: present, requestImport: requestImport)
             }
+            .navigationDestination(item: $pushedGuideTrack) { track in
+                GuideStepView(track: track, model: model, resume: preferences.guideResume(track))
+            }
             .navigationDestination(isPresented: $showConnectionGuide) {
                 ConnectionGuideView(model: model, requestImport: requestImport)
             }
@@ -276,6 +282,7 @@ struct SettingsView: View {
             applyFocusRequest()
             applyAccountsRequest()
             applyBankRequest()
+            applyGuideTrackRequest()
             #if DEBUG
             if DemoMode.isActive {
                 if DemoMode.opensAccounts {
@@ -291,6 +298,7 @@ struct SettingsView: View {
         .onChange(of: focusRequest) { _, _ in applyFocusRequest() }
         .onChange(of: openAccountsRequest) { _, _ in applyAccountsRequest() }
         .onChange(of: openBankRequest) { _, _ in applyBankRequest() }
+        .onChange(of: openGuideTrackRequest) { _, _ in applyGuideTrackRequest() }
         // Un intent puede cambiar un saldo con Ajustes abierto: los campos sin tocar lo reflejan.
         .onChange(of: model.snapshot.balances) { _, _ in refreshUntouched() }
         .onChange(of: focused) { old, _ in
@@ -420,6 +428,12 @@ struct SettingsView: View {
         guard let bank = openBankRequest else { return }
         openBankRequest = nil
         pushedBank = bank
+    }
+
+    private func applyGuideTrackRequest() {
+        guard let track = openGuideTrackRequest else { return }
+        openGuideTrackRequest = nil
+        pushedGuideTrack = track
     }
 
     private func applyFocusRequest() {

@@ -73,16 +73,46 @@ enum PendingMoves {
     }
 
     static func add(_ move: PendingMove) {
-        var list = all()
-        list.removeAll { $0.id == move.id }
-        list.insert(move, at: 0)
-        save(list)
+        #if DEBUG
+        if DemoMode.isActive {
+            var list = demo.all()
+            list.removeAll { $0.id == move.id }
+            list.insert(move, at: 0)
+            demo.set(list)
+            return
+        }
+        #endif
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: legacyStorageKey) != nil {
+            _ = all()
+        }
+        do {
+            try store.add(move)
+            defaults.removeObject(forKey: legacyStorageKey)
+        } catch {
+            // Si pending-moves.json es ilegible o está corrupto, no se destruye ni se borra la clave heredada (M-11).
+        }
     }
 
     static func remove(_ id: UUID) {
-        var list = all()
-        list.removeAll { $0.id == id }
-        save(list)
+        #if DEBUG
+        if DemoMode.isActive {
+            var list = demo.all()
+            list.removeAll { $0.id == id }
+            demo.set(list)
+            return
+        }
+        #endif
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: legacyStorageKey) != nil {
+            _ = all()
+        }
+        do {
+            try store.remove(id)
+            defaults.removeObject(forKey: legacyStorageKey)
+        } catch {
+            // Si pending-moves.json es ilegible o está corrupto, no se destruye ni se borra la clave heredada (M-11).
+        }
     }
 
     static func save(_ moves: [PendingMove]) {

@@ -7,6 +7,28 @@ enum LiveActivityController {
     private typealias Live = Activity<MovementActivityAttributes>
     private static let staleAfter: TimeInterval = 15 * 60
 
+    /// Recuerda en memoria la última actividad mostrada por esta instancia (M-14) para que `endTest`
+    /// con el ojo cerrado solo cierre la actividad de prueba y nunca una real del mismo comercio.
+    private final class LastShownTracker: @unchecked Sendable {
+        private let lock = NSLock()
+        private var last: (activityID: String, merchant: String?, amountCents: Int)?
+
+        func record(activityID: String, merchant: String?, amountCents: Int) {
+            lock.lock()
+            defer { lock.unlock() }
+            last = (activityID, merchant, amountCents)
+        }
+
+        func matches(activityID: String, merchant: String, amountCents: Int) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let last else { return false }
+            return last.activityID == activityID && last.merchant == merchant && last.amountCents == amountCents
+        }
+    }
+
+    private static let lastShown = LastShownTracker()
+
     /// Las que siguen en pantalla. Una actividad caducada (.stale) sigue siendo válida: actualizarla la reactiva.
     private static var live: [Live] {
         Live.activities.filter { $0.activityState == .active || $0.activityState == .stale }
@@ -50,16 +72,20 @@ enum LiveActivityController {
                 body: LocalizedStringResource(stringLiteral: text.body),
                 sound: .default)
             await first.update(content, alertConfiguration: alert)
+            lastShown.record(activityID: first.id, merchant: movement.merchant, amountCents: movement.amountCents)
             for extra in current.dropFirst() { await extra.end(nil, dismissalPolicy: .immediate) }
             // N-4: si el ojo cambió mientras se actualizaba, queda con el de ahora.
             await syncEye()
             return true
         } else {
             refreshed()
-            let created = (try? Live.request(attributes: MovementActivityAttributes(), content: content, pushType: nil)) != nil
+            guard let created = try? Live.request(attributes: MovementActivityAttributes(), content: content, pushType: nil) else {
+                return false
+            }
+            lastShown.record(activityID: created.id, merchant: movement.merchant, amountCents: movement.amountCents)
             // N-4: si el ojo se cerró mientras se creaba (y el aviso del cambio ya pasó por las actividades), se corrige.
-            if created { await syncEye() }
-            return created
+            await syncEye()
+            return true
         }
     }
 
@@ -101,9 +127,12 @@ enum LiveActivityController {
     static func endTest(merchant: String, amountCents: Int) async {
         for activity in Live.activities {
             let state = activity.content.state
-            let matchesAmount = state.lastAmountCents == amountCents
-                || (state.lastAmountCents == nil && state.hidden == true)
-            if state.merchant == merchant && matchesAmount {
+            let matchesOpen = state.merchant == merchant && state.lastAmountCents == amountCents
+            let matchesClosedTest = state.merchant == merchant
+                && state.lastAmountCents == nil
+                && state.hidden == true
+                && lastShown.matches(activityID: activity.id, merchant: merchant, amountCents: amountCents)
+            if matchesOpen || matchesClosedTest {
                 await activity.end(nil, dismissalPolicy: .immediate)
             }
         }

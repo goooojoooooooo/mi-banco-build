@@ -28,10 +28,16 @@ private struct LossyPendingMove: Decodable {
     init(from decoder: Decoder) throws { value = try? PendingMove(from: decoder) }
 }
 
+/// Decodifica una lista de traspasos pendientes elemento a elemento, saltando los corruptos (U31),
+/// pero lanzando error si el documento entero no es un array JSON válido (p. ej. archivo truncado o corrupto).
+public func decodePendingMovesThrowing(_ data: Data) throws -> [PendingMove] {
+    let items = try JSONDecoder().decode([LossyPendingMove].self, from: data)
+    return items.compactMap(\.value)
+}
+
 /// Decodifica una lista de traspasos pendientes elemento a elemento, saltando los corruptos (U31).
 public func decodePendingMoves(_ data: Data) -> [PendingMove] {
-    guard let items = try? JSONDecoder().decode([LossyPendingMove].self, from: data) else { return [] }
-    return items.compactMap(\.value)
+    (try? decodePendingMovesThrowing(data)) ?? []
 }
 
 public enum MoveState: Equatable, Sendable {

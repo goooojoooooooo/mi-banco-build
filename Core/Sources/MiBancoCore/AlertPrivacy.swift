@@ -11,14 +11,24 @@ public struct DeliveredAlertDescriptor: Equatable, Sendable {
     }
 }
 
+/// Identificadores compartidos de categorías de avisos que pueden llevar importes o saldos (M-5).
+/// Única fuente de verdad entre Core, `AlertPoster` y `InsightNotifier`.
+public enum AlertCategoryID {
+    public static let movement = "MOVEMENT"
+    public static let insight = "INSIGHT"
+}
+
 /// Categorías de avisos locales que pueden llevar importes o saldos (`MOVEMENT` e `INSIGHT`).
 /// `BRIEFING`, `BANK_CONSENT` y los avisos sin leer nunca llevan cifras y se conservan.
-public let sensitiveAlertCategories: Set<String> = ["MOVEMENT", "INSIGHT"]
+public let sensitiveAlertCategories: Set<String> = [AlertCategoryID.movement, AlertCategoryID.insight]
 
 /// Identificadores de los avisos entregados que deben quitarse del Centro de Notificaciones al activar el modo privado.
-public func deliveredAlertIdentifiersToRemoveForPrivacy(_ delivered: [DeliveredAlertDescriptor]) -> [String] {
+public func deliveredAlertIdentifiersToRemoveForPrivacy(
+    _ delivered: [DeliveredAlertDescriptor],
+    sensitiveCategories: Set<String> = sensitiveAlertCategories
+) -> [String] {
     delivered
-        .filter { sensitiveAlertCategories.contains($0.categoryIdentifier) }
+        .filter { sensitiveCategories.contains($0.categoryIdentifier) }
         .map(\.identifier)
 }
 

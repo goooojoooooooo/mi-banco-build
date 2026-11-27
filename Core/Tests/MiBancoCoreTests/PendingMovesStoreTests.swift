@@ -108,4 +108,106 @@ import Testing
         #expect(!cleared)
         #expect(legacyData != nil)
     }
+
+    @Test func corruptFileLoadsEmptyWithoutDeletingAndBlocksOverwrite() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let fileURL = dir.appendingPathComponent(PendingMovesStore.fileName)
+        let corruptBytes = Data("{not-valid-pending-moves".utf8)
+        try corruptBytes.write(to: fileURL)
+
+        let store = PendingMovesStore(directory: dir)
+        #expect(store.load().isEmpty)
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            _ = try store.loadThrowing()
+        }
+
+        let newMove = sampleMove(amount: 42_000)
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            try store.add(newMove)
+        }
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            try store.remove(newMove.id)
+        }
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            try store.save([newMove])
+        }
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+
+        #expect(throws: PendingMovesStoreError.corrupt) {
+            try store.save([])
+        }
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+
+        // Si el destino está corrupto, migrateLegacy tampoco debe machacarlo ni borrar la clave heredada.
+        var legacyData: Data? = try JSONEncoder().encode([newMove])
+        var cleared = false
+        _ = store.migrateLegacy(
+            readLegacy: { legacyData },
+            clearLegacy: {
+                cleared = true
+                legacyData = nil
+            }
+        )
+        #expect(!cleared)
+        #expect(legacyData != nil)
+        #expect(try Data(contentsOf: fileURL) == corruptBytes)
+    }
+
+    @Test func unreadableFileLoadsEmptyWithoutDeletingAndBlocksOverwrite() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        // Un directorio donde debería haber un fichero provoca un error de lectura real distinto de ENOENT incluso como root.
+        let fileURL = dir.appendingPathComponent(PendingMovesStore.fileName)
+        try FileManager.default.createDirectory(at: fileURL, withIntermediateDirectories: true)
+
+        let store = PendingMovesStore(directory: dir)
+        #expect(store.load().isEmpty)
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(throws: PendingMovesStoreError.unreadable) {
+            _ = try store.loadThrowing()
+        }
+
+        let newMove = sampleMove(amount: 15_000)
+        #expect(throws: PendingMovesStoreError.unreadable) {
+            try store.add(newMove)
+        }
+        #expect(throws: PendingMovesStoreError.unreadable) {
+            try store.save([newMove])
+        }
+        #expect(throws: PendingMovesStoreError.unreadable) {
+            try store.save([])
+        }
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    @Test func missingFileDistinguishesFromCorruptAndAllowsAddAndRemove() throws {
+        let dir = try makeTempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let store = PendingMovesStore(directory: dir)
+        #expect(try store.loadThrowing().isEmpty)
+
+        let first = sampleMove(amount: 12_000)
+        let second = sampleMove(amount: 34_000)
+        try store.add(first)
+        try store.add(second)
+        #expect(try store.loadThrowing() == [second, first])
+
+        try store.remove(second.id)
+        #expect(try store.loadThrowing() == [first])
+
+        try store.remove(first.id)
+        #expect(try store.loadThrowing().isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(PendingMovesStore.fileName).path))
+    }
 }

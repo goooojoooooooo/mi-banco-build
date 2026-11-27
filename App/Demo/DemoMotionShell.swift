@@ -81,6 +81,10 @@ extension DemoMode {
     /// accesibilidad con el banco encima. Solo para ver en rojo su prueba.
     static var homeReadableUnderBank: Bool { isActive && arguments.contains("-MiBancoDemoHomeReadableUnderBank") }
 
+    /// `-MiBancoDemoHeldGroupsStayLocked` (lote final p2, ronda 1): los grupos del detalle a la vista no reciben toques
+    /// (el defecto de la batería 46005608063). Solo para ver en rojo su prueba.
+    static var heldGroupsStayLocked: Bool { isActive && arguments.contains("-MiBancoDemoHeldGroupsStayLocked") }
+
     static var tabSwitchSeconds: Double? {
         guard isActive, let seconds = value(after: "-MiBancoDemoTabSwitch").flatMap(Double.init), seconds.isFinite,
               seconds > 0 else { return nil }

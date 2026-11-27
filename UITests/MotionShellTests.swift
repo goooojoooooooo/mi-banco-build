@@ -1053,6 +1053,42 @@ final class MotionShellTests: XCTestCase {
         XCTAssertNotEqual(probe()["vuelosSinDestino"] ?? "0", "0", "Con la bandera, la copia debía fundirse: \(probe())")
     }
 
+    /// Lote final p2, ronda 1: con la hoja del detalle quieta y el importe posado, la ficha «Categoría» responde al
+    /// primer toque y abre el selector (batería 46005608063: a la vista y sin responder). Se abre la fila nada más
+    /// aparecer Inicio, como hace la prueba que falló.
+    func testCategoryChipAnswersOnceTheSheetSettles() throws {
+        tapCategoryChipOnceTheSheetSettles()
+    }
+
+    /// Con el defecto de vuelta (`-MiBancoDemoHeldGroupsStayLocked`: los grupos a la vista sin recibir toques), la
+    /// prueba se pone roja (estricto: solo por el selector que no se abre).
+    func testCategoryChipTestFailsWhenTheGroupStaysLocked() throws {
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = { $0.compactDescription.contains("La ficha «Categoría» no abrió el selector") }
+        XCTExpectFailure("Con los grupos bloqueados, la ficha no responde", options: options) {
+            tapCategoryChipOnceTheSheetSettles(["-MiBancoDemoHeldGroupsStayLocked"])
+        }
+    }
+
+    private func tapCategoryChipOnceTheSheetSettles(_ extra: [String] = []) {
+        launch(extra)
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 15), "Inicio no aparece")
+        waitForLaunchToEnd(30)
+        let row = app.buttons.matching(identifier: "movementRow").firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 10) && waitUntil(15, { row.isHittable }), "No hay filas que tocar")
+        row.tap()
+        // La hoja se posa: el importe ha aterrizado cuando «Te quedaban» dice su cifra.
+        let left = labelled("label BEGINSWITH %@", "Te quedaban")
+        XCTAssertTrue(waitUntil(10) { left.exists && left.label.hasSuffix(" euros") }, "El importe no se posó")
+        let chip = app.buttons["category-chip"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), "Falta la ficha «Categoría»")
+        // La entrada escalonada del grupo (retardo + muelle `enter`) dura menos de 1 s.
+        Thread.sleep(forTimeInterval: 1)
+        chip.tap()
+        XCTAssertTrue(app.buttons["category-tile-comerFuera"].waitForExistence(timeout: 3),
+                      "La ficha «Categoría» no abrió el selector con la hoja quieta y a la vista")
+    }
+
     /// Ronda 1 (I-1): el banco abierto encima de Inicio es de Inicio. Si la pestaña cambia con él delante (aquí la demo
     /// pasa a Gasto a los 40 s; en el iPhone, la barra de cristal o la ruta de un aviso), el banco se cierra y Gasto se
     /// ve y se toca.

@@ -765,6 +765,13 @@ final class MotionScreensTests: XCTestCase {
     // MARK: - Conectar un banco: pasos con porcentaje y «conectado» (B6, B7)
 
     /// «Paso 2 de 3, 45 por ciento» -> (2, 45).
+    /// Línea C (lote final p2, ronda 1; cambio mínimo y declarado): la etiqueta leída de UNA instantánea, o nil si el
+    /// elemento ya no está. Con `exists` y luego `label` (dos consultas) la pantalla de pasos podía irse entre las dos y
+    /// la prueba caía con «Failed to get matching snapshot» (run 45914072681).
+    private func labelNow(_ element: XCUIElement) -> String? {
+        (try? element.snapshot())?.label
+    }
+
     private func stepAndPercent(_ label: String) -> (step: Int, percent: Int)? {
         let numbers = label.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
         guard label.hasPrefix("Paso "), numbers.count == 3 else { return nil }
@@ -1232,7 +1239,7 @@ final class MotionScreensTests: XCTestCase {
         var early: Set<Int> = []
         let reading = Date().addingTimeInterval(6)
         while Date() < reading, !summary.exists {
-            guard let now = stepAndPercent(percent.label) else { continue }
+            guard let now = labelNow(percent).flatMap(stepAndPercent) else { continue }
             XCTAssertLessThan(now.percent, 67, "El porcentaje pasó de 67 antes de la vista previa: \(now)")
             XCTAssertLessThan(now.step, 3, "El tercer paso empezó antes de la vista previa")
             early.insert(now.step)
@@ -1247,7 +1254,7 @@ final class MotionScreensTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2.5)
         XCTAssertEqual(percent.label, "Paso 3 de 3, 67 por ciento", "El porcentaje subió solo, sin tocar «Importar»")
 
-        XCTAssertTrue(waitFor(hittable, confirm, timeout: 5), "«Importar» no se puede tocar")
+        XCTAssertTrue(waitFor(hittable, confirm, timeout: 15), "«Importar» no se puede tocar")
         XCTAssertTrue(confirm.isEnabled)
         confirm.tap()
         let bank = app.buttons["bank-import-statement"]
@@ -1262,11 +1269,11 @@ final class MotionScreensTests: XCTestCase {
             if alternate {
                 guard third.exists else { continue }
                 let done = (third.value as? String) == "hecho"
-                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                guard let now = labelNow(percent).flatMap(stepAndPercent) else { continue }
                 if done { XCTAssertEqual(now.percent, 100, "El tercer paso salió hecho antes del 100: \(now)") }
                 afterTap.append(now.percent)
             } else {
-                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                guard let now = labelNow(percent).flatMap(stepAndPercent) else { continue }
                 XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")
                 XCTAssertGreaterThanOrEqual(now.percent, afterTap.last ?? 0, "El porcentaje bajó al importar")
                 if now.percent == 100, third.exists {

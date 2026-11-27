@@ -315,7 +315,7 @@ private func trCSV(_ rows: [[String: String]]) -> String {
                          subscriptions: [normalizeMerchant("CARREFOUR GASOLINERA")]) == .transporte)
         // Las formas que no empiezan por la cadena también son transporte, con cargo mensual y con o sin MCC.
         for text in ["E.S. CARREFOUR", "GASOLINERA CARREFOUR", "E.S. ALCAMPO", "GASOLINERA ALCAMPO"] {
-            let key = [normalizeMerchant(text)]
+            let key: Set<String> = [normalizeMerchant(text)]
             #expect(classify(pay(text, isShop: true), subscriptions: key) == .transporte, "«\(text)» recurrente")
             #expect(classify(pay(text, isShop: true, mcc: "5541"), subscriptions: key) == .transporte, "«\(text)» recurrente 5541")
             #expect(classify(pay(text, isShop: true, mcc: "5541")) == .transporte, "«\(text)» 5541")

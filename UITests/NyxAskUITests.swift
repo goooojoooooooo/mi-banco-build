@@ -59,7 +59,12 @@ final class NyxAskUITests: XCTestCase {
     private func answerCardText() -> String {
         let card = element("assistant-answer-card")
         guard card.exists else { return "" }
-        let labels = card.descendants(matching: .any).allElementsBoundByIndex.map(\.label).filter { !$0.isEmpty }
+        let children = card.descendants(matching: .any)
+        var labels: [String] = []
+        for i in 0..<children.count {
+            let label = children.element(boundBy: i).label
+            if !label.isEmpty { labels.append(label) }
+        }
         return labels.joined(separator: " ")
     }
 
@@ -143,7 +148,9 @@ final class NyxAskUITests: XCTestCase {
 
         launch()
         openNyxFromButton()
-        for _ in 0..<8 where !field.exists { scroller.swipeUp() }
+        let fieldAfter = app.textFields["assistant-question-field"]
+        let scrollerAfter = app.scrollViews["briefing-scroll"].exists ? app.scrollViews["briefing-scroll"] : app.scrollViews.firstMatch
+        for _ in 0..<8 where !fieldAfter.exists { scrollerAfter.swipeUp() }
         XCTAssertTrue(app.buttons["nyx-mic"].waitForExistence(timeout: 6), "Con transcripción disponible falta nyx-mic")
     }
 }

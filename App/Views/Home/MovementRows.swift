@@ -25,6 +25,7 @@ struct ListEntryView: View {
                 .padding(.horizontal, Theme.Space.gutter)
                 .padding(.top, isFirst ? 14 : 22)
                 .padding(.bottom, 6)
+                .background(Theme.canvas)
                 .accessibilityAddTraits(.isHeader)
         case let .row(row, isLast):
             switch row.item {
@@ -67,10 +68,15 @@ struct MovementRowView: View {
             if let openRow, let onFlag {
                 let id = movement.id
                 let flagged = movement.flaggedNotMine
-                SwipeActionsRow(rowID: id, openRow: openRow, actions: [
-                    RowSwipeAction(id: "note", title: "Nota", perform: onOpen),
-                    RowSwipeAction(id: "flag", title: flagTitle, warning: true) { onFlag(id, !flagged) },
-                ]) {
+                SwipeActionsRow(
+                    rowID: id,
+                    openRow: openRow,
+                    actions: [
+                        RowSwipeAction(id: "note", title: "Nota", perform: onOpen),
+                        RowSwipeAction(id: "flag", title: flagTitle, warning: true) { onFlag(id, !flagged) },
+                    ],
+                    leadingShiftLimit: typeSize.isAccessibilitySize ? tileSize + 14 : nil
+                ) {
                     rowButton
                 }
             } else {
@@ -457,6 +463,7 @@ struct UnreadRowView: View {
         .padding(.horizontal, Theme.Space.gutter)
         .padding(.vertical, 12)
         .frame(minHeight: 64)
+        .background(Theme.canvas)
         .overlay(alignment: .bottom) {
             Rectangle().fill(Theme.separator).frame(height: 0.5)
                 .padding(.leading, Theme.Space.gutter + tileSize + 14)

@@ -470,7 +470,7 @@ final class MotionTourScreensTests: MotionTourCase {
         // El ojo se cierra solo, por el mismo camino que el interruptor, 9 s después de que el interruptor aparezca en
         // pantalla; la ráfaga empieza antes: los primeros fotogramas son el control (cifras a la vista) y después el
         // cierre, fotograma a fotograma (lote de cierre, ronda 1, m-2: antes empezaba después del toque).
-        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoCloseEyeAfter", "9"])
+        launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks", "-MiBancoDemoSettingsCloseEyeAfter", "9"])
         XCTAssertTrue(app.navigationBars["Ajustes"].waitForExistence(timeout: 20), "No se ve Ajustes")
         let toggle = element("settings-private-mode")
         scrollDown(to: toggle)
@@ -592,6 +592,35 @@ final class MotionTourScreensTests: MotionTourCase {
         super.launch(["-MiBancoDemoOnboarding", "1", "-MiBancoReduceMotion"])
         burst("welcome-reduce", frames: 14, every: 0.3)
         XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no es de la bienvenida")
+    }
+
+    /// Primer arranque aterrizando en la bienvenida (`.launchWelcomeMark()`) a cámara lenta ×8: marca montada, «ONYX»
+    /// se apaga al despegar, la marca vuela hasta la ranura de 58 pt de la bienvenida y aterriza sin relevo doble ni
+    /// hueco (una sola marca en cada fotograma).
+    func testWelcomeLaunchLanding() throws {
+        super.launch(["-MiBancoDemoOnboarding", "1", "-MiBancoDemoLaunchHold", "25"], scale: 8)
+        let probe = element("launch-probe")
+        var startsAt: Double?
+        let deadline = Date().addingTimeInterval(20)
+        while Date() < deadline {
+            let text = (probe.value as? String) ?? ""
+            for pair in text.split(separator: ";") {
+                let parts = pair.split(separator: "=", maxSplits: 1)
+                if parts.count == 2, parts[0] == "empieza", let t = Double(parts[1]) {
+                    startsAt = t
+                }
+            }
+            if startsAt != nil { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        }
+        let start = try XCTUnwrap(startsAt, "La app no publicó cuándo empieza el arranque de la bienvenida")
+        // A ×8 en Expresivo: brillo ~5,7 s, assembleAt ~7,0 s, despegue ~7,7 s, aterrizaje ~10,8 s.
+        let wait = start + 5.5 - Date().timeIntervalSince1970
+        XCTAssertGreaterThan(wait, 0, "La espera del arranque se quedó corta (\(wait) s)")
+        if wait > 0 { Thread.sleep(forTimeInterval: wait) }
+        burst("welcome-launch", frames: 32, every: 0.25)
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 10), "La ráfaga no llegó a la bienvenida")
+        XCTAssertFalse(app.staticTexts["ONYX"].exists, "Quedó el texto «ONYX» en la bienvenida")
     }
 
     /// La guía de avisos: «Siguiente» desliza la página 70 pt hacia el lado al que se avanza y, medio segundo después,

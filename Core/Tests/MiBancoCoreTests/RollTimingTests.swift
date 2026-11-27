@@ -74,4 +74,25 @@ import Testing
         }
         #expect(AmountMask.closingCells(count: 5, popped: 0, seed: 42).allSatisfy { $0 != nil })
     }
+
+    /// 16.2: los totales de Suscripciones ruedan explícitamente en 0,45 s (`RollLength.subscriptionsTotals`), respetan
+    /// `MotionLevel` (más corto en Sutil, nunca por encima de 0,45 s en Equilibrado/Expresivo) y escalan con cámara lenta.
+    @Test func subscriptionsTotalsRollInFortyFiveHundredths() {
+        #expect(RollLength.subscriptionsTotals == .seconds(0.45))
+        for n in 1...9 {
+            let balanced = RollLength.subscriptionsTotals.timing(.count, digitCount: n, level: .balanced)
+            let expressive = RollLength.subscriptionsTotals.timing(.count, digitCount: n, level: .expressive)
+            let subtle = RollLength.subscriptionsTotals.timing(.count, digitCount: n, level: .subtle)
+            #expect(abs(settled(balanced, digits: n) - 0.45) < 1e-9, "Equilibrado \(n) columnas")
+            #expect(abs(settled(expressive, digits: n) - 0.45) < 1e-9, "Expresivo \(n) columnas")
+            #expect(abs(settled(subtle, digits: n) - 0.45 * MotionLevel.subtle.timeScale) < 1e-9, "Sutil \(n) columnas")
+        }
+        // Con cámara lenta (×4), 0,45 s pasan a 1,80 s.
+        let slow = RollLength.subscriptionsTotals.timing(.count, digitCount: 5, level: .balanced).scaled(4)
+        #expect(abs(settled(slow, digits: 5) - 1.8) < 1e-9)
+        // Diferencia real frente a `.brief` en Sutil: `.brief` topa el 0,80 × 0,85 = 0,68 s en 0,45 s; `.seconds(0.45)` escala a 0,3825 s.
+        let briefSubtle = RollLength.brief.timing(.count, digitCount: 5, level: .subtle)
+        let explicitSubtle = RollLength.subscriptionsTotals.timing(.count, digitCount: 5, level: .subtle)
+        #expect(settled(explicitSubtle, digits: 5) < settled(briefSubtle, digits: 5) - 0.05)
+    }
 }

@@ -561,7 +561,14 @@ struct RollingDigits: View {
             aligned = Array(repeating: 0, count: max(0, n - positions.count)) + Array(positions.suffix(n))
         }
         // La intensidad va dentro de `RollLength` (con su tope); aquí solo la cámara lenta de las grabaciones.
-        let paced = rollLength.timing(timing, digitCount: n, level: motion.level).scaled(max(motion.timeMultiplier, 0.01))
+        let levelTimed = rollLength.timing(timing, digitCount: n, level: motion.level)
+        let paced = levelTimed.scaled(max(motion.timeMultiplier, 0.01))
+        #if DEBUG
+        RollTimingProbe.shared.record(
+            unscaledMs: Int((levelTimed.total(digitCount: n) * 1_000).rounded()),
+            explicit: length != nil
+        )
+        #endif
         // m-2: una duración de 0 deja la cifra puesta, sin rodar.
         guard paced.total(digitCount: n) > 0 else {
             plan = []
@@ -846,6 +853,32 @@ private struct ReduceFade: ViewModifier {
 }
 
 #if DEBUG
+/// Solo DEBUG (`-MiBancoDemoRollTiming`): guarda la duración real (ms, escalada por `MotionLevel`, antes de cámara lenta)
+/// de las últimas rodadas de `RollingDigits`, para verificar duraciones explícitas como 16.2 en Suscripciones.
+@MainActor @Observable final class RollTimingProbe {
+    static let shared = RollTimingProbe()
+
+    private struct Entry {
+        let unscaledMs: Int
+        let explicit: Bool
+    }
+
+    private var entries: [Entry] = []
+
+    func record(unscaledMs: Int, explicit: Bool) {
+        guard DemoMode.exposesRollTiming else { return }
+        entries.append(Entry(unscaledMs: unscaledMs, explicit: explicit))
+    }
+
+    /// Los últimos dos importes que rodaron (mensual y anual al abrir Suscripciones).
+    var lastTwoSummary: String {
+        let tail = entries.suffix(2)
+        let ms = tail.map { String($0.unscaledMs) }.joined(separator: ",")
+        let explicit = tail.filter(\.explicit).count
+        return "ultimos2=\(ms);explicitos=\(explicit);total=\(entries.count)"
+    }
+}
+
 /// Solo DEBUG: pone lo dibujado como valor de accesibilidad cuando la prueba lo pide; si no, no toca nada.
 private struct DrawnTextValue: ViewModifier {
     let text: String

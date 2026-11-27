@@ -1,5 +1,6 @@
 import SwiftUI
 import Observation
+import MiBancoCore
 
 /// Medidas que cambian en cada fotograma (posición del carrusel, desplazamiento de la lista).
 /// Viven aquí, fuera del entorno y del `body` de Inicio: solo las leen modificadores pequeños
@@ -237,23 +238,28 @@ struct CarouselParallax: ViewModifier {
         // Resistencia: crece rápido al principio y se frena (nunca pasa del 4 %).
         let stretch: CGFloat = 0.04 * (1 - 1 / (pull / 120 + 1))
         content
-            .offset(y: y * 0.32)
+            .offset(y: min(y * 0.32, 96))
             .scaleEffect(1 - min(y / 1_400, 0.06) + stretch, anchor: .top)
             .opacity(1 - min(y / 420, 0.45))
     }
 }
 
-/// Degradado negro bajo la barra superior: solo aparece cuando hay contenido pasando por debajo.
+/// Degradado negro bajo la barra superior: solo aparece cuando hay contenido pasando por debajo. La barra en sí lleva
+/// fondo `Theme.canvas` opaco, así que el contenido desplazado nunca se transparenta detrás de «ONYX».
 struct TopEdgeFade: View {
     let motion: HomeMotion
+    var legacy = false
     @Environment(\.motion) private var kit
 
     var body: some View {
-        LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.55), .init(color: .black.opacity(0), location: 1)],
-                       startPoint: .top, endPoint: .bottom)
+        let stops: [Gradient.Stop] = legacy
+            ? [.init(color: .black, location: 0), .init(color: .black, location: 0.55), .init(color: .black.opacity(0), location: 1)]
+            : [.init(color: Theme.canvas, location: 0), .init(color: Theme.canvas.opacity(0), location: 1)]
+        LinearGradient(stops: stops, startPoint: .top, endPoint: .bottom)
             .opacity(motion.listOffset > 8 ? 1 : 0)
             .animation(kit.fade, value: motion.listOffset > 8)
             .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -316,6 +322,25 @@ private struct DrawnTextRecorder: ViewModifier {
             .onChange(of: text) { _, new in DrawnTextAudit.shared.record(new, hidden: hidden) }
     }
 }
+#endif
+
+extension View {
+    /// Solo DEBUG (`-MiBancoDemoDrawnText`): registra en `DrawnTextAudit` una cadena de importe pintada dentro de un
+    /// `Text` compuesto (p. ej. la frase de «Este mes»). En Release no hace nada.
+    @ViewBuilder func auditDrawnAmount(_ text: String?, hidden: Bool) -> some View {
+        #if DEBUG
+        if let text {
+            modifier(DrawnTextRecorder(text: text, hidden: hidden))
+        } else {
+            self
+        }
+        #else
+        self
+        #endif
+    }
+}
+
+#if DEBUG
 
 /// El elemento invisible que publica `DrawnTextAudit.summary` (identificador `drawn-text-audit`).
 struct DrawnTextAuditProbe: View {
@@ -374,6 +399,25 @@ struct DrawnTextAuditProbe: View {
     /// (`PreparedMark`, el paso «listo» de «Mover dinero»).
     var successMarks = 0
     var preparedMarks = 0
+    /// Cabecera de Inicio con texto grande: si la barra superior lleva fondo opaco y si «Este mes» va en un solo bloque.
+    var opaqueTopBar = true
+    var paceSingleBlock = true
+    /// m-7 punto 9: sonda de opacidad dibujada durante la apertura del abanico con Reducir movimiento.
+    /// No observado al escribir (se actualiza en cada fotograma dibujado); `fanReduceSettled` avisa al terminar.
+    @ObservationIgnored var fanReduceAudit = FanReduceAudit()
+    var fanReduceSettled = 0
+
+    func resetFanReduceProbe() {
+        fanReduceAudit = FanReduceAudit()
+    }
+
+    func recordFanFrame(layer: FanReduceAudit.Layer, opacity: Double) {
+        fanReduceAudit.record(layer: layer, opacity: opacity)
+    }
+
+    func finishFanReduceProbe() {
+        fanReduceSettled += 1
+    }
 
     var summary: String {
         [
@@ -381,6 +425,9 @@ struct DrawnTextAuditProbe: View {
             "abanico=\(fanOpen ? 1 : 0)", "abanicos=\(fanOpenings)", "elegida=\(fanPicked)", "vuelos=\(flightRequests)",
             "insignias=\(arrivalBadges)", "nueva=\(freshRows)", "anunciadas=\(arrivalsAnnounced)", "latidos=\(arrivalPulses)", "listas=\(listEntrances)", "fondoLista=\(listSwapFloor)", "vacios=\(blankSwaps)", "muestrasNueva=\(newListSamples)", "importeOculto=\(rowAmountHidden)", "cuentaOculta=\(weekCountsWhileHidden)", "fichasAntes=\(chipsEarly)",
             "exitos=\(successMarks)", "preparados=\(preparedMarks)",
+            "barraOpaca=\(opaqueTopBar ? 1 : 0)", "ritmoBloque=\(paceSingleBlock ? 1 : 0)",
+            "abanicoMin=\(fanReduceAudit.minVisiblePermille)", "abanicoSolapes=\(fanReduceAudit.overlapFrames)",
+            "abanicoMuestras=\(fanReduceAudit.samples)", "abanicoListo=\(fanReduceSettled)",
         ].joined(separator: ";")
     }
 }

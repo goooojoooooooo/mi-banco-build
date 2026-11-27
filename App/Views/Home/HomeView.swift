@@ -32,6 +32,7 @@ struct HomeView: View {
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var typeSize
     /// Intensidad, Reducir movimiento y cámara lenta: todo el movimiento de Inicio sale de aquí.
     @Environment(\.motion) private var kit
 
@@ -93,6 +94,7 @@ struct HomeView: View {
                     onShareIBAN: shareText,
                     onOpenAccounts: openAccounts
                 )
+                .background(Theme.canvas)
                 .homeEntrance(.row(0), listOpacity: listAlpha)
 
                 PendingMoveBanner(
@@ -105,10 +107,12 @@ struct HomeView: View {
                         }
                     }
                 )
+                .background(Theme.canvas)
                 .listOpacity(listAlpha)
 
                 WeekBlock(card: card, week: snapshot.weeks[card] ?? WeekSpend(), pace: snapshot.pace,
                           balance: card.bank.flatMap { snapshot.balances[$0] })
+                    .background(Theme.canvas)
                     .homeEntrance(.row(1), listOpacity: listAlpha)
                 ForEach(entries) { entry in
                     row(entry, snapshot: snapshot, swipes: true)
@@ -120,6 +124,7 @@ struct HomeView: View {
                         .foregroundStyle(Theme.label2)
                         .frame(maxWidth: .infinity)
                         .padding(.top, 40)
+                        .background(Theme.canvas)
                 }
             }
         } header: {
@@ -169,7 +174,9 @@ struct HomeView: View {
                              onFan: openFan)
                     .environment(\.cardTilt, tilt)
                     .environment(\.arrivalPulse, pulse)
-                    .modifier(CarouselParallax(motion: motion, enabled: !kit.reduce))
+                    // Con tamaños de accesibilidad la tarjeta apilada es muy alta: desplazarla hacia abajo con paralaje
+                    // la metía detrás de «Gastado en 7 días» («estimado» sobre «Gastado en»).
+                    .modifier(CarouselParallax(motion: motion, enabled: carouselParallaxEnabled))
                     .homeEntrance(.carousel)
                     .padding(.top, 2)
                 listSection(snapshot, cards: cards, card: activeListCard, entries: entries)
@@ -380,6 +387,14 @@ struct HomeView: View {
         return ListEntryView(entry: entry, logoDomain: domain, isFresh: fresh, zoom: zoom,
                              onOpen: { id in self.open(id) }, onDeleteUnread: { id in deleteUnread(id) },
                              openRow: rowBinding, onFlag: onFlag)
+    }
+
+    private var carouselParallaxEnabled: Bool {
+        guard !kit.reduce else { return false }
+        #if DEBUG
+        if DemoMode.oldHomeAX { return true }
+        #endif
+        return !typeSize.isAccessibilitySize
     }
 
     /// Cuándo se leen los sensores de inclinación: Inicio delante (ni otra pestaña ni el bloqueo), la app activa, la

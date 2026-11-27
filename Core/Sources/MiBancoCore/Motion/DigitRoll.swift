@@ -74,6 +74,8 @@ public enum RollLength: Equatable, Sendable {
 
     public static let leadLimit = 0.8
     public static let briefLimit = 0.45
+    /// 16.2: los totales de Suscripciones (al mes y al año) ruedan explícitamente en 0,45 s, escalados por `\.motion`.
+    public static let subscriptionsTotals: RollLength = .seconds(0.45)
 
     /// La duración por defecto de un importe: la cifra protagonista (`hero`) es `.lead`; las demás, `.brief`.
     public static func `default`(isHero: Bool) -> RollLength { isHero ? .lead : .brief }

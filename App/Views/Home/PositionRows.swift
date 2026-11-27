@@ -18,6 +18,7 @@ struct PositionRows: View {
             .padding(.horizontal, Theme.Space.gutter)
             .padding(.top, 18)
             .padding(.bottom, 6)
+            .background(Theme.canvas)
             .accessibilityAddTraits(.isHeader)
             .homeEntrance(.row(0))
 
@@ -27,6 +28,7 @@ struct PositionRows: View {
                 isLast: index == summary.positions.count - 1,
                 onOpen: { onOpen(value.position.instrument) }
             )
+            .background(Theme.canvas)
             .homeEntrance(.row(1 + index))
         }
     }

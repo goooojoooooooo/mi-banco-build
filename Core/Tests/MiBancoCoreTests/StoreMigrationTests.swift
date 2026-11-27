@@ -244,14 +244,62 @@ import Testing
         #expect(try backupFiles(in: groupDir, for: "ledger.json").isEmpty)
     }
 
-    @Test func olderOrSameAgeLegacyIsDeletedWithoutOverwritingGroup() throws {
+    private func sourceBackupFiles(in dir: URL, for fileName: String) throws -> [URL] {
+        try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
+            .filter { $0.lastPathComponent.hasPrefix("\(fileName)\(storeMigrationSourceBackupTag)") && $0.pathExtension == "bak" }
+    }
+
+    @Test func sameDateDistinctLegacyKeepsTargetAndRescuesSourceInBackup() throws {
         let legacyDir = try makeTempDir()
         let groupDir = try makeTempDir()
         defer {
             try? FileManager.default.removeItem(at: legacyDir)
             try? FileManager.default.removeItem(at: groupDir)
         }
+        let date = Date(timeIntervalSince1970: 1_700_000_600)
+        let olderDate = Date(timeIntervalSince1970: 1_700_000_000)
 
+        var oldLedger = Ledger()
+        oldLedger.setBalance(.rev, cents: 10_000, now: olderDate)
+        try FileStore(directory: legacyDir).save(oldLedger.state)
+        var newLedger = Ledger()
+        newLedger.setBalance(.rev, cents: 99_900, now: date)
+        try FileStore(directory: groupDir).save(newLedger.state)
+        let legacyLedgerBytes = try Data(contentsOf: legacyDir.appendingPathComponent("ledger.json"))
+        try setModificationDate(date, for: legacyDir.appendingPathComponent("ledger.json"))
+        try setModificationDate(date, for: groupDir.appendingPathComponent("ledger.json"))
+
+        let oldMove = PendingMove(from: .rev, target: .own(.ima), amountCents: 1_000, createdAt: olderDate)
+        let groupMove = PendingMove(from: .ima, target: .own(.rev), amountCents: 2_000, createdAt: date)
+        try PendingMovesStore(directory: legacyDir).save([oldMove])
+        try PendingMovesStore(directory: groupDir).save([groupMove])
+        let legacyMovesBytes = try Data(contentsOf: legacyDir.appendingPathComponent("pending-moves.json"))
+        try setModificationDate(date, for: legacyDir.appendingPathComponent("pending-moves.json"))
+        try setModificationDate(date, for: groupDir.appendingPathComponent("pending-moves.json"))
+
+        migrateLegacyStoreFiles(from: legacyDir, to: groupDir)
+
+        let fm = FileManager.default
+        #expect(!fm.fileExists(atPath: legacyDir.appendingPathComponent("ledger.json").path))
+        #expect(!fm.fileExists(atPath: legacyDir.appendingPathComponent("pending-moves.json").path))
+        #expect(try FileStore(directory: groupDir).load().balances[.rev]?.cents == 99_900)
+        #expect(PendingMovesStore(directory: groupDir).load() == [groupMove])
+        let ledgerBackups = try sourceBackupFiles(in: groupDir, for: "ledger.json")
+        #expect(ledgerBackups.count == 1)
+        #expect(try Data(contentsOf: try #require(ledgerBackups.first)) == legacyLedgerBytes)
+        let movesBackups = try sourceBackupFiles(in: groupDir, for: "pending-moves.json")
+        #expect(movesBackups.count == 1)
+        #expect(try Data(contentsOf: try #require(movesBackups.first)) == legacyMovesBytes)
+        #expect(try backupFiles(in: groupDir, for: "ledger.json").isEmpty)
+    }
+
+    @Test func olderDistinctLegacyKeepsTargetAndRescuesSourceInBackup() throws {
+        let legacyDir = try makeTempDir()
+        let groupDir = try makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: legacyDir)
+            try? FileManager.default.removeItem(at: groupDir)
+        }
         let olderDate = Date(timeIntervalSince1970: 1_700_000_000)
         let newerDate = Date(timeIntervalSince1970: 1_700_000_600)
 
@@ -261,26 +309,44 @@ import Testing
         var newLedger = Ledger()
         newLedger.setBalance(.rev, cents: 99_900, now: newerDate)
         try FileStore(directory: groupDir).save(newLedger.state)
+        let legacyBytes = try Data(contentsOf: legacyDir.appendingPathComponent("ledger.json"))
+        let targetBytes = try Data(contentsOf: groupDir.appendingPathComponent("ledger.json"))
         try setModificationDate(olderDate, for: legacyDir.appendingPathComponent("ledger.json"))
         try setModificationDate(newerDate, for: groupDir.appendingPathComponent("ledger.json"))
 
-        // Misma fecha exacta también cuenta como <= y limpia el origen sin sobrescribir.
-        let oldMove = PendingMove(from: .rev, target: .own(.ima), amountCents: 1_000, createdAt: olderDate)
-        let groupMove = PendingMove(from: .ima, target: .own(.rev), amountCents: 2_000, createdAt: newerDate)
-        try PendingMovesStore(directory: legacyDir).save([oldMove])
-        try PendingMovesStore(directory: groupDir).save([groupMove])
-        try setModificationDate(newerDate, for: legacyDir.appendingPathComponent("pending-moves.json"))
-        try setModificationDate(newerDate, for: groupDir.appendingPathComponent("pending-moves.json"))
-
         migrateLegacyStoreFiles(from: legacyDir, to: groupDir)
 
-        let fm = FileManager.default
-        #expect(!fm.fileExists(atPath: legacyDir.appendingPathComponent("ledger.json").path))
-        #expect(!fm.fileExists(atPath: legacyDir.appendingPathComponent("pending-moves.json").path))
-        #expect(try FileStore(directory: groupDir).load().balances[.rev]?.cents == 99_900)
-        #expect(PendingMovesStore(directory: groupDir).load() == [groupMove])
-        #expect(try backupFiles(in: groupDir, for: "ledger.json").isEmpty)
-        #expect(try backupFiles(in: groupDir, for: "pending-moves.json").isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: legacyDir.appendingPathComponent("ledger.json").path))
+        #expect(try Data(contentsOf: groupDir.appendingPathComponent("ledger.json")) == targetBytes)
+        let backups = try sourceBackupFiles(in: groupDir, for: "ledger.json")
+        #expect(backups.count == 1)
+        #expect(try Data(contentsOf: try #require(backups.first)) == legacyBytes)
+    }
+
+    @Test func olderDistinctLegacyIsKeptWhenBackupCannotBeVerified() throws {
+        let legacyDir = try makeTempDir()
+        let groupDir = try makeTempDir()
+        defer {
+            try? FileManager.default.removeItem(at: legacyDir)
+            try? FileManager.default.removeItem(at: groupDir)
+        }
+        let olderDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let newerDate = Date(timeIntervalSince1970: 1_700_000_600)
+        let targetData = Data("target-ok".utf8)
+        let legacyData = Data("legacy-not-valid".utf8)
+        let target = groupDir.appendingPathComponent("x.json")
+        let legacy = legacyDir.appendingPathComponent("x.json")
+        try targetData.write(to: target)
+        try legacyData.write(to: legacy)
+        try setModificationDate(newerDate, for: target)
+        try setModificationDate(olderDate, for: legacy)
+
+        // La validación rechaza los bytes del origen: el respaldo no puede verificarse.
+        migrateStoreFileIfNeeded(from: legacyDir, to: groupDir, fileName: "x.json") { $0 == targetData }
+
+        #expect(try Data(contentsOf: legacy) == legacyData)
+        #expect(try Data(contentsOf: target) == targetData)
+        #expect(try sourceBackupFiles(in: groupDir, for: "x.json").isEmpty)
     }
 
     @Test func newerCorruptLegacyDoesNotOverwriteValidTargetAndIsNotDeleted() throws {

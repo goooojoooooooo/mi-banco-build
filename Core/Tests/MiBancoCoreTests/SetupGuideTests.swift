@@ -64,24 +64,33 @@ private func fieldRow(_ name: String, _ chip: String, intro: String?) -> Row {
         "Si solo ves «Entrada de atajo», tócala y busca «\(name)» dentro.")
 }
 
-private func bankSteps(_ bank: String) -> [Row] {
-    openRows(trigger: "Notificación", triggerHelp: "Si no aparece, comprueba que has escrito «Notificación» sin errores.",
-             triggerLine: "Toca «Notificación» en la lista.")
-        + [
-            row(1, "Elige la app", "Toca «Aplicación».", "Aplicación", "Si no la ves, desliza la pantalla hacia arriba con el dedo."),
-            row(1, "Elige \(bank)", "Toca «\(bank)» en la lista.", bank, "Si «\(bank)» no sale, abre la app de \(bank) una vez y vuelve a Atajos."),
-            row(1, "Confirma", "Toca «OK» arriba a la derecha.", "OK", "Está arriba a la derecha, junto al título."),
-        ]
-        + runRows + actionRows("Registrar aviso")
-        + [
-            row(4, "Elige \(bank)", "Toca «\(bank)» en la lista.", bank, list),
-            fieldRow("Título", "Notificación", intro: "Aquí eliges de qué parte del aviso sale cada dato."),
-            fieldRow("Subtítulo", "Notificación", intro: nil),
-            fieldRow("Cuerpo", "Notificación", intro: nil),
-            row(4, "Listo",
-                "Toca «OK» arriba a la derecha. Para saber si funciona, mira la lista de guías después del próximo aviso de \(bank).",
-                "OK", "Está arriba a la derecha, junto al título."),
-        ]
+private func bankSteps(_ bank: String, other: String) -> [Row] {
+    [
+        row(1, "Crea una automatización",
+            "Abre «Atajos», ve a «Automatización», toca «+» y elige «Notificación».",
+            "Notificación",
+            "Usa el botón «Abrir Atajos» de abajo. Si no tienes Atajos, descárgala gratis del App Store: es de Apple. Si nunca has creado ninguna automatización, el botón dice «Nueva automatización»."),
+        row(1, "Elige \(bank)",
+            "Toca «Aplicación», elige «\(bank)» en la lista y confirma con «OK».",
+            bank,
+            "Si «\(bank)» no sale, abre la app de \(bank) una vez y vuelve a Atajos. Deja los demás filtros en blanco para no perder ningún pago."),
+        row(2, "Que vaya sola",
+            "Marca «Ejecutar inmediatamente», apaga «Notificar al ejecutar» si sale y toca «Siguiente».",
+            "Ejecutar inmediatamente",
+            "Así funciona sola sin preguntarte ni enseñarte un aviso de Atajos cada vez. Si «Notificar al ejecutar» no aparece o ya está gris, sigue sin tocarlo."),
+        row(3, "Elige «Pasar aviso a Onyx»",
+            "Toca «Nueva automatización en blanco», busca «Onyx» y toca «Pasar aviso a Onyx».",
+            "Pasar aviso a Onyx",
+            "Si ves sugerencias antes del buscador, toca primero «Nueva automatización en blanco» y luego «Añadir acción». Si no aparece «Pasar aviso a Onyx», comprueba que has escrito «Onyx» sin errores."),
+        row(4, "Pasa «Notificación»",
+            "Toca «Notificación» y elige la ficha «Notificación» que sale abajo: Onyx detecta el banco solo.",
+            "Notificación",
+            "Solo hay que rellenar este campo. Si en vez de «Notificación» ves «Entrada de atajo», tócala: lleva el aviso entero."),
+        row(4, "Guarda y suma \(other)",
+            "Toca «OK» arriba a la derecha. Para saber si funciona, mira la lista de guías después del próximo aviso de \(bank). Si usas \(other), súmalo al mismo atajo.",
+            "OK",
+            "En iOS 27 puedes apilar el aviso de \(other) en este mismo atajo para tener los dos en 1 minuto. Si tu versión no te deja apilarlos, repite estos pasos eligiendo «\(other)»."),
+    ]
 }
 
 private func applePaySteps(_ bank: String, bankLine: String) -> [Row] {
@@ -180,9 +189,17 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
     }
 
     @Test func pasosDeLasGuiasDeAvisos() {
-        for (track, bank) in [(GuideTrack.revolut, "Revolut"), (.tradeRepublic, "Trade Republic")] {
-            #expect(steps(track).count == 22)
-            compare(steps(track), bankSteps(bank))
+        let expectedIllustrations: [GuideIllustration] = [
+            .quickTrigger, .appPicker, .quickRun, .quickAction, .quickNoticeInput, .quickDone,
+        ]
+        for (track, bank, other) in [
+            (GuideTrack.revolut, "Revolut", "Trade Republic"),
+            (.tradeRepublic, "Trade Republic", "Revolut"),
+        ] {
+            let full = guideSteps(for: track)
+            #expect(full.count == 6)
+            #expect(full.map(\.illustration) == expectedIllustrations)
+            compare(steps(track), bankSteps(bank, other: other))
         }
     }
 
@@ -192,7 +209,7 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
             #expect(steps(track).count == 20)
             compare(steps(track), expected)
         }
-        #expect(Set(GuideTrack.allCases.flatMap { guideSteps(for: $0).map(\.id) }).count == 22 * 2 + 20 * 3)
+        #expect(Set(GuideTrack.allCases.flatMap { guideSteps(for: $0).map(\.id) }).count == 6 * 2 + 20 * 3)
     }
 
     @Test func applePayMarcaLaTarjetaDeSuBanco() {
@@ -214,9 +231,13 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
         let forbidden = ["y después", "y tócala", "Quita la marca"]
         for track in GuideTrack.allCases {
             for step in guideSteps(for: track) where step.tapTarget != "Abrir Atajos" {
+                for text in forbidden { #expect(!step.instruction.contains(text), "\(step.id): \(step.instruction)") }
+                // Las guías de Apple Pay (20 pasos) mantienen un solo toque por pantalla; las de avisos rápidos (6 pasos)
+                // agrupan cada pantalla en un paso corto con su dibujo.
+                guard track.isApplePay else { continue }
                 let marks = quoted(step.instruction)
                 if step.illustration == .variablePicker {
-                    // Los campos: «Título» … ficha «Notificación» … «Título», con ese texto y no otro; y después de
+                    // Los campos: «Importe» … ficha «Transacción» … «Importe», con ese texto y no otro; y después de
                     // quitar su única frase permitida no queda nada.
                     #expect(marks == [step.focus, step.tapTarget, step.focus], "\(step.id): \(step.instruction)")
                     let rest = fieldRemainder(step.instruction, name: step.focus, chip: step.tapTarget)
@@ -230,7 +251,6 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
                     }
                     #expect(actionCount(step.instruction) <= 1, "\(step.id): \(step.instruction)")
                 }
-                for text in forbidden { #expect(!step.instruction.contains(text), "\(step.id): \(step.instruction)") }
             }
         }
         // Los detectores funcionan.
@@ -270,9 +290,9 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
     }
 
     @Test func cadaCampoSeRellenaEnSuPaso() {
-        for track in GuideTrack.allCases {
-            let fields = track.isApplePay ? ["Importe", "Comercio"] : ["Título", "Subtítulo", "Cuerpo"]
-            let chip = track.isApplePay ? "Transacción" : "Notificación"
+        for track in GuideTrack.allCases where track.isApplePay {
+            let fields = ["Importe", "Comercio"]
+            let chip = "Transacción"
             for (n, name) in fields.enumerated() {
                 let step = guideSteps(for: track).first { $0.focus == name }
                 #expect(step != nil, "\(track) \(name)")
@@ -283,6 +303,16 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
                 #expect(step.instruction.hasPrefix("Aquí eliges de qué parte del") == (n == 0))
                 #expect(step.help.hasPrefix("Si solo ves «Entrada de atajo», tócala y busca «\(name)» dentro."))
             }
+        }
+        // En las guías rápidas de avisos hay un único campo («Notificación»).
+        for track in [GuideTrack.revolut, .tradeRepublic] {
+            let fieldSteps = guideSteps(for: track).filter { !$0.focus.isEmpty }
+            #expect(fieldSteps.count == 1)
+            let step = fieldSteps[0]
+            #expect(step.focus == "Notificación")
+            #expect(step.tapTarget == "Notificación")
+            #expect(step.illustration == .quickNoticeInput)
+            #expect(step.instruction.contains("«Notificación»"))
         }
     }
 
@@ -310,23 +340,26 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
             #expect(Set(all.map(\.part)) == [1, 2, 3, 4])
         }
         let revolut = guideSteps(for: .revolut)
-        #expect(guideProgressLabel(revolut[8], number: 9, total: revolut.count) == "Parte 2 de 4 · Paso 9 de 22")
-        #expect(guideProgressLabel(revolut[0], number: 1, total: 22) == "Parte 1 de 4 · Paso 1 de 22")
+        #expect(guideProgressLabel(revolut[0], number: 1, total: revolut.count) == "Parte 1 de 4 · Paso 1 de 6")
+        #expect(guideProgressLabel(revolut[2], number: 3, total: revolut.count) == "Parte 2 de 4 · Paso 3 de 6")
+        #expect(guideProgressLabel(revolut[3], number: 4, total: revolut.count) == "Parte 3 de 4 · Paso 4 de 6")
+        #expect(guideProgressLabel(revolut[4], number: 5, total: revolut.count) == "Parte 4 de 4 · Paso 5 de 6")
     }
 
     @Test func retomarDondeSeDejo() {
-        #expect(guideResumeIndex(saved: nil, total: 22) == nil)
-        #expect(guideResumeIndex(saved: GuideSavedStep(step: 0, of: 22), total: 22) == nil)
-        #expect(guideResumeIndex(saved: GuideSavedStep(step: -3, of: 22), total: 22) == nil)
+        #expect(guideResumeIndex(saved: nil, total: 6) == nil)
+        #expect(guideResumeIndex(saved: GuideSavedStep(step: 0, of: 6), total: 6) == nil)
+        #expect(guideResumeIndex(saved: GuideSavedStep(step: -3, of: 6), total: 6) == nil)
         // Guardado con los mismos pasos que hay ahora: se retoma (el paso se cuenta desde 0, como antes).
-        #expect(guideResumeIndex(saved: GuideSavedStep(step: 8, of: 22), total: 22) == 8)
-        #expect(guideResumeIndex(saved: GuideSavedStep(step: 21, of: 22), total: 22) == 21)
-        // Guardado con otra cantidad de pasos: la guía cambió, no se retoma ni se adivina.
+        #expect(guideResumeIndex(saved: GuideSavedStep(step: 3, of: 6), total: 6) == 3)
+        #expect(guideResumeIndex(saved: GuideSavedStep(step: 5, of: 6), total: 6) == 5)
+        // Guardado con la guía antigua de 22 pasos: la guía cambió, no se retoma ni se adivina.
+        #expect(guideResumeIndex(saved: GuideSavedStep(step: 8, of: 22), total: 6) == nil)
         #expect(guideResumeIndex(saved: GuideSavedStep(step: 8, of: 20), total: 22) == nil)
         #expect(guideResumeIndex(saved: GuideSavedStep(step: 8, of: 22), total: 20) == nil)
         // Fuera de rango: nada.
-        #expect(guideResumeIndex(saved: GuideSavedStep(step: 22, of: 22), total: 22) == nil)
-        #expect(guideResumeLine(index: 8, total: 22) == "Vas por el paso 9 de 22")
+        #expect(guideResumeIndex(saved: GuideSavedStep(step: 6, of: 6), total: 6) == nil)
+        #expect(guideResumeLine(index: 2, total: 6) == "Vas por el paso 3 de 6")
     }
 
     @Test func loGuardadoSeLeeConTolerancia() {
@@ -341,7 +374,7 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
 
     @Test func queGuiaHacer() {
         #expect(guideListAdvice == [
-            "Revolut y Trade Republic: haz la guía que lleva su nombre. La de Apple Pay es opcional, por si un aviso no llega.",
+            "Revolut y Trade Republic: 6 pasos en 1 minuto. Un solo atajo vale para los dos; Apple Pay es opcional, por si un aviso no llega.",
             "imagin: solo funciona con la guía de Apple Pay.",
         ])
         #expect(GuideTrack.allCases.filter(\.isOptional) == [.walletRevolut, .walletTradeRepublic])
@@ -349,20 +382,26 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
 
     @Test func labelDelDibujo() {
         let revolut = guideSteps(for: .revolut)
-        #expect(revolut[1].spokenLabel == "Dibujo de la pantalla. Toca «Automatización», abajo, en el centro.")
-        #expect(revolut[3].spokenLabel == "Dibujo de la pantalla. Escribe «Notificación» en el buscador, arriba.")
-        #expect(revolut[13].spokenLabel == "Dibujo de la pantalla. Toca el buscador, arriba.")
+        #expect(revolut[0].spokenLabel == "Dibujo de la pantalla. Toca «Notificación», en la lista de disparadores de Atajos.")
+        #expect(revolut[3].spokenLabel == "Dibujo de la pantalla. Toca «Pasar aviso a Onyx», en la lista de acciones de Onyx.")
+        let wallet = guideSteps(for: .walletImagin)
+        #expect(wallet[1].spokenLabel == "Dibujo de la pantalla. Toca «Automatización», abajo, en el centro.")
+        #expect(wallet[3].spokenLabel == "Dibujo de la pantalla. Escribe «Transacción» en el buscador, arriba.")
+        #expect(wallet[12].spokenLabel == "Dibujo de la pantalla. Toca el buscador, arriba.")
     }
 
     @Test func nombresDeLasAcciones() {
+        #expect(guideQuickNoticeIntentNames == ["Pasar aviso a Onyx", "Notificación"])
         #expect(guideNoticeIntentNames == ["Registrar aviso", "Banco", "Título", "Subtítulo", "Cuerpo"])
         #expect(guideWalletIntentNames == ["Registrar pago con Cartera", "Banco", "Importe", "Comercio"])
-        #expect(guideIntentNames == ["Registrar aviso", "Banco", "Título", "Subtítulo", "Cuerpo",
-                                     "Registrar pago con Cartera", "Importe", "Comercio"])
+        #expect(guideIntentNames == ["Pasar aviso a Onyx", "Notificación",
+                                     "Registrar pago con Cartera", "Banco", "Importe", "Comercio"])
         let all = GuideTrack.allCases.flatMap { guideSteps(for: $0).map(\.instruction) }
         for name in guideIntentNames {
             #expect(all.contains { $0.contains("«\(name)»") }, "\(name)")
         }
+        #expect(GuideNames.quickNoticeAction == guideQuickNoticeIntentNames[0])
+        #expect(GuideNames.notificationField == guideQuickNoticeIntentNames[1])
         #expect(GuideNames.noticeAction == guideNoticeIntentNames[0])
         #expect(GuideNames.walletAction == guideWalletIntentNames[0])
         #expect(GuideNames.bankField == "Banco")
@@ -372,7 +411,7 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
         #expect(GuideNames.unverified == [
             "Automatización", "Nueva automatización", "Aplicación", "OK", "Ejecutar inmediatamente",
             "Notificar al ejecutar", "Siguiente", "Nueva automatización en blanco", "Añadir acción", "Entrada de atajo",
-            "Título", "Subtítulo", "Cuerpo", "Importe", "Comercio",
+            "Importe", "Comercio",
         ])
         // Lo que nadie ha visto todavía en pantalla: dónde sale la ficha de cada disparador.
         #expect(GuideNames.unverifiedPlaces == ["ficha «Notificación» bajo el campo", "ficha «Transacción» bajo el campo"])
@@ -387,7 +426,7 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
             #expect(text.contains { $0.contains(name) }, "\(name)")
         }
         // Los nuestros no están entre los sin verificar: los comprueba CI contra los intents.
-        for name in [GuideNames.noticeAction, GuideNames.walletAction, GuideNames.bankField] {
+        for name in [GuideNames.quickNoticeAction, GuideNames.noticeAction, GuideNames.walletAction, GuideNames.bankField] {
             #expect(!GuideNames.unverified.contains(name))
         }
     }

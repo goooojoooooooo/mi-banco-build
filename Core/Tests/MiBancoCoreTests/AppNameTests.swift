@@ -13,8 +13,14 @@ import Testing
         #expect(guideAppName == appDisplayName)
         for track in GuideTrack.allCases {
             let all = guideSteps(for: track)
-            #expect(all.contains { $0.title == "Escribe \(appDisplayName)" && $0.tapTarget == appDisplayName
-                && $0.instruction == "Escribe «\(appDisplayName)» en el buscador." }, "\(track)")
+            if track.isApplePay {
+                #expect(all.contains { $0.title == "Escribe \(appDisplayName)" && $0.tapTarget == appDisplayName
+                    && $0.instruction == "Escribe «\(appDisplayName)» en el buscador." }, "\(track)")
+            } else {
+                #expect(all.contains { $0.tapTarget == "Pasar aviso a \(appDisplayName)"
+                    && $0.instruction.contains("«\(appDisplayName)»")
+                    && $0.instruction.contains("«Pasar aviso a \(appDisplayName)»") }, "\(track)")
+            }
         }
     }
 

@@ -8,17 +8,42 @@ import Testing
     // MARK: - SEC-08 · Política de bloqueo sin código ni Face ID
 
     @Test func lockPolicyEvaluatesAuthWhenAvailable() {
-        let decision = LockAuthPolicy.decision(canEvaluateDeviceAuth: true)
+        let decision = LockAuthPolicy.decision(for: .available)
         #expect(decision == .evaluateDeviceAuth)
         #expect(LockAuthPolicy.screenMode(for: decision) == .authenticate)
+        #expect(LockAuthPolicy.proceedsToEvaluate(decision) == true)
         #expect(LockAuthPolicy.allowsSilentUnlock(canEvaluateDeviceAuth: true) == false)
     }
 
     @Test func lockPolicyBlocksWithoutSilentUnlockWhenNoPasscode() {
-        let decision = LockAuthPolicy.decision(canEvaluateDeviceAuth: false)
+        let decision = LockAuthPolicy.decision(for: .passcodeNotSet)
         #expect(decision == .requirePasscodeSetup)
         #expect(LockAuthPolicy.screenMode(for: decision) == .noPasscode)
+        #expect(LockAuthPolicy.proceedsToEvaluate(decision) == false)
         #expect(LockAuthPolicy.allowsSilentUnlock(canEvaluateDeviceAuth: false) == false)
+    }
+
+    /// m-2: solo `LAError.passcodeNotSet` enseña la pantalla «sin código» (con su botón de un toque para desactivar el
+    /// bloqueo). Cualquier otro fallo de `canEvaluatePolicy` deja «Desbloquear» para reintentar y no desbloquea.
+    @Test func lockPolicyTransientFailureKeepsUnlockButtonAndNeverOffersDisable() {
+        let decision = LockAuthPolicy.decision(for: .unavailable)
+        #expect(decision == .retryAuthentication)
+        #expect(LockAuthPolicy.screenMode(for: decision) == .authenticate)
+        #expect(LockAuthPolicy.proceedsToEvaluate(decision) == false)
+    }
+
+    /// m-3: texto de la confirmación al desactivar el bloqueo.
+    @Test func lockPolicyDisableConfirmationExplainsAppOpensUnprotected() {
+        #expect(LockAuthPolicy.disableConfirmationTitle == "¿Desactivar el bloqueo de Onyx?")
+        #expect(LockAuthPolicy.disableConfirmationMessage
+            == "Onyx se abrirá sin protección: cualquiera que tenga tu iPhone podrá ver tu dinero.")
+        #expect(LockAuthPolicy.disableConfirmationButtonTitle == "Desactivar y abrir sin protección")
+    }
+
+    /// m-5: con el ojo ya cerrado al volver a primer plano también se retiran los avisos con cifras.
+    @Test func becomingActiveWithEyeClosedRemovesSensitiveNotifications() {
+        #expect(PrivateModeTransitionEffects.removesDeliveredAlertsOnBecomingActive(eyeClosed: true) == true)
+        #expect(PrivateModeTransitionEffects.removesDeliveredAlertsOnBecomingActive(eyeClosed: false) == false)
     }
 
     @Test func lockPolicyNoPasscodeCopyMatchesSpecExactly() {

@@ -27,6 +27,10 @@ final class MotionTourSecurityTests: MotionTourCase {
         // Dos fotogramas de control antes de tocar y el resto durante la salida y aparición de Inicio.
         burst(name + "-antes", frames: 2, every: 0.3)
         disableButton.tap()
+        // m-3: el botón pide confirmación; la ráfaga arranca al confirmar.
+        let confirm = app.buttons["Desactivar y abrir sin protección"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Falta la confirmación de desactivar el bloqueo")
+        confirm.tap()
         burst(name, frames: 12, every: 0.25)
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 12), "No apareció Inicio tras desactivar")
     }

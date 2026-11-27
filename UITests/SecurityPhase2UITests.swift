@@ -341,8 +341,26 @@ final class SecurityPhase2UITests: XCTestCase {
         XCTAssertTrue(message.exists, "Un toque fuera del botón desbloqueó sin código")
         XCTAssertFalse(app.buttons["Mostrar importes"].exists, "Un toque sobre el bloqueo llegó al ojo de Inicio")
 
-        // Solo al pulsar «Desactivar bloqueo de Onyx» a conciencia se entra limpiamente en Inicio.
+        // m-3: pulsar el botón NO desactiva nada todavía: pide confirmación y explica que Onyx se abrirá sin protección.
+        let confirmButton = app.buttons["Desactivar y abrir sin protección"]
+        let cancelButton = app.buttons["Cancelar"]
         disableButton.tap()
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5), "m-3: falta la confirmación al desactivar el bloqueo")
+        XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "se abrirá sin protección")).firstMatch
+            .waitForExistence(timeout: 3), "m-3: la confirmación no explica que Onyx se abre sin protección")
+        // Cancelar deja el bloqueo puesto.
+        XCTAssertTrue(cancelButton.waitForExistence(timeout: 3), "m-3: falta Cancelar en la confirmación")
+        cancelButton.tap()
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), confirmButton, timeout: 5), "m-3: Cancelar no cerró la confirmación")
+        Thread.sleep(forTimeInterval: 1.0)
+        XCTAssertTrue(message.exists, "m-3: cancelar la confirmación quitó el bloqueo")
+        XCTAssertTrue(disableButton.exists, "m-3: cancelar la confirmación quitó el botón")
+        XCTAssertFalse(homeTitle.exists && homeTitle.isHittable, "m-3: cancelar dejó Inicio tocable")
+
+        // Solo al confirmar a conciencia se entra limpiamente en Inicio.
+        disableButton.tap()
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5), "m-3: la confirmación no volvió a salir")
+        confirmButton.tap()
         XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), disableButton, timeout: 10),
                       "Pulsar Desactivar bloqueo de Onyx no quitó el bloqueo")
         XCTAssertTrue(waitUntil(10) { self.probe()["fundido"] != "1" }, "El fundido del bloqueo no terminó")
@@ -357,6 +375,27 @@ final class SecurityPhase2UITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1.0)
         XCTAssertFalse(disableButton.exists, "Tras desactivar el bloqueo a conciencia volvió a bloquear al volver")
         XCTAssertFalse(app.buttons["Desbloquear"].exists, "Tras desactivar el bloqueo apareció Face ID al volver")
+    }
+
+    /// m-2: un fallo de `canEvaluatePolicy` distinto de «sin código» (`-MiBancoDemoLockAuthError`) NO enseña la pantalla
+    /// de desactivar el bloqueo: deja «Desbloquear» para reintentar y no desbloquea.
+    func testLockTransientAuthErrorKeepsUnlockButtonAndNeverOffersDisable() throws {
+        launch(["-MiBancoDemoLockAuthError"])
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 20), "m-2: con un fallo pasajero falta «Desbloquear»")
+        let homeTitle = app.staticTexts["Tu dinero"]
+        for look in 0..<10 {
+            XCTAssertTrue(unlock.exists, "Mirada \(look): «Desbloquear» desapareció (¿desbloqueo en silencio?)")
+            XCTAssertFalse(element("lock-no-passcode-message").exists, "Mirada \(look): un fallo pasajero enseñó «sin código»")
+            XCTAssertFalse(app.buttons["lock-disable-button"].exists, "Mirada \(look): un fallo pasajero ofrece desactivar el bloqueo")
+            XCTAssertFalse(homeTitle.exists && homeTitle.isHittable, "Mirada \(look): Inicio es tocable bajo el bloqueo")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+        // Reintentar tampoco desbloquea ni ofrece desactivar.
+        unlock.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+        XCTAssertTrue(app.buttons["Desbloquear"].exists, "m-2: reintentar con el fallo pasajero desbloqueó")
+        XCTAssertFalse(app.buttons["lock-disable-button"].exists, "m-2: reintentar ofreció desactivar el bloqueo")
     }
 
     // MARK: - SEC-13 · Cerrar el ojo para la voz del resumen de inmediato

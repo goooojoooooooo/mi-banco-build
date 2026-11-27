@@ -87,6 +87,19 @@ struct SubscriptionsView: View {
         .navigationBarTitleDisplayMode(.large)
         .assemblesOnFirstAppear()
         .sensoryFeedback(.error, trigger: errorTick)
+        #if DEBUG
+        .overlay(alignment: .topLeading) {
+            if DemoMode.exposesRollTiming {
+                Color.clear
+                    .frame(width: 2, height: 2)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Duración de totales")
+                    .accessibilityValue(RollTimingProbe.shared.lastTwoSummary)
+                    .accessibilityIdentifier("suscripciones.rollTiming")
+                    .allowsHitTesting(false)
+            }
+        }
+        #endif
     }
 
     /// La fila se va con un muelle sin rebote hacia el lado; con Reducir movimiento, solo se funde.
@@ -155,15 +168,22 @@ struct HiddenSubscriptionsView: View {
 }
 
 /// «24,98 € al mes · 299,76 € al año»: las dos cifras ruedan desde 0 al montar y de la anterior a la nueva si cambian
-/// (`RollingAmount`; con el ojo cerrado, «•••,•• €» y nunca una cifra). Las dos partes se colocan como un párrafo
-/// (`ParagraphFlow`): si no caben en una línea (importes largos, letra grande), la segunda baja a la línea siguiente; nunca
-/// se salen del ancho ni se montan dos copias. Con letra de accesibilidad, una debajo de la otra.
+/// (`RollingAmount(length: .seconds(0.45))`, 16.2; con el ojo cerrado, «•••,•• €» y nunca una cifra). Las dos partes se
+/// colocan como un párrafo (`ParagraphFlow`): si no caben en una línea (importes largos, letra grande), la segunda baja
+/// a la línea siguiente; nunca se salen del ancho ni se montan dos copias. Con letra de accesibilidad, una debajo de la otra.
 private struct SubscriptionsHeader: View {
     let monthlyCents: Int
     let yearlyCents: Int
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var typeSize
+
+    private static var totalsRollLength: RollLength? {
+        #if DEBUG
+        if DemoMode.oldSubscriptionRoll { return nil }
+        #endif
+        return RollLength.subscriptionsTotals
+    }
 
     var body: some View {
         let stacked = typeSize.isAccessibilitySize
@@ -172,13 +192,13 @@ private struct SubscriptionsHeader: View {
             : AnyLayout(ParagraphFlow())
         layout {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                RollingAmount(cents: monthlyCents, inline: true)
+                RollingAmount(cents: monthlyCents, inline: true, length: Self.totalsRollLength)
                 Text(stacked ? " al mes" : " al mes · ")
                     .lineLimit(1)
                     .fixedSize()
             }
             HStack(alignment: .firstTextBaseline, spacing: 0) {
-                RollingAmount(cents: yearlyCents, inline: true)
+                RollingAmount(cents: yearlyCents, inline: true, length: Self.totalsRollLength)
                 Text(" al año")
                     .lineLimit(1)
                     .fixedSize()

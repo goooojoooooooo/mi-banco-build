@@ -465,12 +465,17 @@ struct MoveMoneySheet: View {
                     // con la cifra nueva (0,15 s). Solo opacidad; la secuencia la marca la propia animación (sin esperas).
                     .onChange(of: amount.cents) { old, new in
                         // Hasta el primer cambio las fichas siguen al importe; desde ahí, con el que tenían.
-                        if chipCents == nil { chipCents = old }
                         #if DEBUG
-                        if DemoMode.oldChips { chipCents = new }
-                        // Sonda: ¿enseñan ya las fichas la cifra nueva en el mismo instante en que cambia el importe?
-                        if chipCents == new { HomeProbe.shared.chipsEarly += 1 }
+                        if DemoMode.oldChips {
+                            chipCents = nil
+                        } else if chipCents == nil {
+                            chipCents = old
+                        }
+                        // Sonda (N-3): mide lo que de verdad dibuja cada ficha (`chipCents ?? new`), no solo `chipCents`.
+                        if (chipCents ?? new) == new { HomeProbe.shared.chipsEarly += 1 }
                         if DemoMode.oldChips { return }
+                        #else
+                        if chipCents == nil { chipCents = old }
                         #endif
                         withAnimation(.easeIn(duration: motion.seconds(0.1))) {
                             chipsDimmed = true

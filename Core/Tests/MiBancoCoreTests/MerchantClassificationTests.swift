@@ -201,7 +201,7 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         let subOverMCC = pay("Tienda Misteriosa", isShop: true, mcc: "5945")
         #expect(classify(subOverMCC, subscriptions: ["tienda misteriosa"]) == .suscripciones)
 
-        // La categoría recordada para el comercio (paso 2) gana sobre el MCC (paso 3).
+        // La categoría recordada para el comercio (paso 2) gana sobre el MCC (paso 4).
         #expect(classify(byMCC, overrides: ["inversiones del norte": .ocio]) == .ocio)
 
         // La categoría elegida por el dueño en el movimiento (paso 1) gana sobre recordada y MCC.
@@ -247,6 +247,25 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         #expect(classify(pay("CHEN LI SL", isShop: true, mcc: "5331")) == .compras)
         // Sin MCC y sin señal de persona no es Personas.
         #expect(classify(pay("CHEN LI SL", isShop: true)) != .personas)
+    }
+
+    @Test func cadenaConocidaQueNoEsSuscripcionGanaALaClaveRecurrente() {
+        // Una cadena conocida del directorio que no es suscripción gana a la clave recurrente (y por tanto al MCC).
+        #expect(classify(pay("Movistar", isShop: true, mcc: "4814"), subscriptions: [normalizeMerchant("Movistar")]) == .casa)
+        #expect(classify(pay("Iberdrola", isShop: true, mcc: "4900"), subscriptions: [normalizeMerchant("Iberdrola")]) == .casa)
+        #expect(classify(pay("Basic-Fit", isShop: true), subscriptions: [normalizeMerchant("Basic-Fit")]) == .ocio)
+        // La clave recurrente sigue ganando al MCC para un comercio desconocido.
+        #expect(classify(pay("Plataforma Rara", isShop: true, mcc: "4899"), subscriptions: ["plataforma rara"]) == .suscripciones)
+        // Netflix con 4899 sigue en Suscripciones.
+        #expect(classify(pay("NETFLIX.COM", isShop: true, mcc: "4899")) == .suscripciones)
+    }
+
+    @Test func appleStoreEsUnaTiendaYAppleBillUnaSuscripcion() {
+        #expect(classify(pay("APPLE STORE PASEO DE GRACIA", isShop: true, mcc: "5732")) == .compras)
+        #expect(classify(pay("Apple Store", isShop: true)) == .compras)
+        #expect(classify(pay("APPLE.COM/BILL", isShop: true)) == .suscripciones)
+        #expect(classify(pay("APPLE.COM/BILL", isShop: true, mcc: "5732")) == .suscripciones)
+        #expect(classify(pay("App Store", isShop: true, mcc: "5735")) == .suscripciones)
     }
 
     @Test func mccSePropagaDesdeEnableBankingYTradeRepublicYSeConservaAlReconciliar() throws {

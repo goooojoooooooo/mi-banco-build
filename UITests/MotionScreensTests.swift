@@ -768,6 +768,7 @@ final class MotionScreensTests: XCTestCase {
     /// Línea C (lote final p2, ronda 1; cambio mínimo y declarado): la etiqueta leída de UNA instantánea, o nil si el
     /// elemento ya no está. Con `exists` y luego `label` (dos consultas) la pantalla de pasos podía irse entre las dos y
     /// la prueba caía con «Failed to get matching snapshot» (run 45914072681).
+    @MainActor
     private func labelNow(_ element: XCUIElement) -> String? {
         (try? element.snapshot())?.label
     }
@@ -1229,6 +1230,7 @@ final class MotionScreensTests: XCTestCase {
 
     /// Primero los pasos (Leer, Revisar) y DESPUÉS la vista previa; el porcentaje se queda en 67 mientras se espera al
     /// dueño, sube al tocar «Importar» y la pantalla vuelve a la del banco.
+    @MainActor
     func testImportStepsThenPreview() throws {
         launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport", "-MiBancoDemoImportSlow"])
         let percent = element("import-steps-percent")

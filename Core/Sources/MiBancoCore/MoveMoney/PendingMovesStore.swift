@@ -107,6 +107,21 @@ public final class PendingMovesStore: Sendable {
         }
     }
 
+    /// Borra la clave heredada SOLO si todos sus traspasos (salvo `ignoring`, el que acaba de quitarse) ya están
+    /// en el archivo protegido. Si el archivo es ilegible o corrupto, o falta algún traspaso, no borra nada (N-3).
+    public func clearLegacyIfPersisted(
+        ignoring removed: UUID? = nil,
+        readLegacy: () -> Data?,
+        clearLegacy: () -> Void
+    ) {
+        guard let legacyData = readLegacy() else { return }
+        guard let persisted = try? loadThrowing() else { return }
+        let persistedIDs = Set(persisted.map(\.id))
+        let pendingIDs = decodePendingMoves(legacyData).map(\.id).filter { $0 != removed }
+        guard pendingIDs.allSatisfy(persistedIDs.contains) else { return }
+        clearLegacy()
+    }
+
     private func coordinatedWrite(_ body: (URL) throws -> Void) throws {
         #if canImport(Darwin)
         var result: Result<Void, Error>?

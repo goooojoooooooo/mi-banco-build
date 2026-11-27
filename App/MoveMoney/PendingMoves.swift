@@ -88,7 +88,7 @@ enum PendingMoves {
         }
         do {
             try store.add(move)
-            defaults.removeObject(forKey: legacyStorageKey)
+            clearLegacyIfPersisted(defaults, ignoring: nil)
         } catch {
             // Si pending-moves.json es ilegible o está corrupto, no se destruye ni se borra la clave heredada (M-11).
         }
@@ -109,10 +109,19 @@ enum PendingMoves {
         }
         do {
             try store.remove(id)
-            defaults.removeObject(forKey: legacyStorageKey)
+            clearLegacyIfPersisted(defaults, ignoring: id)
         } catch {
             // Si pending-moves.json es ilegible o está corrupto, no se destruye ni se borra la clave heredada (M-11).
         }
+    }
+
+    /// Solo borra la clave heredada si sus traspasos ya están en el archivo protegido (N-3).
+    private static func clearLegacyIfPersisted(_ defaults: UserDefaults, ignoring removed: UUID?) {
+        store.clearLegacyIfPersisted(
+            ignoring: removed,
+            readLegacy: { defaults.data(forKey: legacyStorageKey) },
+            clearLegacy: { defaults.removeObject(forKey: legacyStorageKey) }
+        )
     }
 
     static func save(_ moves: [PendingMove]) {

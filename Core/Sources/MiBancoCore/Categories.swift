@@ -127,7 +127,7 @@ func conceptKeywordCategory(for merchant: String) -> SpendingCategory? {
 }
 
 /// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, las suscripciones
-/// reconocidas (directorio o cobro recurrente), el MCC (ISO 18245), el resto del directorio (sobre el nombre limpio) y, después:
+/// reconocidas (entrada de suscripción del directorio, o cobro recurrente salvo que case una cadena del directorio que no es suscripción), el MCC (ISO 18245), el resto del directorio (sobre el nombre limpio) y, después:
 /// - en un pago a una persona (solo con prueba, ver `isPersonPayment`): la palabra de concepto o factura si la hay
 ///   («TRANSFERENCIA ALQUILER» -> casa) y si no, Personas. Las palabras de un local no cuentan: «Bizum a Juan Horno»
 ///   es un amigo, no una panadería;
@@ -141,15 +141,16 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
     let merchant = movement.merchant ?? ""
     let key = normalizeMerchant(merchant)
     if !key.isEmpty, let remembered = overrides[key] { return remembered }
-    // Una suscripción reconocida (cobro recurrente o entrada de suscripción del directorio) gana al MCC:
-    // Netflix con 4899 o Microsoft con 5734 siguen siendo suscripciones.
+    // Una suscripción reconocida gana al MCC: una entrada de suscripción del directorio, o una clave recurrente
+    // detectada. La clave recurrente nunca gana a una cadena conocida que no es suscripción (Movistar, Iberdrola,
+    // Basic-Fit): esa entrada del directorio se impone.
     var directoryHit: SpendingCategory?
     if !key.isEmpty {
-        if subscriptionKeys.contains(key) { return .suscripciones }
         if let domain = merchantDomain(for: merchant, isShop: movement.isShop) {
             directoryHit = directoryCategory(forDomain: domain)
             if directoryHit == .suscripciones { return .suscripciones }
         }
+        if subscriptionKeys.contains(key) { return directoryHit ?? .suscripciones }
     }
     if let fromMCC = mccCategory(movement.merchantCategoryCode) { return fromMCC }
     if let directoryHit { return directoryHit }

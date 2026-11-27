@@ -289,7 +289,8 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("disneyplus.com", ["Disney+", "Disney Plus", "DisneyPlus"]),
     ("max.com", ["HBO", "HBO Max"]),
     ("primevideo.com", ["Prime Video", "Amazon Prime Video"]),
-    ("apple.com", ["Apple", "Apple.com", "Apple Com Bill", "Apple Store", "App Store"]),
+    ("apple.com", ["Apple", "Apple.com", "Apple Com Bill", "App Store"]),
+    ("apple-store.es", ["Apple Store", "Apple Retail"]),
     ("google.com", ["Google", "Google Play", "Google One"]),
     ("youtube.com", ["YouTube", "YouTube Premium"]),
     ("dazn.com", ["DAZN"]),
@@ -462,7 +463,7 @@ let merchantDomainCategories: [String: SpendingCategory] = [
     // Salud
     "promofarma.com": .salud, "atida.com": .salud, "dosfarma.com": .salud,
     // Ocio
-    "basic-fit.com": .ocio, "mcfit.com": .ocio, "cinesa.es": .ocio, "yelmocines.es": .ocio,
+    "apple-store.es": .compras, "basic-fit.com": .ocio, "mcfit.com": .ocio, "cinesa.es": .ocio, "yelmocines.es": .ocio,
     // Personas
     "bizum.es": .personas,
 ]

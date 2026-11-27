@@ -1197,7 +1197,7 @@ private func foldedJoinedContains(_ joined: String, _ needle: String) -> Bool {
 private let nonMerchantTargets: Set<String> = [
     "total", "general", "mes", "meses", "este", "pasado", "anterior", "ultimo", "ultimos", "hoy", "ayer",
     "semana", "semanas", "dia", "dias", "ano", "anos", "va", "cuenta", "cuentas", "tarjeta", "tarjetas",
-    "banco", "bancos", "revolut", "imagin", "caixabank", "caixa", "trade", "republic", "traderepublic",
+    "banco", "bancos", "conectado", "conectada", "conectados", "conectadas", "revolut", "imagin", "caixabank", "caixa", "trade", "republic", "traderepublic",
     "inversiones", "inversion", "cartera", "bolsa", "acciones", "fondos", "cripto", "presupuesto", "presupuestos",
     "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "setiembre",
     "octubre", "noviembre", "diciembre",

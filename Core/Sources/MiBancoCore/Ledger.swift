@@ -59,6 +59,9 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     /// transferencia del banco, «Transfer»/«To X» del extracto de Revolut). nil = sin señal (los libros de antes no lo
     /// traen). Al enlazar fuentes, un true no se pierde. Ver `isPersonPayment`.
     public var personPayment: Bool?
+    /// Código de categoría de comercio ISO 18245 (4 dígitos) que da el banco o el extracto (p. ej. «5812» restaurante,
+    /// «5945» juguetería/videojuegos). nil = no llegó (los libros de antes no lo traen y no se escribe si es nil).
+    public var merchantCategoryCode: String?
 
     /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
     public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
@@ -73,7 +76,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
                 importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
                 excludedFromSpending: Bool = false, linkedAt: Date? = nil, firstSeenStatus: BankStatus? = nil,
-                bookedDay: Date? = nil, personPayment: Bool? = nil) {
+                bookedDay: Date? = nil, personPayment: Bool? = nil, merchantCategoryCode: String? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -100,13 +103,14 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.firstSeenStatus = firstSeenStatus
         self.bookedDay = bookedDay
         self.personPayment = personPayment
+        self.merchantCategoryCode = merchantCategoryCode
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
         case note, flaggedNotMine, category, ownTransfer
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
-        case firstSeenStatus, bookedDay, personPayment
+        case firstSeenStatus, bookedDay, personPayment, merchantCategoryCode
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -138,6 +142,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         firstSeenStatus = try c.decodeIfPresent(BankStatus.self, forKey: .firstSeenStatus)
         bookedDay = try c.decodeIfPresent(Date.self, forKey: .bookedDay)
         personPayment = try c.decodeIfPresent(Bool.self, forKey: .personPayment)
+        merchantCategoryCode = try c.decodeIfPresent(String.self, forKey: .merchantCategoryCode)
     }
 }
 

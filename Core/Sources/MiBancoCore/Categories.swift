@@ -71,8 +71,8 @@ private let keywordRules: [KeywordRule] = {
                        "autoescuela", "taller mecanico", "neumaticos", "itv"]),
         (.casa, ["luz", "agua", "iberdrola", "endesa", "naturgy", "alquiler", "comunidad", "seguro", "seguros",
                  "movistar", "vodafone", "fibra", "lavanderia", "tintoreria"]),
-        (.salud, ["farmacia", "clinica", "dentista", "optica", "hospital", "fisio", "fisioterapia",
-                  "herbolario", "parafarmacia", "ortopedia", "veterinario", "veterinaria"]),
+        (.salud, ["farmacia", "farmacias", "clinica", "dentista", "optica", "hospital", "fisio", "fisioterapia",
+                  "herbolario", "parafarmacia", "parafarmacias", "botica", "ortopedia", "veterinario", "veterinaria"]),
         (.viajes, ["hotel", "hostal", "airbnb", "booking", "vueling", "iberia", "ryanair", "aeropuerto"]),
         (.ocio, ["cine", "teatro", "concierto", "entradas", "gimnasio", "gym", "museo"]),
         (.efectivo, ["cajero", "retirada", "atm", "reintegro"]),
@@ -80,17 +80,48 @@ private let keywordRules: [KeywordRule] = {
         (.compras, ["bazar", "super bazar", "tienda china", "multiprecio", "multiprecios", "todo a 100",
                     "todo a cien", "ferreteria", "papeleria", "libreria", "estanco", "tabacos", "drogueria", "perfumeria",
                     "zapateria", "calzados", "merceria", "jugueteria", "floristeria", "electronica", "moda", "modas",
-                    "boutique", "joyeria", "relojeria", "regalos"]),
+                    "boutique", "joyeria", "relojeria", "regalos",
+                    // Tiendas físicas de Apple: sin entrada propia en el directorio (no hay dominio propio que dar).
+                    "apple store", "apple retail"]),
     ]
+    return makeKeywordRules(chainLineLists + lists)
+}()
+
+/// Líneas de negocio de una cadena del directorio con otra categoría que la de la cadena: la gasolinera de un súper, la
+/// luz y el gas de una petrolera. No tienen dominio propio (nunca se inventa uno): el movimiento lleva el logo de la cadena
+/// y esta regla le da la categoría, por encima de la entrada del directorio (ver `spendingCategory`). Son también palabras
+/// clave de siempre, de varias palabras, así que se miran antes que las de una.
+private let chainLineLists: [(SpendingCategory, [String])] = [
+    (.transporte, ["carrefour gasolinera", "carrefour gasolineras", "gasolinera carrefour", "gasolineras carrefour",
+                   "carrefour e s", "e s carrefour", "carrefour estacion de servicio", "carrefour estacion servicio",
+                   "estacion de servicio carrefour", "estacion servicio carrefour", "carrefour combustible",
+                   "alcampo gasolinera", "alcampo gasolineras", "gasolinera alcampo", "gasolineras alcampo",
+                   "alcampo e s", "e s alcampo", "alcampo estacion de servicio", "alcampo estacion servicio",
+                   "estacion de servicio alcampo", "estacion servicio alcampo", "alcampo combustible"]),
+    // «Repsol Comercializadora de Electricidad y Gas»: la luz y el gas de casa, no la gasolinera («REPSOL ESTACION …»).
+    (.casa, ["repsol luz", "repsol electricidad", "repsol gas", "repsol comercializadora"]),
+]
+
+private let chainLineRules: [KeywordRule] = makeKeywordRules(chainLineLists)
+
+private func makeKeywordRules(_ lists: [(SpendingCategory, [String])]) -> [KeywordRule] {
     var rules: [KeywordRule] = []
     for (category, list) in lists {
         for entry in list { rules.append(KeywordRule(words: entry.split(separator: " ").map(String.init), category: category)) }
     }
-    // Las reglas de varias palabras se miran antes que las de una ("uber eats" antes que "uber").
+    // Las reglas de varias palabras se miran antes que las de una ("uber eats" antes que "uber"); a igual número, la que
+    // va antes en la lista.
     return rules.enumerated().sorted { a, b in
         a.element.words.count != b.element.words.count ? a.element.words.count > b.element.words.count : a.offset < b.offset
     }.map(\.element)
-}()
+}
+
+/// La categoría de una línea de negocio de la cadena («CARREFOUR GASOLINERA» -> transporte); nil si no hay.
+private func chainLineCategory(for merchant: String) -> SpendingCategory? {
+    let tokens = cleanMerchantName(merchant).split(separator: " ").map(String.init)
+    guard !tokens.isEmpty else { return nil }
+    return chainLineRules.first { containsRun(tokens, $0.words) }?.category
+}
 
 private func containsRun(_ tokens: [String], _ words: [String]) -> Bool {
     guard !words.isEmpty, words.count <= tokens.count else { return false }
@@ -100,9 +131,9 @@ private func containsRun(_ tokens: [String], _ words: [String]) -> Bool {
     return false
 }
 
-/// Categoría por palabras enteras del nombre del comercio ("Bar Manolo" -> comer fuera); nil si ninguna casa.
+/// Categoría por palabras enteras del nombre limpio del comercio ("Bar Manolo" -> comer fuera); nil si ninguna casa.
 public func keywordCategory(for merchant: String) -> SpendingCategory? {
-    let tokens = foldedWords(merchant)
+    let tokens = cleanMerchantName(merchant).split(separator: " ").map(String.init)
     guard !tokens.isEmpty else { return nil }
     return keywordRules.first { containsRun(tokens, $0.words) }?.category
 }
@@ -126,12 +157,12 @@ func conceptKeywordCategory(for merchant: String) -> SpendingCategory? {
     }?.category
 }
 
-/// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, el directorio,
-/// las suscripciones y, después:
+/// Categoría de un pago; nil para los ingresos. Orden: la del movimiento, la recordada del comercio, las suscripciones
+/// reconocidas (entrada de suscripción del directorio, o cobro recurrente salvo que case una cadena del directorio que no es suscripción), el MCC (ISO 18245), el resto del directorio (sobre el nombre limpio) y, después:
 /// - en un pago a una persona (solo con prueba, ver `isPersonPayment`): la palabra de concepto o factura si la hay
 ///   («TRANSFERENCIA ALQUILER» -> casa) y si no, Personas. Las palabras de un local no cuentan: «Bizum a Juan Horno»
 ///   es un amigo, no una panadería;
-/// - en cualquier otro pago: las palabras clave de siempre, en su orden de siempre, y por último sin categoría.
+/// - en cualquier otro pago: las palabras clave de siempre (sobre el nombre limpio), en su orden de siempre, y por último sin categoría.
 /// Un comercio que no se conoce NO es una persona: el bar del barrio cuyo nombre en la tarjeta es el de su dueño va a
 /// «Sin categoría» hasta que el dueño lo elija.
 public func spendingCategory(of movement: Movement, overrides: [String: SpendingCategory],
@@ -141,11 +172,20 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
     let merchant = movement.merchant ?? ""
     let key = normalizeMerchant(merchant)
     if !key.isEmpty, let remembered = overrides[key] { return remembered }
+    // Una suscripción reconocida gana al MCC: una entrada de suscripción del directorio, o una clave recurrente
+    // detectada. La clave recurrente nunca gana a una cadena conocida que no es suscripción (Movistar, Iberdrola,
+    // Basic-Fit): esa entrada del directorio se impone.
+    var directoryHit: SpendingCategory?
     if !key.isEmpty {
-        if let domain = merchantDomain(for: merchant, isShop: movement.isShop),
-           let fromDirectory = directoryCategory(forDomain: domain) { return fromDirectory }
-        if subscriptionKeys.contains(key) { return .suscripciones }
+        if let domain = merchantDomain(for: merchant, isShop: movement.isShop) {
+            // La línea de negocio de la cadena (su gasolinera, su luz) manda sobre la categoría de la cadena.
+            directoryHit = chainLineCategory(for: merchant) ?? directoryCategory(forDomain: domain)
+            if directoryHit == .suscripciones { return .suscripciones }
+        }
+        if subscriptionKeys.contains(key) { return directoryHit ?? .suscripciones }
     }
+    if let fromMCC = mccCategory(movement.merchantCategoryCode) { return fromMCC }
+    if let directoryHit { return directoryHit }
     if isPersonPayment(movement) {
         if !key.isEmpty, let concept = conceptKeywordCategory(for: merchant) { return concept }
         return .personas

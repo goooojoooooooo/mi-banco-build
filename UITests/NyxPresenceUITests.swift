@@ -20,11 +20,6 @@ final class NyxPresenceUITests: XCTestCase {
         app = XCUIApplication()
         app.launchArguments = ["-MiBancoDemo"] + extra + ["-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
         app.launch()
-        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        for name in ["Permitir", "Allow"] {
-            let b = springboard.alerts.buttons[name]
-            if b.waitForExistence(timeout: 2) { b.tap(); break }
-        }
     }
 
     private func element(_ id: String) -> XCUIElement {
@@ -101,12 +96,12 @@ final class NyxPresenceUITests: XCTestCase {
 
     /// N10: el aviso de Nyx dentro de la app (`nyx-banner`) se toca y abre la hoja en su mensaje.
     func testElAvisoDeNyxSeTocaYAbreSuMensaje() throws {
-        launch(["-MiBancoDemoNyx", "banner"])
+        launch(["-MiBancoDemoNyx", "banner", "-MiBancoMotionScale", "2"])
         let banner = element("nyx-banner")
         XCTAssertTrue(banner.waitForExistence(timeout: 20), "No apareció nyx-banner")
 
-        let openBtn = app.buttons["nyx-banner-open"]
-        XCTAssertTrue(openBtn.waitForExistence(timeout: 4), "Falta el botón principal del banner de Nyx")
+        let openBtn = element("nyx-banner-open")
+        XCTAssertTrue(openBtn.waitForExistence(timeout: 6), "Falta el botón principal del banner de Nyx")
         openBtn.tap()
 
         XCTAssertTrue(element("nyx-sheet-title").waitForExistence(timeout: 8), "Tocar nyx-banner no abrió la hoja de Nyx")

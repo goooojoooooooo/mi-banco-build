@@ -11,7 +11,10 @@ struct RegisterNoticeIntent: AppIntent, LiveActivityIntent {
     @Parameter(title: "Cuerpo") var noticeBody: String?
 
     func perform() async throws -> some IntentResult {
-        try await IngestRunner.run(.notification(bank: bank.id, title: noticeTitle, subtitle: noticeSubtitle, body: noticeBody))
+        let input = sanitizeIngestInput(
+            .notification(bank: bank.id, title: noticeTitle, subtitle: noticeSubtitle, body: noticeBody)
+        )
+        try await IngestRunner.run(input)
         return .result()
     }
 }

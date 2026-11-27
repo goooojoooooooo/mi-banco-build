@@ -78,6 +78,15 @@ extension DemoMode {
     static var oldWeekCount: Bool { isActive && arguments.contains("-MiBancoDemoOldWeekCount") }
     /// `-MiBancoDemoOldChips`: las fichas de «Desde» cambian de cifra a la vez que el importe tecleado.
     static var oldChips: Bool { isActive && arguments.contains("-MiBancoDemoOldChips") }
+    /// `-MiBancoDemoOldHomeAX`: repone la maquetación vieja de Inicio con texto grande (barra superior traslúcida,
+    /// paralaje activo, segmentado apretado y «Este mes» en columnas estrechas) para ver en rojo la prueba de AX-XXXL.
+    static var oldHomeAX: Bool { isActive && arguments.contains("-MiBancoDemoOldHomeAX") }
+    /// `-MiBancoDemoOldSwipeClose`: repone el desmontaje inmediato al cerrar y las cápsulas estrechas de 64 pt con
+    /// texto grande (N-1 / N-2), para ver en rojo las pruebas de la fila deslizada.
+    static var oldSwipeClose: Bool { isActive && arguments.contains("-MiBancoDemoOldSwipeClose") }
+    /// `-MiBancoDemoOldReduceFan`: repone el solape de antes en el abanico con Reducir movimiento (sin retardo entre el
+    /// telón negro y la entrada del abanico) para ver en rojo la prueba de m-7 punto 9.
+    static var oldReduceFan: Bool { isActive && arguments.contains("-MiBancoDemoOldReduceFan") }
 
     /// `-MiBancoDemoArrivalIncome` (con `-MiBancoDemoArrival`): lo que llega es dinero que entra, no un pago.
     static var arrivalIsIncome: Bool { arguments.contains("-MiBancoDemoArrivalIncome") }

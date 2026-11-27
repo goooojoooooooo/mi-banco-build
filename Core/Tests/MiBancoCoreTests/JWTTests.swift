@@ -28,9 +28,9 @@ private func decodeB64URL(_ s: String) -> Data? {
     }
 
     @Test func jwtSigningInputIsExact() {
-        let input = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: 3600)
+        let input = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: 300)
         let header = #"{"alg":"RS256","kid":"00000000-0000-4000-8000-000000000001","typ":"JWT"}"#
-        let claims = #"{"aud":"api.enablebanking.com","exp":1800003600,"iat":1800000000,"iss":"enablebanking.com"}"#
+        let claims = #"{"aud":"api.enablebanking.com","exp":1800000300,"iat":1800000000,"iss":"enablebanking.com"}"#
         #expect(input == base64URL(Data(header.utf8)) + "." + base64URL(Data(claims.utf8)))
     }
 
@@ -44,7 +44,7 @@ private func decodeB64URL(_ s: String) -> Data? {
         for bad in [Double.nan, .infinity, -.infinity] {
             let input = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: bad)
             let payload = try #require(decodeB64URL(String(input.split(separator: ".")[1])))
-            #expect(String(decoding: payload, as: UTF8.self).contains(#""exp":1800003600"#))
+            #expect(String(decoding: payload, as: UTF8.self).contains(#""exp":1800000300"#))
         }
         let capped = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: 1e12)
         let payload = try #require(decodeB64URL(String(capped.split(separator: ".")[1])))
@@ -55,7 +55,7 @@ private func decodeB64URL(_ s: String) -> Data? {
         let signer = RecordingSigner()
         let token = try enableBankingJWT(appID: appID, now: now, signer: signer)
         #expect(token.hasSuffix(".AQID"))
-        let input = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: 3600)
+        let input = enableBankingJWTSigningInput(appID: appID, now: now, lifetime: 300)
         #expect(signer.received == Data(input.utf8))
         #expect(token == input + ".AQID")
     }

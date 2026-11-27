@@ -37,6 +37,19 @@ func maskedEURWhole(_ cents: Int, sign: Bool) -> String {
     AmountMask.wholeText(negative: cents < 0, showsPlus: sign && cents >= 0)
 }
 
+/// "−12,50 €" / "+1.450,00 €" (signo tipográfico, no guion). Vivía en `CountingAmount.swift`, que ya no existe (C8).
+func signedEUR(_ cents: Int) -> String {
+    (cents < 0 ? "−" : "+") + formatEUR(abs(cents))
+}
+
+/// "3.774,75 €" -> ("3.774", ",75 €"); en negativo, el signo va con los euros.
+func splitEUR(_ cents: Int) -> (main: String, small: String) {
+    let s = formatEUR(abs(cents))
+    let sign = cents < 0 ? "−" : ""
+    guard let i = s.lastIndex(of: ",") else { return (sign + s, "") }
+    return (sign + String(s[..<i]), String(s[i...]))
+}
+
 /// «+1.290 €» / «−310 €»: euros enteros con signo tipográfico.
 func signedEURWhole(_ cents: Int) -> String {
     // Lo que redondea a 0 € no lleva signo («0 €», nunca «−0 €» ni «+0 €»), como `formatEURWhole`.
@@ -548,7 +561,14 @@ struct RollingDigits: View {
             aligned = Array(repeating: 0, count: max(0, n - positions.count)) + Array(positions.suffix(n))
         }
         // La intensidad va dentro de `RollLength` (con su tope); aquí solo la cámara lenta de las grabaciones.
-        let paced = rollLength.timing(timing, digitCount: n, level: motion.level).scaled(max(motion.timeMultiplier, 0.01))
+        let levelTimed = rollLength.timing(timing, digitCount: n, level: motion.level)
+        let paced = levelTimed.scaled(max(motion.timeMultiplier, 0.01))
+        #if DEBUG
+        RollTimingProbe.shared.record(
+            unscaledMs: Int((levelTimed.total(digitCount: n) * 1_000).rounded()),
+            explicit: length != nil
+        )
+        #endif
         // m-2: una duración de 0 deja la cifra puesta, sin rodar.
         guard paced.total(digitCount: n) > 0 else {
             plan = []
@@ -833,6 +853,32 @@ private struct ReduceFade: ViewModifier {
 }
 
 #if DEBUG
+/// Solo DEBUG (`-MiBancoDemoRollTiming`): guarda la duración real (ms, escalada por `MotionLevel`, antes de cámara lenta)
+/// de las últimas rodadas de `RollingDigits`, para verificar duraciones explícitas como 16.2 en Suscripciones.
+@MainActor @Observable final class RollTimingProbe {
+    static let shared = RollTimingProbe()
+
+    private struct Entry {
+        let unscaledMs: Int
+        let explicit: Bool
+    }
+
+    private var entries: [Entry] = []
+
+    func record(unscaledMs: Int, explicit: Bool) {
+        guard DemoMode.exposesRollTiming else { return }
+        entries.append(Entry(unscaledMs: unscaledMs, explicit: explicit))
+    }
+
+    /// Los últimos dos importes que rodaron (mensual y anual al abrir Suscripciones).
+    var lastTwoSummary: String {
+        let tail = entries.suffix(2)
+        let ms = tail.map { String($0.unscaledMs) }.joined(separator: ",")
+        let explicit = tail.filter(\.explicit).count
+        return "ultimos2=\(ms);explicitos=\(explicit);total=\(entries.count)"
+    }
+}
+
 /// Solo DEBUG: pone lo dibujado como valor de accesibilidad cuando la prueba lo pide; si no, no toca nada.
 private struct DrawnTextValue: ViewModifier {
     let text: String

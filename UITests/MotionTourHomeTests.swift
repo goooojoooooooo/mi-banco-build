@@ -571,4 +571,45 @@ final class MotionTourHomeTests: MotionTourCase {
         app.buttons["Cancelar"].tap()
         burst("search-close", frames: 10, every: 0.15)
     }
+
+    // MARK: Menores — cabecera de Inicio con texto más grande (AX-XXXL)
+
+    private func captureFrame(_ name: String, _ index: Int, since start: Date) {
+        let screenshot = app.screenshot()
+        let tenths = Int((Date().timeIntervalSince(start) * 10).rounded())
+        let attachment = XCTAttachment(screenshot: screenshot, quality: .original)
+        attachment.name = "\(name)-" + String(format: "%02d", index) + "_t" + String(format: "%03d", tenths)
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    /// Recorre Inicio entero a AX-XXXL: arriba («ONYX», ojo, lupa, «Tu dinero», tarjeta «Todo»), al medio (segmentado,
+    /// «Mover dinero», «Gastado en 7 días» y barras, «Este mes») y más abajo con el segmentado pegado bajo la barra
+    /// superior (ni «Mover dinero» detrás de «ONYX» ni «estimado» detrás de «Gastado en 7 días»).
+    private func homeHeaderLargestText(_ name: String, extra: [String]) {
+        launch(["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] + extra, scale: 1)
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "Inicio no aparece")
+        let layer = app.descendants(matching: .any).matching(identifier: "launch-layer").firstMatch
+        let limit = Date().addingTimeInterval(20)
+        while layer.exists && Date() < limit { Thread.sleep(forTimeInterval: 0.2) }
+        Thread.sleep(forTimeInterval: 2)
+        let start = Date()
+        let centre = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.65))
+        captureFrame(name, 1, since: start)
+        for index in 2...8 {
+            centre.press(forDuration: 0.08, thenDragTo: centre.withOffset(CGVector(dx: 0, dy: -190)), withVelocity: 400,
+                         thenHoldForDuration: 0.25)
+            Thread.sleep(forTimeInterval: 0.35)
+            captureFrame(name, index, since: start)
+        }
+    }
+
+    func testHomeHeaderLargestText() throws {
+        homeHeaderLargestText("home-ax", extra: [])
+    }
+
+    /// Lo mismo con el ojo cerrado: ninguna cifra en ningún fotograma a texto máximo.
+    func testHomeHeaderLargestTextEyeClosed() throws {
+        homeHeaderLargestText("home-ax-eye", extra: ["-MiBancoDemoPrivate"])
+    }
 }

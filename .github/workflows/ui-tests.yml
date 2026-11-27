@@ -18,6 +18,9 @@ on:
       runner:
         description: "Runner macOS (por defecto: namespace-profile-onyx; NO usar macos-15-intel)"
         required: false
+        type: choice
+        options:
+          - namespace-profile-onyx
         default: "namespace-profile-onyx"
 permissions:
   contents: read
@@ -28,7 +31,7 @@ jobs:
     # paso falle (no se cancele) y se suban el registro y el `.xcresult`.
     timeout-minutes: 150
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Elegir Xcode (26.2 si existe; si no, el mas nuevo)
         run: |
           ls -d /Applications/Xcode*.app
@@ -38,7 +41,8 @@ jobs:
           sudo xcode-select -s "$XCODE"
           echo "DEVELOPER_DIR=$XCODE/Contents/Developer" >> "$GITHUB_ENV"
           xcodebuild -version
-      - run: brew install xcodegen && xcodegen
+      - name: Generar proyecto Xcode (XcodeGen 2.49.0 verificado)
+        run: bash .github/scripts/install_xcodegen.sh
       - name: Crear y arrancar el simulador (maximo 10 min)
         timeout-minutes: 14
         run: |
@@ -69,6 +73,28 @@ jobs:
           echo "### Entorno de pruebas de interfaz" >> "$GITHUB_STEP_SUMMARY"
           echo "- Runtime: $RUNTIME_LINE" >> "$GITHUB_STEP_SUMMARY"
           echo "- Dispositivo: $DEVICETYPE" >> "$GITHUB_STEP_SUMMARY"
+      # Lote final p2 (ronda 1): los clones recién hechos del simulador van lentos los primeros minutos (arranques de
+      # 15-18 s, la app sin quedarse quieta 60 s, «Timed out while acquiring background assertion»). Se compila una vez,
+      # se instala la app y se lanza unos 20 s con letra de accesibilidad y otros 20 s sin ella: los clones salen de un
+      # simulador ya caliente. Las pruebas van después sin volver a compilar.
+      - name: Calentar el simulador
+        timeout-minutes: 40
+        run: |
+          mkdir -p build
+          xcodebuild build-for-testing -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+            -destination "id=$UDID" -derivedDataPath build/dd \
+            CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/warmup.log 2>&1 \
+            || { tail -n 60 build/warmup.log; exit 1; }
+          APP=$(ls -d build/dd/Build/Products/Debug-iphonesimulator/*.app | grep -v -- "-Runner.app" | head -1)
+          echo "App: $APP"
+          xcrun simctl install "$UDID" "$APP"
+          BUNDLE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist")
+          xcrun simctl launch "$UDID" "$BUNDLE" -MiBancoDemo -UIPreferredContentSizeCategoryName UICTContentSizeCategoryAccessibilityM || true
+          sleep 20
+          xcrun simctl terminate "$UDID" "$BUNDLE" || true
+          xcrun simctl launch "$UDID" "$BUNDLE" -MiBancoDemo || true
+          sleep 20
+          xcrun simctl terminate "$UDID" "$BUNDLE" || true
       - name: Pruebas de toques
         timeout-minutes: 125
         env:
@@ -83,7 +109,7 @@ jobs:
             esac
             SELECT="-only-testing:MiBancoUITests/$TEST_CLASS"
           else
-            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests -skip-testing:MiBancoUITests/MotionTourHomeTests -skip-testing:MiBancoUITests/MotionTourScreensTests -skip-testing:MiBancoUITests/MotionTourShellTests"
+            SELECT="-only-testing:MiBancoUITests -skip-testing:MiBancoUITests/MotionTourTests -skip-testing:MiBancoUITests/MotionTourHomeTests -skip-testing:MiBancoUITests/MotionTourScreensTests -skip-testing:MiBancoUITests/MotionTourShellTests -skip-testing:MiBancoUITests/MotionTourSecurityTests"
             # La bateria completa va en 2 simuladores salvo que se pida otro numero (experimento medido: mismas pruebas y
             # mismos resultados que en serie). Una clase sola sigue en serie, salvo que se pida `parallel_workers`.
             PARALLEL_WORKERS="${PARALLEL_WORKERS:-2}"
@@ -95,7 +121,7 @@ jobs:
             SELECT="$SELECT -parallel-testing-enabled YES -parallel-testing-worker-count $PARALLEL_WORKERS -maximum-parallel-testing-workers $PARALLEL_WORKERS"
           fi
           echo "SELECT=$SELECT" >> "$GITHUB_ENV"
-          xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+          xcodebuild test-without-building -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600 \
             $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
@@ -117,7 +143,7 @@ jobs:
           perl -e 'alarm 600; exec @ARGV' xcrun simctl bootstatus "$UDID" -b > /dev/null || echo "El simulador tarda en arrancar"
           mv build/ui.xcresult build/ui-primer-intento.xcresult || true
           set +e
-          xcodebuild test -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
+          xcodebuild test-without-building -project MiBanco.xcodeproj -scheme MiBanco -configuration Debug \
             -destination "id=$UDID" -derivedDataPath build/dd -resultBundlePath build/ui.xcresult \
             -test-timeouts-enabled YES -default-test-execution-time-allowance 420 -maximum-test-execution-time-allowance 600 \
             $SELECT CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=YES > build/ui.log 2>&1
@@ -151,7 +177,7 @@ jobs:
           RAN=$(grep -cE "^Test [Cc]ase .* (passed|failed)" build/ui.log || true)
           echo "Pruebas ejecutadas: ${RAN:-0}"
           if [ "${RAN:-0}" -lt 1 ]; then echo "No se ejecuto ninguna prueba (¿existe la clase pedida?)"; exit 1; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: failure() || cancelled()
         with:
           name: ui-xcresult

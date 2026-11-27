@@ -188,7 +188,7 @@ func clippedName(_ name: String) -> String {
 
 // MARK: Secciones
 
-private func moneyLines(_ input: BriefingInput, quiet: Bool) -> [BriefingLine] {
+private func moneyLines(_ input: BriefingInput, quiet: Bool, fullLists: Bool = false) -> [BriefingLine] {
     var lines: [BriefingLine] = []
     let known = input.banks.filter { $0.cents != nil }
     // «unos» en el total en cuanto UN saldo conocido es una estimación (la suma lo es); cada banco estimado lo dice en su línea.
@@ -199,18 +199,19 @@ private func moneyLines(_ input: BriefingInput, quiet: Bool) -> [BriefingLine] {
         if quiet {
             lines.append(BriefingLine(id: "money-total", parts: [.text(approximate ? "Sigues con unos " : "Sigues con "),
                                                                  .amount(total), .text(" en total\(leftOut).")]))
-            return lines
-        }
-        var parts: [BriefingPart] = [.text(approximate ? "En total, unos " : "En total, "), .amount(total)]
-        if input.totalChangeCents == 0 {
-            parts.append(.text(" (sin cambios)"))
+            if !fullLists { return lines }
         } else {
-            parts += [.text(" ("), .signed(input.totalChangeCents), .text(")")]
+            var parts: [BriefingPart] = [.text(approximate ? "En total, unos " : "En total, "), .amount(total)]
+            if input.totalChangeCents == 0 {
+                parts.append(.text(" (sin cambios)"))
+            } else {
+                parts += [.text(" ("), .signed(input.totalChangeCents), .text(")")]
+            }
+            if !leftOut.isEmpty { parts.append(.text(leftOut)) }
+            lines.append(BriefingLine(id: "money-total", parts: parts))
         }
-        if !leftOut.isEmpty { parts.append(.text(leftOut)) }
-        lines.append(BriefingLine(id: "money-total", parts: parts))
     }
-    if quiet { return lines }
+    if quiet, !fullLists { return lines }
     for bank in input.banks {
         var parts: [BriefingPart]
         if let cents = bank.cents {
@@ -261,7 +262,7 @@ private func happenedLines(_ input: BriefingInput) -> [BriefingLine] {
     return lines
 }
 
-private func upcomingLines(_ input: BriefingInput, calendar: Calendar, quiet: Bool) -> [BriefingLine] {
+private func upcomingLines(_ input: BriefingInput, calendar: Calendar, quiet: Bool, fullLists: Bool = false) -> [BriefingLine] {
     var lines: [BriefingLine] = []
     if !quiet, let expected = input.expected {
         let day = "\(weekdayName(expected.date, calendar)) \(calendar.component(.day, from: expected.date))"
@@ -269,7 +270,7 @@ private func upcomingLines(_ input: BriefingInput, calendar: Calendar, quiet: Bo
                                                           .text(" en \(expected.bank.displayName)")]))
     }
     for (i, charge) in input.upcoming.enumerated() {
-        if quiet, dayDistance(from: input.now, to: charge.date, calendar) > 1 { continue }
+        if quiet, !fullLists, dayDistance(from: input.now, to: charge.date, calendar) > 1 { continue }
         lines.append(BriefingLine(id: "upcoming-\(i)",
                                   parts: [.text("\(dayLabel(charge.date, now: input.now, calendar)): \(clippedName(charge.name)), "),
                                           .amount(charge.cents),
@@ -501,16 +502,20 @@ private func headline(_ input: BriefingInput, calendar: Calendar) -> [BriefingPa
 /// El resumen con las reglas de siempre (sin modelo): es la base que se enseña si el modelo no está o su texto no pasa las
 /// barreras. Cada cifra sale de `BriefingInput`, que sale del libro.
 public func makeBriefing(_ input: BriefingInput, calendar: Calendar) -> Briefing {
+    buildBriefing(input, calendar: calendar, fullLists: false)
+}
+
+func buildBriefing(_ input: BriefingInput, calendar: Calendar, fullLists: Bool) -> Briefing {
     let quiet = input.income.isEmpty && input.payments.isEmpty && input.transfers.isEmpty && input.attention.isEmpty
     var sections: [BriefingSection] = []
     func add(_ kind: BriefingSectionKind, _ title: String, _ lines: [BriefingLine]) {
         if !lines.isEmpty { sections.append(BriefingSection(kind: kind, title: title, lines: lines)) }
     }
-    add(.money, "Tu dinero", moneyLines(input, quiet: quiet))
+    add(.money, "Tu dinero", moneyLines(input, quiet: quiet, fullLists: fullLists))
     if !quiet {
         add(.happened, "Qué ha pasado", happenedLines(input))
     }
-    add(.upcoming, "Lo que viene", upcomingLines(input, calendar: calendar, quiet: quiet))
+    add(.upcoming, "Lo que viene", upcomingLines(input, calendar: calendar, quiet: quiet, fullLists: fullLists))
     if !quiet {
         add(.attention, "Ojo con esto", attentionLines(input, calendar: calendar))
         add(.month, "El mes", input.month.map(monthLines) ?? [])

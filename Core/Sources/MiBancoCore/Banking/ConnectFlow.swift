@@ -310,6 +310,16 @@ public func isBankCallbackURL(_ url: URL) -> Bool {
     url.scheme?.lowercased() == BankingConstants.callbackScheme && url.host?.lowercased() == "cb"
 }
 
+/// Puerta de entrada para `onOpenURL` (`SEC-11`): solo se acepta `mibanco://cb` si existe un intento pendiente.
+/// Sin intento pendiente (`.none`), la URL se ignora de inmediato sin lanzar flujo ni error.
+public func shouldHandleIncomingBankCallback(_ url: URL, pending: PendingCheck) -> Bool {
+    guard isBankCallbackURL(url) else { return false }
+    switch pending {
+    case .none: return false
+    case .valid, .expired: return true
+    }
+}
+
 /// Revolut e imagin siempre; Trade Republic solo si una lista en memoria lo encontró.
 public func canConnectBank(_ bank: BankID, cachedList: [EBASPSP]?) -> Bool {
     switch bank {

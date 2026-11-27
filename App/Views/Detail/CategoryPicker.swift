@@ -28,6 +28,8 @@ struct CategoryPickerRow: View {
     /// Ronda 2 (I-3): «Quitar mi categoría…» se decide al ABRIR la rejilla y no cambia mientras está abierta: elegir una
     /// categoría no inserta un botón que empuja las filas hacia abajo justo antes de plegarse.
     @State private var resetShown = false
+    /// El pliegue que espera tras elegir; se cancela si la fila desaparece.
+    @State private var foldTask: Task<Void, Never>?
 
     init(movement: Movement, current: SpendingCategory, model: LedgerModel) {
         self.movement = movement
@@ -75,7 +77,8 @@ struct CategoryPickerRow: View {
     }
 
     /// Lo que aparece (la rejilla, «Quitar mi categoría…») entra cuando el pliegue ya ha hecho sitio, solo con opacidad;
-    /// lo que se va, se va en 80 ms, antes de que nada suba encima. Nunca dos textos superpuestos.
+    /// lo que se va, se va en 80 ms y el pliegue empieza DESPUÉS de esos 80 ms (`choose`): nada sube encima de un texto
+    /// que aún se ve.
     private var sequencedFade: AnyTransition {
         guard !motion.reduce else { return .opacity }
         return .asymmetric(
@@ -111,6 +114,7 @@ struct CategoryPickerRow: View {
         .overlay(alignment: .top) {
             Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 16)
         }
+        .onDisappear { foldTask?.cancel() }
         .sensoryFeedback(Haptics.detent, trigger: selectTick)
         .sensoryFeedback(Haptics.error, trigger: errorTick)
     }
@@ -208,10 +212,14 @@ struct CategoryPickerRow: View {
             // Ronda 2 (I-3): la ficha blanca llega a la elegida y DESPUÉS se pliega todo junto: se retrasa el cambio de
             // estado (no solo su animación), así la salida de la rejilla y el pliegue empiezan en el mismo instante y
             // no queda el hueco de la rejilla esperando.
-            let wait = motion.reduce ? 0 : motion.seconds(0.32)
-            Task { @MainActor in
+            // N-10: la rejilla empieza a irse a los 0,24 s (su salida dura 80 ms) y el pliegue, cuando ya se ha ido.
+            let exit = motion.reduce ? 0 : motion.seconds(0.08)
+            let wait = motion.reduce ? 0 : motion.seconds(0.32) - exit
+            foldTask?.cancel()
+            foldTask = Task { @MainActor in
                 if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
-                withAnimation(fold) { expanded = false }
+                guard !Task.isCancelled else { return }
+                withAnimation(fold.delay(exit)) { expanded = false }
             }
         } catch {
             errorTick += 1
@@ -295,7 +303,8 @@ private struct CategoryTile: View {
             .contentShape(shape)
         }
         .buttonStyle(.pressable)
-        .animation(motion.animation(.release), value: selected)
+        // N-11: la ficha blanca se desliza con el muelle de los indicadores (no se pasa de largo).
+        .animation(motion.animation(.indicator), value: selected)
         // Entrada escalonada de la rejilla (30 ms por ficha); con Reducir movimiento, solo un fundido.
         .opacity(shown ? 1 : 0)
         .scaleEffect(shown || reduceMotion ? 1 : 0.86)

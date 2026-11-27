@@ -19,8 +19,11 @@ targets:
         excludes:
           - Info.plist
           - "*.entitlements"
+          - PrivacyInfo.xcprivacy
           - Resources/Logos
           - Resources/Logos/**
+      - path: App/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - Shared/MovementActivityAttributes.swift
       # Logos de comercios y bancos (tools/fetch_logos.py): carpeta "Logos" dentro del paquete.
       - path: App/Resources/Logos
@@ -59,6 +62,10 @@ targets:
         LSApplicationQueriesSchemes: [revolut, imagin, traderepublic, shortcuts]
         ALTAppGroups: [group.com.mibanco.shared]
         UIUserInterfaceStyle: Dark
+        # 120 Hz en los iPhone con ProMotion: sin esta clave, las animaciones propias (Core Animation, SwiftUI,
+        # `TimelineView(.animation)`) quedan a 60 Hz aunque la pantalla vaya a 120. En reposo no gasta: el sistema baja
+        # la frecuencia cuando nada se mueve.
+        CADisableMinimumFrameDurationOnPhone: true
         # Pantalla de lanzamiento del sistema: negro liso (color `LaunchBlack` del catálogo), también con el iPhone en
         # modo claro; así no hay un destello blanco antes del arranque negro de la app.
         UILaunchScreen:
@@ -78,6 +85,9 @@ targets:
         excludes:
           - Info.plist
           - "*.entitlements"
+          - PrivacyInfo.xcprivacy
+      - path: NotificationExt/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - App/Theme.swift
       - App/Logos/BundledLogos.swift
       - path: App/Resources/Logos
@@ -120,6 +130,9 @@ targets:
         excludes:
           - Info.plist
           - "*.entitlements"
+          - PrivacyInfo.xcprivacy
+      - path: Widgets/PrivacyInfo.xcprivacy
+        buildPhase: resources
       - Shared/MovementActivityAttributes.swift
       - App/Theme.swift
       - App/Logos/BundledLogos.swift

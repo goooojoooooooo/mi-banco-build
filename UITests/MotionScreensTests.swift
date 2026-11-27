@@ -765,6 +765,14 @@ final class MotionScreensTests: XCTestCase {
     // MARK: - Conectar un banco: pasos con porcentaje y «conectado» (B6, B7)
 
     /// «Paso 2 de 3, 45 por ciento» -> (2, 45).
+    /// Línea C (lote final p2, ronda 1; cambio mínimo y declarado): la etiqueta leída de UNA instantánea, o nil si el
+    /// elemento ya no está. Con `exists` y luego `label` (dos consultas) la pantalla de pasos podía irse entre las dos y
+    /// la prueba caía con «Failed to get matching snapshot» (run 45914072681).
+    @MainActor
+    private func labelNow(_ element: XCUIElement) -> String? {
+        (try? element.snapshot())?.label
+    }
+
     private func stepAndPercent(_ label: String) -> (step: Int, percent: Int)? {
         let numbers = label.components(separatedBy: CharacterSet.decimalDigits.inverted).compactMap { Int($0) }
         guard label.hasPrefix("Paso "), numbers.count == 3 else { return nil }
@@ -979,32 +987,50 @@ final class MotionScreensTests: XCTestCase {
     }
 
     /// I-1, la prueba de la prueba: con el defecto de antes devuelto (`-MiBancoDemoRegressMaskedField`: la cifra real
-    /// dentro del campo, pintada en transparente) el MISMO cuerpo tiene que fallar.
+    /// dentro del campo, pintada en transparente) el MISMO cuerpo tiene que fallar justo por el fallo de privacidad.
     func testClosingTheEyeInSettingsCatchesTheTransparentDigits() throws {
-        XCTExpectFailure("Con la cifra real en transparente la prueba de privacidad tiene que fallar") {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        options.issueMatcher = { $0.compactDescription.contains("sigue dibujando una cifra") }
+        XCTExpectFailure("Con la cifra real en transparente la prueba de privacidad tiene que fallar", options: options) {
             closeTheEyeInSettingsAndCheckTheFields(["-MiBancoDemoRegressMaskedField"])
         }
     }
 
     /// Cuerpo común de I-3: se edita el saldo de Trade Republic (con el ojo abierto, el campo enseña su cifra) y, sin
     /// tocar nada (el teclado taparía el interruptor), Ajustes cierra el ojo por el mismo camino que el interruptor
-    /// (`-MiBancoDemoCloseEyeAfter`). El campo tiene que soltar el foco y pasar a la máscara: ningún dígito dibujado y
-    /// ningún importe con cifras en pantalla.
+    /// (`-MiBancoDemoCloseEyeAfter`). El campo tiene que soltar el foco (el teclado se va) y pasar a la máscara: ningún
+    /// dígito dibujado y ningún importe con cifras en pantalla.
     private func closeTheEyeWhileEditingAndCheck(_ extra: [String]) {
-        let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoCloseEyeAfter", "12"] + extra)
+        let (field, _) = settingsWithBalanceAndEye(["-MiBancoDemoSettingsCloseEyeAfter", "12"] + extra)
         XCTAssertFalse(value(field).hasPrefix("importe oculto"), "El ojo se cerró antes de empezar a editar")
         field.tap()
         XCTAssertTrue(app.keyboards.element.waitForExistence(timeout: 5), "El saldo no se enfocó (no hay teclado)")
         XCTAssertTrue(drawsDigits(value(field)), "Control: editando, el campo no enseña su cifra: \(value(field))")
         XCTAssertTrue(waitFor(NSPredicate(format: "value BEGINSWITH %@", "importe oculto"), field, timeout: 25),
                       "Al cerrarse el ojo, el saldo en edición sigue enseñando su cifra: \(value(field))")
+        // N-1: comprueba que el teclado se fue de verdad (falla si se borra la suelta del foco).
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), app.keyboards.element, timeout: 5),
+                      "Al cerrarse el ojo el teclado no se fue (el campo sigue enfocado)")
+        XCTAssertFalse(app.keyboards.element.exists, "Al cerrarse el ojo el teclado sigue abierto")
         XCTAssertFalse(drawsDigits(value(field)), "Con el ojo cerrado el campo dibuja una cifra: \(value(field))")
         XCTAssertEqual(visibleAmounts(), [], "Con el ojo cerrado se ven importes en Ajustes")
     }
 
-    /// I-3: cerrar el ojo con un saldo en edición suelta el foco y deja la máscara.
+    /// I-3: cerrar el ojo con un saldo en edición suelta el foco (desaparece el teclado) y deja la máscara.
     func testClosingTheEyeWhileEditingMasksTheBalance() throws {
         closeTheEyeWhileEditingAndCheck([])
+    }
+
+    /// N-1 (rojo): si no se suelta el foco al cerrar el ojo (`-MiBancoDemoKeepFocusOnEyeClose`), la prueba falla porque
+    /// el teclado sigue abierto.
+    func testClosingTheEyeWhileEditingCatchesKeptFocus() throws {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        options.issueMatcher = { $0.compactDescription.contains("el teclado no se fue") }
+        XCTExpectFailure("Sin soltar el foco al cerrar el ojo el teclado sigue abierto y la prueba tiene que fallar", options: options) {
+            closeTheEyeWhileEditingAndCheck(["-MiBancoDemoKeepFocusOnEyeClose"])
+        }
     }
 
     // MARK: - Editar con el ojo cerrado (decisión del dueño: la cifra guardada no se enseña NUNCA)
@@ -1222,6 +1248,7 @@ final class MotionScreensTests: XCTestCase {
 
     /// Primero los pasos (Leer, Revisar) y DESPUÉS la vista previa; el porcentaje se queda en 67 mientras se espera al
     /// dueño, sube al tocar «Importar» y la pantalla vuelve a la del banco.
+    @MainActor
     func testImportStepsThenPreview() throws {
         launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoImport", "-MiBancoDemoImportSlow"])
         let percent = element("import-steps-percent")
@@ -1232,7 +1259,7 @@ final class MotionScreensTests: XCTestCase {
         var early: Set<Int> = []
         let reading = Date().addingTimeInterval(6)
         while Date() < reading, !summary.exists {
-            guard let now = stepAndPercent(percent.label) else { continue }
+            guard let now = labelNow(percent).flatMap(stepAndPercent) else { continue }
             XCTAssertLessThan(now.percent, 67, "El porcentaje pasó de 67 antes de la vista previa: \(now)")
             XCTAssertLessThan(now.step, 3, "El tercer paso empezó antes de la vista previa")
             early.insert(now.step)
@@ -1247,7 +1274,7 @@ final class MotionScreensTests: XCTestCase {
         Thread.sleep(forTimeInterval: 2.5)
         XCTAssertEqual(percent.label, "Paso 3 de 3, 67 por ciento", "El porcentaje subió solo, sin tocar «Importar»")
 
-        XCTAssertTrue(waitFor(hittable, confirm, timeout: 5), "«Importar» no se puede tocar")
+        XCTAssertTrue(waitFor(hittable, confirm, timeout: 15), "«Importar» no se puede tocar")
         XCTAssertTrue(confirm.isEnabled)
         confirm.tap()
         let bank = app.buttons["bank-import-statement"]
@@ -1262,11 +1289,11 @@ final class MotionScreensTests: XCTestCase {
             if alternate {
                 guard third.exists else { continue }
                 let done = (third.value as? String) == "hecho"
-                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                guard let now = labelNow(percent).flatMap(stepAndPercent) else { continue }
                 if done { XCTAssertEqual(now.percent, 100, "El tercer paso salió hecho antes del 100: \(now)") }
                 afterTap.append(now.percent)
             } else {
-                guard percent.exists, let now = stepAndPercent(percent.label) else { continue }
+                guard let now = labelNow(percent).flatMap(stepAndPercent) else { continue }
                 XCTAssertGreaterThanOrEqual(now.percent, 67, "El porcentaje bajó de 67 al importar: \(now)")
                 XCTAssertGreaterThanOrEqual(now.percent, afterTap.last ?? 0, "El porcentaje bajó al importar")
                 if now.percent == 100, third.exists {
@@ -1277,5 +1304,65 @@ final class MotionScreensTests: XCTestCase {
         }
         XCTAssertTrue(bank.waitForExistence(timeout: 8), "Tras importar no volvió a la pantalla del banco")
         XCTAssertTrue(afterTap.contains { $0 > 67 }, "Al importar el porcentaje no se movió de 67: \(afterTap)")
+    }
+
+    // MARK: - Menores: aterrizaje de bienvenida (.launchWelcomeMark) y totales de Suscripciones en 0,45 s (16.2)
+
+    /// La marca del primer arranque aterriza sobre la marca de la bienvenida (`.launchWelcomeMark()`), sin texto «ONYX»
+    /// sobrante tras el aterrizaje.
+    private func assertWelcomeReceivesLaunchMark(_ extra: [String]) {
+        launch(["-MiBancoDemoOnboarding", "1"] + extra)
+        XCTAssertTrue(app.staticTexts["Tus saldos"].waitForExistence(timeout: 20), "La bienvenida no enseña «Tus saldos»")
+        let probe = element("launch-probe")
+        XCTAssertTrue(probe.waitForExistence(timeout: 5), "Falta la sonda del arranque")
+        let summary = value(probe)
+        XCTAssertTrue(summary.contains("bienvenida=1"), "La marca del primer arranque no aterrizó en la bienvenida: \(summary)")
+        XCTAssertFalse(app.staticTexts["ONYX"].exists, "La bienvenida enseña el texto «ONYX» sobrante tras el aterrizaje")
+    }
+
+    func testWelcomeReceivesTheLaunchMark() throws {
+        assertWelcomeReceivesLaunchMark([])
+    }
+
+    /// En ROJO sin el gancho `.launchWelcomeMark()` (`-MiBancoDemoNoWelcomeMark`): falla en «no aterrizó en la bienvenida».
+    func testWelcomeLaunchMarkGuardGoesRedWithoutHook() throws {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        options.issueMatcher = { $0.compactDescription.contains("no aterrizó en la bienvenida") }
+        XCTExpectFailure("Sin .launchWelcomeMark() la marca del arranque no aterriza en la bienvenida", options: options) {
+            assertWelcomeReceivesLaunchMark(["-MiBancoDemoNoWelcomeMark"])
+        }
+    }
+
+    /// 16.2: los dos totales de Suscripciones (al mes y al año) ruedan explícitamente en 0,45 s (`length: .seconds(0.45)`),
+    /// escalando con `\.motion` (en Sutil ×0,85 = 383 ms; con la duración por defecto `.brief` se quedaban en 450 ms).
+    private func assertSubscriptionsTotalsRollInFortyFiveHundredths(_ extra: [String]) {
+        openGasto(["-MiBancoMotionLevel", "subtle", "-MiBancoDemoRollTiming"] + extra)
+        let link = element("gasto.suscripciones")
+        scrollDown(to: link)
+        XCTAssertTrue(link.isHittable, "No se puede abrir Suscripciones")
+        link.tap()
+        XCTAssertTrue(element("suscripciones.total").waitForExistence(timeout: 10), "No se ve Suscripciones")
+        let probe = element("suscripciones.rollTiming")
+        XCTAssertTrue(probe.waitForExistence(timeout: 5), "Falta la sonda de duración de Suscripciones")
+        // En Sutil (×0,85), 0,45 s × 0,85 = 382,5 ms (382 o 383 ms según el redondeo por número de dígitos; con `.brief`
+        // se quedaba en 450 ms y `explicitos=0`).
+        let expected = NSPredicate(format: "value MATCHES %@", "^ultimos2=38[0-5],38[0-5];explicitos=2;.*$")
+        XCTAssertTrue(waitFor(expected, probe, timeout: 5),
+                      "Los totales de Suscripciones no rodaron en 0,45 s escalados por movimiento: \(value(probe))")
+    }
+
+    func testSubscriptionsTotalsRollInFortyFiveHundredths() throws {
+        assertSubscriptionsTotalsRollInFortyFiveHundredths([])
+    }
+
+    /// En ROJO con la duración por defecto (`-MiBancoDemoOldSubscriptionRoll`): falla en «no rodaron en 0,45 s».
+    func testSubscriptionsRollGuardGoesRedWithDefaultLength() throws {
+        let options = XCTExpectedFailure.Options()
+        options.isStrict = true
+        options.issueMatcher = { $0.compactDescription.contains("no rodaron en 0,45 s") }
+        XCTExpectFailure("Con la duración por defecto (.brief) en vez de .seconds(0.45) la prueba de 16.2 tiene que fallar", options: options) {
+            assertSubscriptionsTotalsRollInFortyFiveHundredths(["-MiBancoDemoOldSubscriptionRoll"])
+        }
     }
 }

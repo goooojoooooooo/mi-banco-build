@@ -76,6 +76,9 @@ enum DemoMode {
     static var briefingMode: BriefingMode? { value(after: "-MiBancoDemoBriefing").flatMap(BriefingMode.init(rawValue:)) }
     static var briefingShortfall: Bool { arguments.contains("-MiBancoDemoShortfall") }
     static var banksConnected: Bool { arguments.contains("-MiBancoDemoBanks") }
+    /// Plan 12: la demo trae una cuenta remunerada de Revolut (5.000,00 € al 2,00 % puestos hace 3 minutos y un traspaso de
+    /// 100,00 € hace 2): Ajustes › Saldos la enseña bajo Revolut con 5.100,00 € y el total la suma.
+    static var hasSavings: Bool { arguments.contains("-MiBancoDemoSavings") }
     static var opensConnectionGuide: Bool { arguments.contains("-MiBancoDemoGuide") }
     static var opensStatementImport: Bool { arguments.contains("-MiBancoDemoImport") }
     static var startsFlipped: Bool { arguments.contains("-MiBancoDemoFlip") }
@@ -605,9 +608,17 @@ enum DemoMode {
             }
         }
 
+        var savings: SavingsAccount?
+        if hasSavings {
+            // El traspaso es anterior al saldo de Revolut de la demo (hace 1 min): no cambia su saldo, solo el de la remunerada.
+            savings = SavingsAccount(baselineCents: 500_000, baselineAt: now.addingTimeInterval(-180), annualRateBasisPoints: 200)
+            movements.append(Movement(bank: .rev, amountCents: -10_000, merchant: "To EUR Savings", kind: .payment,
+                                      source: .notification, date: now.addingTimeInterval(-120)))
+        }
+
         return LedgerState(balances: balances, movements: movements, unread: [],
                            budgets: Budgets(monthlyCents: 70_000, byCategory: [.comerFuera: 9_000]),
-                           links: links)
+                           links: links, savings: savings)
     }
 }
 #endif

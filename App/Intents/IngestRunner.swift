@@ -24,13 +24,14 @@ enum IngestRunner {
         }
         let snap = try SharedStore.make().update { ledger -> Snapshot in
             let before = bank.flatMap { ledger.balance($0) }
-            let outcome = ledger.ingest(input, now: Date())
+            let now = Date()
+            let outcome = ledger.ingest(input, now: now)
             let after = bank.flatMap { ledger.balance($0) }
             var balances: [String: Int] = [:]
             for b in BankID.allCases { if let c = ledger.balance(b)?.cents { balances[b.rawValue] = c } }
             return Snapshot(outcome: outcome, before: before?.cents, beforeEstimated: before?.estimated ?? false,
                             after: after?.cents, afterEstimated: after?.estimated ?? false,
-                            total: ledger.total(), balances: balances, state: ledger.state)
+                            total: ledger.total(now: now), balances: balances, state: ledger.state)
         }
         // Si la app está abierta, Home se recarga con esto.
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)

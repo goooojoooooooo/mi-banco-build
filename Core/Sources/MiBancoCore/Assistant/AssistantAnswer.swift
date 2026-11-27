@@ -111,7 +111,7 @@ public func answerIntent(_ intent: AssistantIntent, state: LedgerState, portfoli
                          now: Date, calendar: Calendar) -> AssistantAnswer {
     switch intent {
     case .balances(let bank):
-        return AssistantAnswer(intent: intent, lines: balancesAnswer(bank: bank, state: state, portfolio: portfolio))
+        return AssistantAnswer(intent: intent, lines: balancesAnswer(bank: bank, state: state, portfolio: portfolio, now: now))
     case let .spending(month, category, merchant, bank):
         let res = spendingAnswer(month: month, category: category, merchant: merchant, bank: bank,
                                  state: state, now: now, calendar: calendar)
@@ -291,7 +291,7 @@ func firstChargeBelowFloorDays(_ days: [UpcomingDay]) -> [BankID: Date] {
 
 // MARK: 1. Saldos
 
-private func balancesAnswer(bank: BankID?, state: LedgerState, portfolio: Portfolio?) -> [BriefingLine] {
+private func balancesAnswer(bank: BankID?, state: LedgerState, portfolio: Portfolio?, now: Date) -> [BriefingLine] {
     let ledger = Ledger(state: state)
     if let bank {
         guard let b = ledger.balance(bank) else {
@@ -312,10 +312,12 @@ private func balancesAnswer(bank: BankID?, state: LedgerState, portfolio: Portfo
             leftOut.append(b)
         }
     }
-    guard let total = ledger.total(), !known.isEmpty else {
+    // El mismo total que Inicio (`total(now:)`): con la cuenta remunerada, si la hay, que va en su propia línea.
+    let savings = ledger.savingsBalance(now: now)
+    guard let total = ledger.total(now: now), !known.isEmpty || savings != nil else {
         return [BriefingLine(id: "bal-empty", parts: [.text("Aún no tengo ningún saldo guardado.")])]
     }
-    let approx = known.contains(where: \.estimated)
+    let approx = known.contains(where: \.estimated) || savings != nil
     let missingSuffix = leftOut.isEmpty ? "" : ", sin contar \(assistantJoinList(leftOut.map(\.displayName)))"
     var lines = [BriefingLine(id: "bal-total",
                               parts: [.text(approx ? "En total tienes unos " : "En total tienes "), .amount(total),
@@ -323,6 +325,9 @@ private func balancesAnswer(bank: BankID?, state: LedgerState, portfolio: Portfo
     for item in known {
         lines.append(BriefingLine(id: "bal-\(item.bank.rawValue)",
                                   parts: [.text("\(item.bank.displayName): \(item.estimated ? "unos " : "")"), .amount(item.cents)]))
+    }
+    if let savings {
+        lines.append(BriefingLine(id: "bal-savings", parts: [.text("Cuenta remunerada: unos "), .amount(savings.cents)]))
     }
     for missing in leftOut {
         lines.append(BriefingLine(id: "bal-\(missing.rawValue)",

@@ -192,7 +192,8 @@ private func moneyLines(_ input: BriefingInput, quiet: Bool, fullLists: Bool = f
     var lines: [BriefingLine] = []
     let known = input.banks.filter { $0.cents != nil }
     // «unos» en el total en cuanto UN saldo conocido es una estimación (la suma lo es); cada banco estimado lo dice en su línea.
-    let approximate = known.contains(where: \.estimated)
+    // La cuenta remunerada siempre es estimada.
+    let approximate = known.contains(where: \.estimated) || input.savingsCents != nil
     if let total = input.totalCents {
         // «sin contar imagin»: los bancos sin saldo conocido no están en el total ni en su cambio.
         let leftOut = input.totalLeftOut.isEmpty ? "" : ", sin contar " + input.totalLeftOut.map(\.displayName).joined(separator: ", ")
@@ -225,6 +226,9 @@ private func moneyLines(_ input: BriefingInput, quiet: Bool, fullLists: Bool = f
             parts += [.text(" ("), .signed(bank.changeCents), .text(")")]
         }
         lines.append(BriefingLine(id: "money-\(bank.bank.rawValue)", parts: parts))
+    }
+    if let savings = input.savingsCents {
+        lines.append(BriefingLine(id: "money-savings", parts: [.text("Cuenta remunerada: unos "), .amount(savings)]))
     }
     return lines
 }

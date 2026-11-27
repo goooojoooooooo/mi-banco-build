@@ -98,6 +98,7 @@ struct CardCarousel: View {
             card: card, balances: snapshot.balances,
             links: links,
             total: snapshot.total,
+            savingsCents: snapshot.savings?.cents,
             monthSpent: snapshot.monthSpent[card] ?? 0,
             portfolioSummary: portfolioSummary,
             portfolioLastImport: portfolioLastImport,
@@ -632,7 +633,9 @@ struct CardCarousel: View {
         }
         guard let bank = current.bank else {
             let total = snapshot.total.map { spokenAmount($0, hidden: hidden) } ?? "sin saldo"
-            return "Todo, \(total) en tres cuentas, \(position)"
+            // Con la cuenta remunerada son cuatro cuentas (sale en su línea de «Todo»).
+            let accounts = snapshot.savings == nil ? "tres" : "cuatro"
+            return "Todo, \(total) en \(accounts) cuentas, \(position)"
         }
         guard let info = snapshot.balances[bank] else { return "Cuenta, \(bank.displayName), sin saldo, \(position)" }
         let estimate = info.estimated ? ", estimado" : ""

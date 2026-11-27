@@ -117,6 +117,9 @@ struct LedgerSnapshot: Sendable {
     static let maxRows = 60
 
     var balances: [BankID: BalanceInfo] = [:]
+    /// La cuenta remunerada de Revolut (base + traspasos + intereses estimados); nil si el dueño no la ha puesto.
+    var savings: SavingsBalance?
+    /// Los saldos de los bancos más la cuenta remunerada.
     var total: Int?
     /// Lista de cada tarjeta, agrupada por día, recortada a `maxRows` y ya aplanada.
     var entries: [AccountCard: [ListEntry]] = [:]
@@ -182,7 +185,8 @@ struct LedgerSnapshot: Sendable {
                                              origin: base.origin)
             }
         }
-        total = ledger.total()
+        savings = ledger.savingsBalance(now: now)
+        total = ledger.total(now: now)
         let unconfirmedSet = unconfirmedCaptureIDs(in: state, now: now)
         unconfirmed = unconfirmedSet
         // Lo que no suma como gasto (traspasos entre tus cuentas, capturados sin confirmar y capturados con pareja probable

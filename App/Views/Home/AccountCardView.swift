@@ -9,6 +9,8 @@ struct AccountCardView: View {
     let balances: [BankID: BalanceInfo]
     var links: [BankID: BankLinkInfo] = [:]
     let total: Int?
+    /// La cuenta remunerada de Revolut (estimada), ya dentro de `total`: «Todo» la enseña en su línea para que cuadre.
+    var savingsCents: Int? = nil
     let monthSpent: Int
     var portfolioSummary: PortfolioSummary? = nil
     var portfolioLastImport: Date? = nil
@@ -46,6 +48,7 @@ struct AccountCardView: View {
                     card: card,
                     balances: balances,
                     total: total,
+                    savingsCents: savingsCents,
                     portfolioSummary: portfolioSummary,
                     revealed: revealed
                 )
@@ -172,6 +175,7 @@ private struct CardFront: View {
     let card: AccountCard
     let balances: [BankID: BalanceInfo]
     let total: Int?
+    var savingsCents: Int? = nil
     let portfolioSummary: PortfolioSummary?
     let revealed: Bool
 
@@ -211,11 +215,27 @@ private struct CardFront: View {
             Spacer(minLength: 18)
             if card == .all {
                 banks
+                // La cuenta remunerada, en su línea: las columnas y esta línea suman la cifra grande.
+                if let savingsCents {
+                    HStack(spacing: 6) {
+                        BankLogo(bank: .rev, size: 16)
+                        Text("Remunerada · estimado")
+                            .titan(.meta)
+                            .foregroundStyle(secondary)
+                            .lineLimit(typeSize.isAccessibilitySize ? nil : 1)
+                        Spacer(minLength: 8)
+                        RollingAmount(cents: savingsCents, revealed: revealed)
+                            .titan(.meta)
+                            .modifier(RollStartVeil())
+                            .accessibilityIdentifier("card-savings")
+                    }
+                    .padding(.top, 10)
+                }
             } else if card == .investments {
                 investmentsFooter
             } else {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Total en los tres bancos")
+                    Text(savingsCents == nil ? "Total en los tres bancos" : "Total con la cuenta remunerada")
                         .titan(.meta)
                         .foregroundStyle(secondary)
                     if let total {
@@ -391,7 +411,7 @@ private struct CardFront: View {
             } else {
                 Text("Todo").titan(.cardTitle)
                 if !stacked { Spacer(minLength: 0) }
-                Text("3 cuentas").titan(.meta).foregroundStyle(secondary)
+                Text(savingsCents == nil ? "3 cuentas" : "4 cuentas").titan(.meta).foregroundStyle(secondary)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)

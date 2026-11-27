@@ -84,15 +84,44 @@ private let keywordRules: [KeywordRule] = {
                     // Tiendas físicas de Apple: sin entrada propia en el directorio (no hay dominio propio que dar).
                     "apple store", "apple retail"]),
     ]
+    return makeKeywordRules(chainLineLists + lists)
+}()
+
+/// Líneas de negocio de una cadena del directorio con otra categoría que la de la cadena: la gasolinera de un súper, la
+/// luz y el gas de una petrolera. No tienen dominio propio (nunca se inventa uno): el movimiento lleva el logo de la cadena
+/// y esta regla le da la categoría, por encima de la entrada del directorio (ver `spendingCategory`). Son también palabras
+/// clave de siempre, de varias palabras, así que se miran antes que las de una.
+private let chainLineLists: [(SpendingCategory, [String])] = [
+    (.transporte, ["carrefour gasolinera", "carrefour gasolineras", "gasolinera carrefour", "gasolineras carrefour",
+                   "carrefour e s", "e s carrefour", "carrefour estacion de servicio", "carrefour estacion servicio",
+                   "estacion de servicio carrefour", "estacion servicio carrefour", "carrefour combustible",
+                   "alcampo gasolinera", "alcampo gasolineras", "gasolinera alcampo", "gasolineras alcampo",
+                   "alcampo e s", "e s alcampo", "alcampo estacion de servicio", "alcampo estacion servicio",
+                   "estacion de servicio alcampo", "estacion servicio alcampo", "alcampo combustible"]),
+    // «Repsol Comercializadora de Electricidad y Gas»: la luz y el gas de casa, no la gasolinera («REPSOL ESTACION …»).
+    (.casa, ["repsol luz", "repsol electricidad", "repsol gas", "repsol comercializadora"]),
+]
+
+private let chainLineRules: [KeywordRule] = makeKeywordRules(chainLineLists)
+
+private func makeKeywordRules(_ lists: [(SpendingCategory, [String])]) -> [KeywordRule] {
     var rules: [KeywordRule] = []
     for (category, list) in lists {
         for entry in list { rules.append(KeywordRule(words: entry.split(separator: " ").map(String.init), category: category)) }
     }
-    // Las reglas de varias palabras se miran antes que las de una ("uber eats" antes que "uber").
+    // Las reglas de varias palabras se miran antes que las de una ("uber eats" antes que "uber"); a igual número, la que
+    // va antes en la lista.
     return rules.enumerated().sorted { a, b in
         a.element.words.count != b.element.words.count ? a.element.words.count > b.element.words.count : a.offset < b.offset
     }.map(\.element)
-}()
+}
+
+/// La categoría de una línea de negocio de la cadena («CARREFOUR GASOLINERA» -> transporte); nil si no hay.
+private func chainLineCategory(for merchant: String) -> SpendingCategory? {
+    let tokens = cleanMerchantName(merchant).split(separator: " ").map(String.init)
+    guard !tokens.isEmpty else { return nil }
+    return chainLineRules.first { containsRun(tokens, $0.words) }?.category
+}
 
 private func containsRun(_ tokens: [String], _ words: [String]) -> Bool {
     guard !words.isEmpty, words.count <= tokens.count else { return false }
@@ -149,7 +178,8 @@ public func spendingCategory(of movement: Movement, overrides: [String: Spending
     var directoryHit: SpendingCategory?
     if !key.isEmpty {
         if let domain = merchantDomain(for: merchant, isShop: movement.isShop) {
-            directoryHit = directoryCategory(forDomain: domain)
+            // La línea de negocio de la cadena (su gasolinera, su luz) manda sobre la categoría de la cadena.
+            directoryHit = chainLineCategory(for: merchant) ?? directoryCategory(forDomain: domain)
             if directoryHit == .suscripciones { return .suscripciones }
         }
         if subscriptionKeys.contains(key) { return directoryHit ?? .suscripciones }

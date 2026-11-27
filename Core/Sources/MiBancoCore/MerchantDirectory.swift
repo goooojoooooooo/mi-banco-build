@@ -128,6 +128,8 @@ private let ambiguousAliases: Set<String> = [
 ]
 
 /// Otros negocios que pueden empezar como una marca corta ("HM Hospitales", "BP Consulting", "Orange Garden").
+/// Una cadena con una de estas palabras en su texto real («DIA RETAIL ESPANA», «KFC RETAIL PARK») lleva un alias de
+/// varias palabras, que no es ambiguo.
 private let otherBusinessWords: Set<String> = [
     "hospital", "hospitales", "consulting", "consultoria", "garden", "jardin", "grill", "pub", "club", "lounge",
     "beach", "burger", "pizza", "sushi", "tapas", "studio", "estudio", "shop", "store", "retail", "bakery", "coffee",
@@ -200,7 +202,9 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("mercadona.es", ["Mercadona"]),
     ("lidl.es", ["Lidl", "Lidl Supermercados"]),
     ("carrefour.com", ["Carrefour", "Carrefour Express", "Carrefour Market", "Carrefour Bio"]),
-    ("dia.es", ["Dia", "Dia %", "Supermercados Dia", "Dia Supermercado", "Dia Supermercados", "Dia Market", "Dia & Go", "La Plaza de Dia"]),
+    ("dia.es", ["Dia", "Dia %", "Supermercados Dia", "Dia Supermercado", "Dia Supermercados", "Dia Market", "Dia & Go", "La Plaza de Dia",
+                // Razón social («DIA RETAIL ESPANA S.A.U.»): «retail» tras el alias ambiguo «Dia» no casaría.
+                "Dia Retail"]),
     ("aldi.es", ["Aldi", "Aldi Supermercados"]),
     ("alcampo.es", ["Alcampo", "Mi Alcampo"]),
     ("eroski.es", ["Eroski", "Eroski Center", "Eroski City"]),
@@ -250,20 +254,20 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("plenoil.es", ["Plenoil", "Plenergy"]),
     ("ballenoil.es", ["Ballenoil"]),
     ("petroprix.com", ["Petroprix"]),
-    ("gasolineras.carrefour.es", ["Carrefour Gasolinera", "Gasolinera Carrefour", "Carrefour E S", "E S Carrefour", "Carrefour Estacion Servicio", "Carrefour Combustible"]),
-    ("gasolineras.alcampo.es", ["Alcampo Gasolinera", "Gasolinera Alcampo", "Alcampo E S", "E S Alcampo", "Alcampo Estacion Servicio", "Alcampo Combustible"]),
+    // Las gasolineras de Carrefour y Alcampo no tienen dominio propio: llevan el logo de la cadena y su categoría sale de
+    // `chainLineRules` (Categories.swift) y del MCC 5541/5542.
     // Comida a domicilio y restaurantes
     ("glovoapp.com", ["Glovo", "Glovoapp"]),
     ("just-eat.es", ["Just Eat", "JustEat"]),
     ("mcdonalds.es", ["McDonald's", "Mc Donalds", "McDonalds"]),
     ("burgerking.es", ["Burger King", "BK Espana"]),
-    ("kfc.com", ["KFC", "KFC Espana", "KFC Restaurante", "Kentucky Fried Chicken"]),
+    ("kfc.com", ["KFC", "KFC Espana", "KFC Restaurante", "Kentucky Fried Chicken", "KFC Retail Park"]),
     ("telepizza.es", ["Telepizza"]),
     ("dominospizza.es", ["Domino's", "Dominos Pizza"]),
     ("starbucks.es", ["Starbucks"]),
     ("vips.es", ["Vips", "Vips Smart", "Vips Cafeteria", "Vips Restaurante"]),
     ("100montaditos.com", ["100 Montaditos", "Cien Montaditos"]),
-    ("thegoodburger.com", ["TGB", "The Good Burger", "TGB Burger", "TGB The Good Burger"]),
+    ("thegoodburger.com", ["TGB", "The Good Burger", "TGB Burger", "TGB The Good Burger", "TGB Retail Park"]),
     ("rodilla.es", ["Rodilla", "Artesanos Rodilla", "Rodilla Cafe", "Rodilla Cafeteria"]),
     ("fiveguys.es", ["Five Guys"]),
     ("goiko.com", ["Goiko", "Goiko Grill"]),
@@ -331,7 +335,7 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("massimodutti.com", ["Massimo Dutti"]),
     ("oysho.com", ["Oysho"]),
     ("lefties.com", ["Lefties"]),
-    ("mango.com", ["Mango"]),
+    ("mango.com", ["Mango", "Mango Retail Park"]),
     ("hm.com", ["H&M", "HM", "H and M", "Hennes Mauritz"]),
     ("uniqlo.com", ["Uniqlo"]),
     ("primark.com", ["Primark"]),
@@ -361,7 +365,7 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("shein.com", ["Shein"]),
     ("temu.com", ["Temu"]),
     ("zalando.es", ["Zalando"]),
-    ("nike.com", ["Nike"]),
+    ("nike.com", ["Nike", "Nike Retail"]), // «NIKE RETAIL B.V.», la entidad europea de Nike
     ("adidas.es", ["Adidas"]),
     ("druni.es", ["Druni"]),
     ("primor.eu", ["Primor"]),
@@ -390,7 +394,7 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("octopusenergy.es", ["Octopus Energy"]),
     ("holaluz.com", ["Holaluz", "Hola Luz"]),
     ("canaldeisabelsegunda.es", ["Canal de Isabel II", "Canal Isabel II", "Canal de Isabel 2", "Canal de Isabel"]),
-    ("repsolluzygas.es", ["Repsol Luz", "Repsol Luz y Gas"]),
+    // Repsol Luz y Gas no tiene dominio propio: logo de repsol.es y categoría por `chainLineRules` (Categories.swift).
     ("aiguesdebarcelona.cat", ["Aigues de Barcelona", "Agbar"]),
     ("correos.es", ["Correos"]),
     ("lowi.es", ["Lowi"]),
@@ -415,7 +419,7 @@ let merchantDomainCategories: [String: SpendingCategory] = [
     "alsa.es": .transporte, "metromadrid.es": .transporte, "tmb.cat": .transporte, "blablacar.es": .transporte,
     "free-now.com": .transporte, "repsol.es": .transporte, "moeveglobal.com": .transporte, "bp.com": .transporte,
     "shell.es": .transporte, "galp.com": .transporte, "plenoil.es": .transporte, "ballenoil.es": .transporte,
-    "petroprix.com": .transporte, "gasolineras.carrefour.es": .transporte, "gasolineras.alcampo.es": .transporte,
+    "petroprix.com": .transporte,
     // Viajes
     "iberia.com": .viajes, "vueling.com": .viajes, "ryanair.com": .viajes, "aireuropa.com": .viajes,
     "easyjet.com": .viajes, "volotea.com": .viajes, "bintercanarias.com": .viajes,
@@ -443,7 +447,7 @@ let merchantDomainCategories: [String: SpendingCategory] = [
     "digimobil.es": .casa, "pepephone.com": .casa, "lowi.es": .casa, "o2online.es": .casa, "simyo.es": .casa,
     "jazztel.com": .casa, "finetwork.com": .casa, "endesa.com": .casa, "iberdrola.es": .casa, "naturgy.es": .casa,
     "totalenergies.es": .casa, "octopusenergy.es": .casa, "holaluz.com": .casa, "canaldeisabelsegunda.es": .casa,
-    "repsolluzygas.es": .casa, "aiguesdebarcelona.cat": .casa, "idealista.com": .casa,
+    "aiguesdebarcelona.cat": .casa, "idealista.com": .casa,
     // Compras (tecnología, videojuegos, ropa, deporte, hogar y bricolaje)
     "amazon.es": .compras, "game.es": .compras, "mediamarkt.es": .compras, "pccomponentes.com": .compras,
     "fnac.es": .compras, "es.webuy.com": .compras, "worten.es": .compras, "ktuin.com": .compras,

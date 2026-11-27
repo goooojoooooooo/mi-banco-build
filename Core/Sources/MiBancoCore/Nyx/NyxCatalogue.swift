@@ -268,7 +268,7 @@ public func nyxMessage(for o: NyxObservation, now: Date, calendar: Calendar) -> 
         if isPast {
             // Un cobro de un día ya pasado se cuenta en pasado y no ofrece traspaso: el saldo guardado ya no vale.
             if let closedDay, let bank = f.bank?.displayName {
-                neutral = "\(closedDay) te cobraron algo en \(bank) y la cuenta se quedó corta."
+                neutral = "\(closedDay) te cobraron algo en \(bank) y no cabía en la cuenta."
             } else if let closedDay {
                 neutral = "\(closedDay) tuviste un cobro que no cabía en la cuenta."
             } else {
@@ -286,7 +286,7 @@ public func nyxMessage(for o: NyxObservation, now: Date, calendar: Calendar) -> 
             if let dayDate = f.day, let rawMerchant, let bank = f.bank?.displayName, let cents = f.cents {
                 let openDay = nyxDayPhrase(dayDate, now: now, calendar: calendar)
                 open = [.text("\(openDay) te cobraron \(clippedName(rawMerchant)) ("), .amount(cents),
-                        .text(") en \(bank) y la cuenta se quedó corta.")]
+                        .text(") en \(bank) y no cabía en la cuenta.")]
             } else {
                 open = [.text(neutral)]
             }
@@ -309,14 +309,14 @@ public func nyxMessage(for o: NyxObservation, now: Date, calendar: Calendar) -> 
         let closed: String
         if let closedDay, let rawMerchant, let bank = f.bank?.displayName {
             closed = isPast
-                ? "\(closedDay) te cobraron \(clippedName(rawMerchant)) en \(bank) y la cuenta se quedó corta."
+                ? "\(closedDay) te cobraron \(clippedName(rawMerchant)) en \(bank) y no cabía en la cuenta."
                 : "\(closedDay) te cobran \(clippedName(rawMerchant)) en \(bank) y la cuenta se queda corta."
         } else {
             closed = neutral
         }
         let actions: [NyxAction] = isPast ? [] : (f.bank.map { [.prepareTransfer(from: f.otherBank, to: $0, cents: f.suggestedCents)] } ?? [])
         return build(
-            title: "Un cobro que no cabe",
+            title: isPast ? "Un cobro que no cabía" : "Un cobro que no cabe",
             open: open,
             closed: closed,
             neutral: neutral,

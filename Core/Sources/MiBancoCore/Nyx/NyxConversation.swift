@@ -42,13 +42,12 @@ private let nyxNewQuestionCues: Set<String> = [
     "saldo", "saldos", "presupuesto", "presupuestos", "ingresos", "traspasos", "inversiones", "cartera", "resumen",
 ]
 
-/// «pago» y «pagos» no están: se dicen igual en «¿has visto algún pago raro?» o «¿llegan los avisos de los pagos?».
 /// Palabras de consulta financiera normal: evitan desviar preguntas de saldos, gasto o presupuesto a preguntas propias de Nyx.
 private let nyxFinancialQuestionCues: Set<String> = [
     "cuanto", "cuanta", "cuantos", "cuantas",
     "saldo", "saldos", "dinero",
     "gaste", "gastado", "gasto", "gastos", "gastar",
-    "pague", "pagado", "llevo",
+    "pague", "pagado", "pago", "pagos", "llevo",
     "cobre", "cobrado", "ingreso", "ingresos", "nomina", "sueldo",
     "presupuesto", "presupuestos", "suscripcion", "suscripciones",
     "traspaso", "traspasos", "inversion", "inversiones", "cartera",
@@ -62,8 +61,12 @@ private func nyxFoldedTokens(_ text: String) -> (rawFolded: String, tokens: [Str
     return (rawFolded, tokens, joined)
 }
 
+/// Frases propias de Nyx que llevan «pago(s)» pero no son una consulta de dinero: la barrera no se aplica a ellas.
+private let nyxOwnPaymentPhrases = [" pago raro ", " pagos raros ", " avisos de los pagos ", " avisos de pagos ", " avisos de mis pagos "]
+
 private func nyxOwnQuestion(tokens: [String], joined: String) -> NyxQuestion? {
-    guard !tokens.contains(where: { nyxFinancialQuestionCues.contains($0) }) else { return nil }
+    let ownPhrase = nyxOwnPaymentPhrases.contains { joined.contains($0) }
+    guard ownPhrase || !tokens.contains(where: { nyxFinancialQuestionCues.contains($0) }) else { return nil }
     if joined.contains(" has visto ") || joined.contains(" me he perdido ") || tokens.contains("novedades") {
         return .seen
     }
@@ -71,6 +74,10 @@ private func nyxOwnQuestion(tokens: [String], joined: String) -> NyxQuestion? {
         || joined.contains(" en el banco conectad")
         || joined.contains(" de la cuenta conectad")
         || joined.contains(" del banco conectad")
+        || joined.contains(" en las cuentas conectad")
+        || joined.contains(" en los bancos conectad")
+        || joined.contains(" de las cuentas conectad")
+        || joined.contains(" de los bancos conectad")
     if tokens.contains(where: { $0.hasPrefix("funciona") })
         || joined.contains(" va todo bien con la app ")
         || joined.contains(" todo bien con la app ")

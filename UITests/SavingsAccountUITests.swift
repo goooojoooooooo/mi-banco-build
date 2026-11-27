@@ -128,4 +128,57 @@ final class SavingsAccountUITests: XCTestCase {
         let expected = eurosLabel(banksTotal + 600_000)
         XCTAssertTrue(waitUntil(8) { hero.label == expected }, "El total no sigue a la corrección: \(hero.label), se esperaba \(expected)")
     }
+
+    /// Ronda 1: la tarjeta «Todo» enseña la remunerada en su línea (las columnas y esa línea suman la cifra grande) y
+    /// VoiceOver cuenta cuatro cuentas.
+    func testTodoCardShowsSavingsLine() {
+        let app = launch([])
+        let hero = any(app, "card-hero-all")
+        XCTAssertTrue(hero.waitForExistence(timeout: 15), "Falta la cifra grande de «Todo»")
+        let line = any(app, "card-savings")
+        XCTAssertTrue(line.waitForExistence(timeout: 8), "La tarjeta «Todo» no enseña la cuenta remunerada")
+        XCTAssertTrue(waitUntil(8) { line.label == self.eurosLabel(510_000) }, "La línea de la remunerada no dice su saldo: \(line.label)")
+        XCTAssertTrue(waitUntil(8) { hero.label == self.eurosLabel(self.banksTotal + 510_000) },
+                      "La cifra grande no es la suma de las columnas y la remunerada: \(hero.label)")
+        let label = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", "Remunerada · estimado")).firstMatch
+        XCTAssertTrue(label.exists, "La línea no dice «estimado»")
+        let carousel = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "en cuatro cuentas")).firstMatch
+        XCTAssertTrue(carousel.waitForExistence(timeout: 5), "VoiceOver no cuenta cuatro cuentas en «Todo»")
+    }
+
+    /// Ronda 1: quitar la remunerada se confirma dentro de la hoja; después la fila vuelve a ofrecer ponerla y el total ya
+    /// no la suma.
+    func testRemovingTheSavingsAccount() {
+        let app = launch(["-MiBancoDemoScreen", "ajustes"])
+        savingsRow(app).tap()
+        let remove = app.buttons["savings-remove"]
+        XCTAssertTrue(remove.waitForExistence(timeout: 5), "Falta «Quitar cuenta remunerada»")
+        remove.tap()
+        let confirm = app.buttons["savings-remove-confirm"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5), "Quitar no pide confirmación en la hoja")
+        confirm.tap()
+        let row = app.buttons["settings-savings"]
+        XCTAssertTrue(waitUntil(6) { row.exists && row.label.contains("Añadir cuenta remunerada") },
+                      "La fila no vuelve a ofrecer ponerla: \(row.label)")
+        app.tabBars.buttons["Inicio"].tap()
+        let hero = any(app, "card-hero-all")
+        XCTAssertTrue(hero.waitForExistence(timeout: 8), "Falta la cifra grande de «Todo»")
+        XCTAssertTrue(waitUntil(8) { hero.label == self.eurosLabel(self.banksTotal) }, "El total sigue sumando la remunerada: \(hero.label)")
+        XCTAssertFalse(any(app, "card-savings").exists, "La tarjeta «Todo» sigue enseñando la remunerada")
+    }
+
+    /// Ronda 1: con el ojo cerrado el campo del interés dice «interés oculto» y el interés se puede quitar igual.
+    func testEyeClosedRateCanBeCleared() {
+        let app = launch(["-MiBancoDemoScreen", "ajustes", "-MiBancoDemoPrivate"])
+        let row = savingsRow(app)
+        XCTAssertTrue(row.label.contains("anual"), "La fila no enseña que hay interés: \(row.label)")
+        row.tap()
+        let rate = app.textFields["savings-rate-field"]
+        XCTAssertTrue(rate.waitForExistence(timeout: 5), "No se abrió la hoja de la cuenta remunerada")
+        XCTAssertEqual(rate.value as? String, "interés oculto", "VoiceOver no dice que es el interés")
+        app.buttons["savings-no-rate"].tap()
+        app.buttons["savings-save"].tap()
+        XCTAssertTrue(waitUntil(6) { row.exists && !row.label.contains("anual") }, "El interés no se quitó: \(row.label)")
+        XCTAssertNil(row.label.rangeOfCharacter(from: .decimalDigits), "Con el ojo cerrado la fila lleva cifras: \(row.label)")
+    }
 }

@@ -93,6 +93,9 @@ public func ownTransferIDs(in movements: [Movement]) -> Set<UUID> {
         ids.insert(pair.incomeID)
     }
     for m in movements where m.ownTransfer == true { ids.insert(m.id) }
+    // Los traspasos con la cuenta remunerada de Revolut también son entre tus cuentas (salvo que el dueño diga que no):
+    // ni gasto, ni ingreso, ni presupuesto, ni aviso de pago grande.
+    for m in movements where m.ownTransfer != false && isSavingsTransfer(m) { ids.insert(m.id) }
     return ids
 }
 

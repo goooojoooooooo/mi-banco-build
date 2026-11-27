@@ -352,6 +352,33 @@ final class LedgerModel {
     /// Pone o corrige la cuenta remunerada: el saldo de ahora pasa a ser la base (Plan 12).
     func setSavings(cents: Int, annualRateBasisPoints: Int?) throws {
         try mutate { $0.setSavings(balanceCents: cents, annualRateBasisPoints: annualRateBasisPoints, now: clock) }
+        refreshRevolutForSavingsBase()
+    }
+
+    /// Deja de seguir la cuenta remunerada.
+    func removeSavings() throws {
+        try mutate { $0.removeSavings() }
+    }
+
+    /// Tras poner la base, una consulta a Revolut (si está conectado): lo que traiga ya estaba en el saldo que puso el dueño
+    /// (`Ledger.noteSavingsRefresh`), así una fila de solo día del mismo día no se cuenta dos veces. Si ya había una consulta
+    /// en marcha, se espera a que acabe (como mucho un minuto). Solo lee: no mueve dinero.
+    private func refreshRevolutForSavingsBase() {
+        #if DEBUG
+        if DemoMode.isActive { return }
+        #endif
+        guard state.links[.rev] != nil else { return }
+        Task { [weak self] in
+            _ = await BankSync.shared.refresh(trigger: .manual, only: .rev)
+            var waited = 0
+            while BankSyncStatus.shared.running.contains(.rev), waited < 60 {
+                try? await Task.sleep(for: .seconds(1))
+                waited += 1
+            }
+            try? self?.mutate { ledger in
+                if let syncedAt = ledger.state.links[.rev]?.lastSuccessAt { ledger.noteSavingsRefresh(syncedAt: syncedAt) }
+            }
+        }
     }
 
     func deleteUnread(_ id: UUID) throws {

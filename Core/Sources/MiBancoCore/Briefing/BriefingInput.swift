@@ -100,12 +100,14 @@ public struct BriefingInput: Equatable, Sendable {
     public var freeMoney: FreeMoney?
     /// Bancos del resumen sin saldo conocido: no entran en el total ni en su cambio, y el texto lo dice.
     public var totalLeftOut: [BankID]
+    /// La cuenta remunerada de Revolut (estimada), ya dentro de `totalCents`; nil si no hay.
+    public var savingsCents: Int?
 
     public init(now: Date, since: Date, isFirst: Bool, banks: [BankLine] = [], totalCents: Int? = nil, totalChangeCents: Int = 0,
                 income: [MovementDigest] = [], payments: [MovementDigest] = [], transfers: [TransferDigest] = [],
                 upcoming: [UpcomingCharge] = [], expected: ExpectedIncome? = nil, attention: [AttentionItem] = [],
                 month: MonthDigest? = nil, investments: PortfolioSummary? = nil, shortfalls: [Shortfall] = [],
-                budgetTip: BudgetTip? = nil, freeMoney: FreeMoney? = nil, totalLeftOut: [BankID] = []) {
+                budgetTip: BudgetTip? = nil, freeMoney: FreeMoney? = nil, totalLeftOut: [BankID] = [], savingsCents: Int? = nil) {
         self.now = now
         self.since = since
         self.isFirst = isFirst
@@ -124,6 +126,7 @@ public struct BriefingInput: Equatable, Sendable {
         self.budgetTip = budgetTip
         self.freeMoney = freeMoney
         self.totalLeftOut = totalLeftOut
+        self.savingsCents = savingsCents
     }
 }
 
@@ -237,8 +240,14 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
         banks.append(BankLine(bank: bank, cents: balance?.cents, estimated: balance?.estimated ?? false,
                               changeCents: mine.filter { !doubleCounted.contains($0.id) }.reduce(0) { $0 + $1.amountCents }))
     }
-    // El cambio total solo suma bancos con saldo conocido; los que quedan fuera se dicen junto al total.
-    let totalChange = banks.filter { $0.cents != nil }.reduce(0) { $0 + $1.changeCents }
+    // El cambio total solo suma bancos con saldo conocido; los que quedan fuera se dicen junto al total. Con la cuenta
+    // remunerada puesta, un traspaso con ella no cambia el total: lo que sale de Revolut entra en la remunerada.
+    // Se anula exactamente lo que esos traspasos movieron en el cambio de Revolut (con el mismo filtro de duplicados).
+    let savings = ledger.savingsBalance(now: now)
+    let savingsChange = savings == nil || ledger.balance(.rev) == nil ? 0 : period
+        .filter { $0.bank == .rev && isSavingsTransfer($0) && $0.ownTransfer != false && !doubleCounted.contains($0.id) }
+        .reduce(0) { $0 - $1.amountCents }
+    let totalChange = banks.filter { $0.cents != nil }.reduce(0) { $0 + $1.changeCents } + savingsChange
     // También los bancos conectados sin saldo conocido que no tuvieron ningún movimiento en el periodo.
     let listedWithoutBalance = Set(banks.filter { $0.cents == nil }.map(\.bank))
     let linkedWithoutBalance = Set(state.links.keys.filter { ledger.balance($0) == nil })
@@ -312,9 +321,9 @@ public func briefingInput(state: LedgerState, portfolio: Portfolio?, book: Accou
     let free = freeMoney(balances: balances, floors: book.floors, banks: [.rev, .ima], pending: allCharges, now: now,
                          calendar: calendar)
 
-    return BriefingInput(now: now, since: since, isFirst: isFirst, banks: banks, totalCents: ledger.total(),
+    return BriefingInput(now: now, since: since, isFirst: isFirst, banks: banks, totalCents: ledger.total(now: now),
                          totalChangeCents: totalChange, income: income, payments: payments, transfers: transfers,
                          upcoming: upcoming, expected: expected, attention: attention, month: month,
                          investments: portfolio.flatMap { portfolioSummary($0, now: now, calendar: calendar) }, shortfalls: short,
-                         budgetTip: budgetTip, freeMoney: free, totalLeftOut: leftOut)
+                         budgetTip: budgetTip, freeMoney: free, totalLeftOut: leftOut, savingsCents: savings?.cents)
 }

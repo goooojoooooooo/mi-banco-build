@@ -26,6 +26,8 @@ struct MaskedAmountTextField: View {
     let editing: Bool
     /// Lo que enseña con el ojo cerrado y sin editar (el interés de la cuenta remunerada usa «•,•• %»).
     var mask: String = maskedFieldMask
+    /// Lo que dice VoiceOver con el ojo cerrado («interés oculto» en el campo del interés).
+    var hiddenSpoken: String = "importe oculto"
 
     @State private var edit = MaskedFieldEditing()
 
@@ -38,7 +40,7 @@ struct MaskedAmountTextField: View {
             .animation(nil, value: hidden)
             .animation(nil, value: editing)
             .privacySensitive()
-            .accessibilityValue(edit.spoken(stored: text, hidden: hidden, editing: editing)
+            .accessibilityValue(edit.spoken(stored: text, hidden: hidden, editing: editing, hiddenText: hiddenSpoken)
                 + drawnAmountForTests(shown.wrappedValue))
             .onChange(of: editing, initial: true) { _, now in
                 if now {

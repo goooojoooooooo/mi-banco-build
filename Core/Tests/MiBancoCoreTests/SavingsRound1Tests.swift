@@ -110,7 +110,7 @@ private func savings(_ base: Date, _ movements: [Movement], refreshedAt: Date? =
         #expect(l.total(now: nov(10, 20)) == 534_020)
 
         // El asistente dice el mismo total y la remunerada en su línea.
-        let answer = answerIntent(.balances(nil), state: l.state, portfolio: nil, book: AccountBook(), now: nov(10, 20), calendar: madrid)
+        let answer = answerIntent(.balances(bank: nil), state: l.state, portfolio: nil, book: AccountBook(), now: nov(10, 20), calendar: madrid)
         let totalLine = try #require(answer.lines.first { $0.id == "bal-total" })
         #expect(totalLine.parts.contains(.amount(534_020)))
         let savingsLine = try #require(answer.lines.first { $0.id == "bal-savings" })

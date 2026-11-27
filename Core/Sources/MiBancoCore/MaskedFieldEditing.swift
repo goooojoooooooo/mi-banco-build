@@ -59,10 +59,11 @@ public struct MaskedFieldEditing: Equatable, Sendable {
         return stored.isEmpty ? .text("") : .mask
     }
 
-    /// Lo que dice VoiceOver: con el ojo cerrado, «importe oculto» salvo lo que se está tecleando.
-    public func spoken(stored: String, hidden: Bool, editing: Bool) -> String {
+    /// Lo que dice VoiceOver: con el ojo cerrado, «importe oculto» (o `hiddenText`, p. ej. «interés oculto») salvo lo que se
+    /// está tecleando.
+    public func spoken(stored: String, hidden: Bool, editing: Bool, hiddenText: String = "importe oculto") -> String {
         guard hidden else { return stored }
         if editing, editsHidden, !draft.isEmpty { return draft }
-        return "importe oculto"
+        return hiddenText
     }
 }

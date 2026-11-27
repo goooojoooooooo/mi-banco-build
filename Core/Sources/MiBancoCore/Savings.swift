@@ -11,11 +11,16 @@ public struct SavingsAccount: Codable, Equatable, Sendable {
     public var baselineAt: Date
     /// Interés anual en puntos básicos (200 = 2,00 %). nil = sin interés (no se escribe).
     public var annualRateBasisPoints: Int?
+    /// Hora de la consulta de Revolut que siguió a poner la base (`Ledger.noteSavingsRefresh`): las filas de solo día del
+    /// día de la base que llegaron en ella o antes ya estaban dentro del saldo que puso el dueño. nil = no hubo esa consulta
+    /// (no se escribe): cuenta la hora de la base.
+    public var coveredThrough: Date?
 
-    public init(baselineCents: Int, baselineAt: Date, annualRateBasisPoints: Int? = nil) {
+    public init(baselineCents: Int, baselineAt: Date, annualRateBasisPoints: Int? = nil, coveredThrough: Date? = nil) {
         self.baselineCents = baselineCents
         self.baselineAt = baselineAt
         self.annualRateBasisPoints = annualRateBasisPoints
+        self.coveredThrough = coveredThrough
     }
 }
 
@@ -83,12 +88,14 @@ public func savingsInterestCents(baselineCents: Int, baselineAt: Date, flows: [S
 }
 
 /// Los movimientos que mueven la remunerada, ya sin duplicados: los del libro tal como quedan tras fusionar las fuentes
-/// (un aviso enlazado con su registro es UN movimiento; lo borrado ya no está), sin los «no es mío», sin los anteriores a
-/// la base y sin las copias que la app ya reconoce como el mismo dinero: el pendiente que tiene su apuntado
-/// (`twinnedPending`), el capturado sin confirmar (`unconfirmedCaptureIDs`) y el capturado sin enlazar que tiene su fila del
-/// banco o del extracto (mismo importe con signo, a un día de Madrid o menos; uno a uno).
-public func countedSavingsTransfers(in state: LedgerState, since baselineAt: Date, now: Date) -> [Movement] {
-    let candidates = state.movements.filter { isSavingsTransfer($0) && !$0.flaggedNotMine && $0.date > baselineAt }
+/// (un aviso enlazado con su registro es UN movimiento; lo borrado ya no está), sin los «no es mío» ni los que el dueño dice
+/// que no son la remunerada (`ownTransfer == false`), y sin las copias que la app ya reconoce como el mismo dinero: el
+/// pendiente que tiene su apuntado (`twinnedPending`), el capturado sin confirmar (`unconfirmedCaptureIDs`) y la fila del
+/// banco o del extracto de un capturado sin enlazar (mismo importe con signo, a un día de Madrid o menos; uno a uno): el par
+/// lo representa el capturado, que trae la hora exacta. Primero se quitan las copias, sobre TODOS los traspasos, y solo
+/// después se mira la base (`isAfterSavingsBaseline`): un aviso de antes de la base se lleva su fila con él.
+public func countedSavingsTransfers(in state: LedgerState, account: SavingsAccount, now: Date) -> [Movement] {
+    let candidates = state.movements.filter { isSavingsTransfer($0) && !$0.flaggedNotMine && $0.ownTransfer != false }
     guard !candidates.isEmpty else { return [] }
     // Lectura neutra: todo apuntado del banco cuenta como visto, así cada pendiente con su apuntado se empareja.
     let neutral = ManualBalance(cents: 0, setAt: .distantFuture, origin: .bank)
@@ -108,10 +115,27 @@ public func countedSavingsTransfers(in state: LedgerState, since baselineAt: Dat
         }.min { abs($0.date.timeIntervalSince(capture.date)) < abs($1.date.timeIntervalSince(capture.date)) }
         if let twin {
             usedRows.insert(twin.id)
-            skip.insert(capture.id)
+            skip.insert(twin.id)
         }
     }
-    return candidates.filter { !skip.contains($0.id) }
+    return candidates.filter { !skip.contains($0.id) && isAfterSavingsBaseline($0, account) }
+}
+
+/// ¿Es este traspaso posterior a la base (no estaba ya en el saldo que puso el dueño)?
+/// - Con hora (aviso, Cartera, extracto, o fila del banco enlazada a un aviso): si su hora es posterior a la de la base.
+/// - Fila de solo día (Enable Banking, a mediodía de Madrid): por días de Madrid. Un día anterior al de la base ya estaba
+///   dentro; uno posterior, no. Del MISMO día solo cuenta si se vio por primera vez (`importedAt`, o `linkedAt` de un
+///   capturado) después de lo que la base ya incluye: la hora de la base o, si la hubo, la consulta de Revolut que siguió a
+///   ponerla (`coveredThrough`), que trae lo que se hizo antes de la base. Sin esa consulta, una fila del día de la base que
+///   llega después se toma por posterior.
+func isAfterSavingsBaseline(_ m: Movement, _ account: SavingsAccount) -> Bool {
+    guard m.dayOnly else { return m.date > account.baselineAt }
+    let day = madridCalendar.startOfDay(for: m.date)
+    let baseDay = madridCalendar.startOfDay(for: account.baselineAt)
+    if day != baseDay { return day > baseDay }
+    let firstSeen = m.source.isBankSourced ? m.importedAt : (m.linkedAt ?? m.importedAt)
+    guard let firstSeen else { return false }
+    return firstSeen > max(account.baselineAt, account.coveredThrough ?? account.baselineAt)
 }
 
 extension Ledger {
@@ -121,11 +145,28 @@ extension Ledger {
         state.savings = SavingsAccount(baselineCents: balanceCents, baselineAt: now, annualRateBasisPoints: rate)
     }
 
+    /// Deja de seguir la cuenta remunerada: el libro queda como si nunca se hubiera puesto.
+    public mutating func removeSavings() {
+        state.savings = nil
+    }
+
+    /// La consulta de Revolut que se pide al guardar la base terminó bien a la hora `syncedAt`: lo que trajo ya estaba en el
+    /// saldo que puso el dueño. Solo vale la primera, y solo si llega en los 15 minutos siguientes a la base (otra consulta
+    /// más tarde podría traer traspasos hechos después de la base).
+    public mutating func noteSavingsRefresh(syncedAt: Date) {
+        guard var account = state.savings, account.coveredThrough == nil, syncedAt >= account.baselineAt,
+              syncedAt.timeIntervalSince(account.baselineAt) <= Self.savingsRefreshWindow else { return }
+        account.coveredThrough = syncedAt
+        state.savings = account
+    }
+
+    static let savingsRefreshWindow: TimeInterval = 15 * 60
+
     /// Lo que vale ahora la cuenta remunerada; nil si el dueño no la ha puesto.
     public func savingsBalance(now: Date) -> SavingsBalance? {
         guard let account = state.savings else { return nil }
         // Un traspaso que SALE de la cuenta de Revolut (pago) ENTRA en la remunerada, y al revés.
-        let flows = countedSavingsTransfers(in: state, since: account.baselineAt, now: now)
+        let flows = countedSavingsTransfers(in: state, account: account, now: now)
             .map { SavingsFlow(date: $0.date, cents: -$0.amountCents) }
         let transfers = flows.reduce(0) { $0 + $1.cents }
         let interest = account.annualRateBasisPoints.map {
@@ -137,17 +178,19 @@ extension Ledger {
                               baselineAt: account.baselineAt)
     }
 
-    /// El total de Inicio: los saldos de los bancos (`total()`) más la cuenta remunerada, si la hay.
+    /// EL total (la única fuente para Inicio, la Live Activity, el asistente y el resumen): los saldos de los bancos
+    /// (`banksTotal()`) más la cuenta remunerada, si la hay. Con solo la remunerada puesta, es ella.
     public func total(now: Date) -> Int? {
-        let banks = total()
+        let banks = banksTotal()
         guard let savings = savingsBalance(now: now)?.cents else { return banks }
         return (banks ?? 0) + savings
     }
 }
 
-/// Texto de un campo de interés anual -> puntos básicos («2,00» = 200), o nil si no se entiende o pasa del 100 %.
-/// Acepta el «%» y 0, 1 o 2 decimales tras `,` o `.`, como los saldos.
+/// Texto de un campo de interés anual -> puntos básicos («2,00» = 200), o nil si no se entiende, pasa del 100 % o lleva
+/// «€». Acepta el «%» y 0, 1 o 2 decimales tras `,` o `.`, como los saldos.
 public func parseAnnualRateInput(_ text: String) -> Int? {
+    guard !text.contains("€") else { return nil }
     let clean = text.filter { $0 != "%" }
     guard let bp = parseBalanceInput(clean), (0...10_000).contains(bp) else { return nil }
     return bp

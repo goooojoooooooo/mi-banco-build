@@ -17,6 +17,8 @@ struct SavingsEditorSheet: View {
     @State private var rateText = ""
     @State private var error: String?
     @State private var errorTick = 0
+    /// «Quitar cuenta remunerada» pide confirmarlo aquí mismo, dentro de la hoja (ninguna otra presentación, U55).
+    @State private var confirmingRemoval = false
     @FocusState private var focused: Field?
 
     var body: some View {
@@ -45,13 +47,29 @@ struct SavingsEditorSheet: View {
             }
             field(title: "Interés anual (opcional)") {
                 MaskedAmountTextField(placeholder: "2,00 %", text: $rateText, hidden: hidden, editing: focused == .rate,
-                                      mask: "•,••\u{00A0}%")
+                                      mask: "•,••\u{00A0}%", hiddenSpoken: "interés oculto")
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
                     .focused($focused, equals: .rate)
                     .onSubmit(save)
                     .accessibilityLabel("Interés anual (opcional)")
                     .accessibilityIdentifier("savings-rate-field")
+            }
+            // Quitar el interés también con el ojo cerrado (vaciar el campo así deja el valor de antes).
+            if !rateText.isEmpty {
+                Button {
+                    focused = nil
+                    rateText = ""
+                } label: {
+                    Text("Sin interés")
+                        .titan(.meta)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Theme.label2)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("savings-no-rate")
             }
 
             if let error {
@@ -62,32 +80,15 @@ struct SavingsEditorSheet: View {
                     .transition(.opacity)
             }
 
-            VStack(spacing: 10) {
-                Button(action: save) {
-                    Text("Guardar")
-                        .titan(.option)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(Theme.onTileSelected)
-                        .frame(maxWidth: .infinity, minHeight: 50)
-                        .background(Theme.tileSelected, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
-                .accessibilityIdentifier("savings-save")
-
-                Button(action: onClose) {
-                    Text("Cancelar")
-                        .titan(.option)
-                        .foregroundStyle(Theme.label)
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Theme.raised, in: Capsule())
-                        .contentShape(Capsule())
-                }
-                .buttonStyle(.pressable)
+            if confirmingRemoval {
+                removalConfirmation
+            } else {
+                actions
             }
             Spacer(minLength: 0)
         }
         .animation(motion.fade, value: error)
+        .animation(motion.fade, value: confirmingRemoval)
         .padding(.horizontal, Theme.Space.gutter)
         .padding(.vertical, 16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -106,8 +107,94 @@ struct SavingsEditorSheet: View {
             withTransaction(still) { focused = nil }
         }
         .sensoryFeedback(Haptics.error, trigger: errorTick)
-        .presentationDetents([.medium, .large])
+        .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+    }
+
+    /// Guardar, cancelar y, si la cuenta ya está puesta, quitarla.
+    private var actions: some View {
+        VStack(spacing: 10) {
+            Button(action: save) {
+                Text("Guardar")
+                    .titan(.option)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.onTileSelected)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Theme.tileSelected, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("savings-save")
+
+            Button(action: onClose) {
+                Text("Cancelar")
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Theme.raised, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+
+            if model.state.savings != nil {
+                Button {
+                    focused = nil
+                    confirmingRemoval = true
+                } label: {
+                    Text("Quitar cuenta remunerada")
+                        .titan(.option)
+                        .foregroundStyle(Theme.warning)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("savings-remove")
+            }
+        }
+    }
+
+    /// La confirmación de quitarla, en la propia hoja.
+    private var removalConfirmation: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Se deja de seguir aquí y sale del total. Tus movimientos se quedan.")
+                .titan(.callout)
+                .foregroundStyle(Theme.label)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(role: .destructive, action: remove) {
+                Text("Quitar")
+                    .titan(.option)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.canvas)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(Theme.warning, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("savings-remove-confirm")
+            Button {
+                confirmingRemoval = false
+            } label: {
+                Text("No quitar")
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(Theme.raised, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+        }
+        .transition(.opacity)
+    }
+
+    private func remove() {
+        do {
+            try model.removeSavings()
+            onClose()
+        } catch {
+            confirmingRemoval = false
+            self.error = "No se pudo guardar. Inténtalo de nuevo."
+            errorTick += 1
+        }
     }
 
     private func field<Content: View>(title: String, @ViewBuilder content: () -> Content) -> some View {

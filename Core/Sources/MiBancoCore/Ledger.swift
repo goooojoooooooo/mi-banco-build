@@ -801,7 +801,9 @@ public struct Ledger: Sendable {
         return true
     }
 
-    public func total() -> Int? {
+    /// Solo los saldos de los tres bancos. El total que se ENSEÑA (Inicio, Live Activity, asistente, resumen) es
+    /// `total(now:)`, que suma también la cuenta remunerada: no uses este para eso.
+    public func banksTotal() -> Int? {
         let known = BankID.allCases.compactMap { balance($0)?.cents }
         return known.isEmpty ? nil : known.reduce(0, +)
     }

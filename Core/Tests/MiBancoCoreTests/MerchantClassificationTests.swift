@@ -258,6 +258,9 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         #expect(classify(pay("Plataforma Rara", isShop: true, mcc: "4899"), subscriptions: ["plataforma rara"]) == .suscripciones)
         // Netflix con 4899 sigue en Suscripciones.
         #expect(classify(pay("NETFLIX.COM", isShop: true, mcc: "4899")) == .suscripciones)
+        // La entrada del directorio gana a la clave recurrente aunque el MCC apunte a OTRA categoría.
+        #expect(classify(pay("Movistar", isShop: true, mcc: "5812"), subscriptions: [normalizeMerchant("Movistar")]) == .casa)
+        #expect(classify(pay("Basic-Fit", isShop: true, mcc: "5411"), subscriptions: [normalizeMerchant("Basic-Fit")]) == .ocio)
     }
 
     @Test func appleStoreEsUnaTiendaYAppleBillUnaSuscripcion() {
@@ -266,6 +269,10 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         #expect(classify(pay("APPLE.COM/BILL", isShop: true)) == .suscripciones)
         #expect(classify(pay("APPLE.COM/BILL", isShop: true, mcc: "5732")) == .suscripciones)
         #expect(classify(pay("App Store", isShop: true, mcc: "5735")) == .suscripciones)
+        // Sin dominio inventado: «Apple Store» se resuelve por palabras clave (y por MCC), no por una entrada del directorio.
+        #expect(!merchantDirectoryDomains.contains("apple-store.es"))
+        #expect(classify(pay("APPLE STORE PASEO DE GRACIA", isShop: true)) == .compras)
+        #expect(classify(pay("APPLE RETAIL", isShop: true)) == .compras)
     }
 
     @Test func mccSePropagaDesdeEnableBankingYTradeRepublicYSeConservaAlReconciliar() throws {

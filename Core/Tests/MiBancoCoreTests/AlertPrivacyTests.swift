@@ -149,4 +149,16 @@ import Testing
         ]
         #expect(deliveredAlertIdentifiersToRemoveForPrivacy(delivered).isEmpty)
     }
+
+    @Test func sharedCategoryConstantsAndCustomCategorySetWork() {
+        #expect(AlertCategoryID.movement == "MOVEMENT")
+        #expect(AlertCategoryID.insight == "INSIGHT")
+        #expect(sensitiveAlertCategories == [AlertCategoryID.movement, AlertCategoryID.insight])
+
+        let delivered = [
+            DeliveredAlertDescriptor(identifier: "a", categoryIdentifier: "MOVEMENT"),
+            DeliveredAlertDescriptor(identifier: "b", categoryIdentifier: "CUSTOM"),
+        ]
+        #expect(deliveredAlertIdentifiersToRemoveForPrivacy(delivered, sensitiveCategories: ["CUSTOM"]) == ["b"])
+    }
 }

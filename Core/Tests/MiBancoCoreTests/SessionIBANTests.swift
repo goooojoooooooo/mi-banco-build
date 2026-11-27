@@ -30,6 +30,8 @@ private actor IBANFixtureTransport: HTTPTransport {
     private let gbIBAN = "GB82WEST12345698765432"
     private let frIBAN = "FR7630006000011234567890189"
     private let ieIBAN = "IE29AIBK93115212345678"
+    private let ilIBAN = "IL620108000000099999999"
+    private let tlIBAN = "TL380080012345678910157"
 
     // MARK: - Validación estricta de IBAN recibido de un banco
 
@@ -41,6 +43,18 @@ private actor IBANFixtureTransport: HTTPTransport {
         #expect(validatedBankIBAN(gbIBAN) == gbIBAN)
         #expect(validatedBankIBAN(frIBAN) == frIBAN)
         #expect(validatedBankIBAN(ieIBAN) == ieIBAN)
+        #expect(validatedBankIBAN(ilIBAN) == ilIBAN)
+        #expect(validatedBankIBAN(tlIBAN) == tlIBAN)
+    }
+
+    @Test func validatesIsraelAndTimorLeste23CharLengthsAndRejects19Char() {
+        #expect(ibanCountryLengths["IL"] == 23)
+        #expect(ibanCountryLengths["TL"] == 23)
+        #expect(validatedBankIBAN("IL62 0108 0000 0009 9999 999") == ilIBAN)
+        #expect(validatedBankIBAN("TL38 0080 0123 4567 8910 157") == tlIBAN)
+        // Cadenas de 19 caracteres con módulo 97 == 1: deben rechazarse porque IL y TL son de 23.
+        #expect(validatedBankIBAN("IL15010800000009999") == nil)
+        #expect(validatedBankIBAN("TL48008001234567891") == nil)
     }
 
     @Test(arguments: [
@@ -54,10 +68,12 @@ private actor IBANFixtureTransport: HTTPTransport {
         "ES0021000418450200051321",
         "ES0121000418450200051303",
         "ES9921000418450200051382",
-        // Longitud incorrecta para el país aunque mod 97 sea 1 (LT debe ser 20, ES debe ser 24).
+        // Longitud incorrecta para el país aunque mod 97 sea 1 (LT=20, ES=24, IL=23, TL=23).
         "LT68100001110100100012",
         "ES982100041845020005133",
         "ES48210004184502000513321",
+        "IL15010800000009999",
+        "TL48008001234567891",
         // Código de país inexistente aunque mod 97 sea 1.
         "XX61ABCD1234567890ABCD1234567890AB",
         // Caracteres no permitidos en un IBAN bancario.
@@ -229,6 +245,32 @@ private actor IBANFixtureTransport: HTTPTransport {
         }
     }
 
+    @Test func rejectsMaskedIBANAndBBANOnlyAccounts() {
+        let maskedCases = [
+            // IBAN enmascarado en account_id.iban.
+            #"{"session_id":"s","accounts":[{"uid":"u1","account_id":{"iban":"ES12 **** 1234"},"currency":"EUR","cash_account_type":"CACC"}]}"#,
+            // IBAN enmascarado en account_id.iban aunque all_account_ids traiga otro válido.
+            #"{"session_id":"s","accounts":[{"uid":"u1","account_id":{"iban":"ES12 **** 1234"},"all_account_ids":[{"scheme_name":"IBAN","identification":"ES9121000418450200051332"}],"currency":"EUR","cash_account_type":"CACC"}]}"#,
+            // IBAN enmascarado en all_account_ids sin account_id.iban.
+            #"{"session_id":"s","accounts":[{"uid":"u1","account_id":{},"all_account_ids":[{"scheme_name":"IBAN","identification":"ES12 **** 1234"}],"currency":"EUR","cash_account_type":"CACC"}]}"#,
+            // Cuenta que solo trae BBAN en account_id (sin IBAN).
+            #"{"session_id":"s","accounts":[{"uid":"u1","account_id":{"bban":"21000418450200051332"},"currency":"EUR","cash_account_type":"CACC"}]}"#,
+            // Cuenta que solo trae BBAN en all_account_ids (sin IBAN).
+            #"{"session_id":"s","accounts":[{"uid":"u1","account_id":{},"all_account_ids":[{"scheme_name":"BBAN","identification":"21000418450200051332"}],"currency":"EUR","cash_account_type":"CACC"}]}"#,
+        ]
+        var book = AccountBook()
+        for json in maskedCases {
+            let extracted = extractPrimaryEuroIBAN(fromSessionData: Data(json.utf8))
+            #expect(extracted == nil)
+            if let extracted {
+                _ = book.fillIBANIfEmpty(extracted, for: .ima)
+            }
+        }
+        // Tampoco si llega un IBAN enmascarado directo a fillIBANIfEmpty se guarda nada.
+        #expect(book.fillIBANIfEmpty("ES12 **** 1234", for: .ima) == false)
+        #expect(book.ibans.isEmpty)
+    }
+
     // MARK: - Varias cuentas y divisas
 
     @Test func selectsOnlyPrimaryEuroCurrentAccountWithoutGuessing() {
@@ -336,6 +378,38 @@ private actor IBANFixtureTransport: HTTPTransport {
         }
     }
 
+    @Test func redactsIBANFromMirrorAndDump() throws {
+        let json = #"""
+        {
+          "session_id": "sess-mirror-88",
+          "accounts": [{
+            "uid": "u-1",
+            "account_id": { "iban": "ES9121000418450200051332" },
+            "currency": "EUR",
+            "cash_account_type": "CACC"
+          }],
+          "access": { "valid_until": "2027-05-19T10:00:00Z" }
+        }
+        """#
+        let session = try JSONDecoder().decode(EBSession.self, from: Data(json.utf8))
+        let accountIBAN = EBSessionAccountIBAN(uid: "u-1", currency: "EUR", cashAccountType: "CACC", rawIBAN: esIBAN)
+        let auth = EBSessionAuthorization(session: session, primaryEuroIBAN: esIBAN)
+
+        #expect(Mirror(reflecting: accountIBAN).children.isEmpty)
+        #expect(Mirror(reflecting: auth).children.isEmpty)
+
+        var dumpedAccount = ""
+        dump(accountIBAN, to: &dumpedAccount)
+        var dumpedAuth = ""
+        dump(auth, to: &dumpedAuth)
+
+        for output in [dumpedAccount, dumpedAuth] {
+            for fragment in ["ES91", "2100", "0418", "4502", "0005", "1332", "sess-mirror-88"] {
+                #expect(!output.contains(fragment))
+            }
+        }
+    }
+
     // MARK: - Cliente Enable Banking: una sola llamada POST /sessions
 
     @Test func authorizeSessionReturnsSessionAndValidatedIBANInOneRequest() async throws {
@@ -410,5 +484,89 @@ private actor IBANFixtureTransport: HTTPTransport {
         // La descripción del cuaderno sigue redactada sin IBAN.
         #expect(!"\(book)".contains("ES91"))
         #expect(!"\(book)".contains("LT12"))
+    }
+
+    @Test func accountBookRemembersOwnerDeletedIBANWithoutStoringIt() throws {
+        var book = AccountBook()
+
+        // 1. Relleno inicial desde conexión bancaria.
+        #expect(book.fillIBANIfEmpty(esIBAN, for: .ima) == true)
+        #expect(book.ibans[.ima] == esIBAN)
+        #expect(book.autoIBANDismissed.isEmpty)
+
+        // 2. El dueño borra a propósito el IBAN de imagin: no se vuelve a rellenar al renovar.
+        book.setIBAN(nil, for: .ima)
+        #expect(book.ibans[.ima] == nil)
+        #expect(book.autoIBANDismissed == [.ima])
+        #expect(book.fillIBANIfEmpty(esIBAN, for: .ima) == false)
+        #expect(book.fillIBANIfEmpty(esIBAN2, for: .ima) == false)
+        #expect(book.ibans[.ima] == nil)
+
+        // 3. No afecta a otros bancos: Revolut todavía se rellena si estaba vacío.
+        #expect(book.fillIBANIfEmpty(ltIBAN, for: .rev) == true)
+        #expect(book.ibans[.rev] == ltIBAN)
+
+        // Borrar dejando espacios en blanco también recuerda el borrado para Revolut.
+        book.setIBAN("   ", for: .rev)
+        #expect(book.ibans[.rev] == nil)
+        #expect(book.autoIBANDismissed == [.ima, .rev])
+        #expect(book.fillIBANIfEmpty(ltIBAN, for: .rev) == false)
+
+        // 4. Persistencia JSON: recuerda los bancos rechazados SIN guardar ningún IBAN ni fragmento.
+        let encoded = try JSONEncoder().encode(book)
+        let encodedText = String(decoding: encoded, as: UTF8.self)
+        for fragment in ["ES91", "2100", "0418", "1332", "LT12", "1000", "0111"] {
+            #expect(!encodedText.contains(fragment))
+        }
+        let reloaded = try JSONDecoder().decode(AccountBook.self, from: encoded)
+        #expect(reloaded == book)
+        #expect(reloaded.autoIBANDismissed == [.ima, .rev])
+        var reloadedCopy = reloaded
+        #expect(reloadedCopy.fillIBANIfEmpty(esIBAN, for: .ima) == false)
+        #expect(reloadedCopy.ibans[.ima] == nil)
+
+        // 5. Si el dueño escribe después un IBAN nuevo, se quita la marca de borrado (y sigue sin pisarse).
+        book.setIBAN("es79 2100 0813 6101 2345 6789", for: .ima)
+        #expect(book.ibans[.ima] == esIBAN2)
+        #expect(!book.autoIBANDismissed.contains(.ima))
+        #expect(book.autoIBANDismissed == [.rev])
+        #expect(book.fillIBANIfEmpty(esIBAN, for: .ima) == false)
+        #expect(book.ibans[.ima] == esIBAN2)
+
+        // Si el dueño vuelve a borrarlo, vuelve a quedar bloqueado el relleno automático.
+        book.setIBAN("", for: .ima)
+        #expect(book.ibans[.ima] == nil)
+        #expect(book.autoIBANDismissed == [.ima, .rev])
+        #expect(book.fillIBANIfEmpty(esIBAN, for: .ima) == false)
+
+        // 6. Un banco vacío que nunca tuvo IBAN no queda marcado si se invoca setIBAN vacío; Trade Republic tampoco.
+        var emptyBook = AccountBook()
+        emptyBook.setIBAN(nil, for: .ima)
+        #expect(emptyBook.autoIBANDismissed.isEmpty)
+        #expect(emptyBook.fillIBANIfEmpty(esIBAN, for: .ima) == true)
+        emptyBook.setIBAN(deIBAN, for: .tr)
+        emptyBook.setIBAN(nil, for: .tr)
+        #expect(!emptyBook.autoIBANDismissed.contains(.tr))
+    }
+
+    @Test func accountBookDecodesLegacyJSONAndOmitsEmptyDismissedKey() throws {
+        // Libreta antigua sin la clave `autoIBANDismissed`.
+        let legacyJSON = #"""
+        {
+          "ibans": { "ima": "ES9121000418450200051332" },
+          "floors": { "rev": 15000 },
+          "payees": []
+        }
+        """#
+        let decoded = try JSONDecoder().decode(AccountBook.self, from: Data(legacyJSON.utf8))
+        var expected = AccountBook()
+        expected.ibans[.ima] = esIBAN
+        expected.floors[.rev] = 15_000
+        #expect(decoded == expected)
+        #expect(decoded.autoIBANDismissed.isEmpty)
+
+        // Cuando `autoIBANDismissed` está vacío, se omite en JSON para compatibilidad total.
+        let encoded = String(decoding: try JSONEncoder().encode(decoded), as: UTF8.self)
+        #expect(!encoded.contains("autoIBANDismissed"))
     }
 }

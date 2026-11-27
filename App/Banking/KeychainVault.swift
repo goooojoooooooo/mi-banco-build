@@ -41,8 +41,8 @@ enum KeychainVault {
         }
     }
 
-    /// Añade o actualiza en una sola operación lógica: si la actualización no encuentra el elemento, lo añade.
-    /// También fija `kSecAttrAccessible` en `SecItemUpdate` (SEC-10).
+    /// Añade o actualiza en una sola operación lógica (nunca hay un instante sin valor): si la actualización no encuentra
+    /// el elemento, lo añade. También fija `kSecAttrAccessible` en `SecItemUpdate` (SEC-10).
     /// `service` solo cambia en la autoprueba, que usa otro servicio para no tocar los datos reales.
     static func set(_ data: Data, for item: Item, service: String = KeychainVault.service) throws {
         let update: [CFString: Any] = [

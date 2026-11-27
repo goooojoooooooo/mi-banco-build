@@ -10,8 +10,6 @@ on:
         options:
           - namespace-profile-onyx
         default: "namespace-profile-onyx"
-  push:
-    tags: ['v*']
 permissions:
   contents: read
 jobs:
@@ -87,21 +85,7 @@ jobs:
           zip -qry MiBanco.ipa Payload
           unzip -l MiBanco.ipa | grep -E "Info.plist|PrivacyInfo.xcprivacy"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'workflow_dispatch'
         with:
           name: MiBanco.ipa
           path: MiBanco.ipa
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: MiBanco.ipa
-      - name: Publicar release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" MiBanco.ipa --title "$GITHUB_REF_NAME" --generate-notes

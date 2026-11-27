@@ -19,8 +19,20 @@ private final class NoRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendab
 struct URLSessionTransport: HTTPTransport {
     private static let noRedirectDelegate = NoRedirectDelegate()
     private let session: URLSession
+    private let maxResponseBytes: Int
 
     init() {
+        self.init(protocolClasses: nil, maxResponseBytes: BankingConstants.maxResponseBytes)
+    }
+
+    #if DEBUG
+    /// Solo para la autoprueba DEBUG (`BankingSelfTest`): permite inyectar un `URLProtocol` controlado y probar el tope.
+    init(protocolClasses: [AnyClass], maxResponseBytes: Int = BankingConstants.maxResponseBytes) {
+        self.init(protocolClasses: Optional(protocolClasses), maxResponseBytes: maxResponseBytes)
+    }
+    #endif
+
+    private init(protocolClasses: [AnyClass]?, maxResponseBytes: Int) {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
@@ -28,7 +40,11 @@ struct URLSessionTransport: HTTPTransport {
         configuration.httpShouldSetCookies = false
         configuration.timeoutIntervalForRequest = 30
         configuration.timeoutIntervalForResource = 60
+        if let protocolClasses {
+            configuration.protocolClasses = protocolClasses
+        }
         session = URLSession(configuration: configuration)
+        self.maxResponseBytes = maxResponseBytes
     }
 
     func send(_ request: HTTPRequest) async throws -> HTTPResponse {
@@ -47,7 +63,7 @@ struct URLSessionTransport: HTTPTransport {
                 data = try await collectCapped(
                     bytes,
                     expectedLength: response.expectedContentLength,
-                    limit: BankingConstants.maxResponseBytes
+                    limit: maxResponseBytes
                 )
             } catch CappedDownloadError.tooLarge {
                 throw URLError(.dataLengthExceedsMaximum)

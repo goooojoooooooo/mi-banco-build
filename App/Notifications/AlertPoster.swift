@@ -3,7 +3,7 @@ import UserNotifications
 import MiBancoCore
 
 enum AlertPoster {
-    static let category = "MOVEMENT"
+    static let category = AlertCategoryID.movement
 
     /// Una vez al arrancar: permiso y categoría (sin acciones) para la vista expandida.
     static func setup() async {
@@ -59,7 +59,10 @@ enum AlertPoster {
                 categoryIdentifier: $0.request.content.categoryIdentifier
             )
         }
-        let ids = deliveredAlertIdentifiersToRemoveForPrivacy(descriptors)
+        let ids = deliveredAlertIdentifiersToRemoveForPrivacy(
+            descriptors,
+            sensitiveCategories: [AlertPoster.category, InsightNotifier.category]
+        )
         guard !ids.isEmpty else { return }
         center.removeDeliveredNotifications(withIdentifiers: ids)
     }

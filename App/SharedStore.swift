@@ -65,7 +65,8 @@ enum SharedStore {
     }
 
     /// Una sola vez: migra los ficheros heredados de la carpeta privada al grupo y borra el origen huérfano
-    /// solo tras comprobar que el destino quedó escrito y se puede leer. Nunca se pisa un fichero válido del grupo.
+    /// solo cuando es idéntico o anterior al destino; si el origen es más nuevo y válido, aparta el destino antiguo
+    /// en un respaldo protegido antes de promover el más nuevo (I-1: nunca pierde ninguno de los dos).
     private static func migrateIfNeeded(to groupDirectory: URL) {
         migrateLegacyStoreFiles(from: URL.applicationSupportDirectory, to: groupDirectory)
     }

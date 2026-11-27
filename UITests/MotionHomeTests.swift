@@ -1308,13 +1308,13 @@ final class MotionHomeTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(Double(flagInk), Double(expectedCap) * 0.8,
                                             "«No es mío» se lee encogida: \(flagInk) px de tinta frente a \(expectedCap) px esperados")
             }
-            // Ronda 1: el título entero, sin «…» ni recorte. Se compara la tinta dibujada de «No es mío» con el ancho de la
+            // Ronda 1: el título entero, sin «…» ni recorte (cortado sale a ~0,6 de la cadena entera; entero, a ~0,85). Se compara la tinta dibujada de «No es mío» con el ancho de la
             // cadena entera en `footnote` semibold a AX-XXXL (referencia), y la cápsula tiene que ser más ancha que ella.
             if let ink = inkWidth(of: flag) {
                 let refFont = UIFont.systemFont(
                     ofSize: UIFont.preferredFont(forTextStyle: .footnote, compatibleWith: axXXXL).pointSize, weight: .semibold)
                 let fullWidth = ("No es mío" as NSString).size(withAttributes: [.font: refFont]).width
-                XCTAssertGreaterThanOrEqual(Double(ink.width), Double(fullWidth * ink.scale) * 0.9,
+                XCTAssertGreaterThanOrEqual(Double(ink.width), Double(fullWidth * ink.scale) * 0.75,
                                             "«No es mío» sale cortado o en dos líneas: \(ink.width) px de tinta frente a \(fullWidth * ink.scale) px del título entero")
                 XCTAssertGreaterThanOrEqual(flag.frame.width, fullWidth,
                                             "La cápsula «No es mío» no cabe el título entero: \(flag.frame.width) pt frente a \(fullWidth) pt")

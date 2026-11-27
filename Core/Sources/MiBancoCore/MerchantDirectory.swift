@@ -130,7 +130,7 @@ private let ambiguousAliases: Set<String> = [
 /// Otros negocios que pueden empezar como una marca corta ("HM Hospitales", "BP Consulting", "Orange Garden").
 private let otherBusinessWords: Set<String> = [
     "hospital", "hospitales", "consulting", "consultoria", "garden", "jardin", "grill", "pub", "club", "lounge",
-    "beach", "burger", "pizza", "sushi", "tapas", "studio", "estudio", "shop", "store", "bakery", "coffee",
+    "beach", "burger", "pizza", "sushi", "tapas", "studio", "estudio", "shop", "store", "retail", "bakery", "coffee",
     "academia", "escuela", "abogados", "asesoria", "inmobiliaria", "reformas", "spa", "salon",
 ]
 
@@ -290,7 +290,6 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     ("max.com", ["HBO", "HBO Max"]),
     ("primevideo.com", ["Prime Video", "Amazon Prime Video"]),
     ("apple.com", ["Apple", "Apple.com", "Apple Com Bill", "App Store"]),
-    ("apple-store.es", ["Apple Store", "Apple Retail"]),
     ("google.com", ["Google", "Google Play", "Google One"]),
     ("youtube.com", ["YouTube", "YouTube Premium"]),
     ("dazn.com", ["DAZN"]),
@@ -463,7 +462,7 @@ let merchantDomainCategories: [String: SpendingCategory] = [
     // Salud
     "promofarma.com": .salud, "atida.com": .salud, "dosfarma.com": .salud,
     // Ocio
-    "apple-store.es": .compras, "basic-fit.com": .ocio, "mcfit.com": .ocio, "cinesa.es": .ocio, "yelmocines.es": .ocio,
+    "basic-fit.com": .ocio, "mcfit.com": .ocio, "cinesa.es": .ocio, "yelmocines.es": .ocio,
     // Personas
     "bizum.es": .personas,
 ]

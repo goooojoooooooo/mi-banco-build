@@ -80,7 +80,9 @@ private let keywordRules: [KeywordRule] = {
         (.compras, ["bazar", "super bazar", "tienda china", "multiprecio", "multiprecios", "todo a 100",
                     "todo a cien", "ferreteria", "papeleria", "libreria", "estanco", "tabacos", "drogueria", "perfumeria",
                     "zapateria", "calzados", "merceria", "jugueteria", "floristeria", "electronica", "moda", "modas",
-                    "boutique", "joyeria", "relojeria", "regalos"]),
+                    "boutique", "joyeria", "relojeria", "regalos",
+                    // Tiendas físicas de Apple: sin entrada propia en el directorio (no hay dominio propio que dar).
+                    "apple store", "apple retail"]),
     ]
     var rules: [KeywordRule] = []
     for (category, list) in lists {

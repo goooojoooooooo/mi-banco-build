@@ -94,10 +94,11 @@ final class NyxSheetUITests: XCTestCase {
         action.tap()
 
         XCTAssertTrue(app.navigationBars["Mover dinero"].waitForExistence(timeout: 12), "No se abrió Mover dinero")
-        let filled = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS '10,00' OR value CONTAINS '10,00'"))
-            .firstMatch
-        XCTAssertTrue(filled.waitForExistence(timeout: 6), "Mover dinero no se abrió relleno con 10,00 €")
+        let nbsp = "\u{00A0}"
+        XCTAssertTrue(
+            app.staticTexts["10\(nbsp)€"].waitForExistence(timeout: 8),
+            "Mover dinero no se abrió relleno con 10 €"
+        )
         let imagin = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS 'imagin'"))
             .firstMatch

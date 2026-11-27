@@ -65,6 +65,9 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     /// de saldo intermedia no debe deshacerse). Solo para reconocer su reentrega y emparejar un pago de Cartera tardío.
     public var settledFingerprint: String?
     public var settledAt: Date?
+    /// Solo en un pago de Cartera que absorbió un aviso «pendiente»: la clave del comercio de ESE aviso (Cartera puede llamarlo
+    /// distinto o no traer ninguno), para reconocer el aviso del cargo.
+    public var pendingMerchantKey: String?
 
     /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
     public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
@@ -80,7 +83,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
                 excludedFromSpending: Bool = false, linkedAt: Date? = nil, firstSeenStatus: BankStatus? = nil,
                 bookedDay: Date? = nil, personPayment: Bool? = nil, noticePending: Bool? = nil,
-                settledFingerprint: String? = nil, settledAt: Date? = nil) {
+                settledFingerprint: String? = nil, settledAt: Date? = nil, pendingMerchantKey: String? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -110,6 +113,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.noticePending = noticePending
         self.settledFingerprint = settledFingerprint
         self.settledAt = settledAt
+        self.pendingMerchantKey = pendingMerchantKey
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -117,7 +121,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         case note, flaggedNotMine, category, ownTransfer
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
         case firstSeenStatus, bookedDay, personPayment, noticePending
-        case settledFingerprint, settledAt
+        case settledFingerprint, settledAt, pendingMerchantKey
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -152,6 +156,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         noticePending = try c.decodeIfPresent(Bool.self, forKey: .noticePending)
         settledFingerprint = try c.decodeIfPresent(String.self, forKey: .settledFingerprint)
         settledAt = try c.decodeIfPresent(Date.self, forKey: .settledAt)
+        pendingMerchantKey = try c.decodeIfPresent(String.self, forKey: .pendingMerchantKey)
     }
 }
 
@@ -330,9 +335,19 @@ let madridCalendar: Calendar = {
 }()
 
 extension Movement {
-    /// Cerca en el tiempo de `t`: por su hora o por la del aviso del cargo que se fundió con él.
-    func isNear(_ t: Date, within window: TimeInterval) -> Bool {
-        abs(date.timeIntervalSince(t)) <= window || (settledAt.map { abs($0.timeIntervalSince(t)) <= window } ?? false)
+    /// Cerca en el tiempo de `t`: por su hora o, en `settledWithin` segundos, por la del aviso del cargo que se fundió con él.
+    /// Con `sameMerchantAs`, esa segunda vía solo vale si el comercio coincide (una clave vacía no coincide con nada);
+    /// con nil no se pide comercio.
+    func isNear(_ t: Date, within window: TimeInterval, settledWithin: TimeInterval, sameMerchantAs key: String?) -> Bool {
+        if abs(date.timeIntervalSince(t)) <= window { return true }
+        guard let settledAt, abs(settledAt.timeIntervalSince(t)) <= settledWithin else { return false }
+        guard let key else { return true }
+        return !key.isEmpty && hasMerchantKey(key)
+    }
+
+    /// El comercio del movimiento (o el del aviso pendiente que absorbió) tiene esta clave normalizada.
+    func hasMerchantKey(_ key: String) -> Bool {
+        normalizeMerchant(merchant ?? "") == key || pendingMerchantKey == key
     }
 }
 
@@ -584,7 +599,7 @@ public struct Ledger: Sendable {
                 return $0.bank == bank && eligible && $0.amountCents == signed
                     && $0.fingerprint != fingerprint && $0.settledFingerprint != fingerprint
                     && ($0.noticePending == true) != parsed.isPending
-                    && normalizeMerchant($0.merchant ?? "") == key
+                    && $0.hasMerchantKey(key)
                     && abs($0.date.timeIntervalSince(now)) <= Self.pendingSettleWindow
             }
             if let twin {
@@ -602,20 +617,27 @@ public struct Ledger: Sendable {
         // 2. El mismo pago visto por la otra fuente: cada movimiento se empareja una sola vez.
         let partner = state.movements.firstIndex {
             $0.bank == bank && $0.source != source && !$0.source.isBankSourced && !$0.pairedAcrossSources && $0.amountCents == signed
-                && $0.isNear(now, within: Self.duplicateWindow)
+                && $0.isNear(now, within: Self.duplicateWindow, settledWithin: Self.duplicateWindow,
+                             sameMerchantAs: parsed.merchant.map(normalizeMerchant) ?? "")
         }
         if let partner {
             state.movements[partner].pairedAcrossSources = true
             state.movements[partner].pairedFingerprint = fingerprint
             // Un aviso «pendiente» absorbido por Cartera: el cargo que llegue después es este mismo pago.
-            if source == .notification && parsed.isPending { state.movements[partner].noticePending = true }
+            if source == .notification && parsed.isPending {
+                state.movements[partner].noticePending = true
+                // Cartera puede llamar al comercio distinto o no traer ninguno: se guarda el nombre del aviso pendiente.
+                let key = parsed.merchant.map(normalizeMerchant) ?? ""
+                if !key.isEmpty { state.movements[partner].pendingMerchantKey = key }
+            }
             return .duplicate
         }
 
         // 3. Reentrega de un registro ya emparejado (llegó hasta 180 s después del original; su reentrega, 60 s más).
         let redeliveredPartner = state.movements.contains {
             $0.source != source && !$0.source.isBankSourced && $0.pairedFingerprint == fingerprint
-                && $0.isNear(now, within: Self.duplicateWindow + Self.redeliveryWindow)
+                && $0.isNear(now, within: Self.duplicateWindow + Self.redeliveryWindow, settledWithin: Self.redeliveryWindow,
+                             sameMerchantAs: nil)
         }
         if redeliveredPartner { return .duplicate }
 

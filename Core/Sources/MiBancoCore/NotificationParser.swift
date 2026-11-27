@@ -69,7 +69,7 @@ let notificationSendWords: Set<String> = personPaymentWords.union(["enviaste", "
 /// Frases de pago explícitas: ganan a cualquier palabra de ingreso ("recibo de" es una factura, no "recibido").
 private let explicitPaymentStems = ["has pagado", "has enviado", "recibo de", "cargado", "pago con tarjeta"]
 private let incomeStems = [
-    "has recibido", "recibido", "recibiste", "received", "te han enviado", "te ha enviado", "bizum de",
+    "has recibido", "recibido", "recibida", "recibiste", "received", "te han enviado", "te ha enviado", "bizum de",
     "ingreso", "reembolso", "devoluci", "devuelto", "refund", "abono de",
 ]
 /// Palabras de ingreso de nómina: valen solo ENTERAS y fuera del nombre del comercio («Nominalia», «SalaryFinance» no son ingresos).
@@ -93,12 +93,16 @@ private func strippingLeadingNonAlphanumerics(_ s: String) -> Substring {
 
 /// Signo según el texto (ya plegado), o nil si no dice nada.
 /// `incomeScope`: el trozo donde buscar las palabras de ingreso (en la línea del importe, lo que va ANTES del importe; el
-/// comercio va detrás). nil = el texto entero.
-private func sign(of text: String, incomeScope: String? = nil) -> MovementKind? {
+/// comercio va detrás, y se corta también en el primer « en »/« at »). nil = el texto entero.
+/// `incomeWordsLast`: en las demás líneas (donde puede estar el nombre del comercio) las palabras de ingreso van tras las
+/// raíces de pago genérico.
+private func sign(of text: String, incomeScope: String? = nil, incomeWordsLast: Bool = false) -> MovementKind? {
     if explicitPaymentStems.contains(where: { text.contains($0) }) { return .payment }
     if incomeStems.contains(where: { text.contains($0) }) { return .income }
-    if foldedWords(incomeScope ?? text).contains(where: { incomeWords.contains($0) }) { return .income }
+    let hasIncomeWord = foldedWords(incomeScope ?? text).contains(where: { incomeWords.contains($0) })
+    if hasIncomeWord, !incomeWordsLast { return .income }
     if genericPaymentStems.contains(where: { text.contains($0) }) { return .payment }
+    if hasIncomeWord { return .income }
     return nil
 }
 
@@ -159,8 +163,10 @@ public func parseNotification(bank: BankID, title: String?, subtitle: String?, b
         .filter { $0 != pay.index && $0 >= titleCount }
         .map { folded[$0] }
         .joined(separator: "\n")
-    let beforeAmount = String(pay.line[..<pay.range.lowerBound])
-    guard let kind = sign(of: folded[pay.index], incomeScope: beforeAmount) ?? sign(of: others) else { return .unreadable }
+    let beforeAmount = fold(String(pay.line[..<pay.range.lowerBound]))
+    let incomeScope = [" en ", " at "].compactMap { beforeAmount.range(of: $0)?.lowerBound }.min()
+        .map { String(beforeAmount[..<$0]) } ?? beforeAmount
+    guard let kind = sign(of: folded[pay.index], incomeScope: incomeScope) ?? sign(of: others, incomeWordsLast: true) else { return .unreadable }
 
     // Un envío a alguien (en cualquier línea del aviso, sin contar el título) nunca es una compra en tienda.
     let bodyWords = foldedWords(lines[titleCount...].joined(separator: "\n"))

@@ -85,8 +85,9 @@ final class NyxPresenceUITests: XCTestCase {
 
     /// N10: el botón no aparece con el bloqueo delante ni dentro de los pasos de la guía de avisos.
     func testElBotonNoSaleEnLaGuiaNiConElBloqueo() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "4"])
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "12"])
         let nyx = app.buttons["nyx-button"]
+        XCTAssertTrue(app.buttons["Desbloquear"].waitForExistence(timeout: 8), "No apareció la pantalla de bloqueo")
         XCTAssertFalse(nyx.exists && nyx.isHittable, "nyx-button no puede aparecer con el bloqueo delante")
         XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "No se desbloqueó Inicio")
         XCTAssertTrue(nyx.waitForExistence(timeout: 8), "Tras desbloquear debe aparecer nyx-button")
@@ -138,6 +139,7 @@ final class NyxPresenceUITests: XCTestCase {
         XCTAssertFalse(lbl.contains("€"), "nyx-banner expone € con ojo cerrado: \(lbl)")
         XCTAssertFalse(lbl.contains("%"), "nyx-banner expone % con ojo cerrado: \(lbl)")
         let children = banner.descendants(matching: .any)
+        XCTAssertGreaterThan(children.count, 0, "nyx-banner debe exponer sus elementos internos")
         for i in 0..<children.count {
             let child = children.element(boundBy: i)
             let cLbl = child.label

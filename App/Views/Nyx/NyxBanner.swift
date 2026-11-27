@@ -103,7 +103,6 @@ struct NyxBanner: View {
         )
         .task { await run() }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(displayTitle). \(displayBody)")
         .accessibilityIdentifier("nyx-banner")
     }
 

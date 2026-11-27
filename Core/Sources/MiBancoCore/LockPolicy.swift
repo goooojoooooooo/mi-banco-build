@@ -76,3 +76,17 @@ public enum LockAuthPolicy {
         false
     }
 }
+
+/// Dominio de error de `LocalAuthentication` (`LAError.errorDomain`).
+public let lockAuthErrorDomain = "com.apple.LocalAuthentication"
+
+/// Valor numérico de `LAError.passcodeNotSet` (-5). Se fija aquí para clasificar sin importar `LocalAuthentication`;
+/// la app lo compara con el sistema real en `LockView.systemDeviceAuth`.
+public let lockPasscodeNotSetErrorCode = -5
+
+/// Clasifica el fallo de `canEvaluatePolicy` (SEC-08): solo el dominio de `LocalAuthentication` con `passcodeNotSet`
+/// es «sin código»; cualquier otro error, dominio o ausencia de datos es un fallo recuperable (reintentar).
+public func lockAvailability(errorDomain: String?, errorCode: Int?) -> DeviceAuthAvailability {
+    if errorDomain == lockAuthErrorDomain, errorCode == lockPasscodeNotSetErrorCode { return .passcodeNotSet }
+    return .unavailable
+}

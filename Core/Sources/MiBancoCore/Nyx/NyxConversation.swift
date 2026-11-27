@@ -66,7 +66,9 @@ private let nyxOwnPaymentPhrases = [" pago raro ", " pagos raros ", " avisos de 
 
 private func nyxOwnQuestion(tokens: [String], joined: String) -> NyxQuestion? {
     let ownPhrase = nyxOwnPaymentPhrases.contains { joined.contains($0) }
-    guard ownPhrase || !tokens.contains(where: { nyxFinancialQuestionCues.contains($0) }) else { return nil }
+    // Con una frase propia solo se ignoran «pago»/«pagos»: cualquier otra palabra de dinero («saldo», «llevo»...) mantiene la barrera.
+    let barrier = ownPhrase ? nyxFinancialQuestionCues.subtracting(["pago", "pagos"]) : nyxFinancialQuestionCues
+    guard !tokens.contains(where: { barrier.contains($0) }) else { return nil }
     if joined.contains(" has visto ") || joined.contains(" me he perdido ") || tokens.contains("novedades") {
         return .seen
     }

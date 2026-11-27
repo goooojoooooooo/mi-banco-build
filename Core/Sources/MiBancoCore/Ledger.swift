@@ -572,7 +572,8 @@ public struct Ledger: Sendable {
                     merchant: sanitizeMerchant(m.merchant),
                     reportedBalanceCents: m.reportedBalanceCents,
                     merchantIsShop: m.merchantIsShop,
-                    personPayment: m.personPayment
+                    personPayment: m.personPayment,
+                    isPending: m.isPending
                 )
             }
         case let .wallet(b, amount, merchant):

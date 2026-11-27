@@ -275,6 +275,99 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         #expect(classify(pay("APPLE RETAIL", isShop: true)) == .compras)
     }
 
+    @Test func elDirectorioNoTieneDominiosInventados() {
+        // Dominios que no existen (no resuelven): fuera del directorio, y por tanto de `tools/fetch_logos.py`.
+        for invented in ["gasolineras.carrefour.es", "gasolineras.alcampo.es", "repsolluzygas.es", "apple-store.es"] {
+            #expect(!merchantDirectoryDomains.contains(invented), "\(invented)")
+        }
+        // Forma básica: etiquetas de [a-z0-9-], dominio de primer nivel conocido y nada de subdominios inventados
+        // («gasolineras.»): solo dos etiquetas, salvo los subdominios de país reales que se listan aquí.
+        let knownTLDs: Set<String> = ["com", "es", "cat", "eu", "org"]
+        let realCountrySubdomains: Set<String> = ["es.webuy.com"]
+        for domain in merchantDirectoryDomains {
+            let labels = domain.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+            #expect(labels.count >= 2, "\(domain)")
+            #expect(labels.allSatisfy { label in
+                !label.isEmpty && !label.hasPrefix("-") && !label.hasSuffix("-")
+                    && label.allSatisfy { ($0.isASCII && ($0.isLowercase || $0.isNumber)) || $0 == "-" }
+            }, "\(domain)")
+            #expect(knownTLDs.contains(labels.last ?? ""), "\(domain)")
+            #expect(labels.count == 2 || realCountrySubdomains.contains(domain), "subdominio: \(domain)")
+        }
+    }
+
+    @Test func gasolinerasDeCarrefourYAlcampoSonTransporteSinDominioPropio() {
+        let cases = [
+            "CARREFOUR GASOLINERA MADRID", "GASOLINERA CARREFOUR", "CARREFOUR E.S. 0123", "E.S. CARREFOUR",
+            "CARREFOUR ESTACION DE SERVICIO", "ESTACION DE SERVICIO CARREFOUR", "CARREFOUR ESTACION SERVICIO",
+            "CARREFOUR COMBUSTIBLE",
+            "ALCAMPO GASOLINERA VALENCIA", "GASOLINERA ALCAMPO", "ALCAMPO E.S. 042", "E.S. ALCAMPO",
+            "ALCAMPO ESTACION DE SERVICIO", "ESTACION DE SERVICIO ALCAMPO", "ALCAMPO ESTACION SERVICIO",
+            "ALCAMPO COMBUSTIBLE",
+        ]
+        for text in cases {
+            #expect(classify(pay(text, isShop: true)) == .transporte, "«\(text)»")
+            #expect(classify(pay(text, isShop: true, mcc: "5541")) == .transporte, "«\(text)» 5541")
+            #expect(classify(pay(text, isShop: true, mcc: "5542")) == .transporte, "«\(text)» 5542")
+        }
+        // Una gasolinera recurrente sigue siendo transporte (la línea de negocio gana a la clave recurrente).
+        #expect(classify(pay("CARREFOUR GASOLINERA", isShop: true),
+                         subscriptions: [normalizeMerchant("CARREFOUR GASOLINERA")]) == .transporte)
+        // El logo es el de la cadena real.
+        #expect(merchantDomain(for: "CARREFOUR GASOLINERA MADRID") == "carrefour.com")
+        #expect(merchantDomain(for: "ALCAMPO GASOLINERA VALENCIA") == "alcampo.es")
+        // El súper sigue siendo súper.
+        #expect(classify(pay("CARREFOUR EXPRESS 0123 MADRID", isShop: true)) == .supermercado)
+        #expect(classify(pay("CARREFOUR MARKET", isShop: true)) == .supermercado)
+        #expect(classify(pay("ALCAMPO 042 VIGO", isShop: true)) == .supermercado)
+        #expect(classify(pay("CARREFOUR", isShop: true, mcc: "5411")) == .supermercado)
+    }
+
+    @Test func luzYGasDeRepsolSonCasaYSusGasolinerasTransporte() {
+        let homeSupply = [
+            "REPSOL LUZ", "REPSOL LUZ Y GAS", "Repsol Luz y Gas", "REPSOL ELECTRICIDAD", "REPSOL GAS",
+            "REPSOL COMERCIALIZADORA DE ELECTRICIDAD Y GAS SLU",
+        ]
+        for text in homeSupply {
+            #expect(classify(pay(text, isShop: true)) == .casa, "«\(text)»")
+            #expect(classify(pay(text, isShop: false)) == .casa, "«\(text)» sin tienda")
+            #expect(classify(pay(text, isShop: true, mcc: "4900")) == .casa, "«\(text)» 4900")
+            // Recibo mensual (clave recurrente): sigue siendo la casa, no transporte ni suscripción.
+            #expect(classify(pay(text, isShop: false), subscriptions: [normalizeMerchant(text)]) == .casa, "«\(text)» recurrente")
+        }
+        #expect(merchantDomain(for: "REPSOL LUZ Y GAS") == "repsol.es")
+        // La gasolinera de Repsol sigue en transporte.
+        for text in ["REPSOL ESTACION 1234 MADRID", "REPSOL ESTACION DE SERVICIO", "REPSOL E.S. 1234 MADRID", "Repsol",
+                     "REPSOL GASOLINERA", "Repsol Cafetería"] {
+            #expect(classify(pay(text, isShop: true)) == .transporte, "«\(text)»")
+        }
+        #expect(classify(pay("REPSOL ESTACION 1234 MADRID", isShop: true, mcc: "5541")) == .transporte)
+    }
+
+    @Test func cadenasConRetailEnElNombreConservanSuEntrada() {
+        // «retail» en `otherBusinessWords` no debe quitar el directorio a la razón social real de la cadena.
+        #expect(merchantDomain(for: "DIA RETAIL ESPANA S.A.U.") == "dia.es")
+        #expect(classify(pay("DIA RETAIL ESPANA S.A.U.", isShop: true)) == .supermercado)
+        #expect(classify(pay("DIA RETAIL ESPANA S.A.U.", isShop: true, mcc: "5411")) == .supermercado)
+        #expect(merchantDomain(for: "NIKE RETAIL B.V.") == "nike.com")
+        #expect(classify(pay("NIKE RETAIL B.V.", isShop: true)) == .compras)
+        // «… RETAIL PARK» como ubicación: la cadena se conserva.
+        #expect(merchantDomain(for: "KFC RETAIL PARK ALFAFAR") == "kfc.com")
+        #expect(classify(pay("KFC RETAIL PARK ALFAFAR", isShop: true)) == .comerFuera)
+        #expect(merchantDomain(for: "MANGO RETAIL PARK") == "mango.com")
+        #expect(classify(pay("MANGO RETAIL PARK", isShop: true)) == .compras)
+        #expect(merchantDomain(for: "TGB RETAIL PARK") == "thegoodburger.com")
+        #expect(classify(pay("TGB RETAIL PARK", isShop: true)) == .comerFuera)
+        #expect(merchantDomain(for: "NIKE RETAIL PARK") == "nike.com")
+        // Y el MCC sigue decidiendo si llega.
+        #expect(classify(pay("KFC RETAIL PARK ALFAFAR", isShop: true, mcc: "5814")) == .comerFuera)
+        // Apple Retail sigue siendo una tienda, no la suscripción de apple.com.
+        #expect(classify(pay("APPLE RETAIL", isShop: true)) == .compras)
+        #expect(merchantDomain(for: "APPLE RETAIL") == nil)
+        // Personas no cambia: un Bizum a una persona apellidada como la cadena sigue en Personas.
+        #expect(classify(pay("Bizum a Ana Dia", isShop: false)) == .personas)
+    }
+
     @Test func mccSePropagaDesdeEnableBankingYTradeRepublicYSeConservaAlReconciliar() throws {
         // Enable Banking -> BankRecord -> Movement (paso 4 de reconcile)
         let ebRecords = bankRecords(from: [

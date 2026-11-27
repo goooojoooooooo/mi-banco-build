@@ -14,7 +14,9 @@ final class SavingsAccountUITests: XCTestCase {
     private func launch(_ extra: [String]) -> XCUIApplication {
         let app = XCUIApplication()
         // Día fijo (a mediodía): ningún cambio de día entre la base y ahora, así los intereses estimados son 0,00 €.
-        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoSavings", "-MiBancoDemoToday", "2026-11-18"] + extra
+        // `-MiBancoDemoCardElements`: el carrusel deja ver a XCUITest la cifra grande de «Todo» (`card-hero-all`).
+        app.launchArguments = ["-MiBancoDemo", "-MiBancoDemoSavings", "-MiBancoDemoToday", "2026-11-18",
+                               "-MiBancoDemoCardElements"] + extra
             + ["-AppleLanguages", "(es)", "-AppleLocale", "es_ES"]
         app.launch()
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")

@@ -313,6 +313,16 @@ private func trCSV(_ rows: [[String: String]]) -> String {
         // Una gasolinera recurrente sigue siendo transporte (la línea de negocio gana a la clave recurrente).
         #expect(classify(pay("CARREFOUR GASOLINERA", isShop: true),
                          subscriptions: [normalizeMerchant("CARREFOUR GASOLINERA")]) == .transporte)
+        // Las formas que no empiezan por la cadena también son transporte, con cargo mensual y con o sin MCC.
+        for text in ["E.S. CARREFOUR", "GASOLINERA CARREFOUR", "E.S. ALCAMPO", "GASOLINERA ALCAMPO"] {
+            let key: Set<String> = [normalizeMerchant(text)]
+            #expect(classify(pay(text, isShop: true), subscriptions: key) == .transporte, "«\(text)» recurrente")
+            #expect(classify(pay(text, isShop: true, mcc: "5541"), subscriptions: key) == .transporte, "«\(text)» recurrente 5541")
+            #expect(classify(pay(text, isShop: true, mcc: "5541")) == .transporte, "«\(text)» 5541")
+            #expect(classify(pay(text, isShop: true)) == .transporte, "«\(text)»")
+        }
+        #expect(merchantDomain(for: "E.S. CARREFOUR") == "carrefour.com")
+        #expect(merchantDomain(for: "GASOLINERA ALCAMPO") == "alcampo.es")
         // El logo es el de la cadena real.
         #expect(merchantDomain(for: "CARREFOUR GASOLINERA MADRID") == "carrefour.com")
         #expect(merchantDomain(for: "ALCAMPO GASOLINERA VALENCIA") == "alcampo.es")

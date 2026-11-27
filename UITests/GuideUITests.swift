@@ -2,8 +2,8 @@ import XCTest
 
 /// Toques reales sobre la guía de avisos: abrirla desde Ajustes, avanzar, retroceder, ayuda y «Abrir Atajos».
 final class GuideUITests: XCTestCase {
-    /// Pasos de la guía de Revolut (una sola acción por pantalla).
-    static let revolutSteps = 22
+    /// Pasos de la guía rápida de Revolut (6 pasos con «Pasar aviso a Onyx»).
+    static let revolutSteps = 6
     var app: XCUIApplication!
 
     override func setUpWithError() throws {
@@ -20,9 +20,9 @@ final class GuideUITests: XCTestCase {
         app.launch()
     }
 
-    /// El contador lleva identificador, así que se lee su etiqueta («Parte 1 de 4 · Paso 3 de 22»), no se busca por texto.
+    /// El contador lleva identificador, así que se lee su etiqueta («Parte 1 de 4 · Paso 3 de 6»), no se busca por texto.
     private func waitForStep(_ n: Int, _ message: String, total: Int = GuideUITests.revolutSteps,
-                             partEnds: [Int] = [8, 11, 16]) {
+                             partEnds: [Int] = [2, 3, 4]) {
         let counter = app.descendants(matching: .any).matching(identifier: "guide-step-counter").firstMatch
         if !counter.waitForExistence(timeout: 10) {
             // Si falla, el árbol de accesibilidad (en una línea) queda en el registro para ver qué había en pantalla.
@@ -30,7 +30,7 @@ final class GuideUITests: XCTestCase {
             XCTFail("\(message). Árbol: \(tree.prefix(6000))")
             return
         }
-        // Partes de la guía de Revolut: pasos 1–8, 9–11, 12–16 y 17–22 (Apple Pay: 1–7, 8–10, 11–15 y 16–20).
+        // Partes de la guía de Revolut: pasos 1–2, 3, 4 y 5–6 (Apple Pay: 1–7, 8–10, 11–15 y 16–20).
         let part = (partEnds.firstIndex { n <= $0 } ?? partEnds.count) + 1
         let expected = "Parte \(part) de 4 · Paso \(n) de \(total)"
         let reached = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", expected), object: counter)
@@ -162,7 +162,7 @@ final class GuideUITests: XCTestCase {
     /// Retomando una guía en un paso con mucho texto, lo que él necesita se ve sin deslizar: la ayuda se puede tocar y la
     /// instrucción entera queda por encima de «Abrir Atajos».
     func testResumedStepFitsWithoutScrolling() throws {
-        for step in [19, 10] {
+        for step in [5, 6] {
             app.terminate()
             app.launchArguments = base + ["-MiBancoDemoGuideSeed", "rev", String(step)]
             app.launch()
@@ -263,11 +263,11 @@ final class GuideUITests: XCTestCase {
         XCTContext.runActivity(named: measure) { _ in }
     }
 
-    /// Abrir «¿No te sale esto?» siempre la enseña (G28), retomando el paso 19 de Revolut.
+    /// Abrir «¿No te sale esto?» siempre la enseña (G28), retomando el paso 6 de Revolut.
     func testOpeningHelpShowsIt() throws {
-        launchResumed("rev", 19)
-        waitForStep(19, "No retomó rev en el paso 19")
-        assertOpeningHelpShowsIt("rev 19 retomado")
+        launchResumed("rev", 6)
+        waitForStep(6, "No retomó rev en el paso 6")
+        assertOpeningHelpShowsIt("rev 6 retomado")
     }
 
     /// La ayuda más larga (Apple Pay de imagin, paso 6, retomado): se ve entera al abrirla (el dibujo cede el sitio).
@@ -281,11 +281,11 @@ final class GuideUITests: XCTestCase {
     /// por encima de «Abrir Atajos» sin deslizar.
     func testOpeningHelpOnFreshStepShowsIt() throws {
         app.terminate()
-        app.launchArguments = base + ["-MiBancoDemoAlertsGuide", "rev", "19"]
+        app.launchArguments = base + ["-MiBancoDemoAlertsGuide", "rev", "6"]
         app.launch()
-        waitForStep(19, "No abrió rev en el paso 19")
+        waitForStep(6, "No abrió rev en el paso 6")
         XCTAssertFalse(app.buttons["guide-restart"].exists, "Este paso no debía abrirse retomando")
-        assertOpeningHelpShowsIt("rev 19 nuevo")
+        assertOpeningHelpShowsIt("rev 6 nuevo")
     }
 
     /// Cerrar la ayuda devuelve el paso exactamente a su sitio (G28 / I2): primero se afirma que al abrirla la ayuda se
@@ -343,8 +343,8 @@ final class GuideUITests: XCTestCase {
     /// «Empezar desde el principio» y el dibujo al final.
     @MainActor
     func testTextFirstReadsInScreenOrder() throws {
-        launchResumed("rev", 19, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
-        waitForStep(19, "No retomó rev en el paso 19")
+        launchResumed("rev", 6, extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityM"])
+        waitForStep(6, "No retomó rev en el paso 6")
         let instruction = app.staticTexts["guide-instruction"]
         let drawing = app.descendants(matching: .any).matching(identifier: "guide-drawing").firstMatch
         XCTAssertTrue(instruction.waitForExistence(timeout: 5) && drawing.exists, "Falta la instrucción o el dibujo")
@@ -363,12 +363,12 @@ final class GuideUITests: XCTestCase {
         XCTAssertEqual(found, found.sorted(), "VoiceOver no lee en el orden de la pantalla: \(order)")
     }
 
-    /// Con letra más grande (sin ser de accesibilidad), retomando el paso 19: la instrucción entera y «¿No te sale
+    /// Con letra más grande (sin ser de accesibilidad), retomando el paso 6: la instrucción entera y «¿No te sale
     /// esto?» siguen por encima de «Abrir Atajos» sin deslizar.
     func testResumedStepFitsAtLargerText() throws {
         for size in ["UICTContentSizeCategoryXL", "UICTContentSizeCategoryXXXL"] {
-            launchResumed("rev", 19, extra: ["-UIPreferredContentSizeCategoryName", size])
-            waitForStep(19, "No retomó en el paso 19 (\(size))")
+            launchResumed("rev", 6, extra: ["-UIPreferredContentSizeCategoryName", size])
+            waitForStep(6, "No retomó en el paso 6 (\(size))")
             let help = app.buttons["guide-help"]
             XCTAssertTrue(help.waitForExistence(timeout: 5), "Falta «¿No te sale esto?» (\(size))")
             XCTAssertTrue(help.isHittable, "«¿No te sale esto?» no se ve sin deslizar (\(size))")

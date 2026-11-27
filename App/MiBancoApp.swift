@@ -220,8 +220,8 @@ private struct AppShellView: View {
                 shell.apply(.safetyFired)
             }
             .task {
-                // Arranque en frío (tarea 10): puede que no haya cambio de escena que lo dispare.
-                await MainActor.run { BankSync.refreshOnOpen() }
+                // Arranque en frío (tarea 10): solo tras superar el bloqueo y en primer plano.
+                await MainActor.run { BankSync.refreshOnOpen(isUnlocked: !shell.showsLock) }
                 await logos.prewarm(domains: [])
                 #if DEBUG
                 if DemoMode.isActive {
@@ -270,7 +270,8 @@ private struct AppShellView: View {
             // Bancos (tarea 10): una conexión cambió (conectar, renovar, desconectar).
             .onReceive(NotificationCenter.default.publisher(for: .bankLinkDidChange)) { note in
                 let bank = (note.userInfo?["bank"] as? String).flatMap(BankID.init(rawValue:))
-                Task { await BankSync.shared.linkDidChange(bank) }
+                let unlocked = !shell.showsLock
+                Task { await BankSync.shared.linkDidChange(bank, isUnlocked: unlocked) }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Conexión bancaria (tarea 9): el conector decide con su propio estado; el bloqueo no interviene.
@@ -299,7 +300,7 @@ private struct AppShellView: View {
                         book: accountBook.book,
                         privateMode: preferences.privateMode
                     )
-                    BankSync.refreshOnOpen() // tarea 10
+                    BankSync.refreshOnOpen(isUnlocked: !shell.showsLock) // tarea 10
                     Task { await portfolio.refreshPrices(force: false) }
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
@@ -363,7 +364,11 @@ private struct AppShellView: View {
                 }
             }
             .onChange(of: shell.showsLock) { _, isLocked in
-                if isLocked { speaker.stop() }
+                if isLocked {
+                    speaker.stop()
+                } else if scenePhase == .active {
+                    BankSync.refreshOnOpen(isUnlocked: true)
+                }
             }
             // La marca de la barra de Inicio se esconde mientras vuela la del arranque (`LaunchAnchor.flying`, que ponen
             // y quitan las propias capas que vuelan). Respaldo: sin ninguna de esas capas, nunca se queda escondida.

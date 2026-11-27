@@ -313,10 +313,7 @@ struct LockView: View {
         let context = LAContext()
         var error: NSError?
         if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) { return .available }
-        if let error, error.domain == LAError.errorDomain, error.code == LAError.passcodeNotSet.rawValue {
-            return .passcodeNotSet
-        }
-        return .unavailable
+        return lockAvailability(errorDomain: error?.domain, errorCode: error?.code)
     }
 
     /// Solo en DEBUG, las banderas de demo sustituyen lo que contesta el sistema; el resto del recorrido es el real.
@@ -333,6 +330,8 @@ struct LockView: View {
     private func applyAvailability(_ availability: DeviceAuthAvailability) -> Bool {
         let decision = LockAuthPolicy.decision(for: availability)
         screenMode = LockAuthPolicy.screenMode(for: decision)
+        // Al salir de «sin código» el panel de confirmación vuelve a su primer paso (no queda el consentimiento a medias).
+        if !LockAuthPolicy.keepsDisableConfirmation(for: decision) { confirmingDisable = false }
         if LockAuthPolicy.proceedsToEvaluate(decision) { return true }
         // Al volver de Ajustes del iPhone (o tras un fallo pasajero), permite volver a comprobar.
         autoAttempted = false

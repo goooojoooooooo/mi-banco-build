@@ -201,12 +201,15 @@ let merchantAliases: [(domain: String, aliases: [String])] = [
     // Supermercados
     ("mercadona.es", ["Mercadona"]),
     ("lidl.es", ["Lidl", "Lidl Supermercados"]),
-    ("carrefour.com", ["Carrefour", "Carrefour Express", "Carrefour Market", "Carrefour Bio"]),
+    ("carrefour.com", ["Carrefour", "Carrefour Express", "Carrefour Market", "Carrefour Bio",
+                      // Sus gasolineras no tienen dominio propio: llevan el logo de la cadena y `chainLineRules` las pasa a transporte.
+                      "Gasolinera Carrefour", "E S Carrefour", "Estacion de Servicio Carrefour", "Estacion Servicio Carrefour"]),
     ("dia.es", ["Dia", "Dia %", "Supermercados Dia", "Dia Supermercado", "Dia Supermercados", "Dia Market", "Dia & Go", "La Plaza de Dia",
                 // Razón social («DIA RETAIL ESPANA S.A.U.»): «retail» tras el alias ambiguo «Dia» no casaría.
                 "Dia Retail"]),
     ("aldi.es", ["Aldi", "Aldi Supermercados"]),
-    ("alcampo.es", ["Alcampo", "Mi Alcampo"]),
+    ("alcampo.es", ["Alcampo", "Mi Alcampo",
+                    "Gasolinera Alcampo", "E S Alcampo", "Estacion de Servicio Alcampo", "Estacion Servicio Alcampo"]),
     ("eroski.es", ["Eroski", "Eroski Center", "Eroski City"]),
     ("consum.es", ["Consum", "Charter Consum", "Supermercados Consum", "Consum Supermercado"]),
     ("elcorteingles.es", ["El Corte Inglés", "Corte Ingles", "ECI Supermercado"]),

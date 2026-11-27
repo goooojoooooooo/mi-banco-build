@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import LocalAuthentication
 import MiBancoCore
 import Security
 import SwiftUI
@@ -14,6 +15,10 @@ enum BankingSelfTest {
         func step(_ name: String) async {
             if let onStep { await onStep(name) }
         }
+        await step("0-LocalAuthentication")
+        // SEC-08: las constantes de Core que clasifican el error del sistema coinciden con las reales de LocalAuthentication.
+        guard LAError.Code.passcodeNotSet.rawValue == lockPasscodeNotSetErrorCode, LAError.errorDomain == lockAuthErrorDomain
+        else { return failure("LocalAuthentication (constantes de bloqueo)") }
         await step("1-clave")
         // 1. Clave RSA-2048 en memoria (no permanente) y su PKCS#1.
         let attributes: [CFString: Any] = [
@@ -459,6 +464,75 @@ enum BankingSelfTest {
         } catch {
             return "I-3 (error en respuesta 200)"
         }
+
+        // 6h. L1: cabeceras PSU locales reales en `URLSessionTransport` + `EnableBankingClient` (sin IP ni cookies),
+        // ausencia total en segundo plano / `GET /aspsps`, y manejo limpio de 422 PSU / 429 rate-limit.
+        await step("6h-psu-headers")
+        SelfTestURLProtocol.state.reset()
+        let localPSU = BankSync.localPSUHeaders()
+        guard let ua = localPSU["Psu-User-Agent"],
+              ua.hasPrefix("\(AppIdentity.displayName)/"),
+              ua.contains("(iOS "),
+              localPSU["Psu-Ip-Address"] == nil else {
+            return "L1 (cabeceras PSU locales invalidas)"
+        }
+        do {
+            _ = try await client.balances(accountUID: "selftest-psu", psuHeaders: localPSU)
+            guard let sent = SelfTestURLProtocol.state.headers(for: "/accounts/selftest-psu/balances") else {
+                return "L1 (faltan cabeceras grabadas en balances PSU)"
+            }
+            let lower = Dictionary(uniqueKeysWithValues: sent.map { ($0.key.lowercased(), $0.value) })
+            guard lower["psu-user-agent"] == ua,
+                  lower["psu-ip-address"] == nil,
+                  lower["cookie"] == nil,
+                  lower["authorization"]?.hasPrefix("Bearer ") == true else {
+                return "L1 (cabeceras PSU en URLRequest incorrectas)"
+            }
+            if let lang = localPSU["Psu-Accept-language"], lower["psu-accept-language"] != lang {
+                return "L1 (Psu-Accept-language no llego intacta)"
+            }
+        } catch {
+            return "L1 (error en balances con PSU)"
+        }
+        do {
+            _ = try await client.balances(accountUID: "selftest-bg", psuHeaders: nil)
+            guard let bgHeaders = SelfTestURLProtocol.state.headers(for: "/accounts/selftest-bg/balances"),
+                  !bgHeaders.keys.contains(where: { $0.lowercased().hasPrefix("psu-") }) else {
+                return "L1 (segundo plano envio cabecera PSU)"
+            }
+        } catch {
+            return "L1 (error en balances sin PSU)"
+        }
+        do {
+            let aspsps = try await client.aspsps(country: "ES")
+            guard let aspspHeaders = SelfTestURLProtocol.state.headers(for: "/aspsps"),
+                  !aspspHeaders.keys.contains(where: { $0.lowercased().hasPrefix("psu-") }),
+                  aspsps.count == 2,
+                  aspsps[0].requiredPSUHeaders == [],
+                  aspsps[1].requiredPSUHeaders == ["Psu-Ip-Address"] else {
+                return "L1 (GET /aspsps envio PSU o no decodifico required_psu_headers)"
+            }
+        } catch {
+            return "L1 (error en GET /aspsps)"
+        }
+        do {
+            _ = try await client.balances(accountUID: "selftest-422-psu", psuHeaders: localPSU)
+            return "L1 (422 PSU no fallo)"
+        } catch let error as BankingClientError {
+            guard error == .api(.unknown, code: "PSU_HEADER_NOT_PROVIDED"), isPSUHeaderRejection(error) else {
+                return "L1 (422 PSU mal clasificado)"
+            }
+        } catch {
+            return "L1 (error inesperado en 422 PSU)"
+        }
+        do {
+            _ = try await client.balances(accountUID: "selftest-429-psu", psuHeaders: localPSU)
+            return "L1 (429 no fallo)"
+        } catch BankingClientError.api(.rateLimited, code: "ASPSP_RATE_LIMIT_EXCEEDED") {
+            // OK
+        } catch {
+            return "L1 (429 mal clasificado)"
+        }
         return nil
     }
 
@@ -546,12 +620,26 @@ private final class SelfTestURLProtocol: URLProtocol {
         private let lock = NSLock()
         private var redirectTargetHits = 0
         private var deleteSessionAuthHeaders: [String] = []
+        private var headersByPath: [String: [String: String]] = [:]
 
         func reset() {
             lock.lock()
             defer { lock.unlock() }
             redirectTargetHits = 0
             deleteSessionAuthHeaders = []
+            headersByPath = [:]
+        }
+
+        func recordHeaders(_ headers: [String: String], for path: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            headersByPath[path] = headers
+        }
+
+        func headers(for path: String) -> [String: String]? {
+            lock.lock()
+            defer { lock.unlock() }
+            return headersByPath[path]
         }
 
         func recordRedirectTargetHit() {
@@ -652,6 +740,25 @@ private final class SelfTestURLProtocol: URLProtocol {
         case "/sessions/selftest-s1" where request.httpMethod == "DELETE":
             Self.state.recordDeleteSessionAuth(request.value(forHTTPHeaderField: "Authorization"))
             sendResponse(url: url, status: 204, headers: nil, body: nil)
+
+        case "/accounts/selftest-psu/balances", "/accounts/selftest-bg/balances":
+            Self.state.recordHeaders(request.allHTTPHeaderFields ?? [:], for: url.path)
+            sendResponse(url: url, status: 200, headers: ["Content-Type": "application/json"], body: Data(#"{"balances":[]}"#.utf8))
+
+        case "/aspsps":
+            Self.state.recordHeaders(request.allHTTPHeaderFields ?? [:], for: url.path)
+            let body = #"{"aspsps":[{"name":"Revolut","country":"ES","required_psu_headers":[]},{"name":"imaginBank","country":"ES","required_psu_headers":["Psu-Ip-Address"]}]}"#
+            sendResponse(url: url, status: 200, headers: ["Content-Type": "application/json"], body: Data(body.utf8))
+
+        case "/accounts/selftest-422-psu/balances":
+            sendResponse(
+                url: url, status: 422, headers: ["Content-Type": "application/json"],
+                body: Data(#"{"error":"PSU_HEADER_NOT_PROVIDED"}"#.utf8))
+
+        case "/accounts/selftest-429-psu/balances":
+            sendResponse(
+                url: url, status: 429, headers: ["Content-Type": "application/json"],
+                body: Data(#"{"error":"ASPSP_RATE_LIMIT_EXCEEDED"}"#.utf8))
 
         default:
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))

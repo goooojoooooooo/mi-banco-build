@@ -90,16 +90,21 @@ public func savingsInterestCents(baselineCents: Int, baselineAt: Date, flows: [S
 /// Los movimientos que mueven la remunerada, ya sin duplicados: los del libro tal como quedan tras fusionar las fuentes
 /// (un aviso enlazado con su registro es UN movimiento; lo borrado ya no está), sin los «no es mío» ni los que el dueño dice
 /// que no son la remunerada (`ownTransfer == false`), y sin las copias que la app ya reconoce como el mismo dinero: el
-/// pendiente que tiene su apuntado (`twinnedPending`), el capturado sin confirmar (`unconfirmedCaptureIDs`) y la fila del
+/// pendiente que tiene su apuntado (`twinPairs`: el par se juzga junto), el capturado sin confirmar (`unconfirmedCaptureIDs`) y la fila del
 /// banco o del extracto de un capturado sin enlazar (mismo importe con signo, a un día de Madrid o menos; uno a uno): el par
 /// lo representa el capturado, que trae la hora exacta. Primero se quitan las copias, sobre TODOS los traspasos, y solo
 /// después se mira la base (`isAfterSavingsBaseline`): un aviso de antes de la base se lleva su fila con él.
 public func countedSavingsTransfers(in state: LedgerState, account: SavingsAccount, now: Date) -> [Movement] {
     let candidates = state.movements.filter { isSavingsTransfer($0) && !$0.flaggedNotMine && $0.ownTransfer != false }
     guard !candidates.isEmpty else { return [] }
-    // Lectura neutra: todo apuntado del banco cuenta como visto, así cada pendiente con su apuntado se empareja.
+    // Lectura neutra: todo apuntado del banco cuenta como visto, así cada pendiente con su apuntado se empareja. El par es UN
+    // traspaso: lo representa el apuntado, pero solo cuenta si el pendiente también es posterior a la base (el más temprano
+    // de los dos manda: si el pendiente ya estaba en el saldo puesto, su apuntado también).
     let neutral = ManualBalance(cents: 0, setAt: .distantFuture, origin: .bank)
-    var skip = Ledger.twinnedPending(state.movements, bank: .rev, base: neutral)
+    let pairs = Ledger.twinPairs(state.movements, bank: .rev, base: neutral)
+    var pendingOf: [UUID: Movement] = [:]
+    for pair in pairs { pendingOf[pair.booked.id] = pair.pending }
+    var skip = Set(pairs.map(\.pending.id))
     skip.formUnion(unconfirmedCaptureIDs(in: state, now: now))
     let rows = candidates.filter { $0.source.isBankSourced && !skip.contains($0.id) }
     var usedRows = Set<UUID>()
@@ -118,21 +123,27 @@ public func countedSavingsTransfers(in state: LedgerState, account: SavingsAccou
             skip.insert(twin.id)
         }
     }
-    return candidates.filter { !skip.contains($0.id) && isAfterSavingsBaseline($0, account) }
+    let connected = state.links[.rev] != nil
+    return candidates.filter { m in
+        guard !skip.contains(m.id), isAfterSavingsBaseline(m, account, revolutConnected: connected) else { return false }
+        return pendingOf[m.id].map { isAfterSavingsBaseline($0, account, revolutConnected: connected) } ?? true
+    }
 }
 
-/// ¿Es este traspaso posterior a la base (no estaba ya en el saldo que puso el dueño)?
+/// ¿Es este traspaso posterior a la base (no estaba ya en el saldo que puso el dueño)? Ante la duda, no: en una app de
+/// saldos, inflar el dinero es peor que no verlo.
 /// - Con hora (aviso, Cartera, extracto, o fila del banco enlazada a un aviso): si su hora es posterior a la de la base.
 /// - Fila de solo día (Enable Banking, a mediodía de Madrid): por días de Madrid. Un día anterior al de la base ya estaba
 ///   dentro; uno posterior, no. Del MISMO día solo cuenta si se vio por primera vez (`importedAt`, o `linkedAt` de un
-///   capturado) después de lo que la base ya incluye: la hora de la base o, si la hubo, la consulta de Revolut que siguió a
-///   ponerla (`coveredThrough`), que trae lo que se hizo antes de la base. Sin esa consulta, una fila del día de la base que
-///   llega después se toma por posterior.
-func isAfterSavingsBaseline(_ m: Movement, _ account: SavingsAccount) -> Bool {
+///   capturado) después de la consulta de Revolut que siguió a ponerla (`coveredThrough`), que trae lo que se hizo antes de
+///   la base. Con Revolut conectado y sin esa consulta no se sabe si es de antes o de después: no cuenta. Sin Revolut
+///   conectado (filas de una conexión anterior) se compara con la hora de la base.
+func isAfterSavingsBaseline(_ m: Movement, _ account: SavingsAccount, revolutConnected: Bool) -> Bool {
     guard m.dayOnly else { return m.date > account.baselineAt }
     let day = madridCalendar.startOfDay(for: m.date)
     let baseDay = madridCalendar.startOfDay(for: account.baselineAt)
     if day != baseDay { return day > baseDay }
+    if account.coveredThrough == nil, revolutConnected { return false }
     let firstSeen = m.source.isBankSourced ? m.importedAt : (m.linkedAt ?? m.importedAt)
     guard let firstSeen else { return false }
     return firstSeen > max(account.baselineAt, account.coveredThrough ?? account.baselineAt)

@@ -45,6 +45,9 @@ public func sanitizeIngestInput(_ input: IngestInput) -> IngestInput {
             amount: sanitizeWalletAmount(amount),
             merchant: sanitizeMerchant(merchant)
         )
+    case let .unattributedNotice(text):
+        // Aviso sin banco (avisos rápidos): mismo saneado que el cuerpo de un aviso.
+        return .unattributedNotice(text: sanitizeNoticeField(text) ?? "")
     }
 }
 

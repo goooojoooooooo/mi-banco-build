@@ -280,6 +280,11 @@ struct SettingsView: View {
             applyFocusRequest()
             applyAccountsRequest()
             applyBankRequest()
+            BankSyncStatus.shared.reloadRequiredPSUHeaders(cachedASPSPs: BankConnector.shared.cachedASPSPs)
+            if BankSync.isEnabled,
+               BankID.allCases.contains(where: { model.state.links[$0] != nil && BankSyncStatus.shared.requiredPSUHeaders[$0] == nil }) {
+                Task { await BankSync.shared.prefetchMissingRequiredPSUHeaders() }
+            }
             #if DEBUG
             if DemoMode.isActive {
                 if DemoMode.opensAccounts {
@@ -411,7 +416,18 @@ struct SettingsView: View {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "?"
         let build = info?["CFBundleVersion"] as? String ?? "?"
-        return "Diagnóstico: datos en \(place) · Versión \(version) (\(build))\n\(BankApps.diagnosticsLine)"
+        var lines = [
+            "Diagnóstico: datos en \(place) · Versión \(version) (\(build))",
+            BankApps.diagnosticsLine,
+        ]
+        let connected = BankID.allCases.filter { model.state.links[$0] != nil }
+        if let psuLine = psuHeadersDiagnosticsLine(
+            connectedBanks: connected,
+            requiredByBank: BankSyncStatus.shared.requiredPSUHeaders
+        ) {
+            lines.append(psuLine)
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func applyAccountsRequest() {

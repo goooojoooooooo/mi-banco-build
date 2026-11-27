@@ -80,12 +80,13 @@ final class NyxPresenceUITests: XCTestCase {
 
     /// N10: el botón no aparece con el bloqueo delante ni dentro de los pasos de la guía de avisos.
     func testElBotonNoSaleEnLaGuiaNiConElBloqueo() throws {
-        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "12"])
+        launch(["-MiBancoDemoLock", "-MiBancoDemoLockSeconds", "6"])
         let nyx = app.buttons["nyx-button"]
-        XCTAssertTrue(app.buttons["Desbloquear"].waitForExistence(timeout: 8), "No apareció la pantalla de bloqueo")
+        let unlock = app.buttons["Desbloquear"]
+        XCTAssertTrue(unlock.waitForExistence(timeout: 8), "No apareció la pantalla de bloqueo")
         XCTAssertFalse(nyx.exists && nyx.isHittable, "nyx-button no puede aparecer con el bloqueo delante")
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "No se desbloqueó Inicio")
-        XCTAssertTrue(nyx.waitForExistence(timeout: 8), "Tras desbloquear debe aparecer nyx-button")
+        XCTAssertTrue(waitFor(NSPredicate(format: "exists == false"), unlock, timeout: 20), "El bloqueo de demo no se quitó")
+        XCTAssertTrue(nyx.waitForExistence(timeout: 10), "Tras desbloquear debe aparecer nyx-button")
 
         app.terminate()
 

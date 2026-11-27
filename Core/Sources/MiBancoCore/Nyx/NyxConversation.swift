@@ -42,12 +42,13 @@ private let nyxNewQuestionCues: Set<String> = [
     "saldo", "saldos", "presupuesto", "presupuestos", "ingresos", "traspasos", "inversiones", "cartera", "resumen",
 ]
 
+/// «pago» y «pagos» no están: se dicen igual en «¿has visto algún pago raro?» o «¿llegan los avisos de los pagos?».
 /// Palabras de consulta financiera normal: evitan desviar preguntas de saldos, gasto o presupuesto a preguntas propias de Nyx.
 private let nyxFinancialQuestionCues: Set<String> = [
     "cuanto", "cuanta", "cuantos", "cuantas",
     "saldo", "saldos", "dinero",
     "gaste", "gastado", "gasto", "gastos", "gastar",
-    "pague", "pagado", "pago", "pagos", "llevo",
+    "pague", "pagado", "llevo",
     "cobre", "cobrado", "ingreso", "ingresos", "nomina", "sueldo",
     "presupuesto", "presupuestos", "suscripcion", "suscripciones",
     "traspaso", "traspasos", "inversion", "inversiones", "cartera",

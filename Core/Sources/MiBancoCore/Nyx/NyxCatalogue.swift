@@ -263,8 +263,18 @@ public func nyxMessage(for o: NyxObservation, now: Date, calendar: Calendar) -> 
 
     case .shortfall:
         let closedDay = f.day.map { nyxClosedDayPhrase($0, now: now, calendar: calendar) }
+        let isPast = f.day.map { calendar.startOfDay(for: $0) < calendar.startOfDay(for: now) } ?? false
         let neutral: String
-        if let closedDay, let bank = f.bank?.displayName {
+        if isPast {
+            // Un cobro de un día ya pasado se cuenta en pasado y no ofrece traspaso: el saldo guardado ya no vale.
+            if let closedDay, let bank = f.bank?.displayName {
+                neutral = "\(closedDay) te cobraron algo en \(bank) y la cuenta se quedó corta."
+            } else if let closedDay {
+                neutral = "\(closedDay) tuviste un cobro que no cabía en la cuenta."
+            } else {
+                neutral = "Tuviste un cobro que no cabía en la cuenta."
+            }
+        } else if let closedDay, let bank = f.bank?.displayName {
             neutral = "\(closedDay) te cobran algo en \(bank) y la cuenta se queda corta."
         } else if let closedDay {
             neutral = "\(closedDay) tienes un cobro que no cabe en la cuenta."
@@ -272,8 +282,16 @@ public func nyxMessage(for o: NyxObservation, now: Date, calendar: Calendar) -> 
             neutral = "Tienes un cobro próximo que no cabe en la cuenta."
         }
         let open: [BriefingPart]
-        if let dayDate = f.day, let rawMerchant, let bank = f.bank?.displayName,
-           let cents = f.cents, let balance = f.balanceCents, let suggested = f.suggestedCents {
+        if isPast {
+            if let dayDate = f.day, let rawMerchant, let bank = f.bank?.displayName, let cents = f.cents {
+                let openDay = nyxDayPhrase(dayDate, now: now, calendar: calendar)
+                open = [.text("\(openDay) te cobraron \(clippedName(rawMerchant)) ("), .amount(cents),
+                        .text(") en \(bank) y la cuenta se quedó corta.")]
+            } else {
+                open = [.text(neutral)]
+            }
+        } else if let dayDate = f.day, let rawMerchant, let bank = f.bank?.displayName,
+                  let cents = f.cents, let balance = f.balanceCents, let suggested = f.suggestedCents {
             let openDay = nyxDayPhrase(dayDate, now: now, calendar: calendar)
             var parts: [BriefingPart] = [
                 .text("\(openDay) te cobran \(clippedName(rawMerchant)) ("), .amount(cents),
@@ -290,11 +308,13 @@ public func nyxMessage(for o: NyxObservation, now: Date, calendar: Calendar) -> 
         }
         let closed: String
         if let closedDay, let rawMerchant, let bank = f.bank?.displayName {
-            closed = "\(closedDay) te cobran \(clippedName(rawMerchant)) en \(bank) y la cuenta se queda corta."
+            closed = isPast
+                ? "\(closedDay) te cobraron \(clippedName(rawMerchant)) en \(bank) y la cuenta se quedó corta."
+                : "\(closedDay) te cobran \(clippedName(rawMerchant)) en \(bank) y la cuenta se queda corta."
         } else {
             closed = neutral
         }
-        let actions: [NyxAction] = f.bank.map { [.prepareTransfer(from: f.otherBank, to: $0, cents: f.suggestedCents)] } ?? []
+        let actions: [NyxAction] = isPast ? [] : (f.bank.map { [.prepareTransfer(from: f.otherBank, to: $0, cents: f.suggestedCents)] } ?? [])
         return build(
             title: "Un cobro que no cabe",
             open: open,

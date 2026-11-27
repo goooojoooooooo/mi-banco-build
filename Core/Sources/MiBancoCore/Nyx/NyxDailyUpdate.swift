@@ -175,10 +175,11 @@ public func nyxDailyUpdate(input: BriefingInput, candidates: [NyxObservation], f
     return NyxDailyUpdate(briefing: briefing, opening: opening, focus: focus, seenSinceLastLook: max(0, seenSinceLastLook))
 }
 
-/// Línea de novedades en la puesta al día; nil si no hay ninguna.
-public func nyxSeenLine(_ count: Int) -> String? {
+/// Línea de novedades en la puesta al día; nil si no hay ninguna. Con el ojo cerrado no lleva ningún número.
+public func nyxSeenLine(_ count: Int, hidden: Bool = false) -> String? {
     guard count > 0 else { return nil }
-    return count == 1 ? "He visto una cosa desde la última vez." : "He visto \(count) cosas desde la última vez."
+    if count == 1 { return "He visto una cosa desde la última vez." }
+    return hidden ? "He visto algunas cosas desde la última vez." : "He visto \(count) cosas desde la última vez."
 }
 
 private func nyxEndSentence(_ text: String) -> String {

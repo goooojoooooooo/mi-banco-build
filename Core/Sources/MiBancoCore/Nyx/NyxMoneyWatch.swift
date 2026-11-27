@@ -69,9 +69,6 @@ private func computeNyxBaselines(in state: LedgerState, now: Date, calendar: Cal
         merchantUsual[key] = nyxMedian(amounts)
     }
 
-    let averages = averageMonthlySpendingByCategory(in: state, before: now, months: 3, calendar: calendar,
-                                                    notSpending: exclusions, subscriptionKeys: subKeys)?.byCategory ?? [:]
-
     let fullMonths: Int
     if let first = state.movements.map(\.date).min(),
        let firstMonth = calendar.dateInterval(of: .month, for: first)?.start,
@@ -91,6 +88,10 @@ private func computeNyxBaselines(in state: LedgerState, now: Date, calendar: Cal
     } else {
         fullMonths = 0
     }
+
+    // La media usa solo meses completos: el primer mes a medias no la diluye.
+    let averages = averageMonthlySpendingByCategory(in: state, before: now, months: min(3, fullMonths), calendar: calendar,
+                                                    notSpending: exclusions, subscriptionKeys: subKeys)?.byCategory ?? [:]
 
     return NyxBaselines(merchantUsualCents: merchantUsual, categoryAverageCents: averages, fullMonths: fullMonths)
 }

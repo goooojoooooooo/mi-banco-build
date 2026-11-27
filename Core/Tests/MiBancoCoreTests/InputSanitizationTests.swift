@@ -92,4 +92,12 @@ import Testing
         #expect(!saved.contains("\u{202E}"))
         #expect(!saved.contains("\u{0007}"))
     }
+
+    @Test func preservesCompoundEmojiWithZWJWhileStrippingControlsAndBidi() {
+        let chef = "Café \u{1F9D1}\u{200D}\u{1F373} \u{202E}\u{FEFF}\u{200B}Madrid\u{0000}"
+        #expect(sanitizeMerchant(chef) == "Café \u{1F9D1}\u{200D}\u{1F373} Madrid")
+
+        let familyNotice = "Pago en \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} Tienda\u{202E} 12,50\u{00A0}€\u{200B}"
+        #expect(sanitizeNoticeField(familyNotice) == "Pago en \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} Tienda 12,50\u{00A0}€")
+    }
 }

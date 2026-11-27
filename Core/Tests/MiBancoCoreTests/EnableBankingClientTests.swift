@@ -310,4 +310,11 @@ private func tx(_ id: String) -> String {
             )
         }
     }
+
+    @Test func oversizedResponseIsBadResponseNotOffline() async {
+        let oversized = FixtureTransport([.fail(.dataLengthExceedsMaximum)])
+        await #expect(throws: BankingClientError.badResponse) {
+            _ = try await makeClient(oversized).balances(accountUID: "u-1")
+        }
+    }
 }

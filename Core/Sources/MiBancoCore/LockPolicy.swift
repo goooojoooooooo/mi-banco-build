@@ -7,6 +7,20 @@ public enum LockAvailabilityDecision: Equatable, Sendable {
     case evaluateDeviceAuth
     /// El iPhone no tiene código ni biometría: mantener bloqueado con aviso claro y opción consciente de desactivar.
     case requirePasscodeSetup
+    /// `canEvaluatePolicy` falló por otro motivo (no es «sin código»): se queda el botón «Desbloquear» para reintentar.
+    /// Jamás se ofrece desactivar el bloqueo por un fallo pasajero.
+    case retryAuthentication
+}
+
+/// Lo que contesta el sistema al preguntar si puede autenticar al dueño (`LAContext.canEvaluatePolicy`), sin importar
+/// `LocalAuthentication` aquí.
+public enum DeviceAuthAvailability: Equatable, Sendable {
+    /// Face ID, Touch ID o código del iPhone disponibles.
+    case available
+    /// El error fue exactamente `LAError.passcodeNotSet`: el iPhone no tiene código.
+    case passcodeNotSet
+    /// Cualquier otro motivo por el que no se pudo evaluar (error pasajero o inesperado).
+    case unavailable
 }
 
 /// Estado visual de `LockView` frente a la disponibilidad de autenticación del sistema (`SEC-08`).
@@ -27,9 +41,25 @@ public enum LockAuthPolicy {
         "Desactivar bloqueo de \(appDisplayName)"
     }
 
-    /// Decide la acción según si `LAContext.canEvaluatePolicy(.deviceOwnerAuthentication, ...)` devuelve `true`.
-    public static func decision(canEvaluateDeviceAuth: Bool) -> LockAvailabilityDecision {
-        canEvaluateDeviceAuth ? .evaluateDeviceAuth : .requirePasscodeSetup
+    /// Texto de la confirmación al desactivar el bloqueo.
+    public static var disableConfirmationTitle: String { "¿Desactivar el bloqueo de \(appDisplayName)?" }
+    public static var disableConfirmationMessage: String {
+        "\(appDisplayName) se abrirá sin protección: cualquiera que tenga tu iPhone podrá ver tu dinero."
+    }
+    public static var disableConfirmationButtonTitle: String { "Desactivar y abrir sin protección" }
+
+    /// Decide la acción según lo que contestó el sistema. Solo `passcodeNotSet` lleva a la pantalla «sin código».
+    public static func decision(for availability: DeviceAuthAvailability) -> LockAvailabilityDecision {
+        switch availability {
+        case .available: .evaluateDeviceAuth
+        case .passcodeNotSet: .requirePasscodeSetup
+        case .unavailable: .retryAuthentication
+        }
+    }
+
+    /// Solo con `evaluateDeviceAuth` se pide Face ID/código; con cualquier otra decisión no se sigue ni se desbloquea.
+    public static func proceedsToEvaluate(_ decision: LockAvailabilityDecision) -> Bool {
+        decision == .evaluateDeviceAuth
     }
 
     /// Traduce la decisión al estado visual del bloqueo.
@@ -37,6 +67,7 @@ public enum LockAuthPolicy {
         switch decision {
         case .evaluateDeviceAuth: .authenticate
         case .requirePasscodeSetup: .noPasscode
+        case .retryAuthentication: .authenticate
         }
     }
 

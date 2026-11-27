@@ -64,7 +64,7 @@ private struct AppShellView: View {
     private static func lockSetting(enabled: Bool, demoNoPasscodeDisabled: Bool = false) -> (applies: Bool, relocks: Bool) {
         #if DEBUG
         if DemoMode.isActive {
-            if DemoMode.simulatesNoPasscode {
+            if DemoMode.simulatedDeviceAuth != nil {
                 let active = !demoNoPasscodeDisabled
                 return (active, active)
             }
@@ -303,6 +303,16 @@ private struct AppShellView: View {
                     Task { await portfolio.refreshPrices(force: false) }
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
+                    // SEC-06 (m-5): con el ojo ya cerrado, retira otra vez los avisos con cifras (la app pudo morir justo
+                    // después de cerrarlo, antes de que la retirada se ejecutara). Es idempotente.
+                    if PrivateModeTransitionEffects.removesDeliveredAlertsOnBecomingActive(eyeClosed: preferences.privateMode) {
+                        #if DEBUG
+                        let isDemo = DemoMode.isActive
+                        #else
+                        let isDemo = false
+                        #endif
+                        if !isDemo { Task { await AlertPoster.removeDeliveredSensitiveNotifications() } }
+                    }
                 case .background:
                     speaker.stop()
                     BackgroundRefresh.schedule() // tarea 10

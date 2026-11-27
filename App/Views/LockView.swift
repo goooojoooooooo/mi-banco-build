@@ -22,9 +22,14 @@ struct LockView: View {
     var fadeStarted: (_ seconds: Double, _ keepsItsMark: Bool) -> Void = { _, _ in }
     /// SEC-08: desactivar el bloqueo a conciencia cuando el iPhone no tiene código ni Face ID.
     var disableLock: () -> Void = {}
+    /// SEC-08: lo que contesta el sistema a «¿puedo autenticar al dueño?». Se inyecta para que lo único que cambia entre
+    /// la app real, la demo sin código y las pruebas sea ESTE valor: la guardia de `authenticate()` es siempre la misma.
+    var deviceAuth: () -> DeviceAuthAvailability = LockView.systemDeviceAuth
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motion) private var motion
     @State private var authenticating = false
+    /// SEC-08 (m-3): desactivar el bloqueo pide confirmación; Onyx se abrirá sin protección.
+    @State private var confirmingDisable = false
     /// Un intento automático por bloqueo (esta vista solo existe mientras está bloqueado).
     @State private var autoAttempted = false
     @State private var failures = 0
@@ -131,11 +136,7 @@ struct LockView: View {
         .task { await assembleMark(timeline) }
         .task {
             #if DEBUG
-            if DemoMode.simulatesNoPasscode {
-                applyAvailability(canEvaluate: false)
-                return
-            }
-            if DemoMode.holdsLock {
+            if DemoMode.holdsLock, DemoMode.simulatedDeviceAuth == nil {
                 // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación. (Si una prueba
                 // retrasa el arranque para grabarlo, el bloqueo de demo espera lo mismo; la espera es exacta para que
                 // las grabaciones sepan cuándo ocurre.)
@@ -157,12 +158,6 @@ struct LockView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
-                #if DEBUG
-                if DemoMode.simulatesNoPasscode {
-                    applyAvailability(canEvaluate: false)
-                    return
-                }
-                #endif
                 Task { await autoAuthenticate() }
             }
         }
@@ -188,7 +183,7 @@ struct LockView: View {
             .padding(16)
             .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
 
-            Button(action: disableLockAndUnlock) {
+            Button { confirmingDisable = true } label: {
                 Text(LockAuthPolicy.disableLockButtonTitle)
                     .titan(.option)
                     .fontWeight(.semibold)
@@ -202,6 +197,12 @@ struct LockView: View {
             }
             .buttonStyle(.pressable)
             .accessibilityIdentifier("lock-disable-button")
+        }
+        .confirmationDialog(LockAuthPolicy.disableConfirmationTitle, isPresented: $confirmingDisable, titleVisibility: .visible) {
+            Button(LockAuthPolicy.disableConfirmationButtonTitle, role: .destructive, action: disableLockAndUnlock)
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text(LockAuthPolicy.disableConfirmationMessage)
         }
     }
 
@@ -248,7 +249,7 @@ struct LockView: View {
     /// Solo en primer plano y una vez por bloqueo; si se cancela, queda el botón.
     private func autoAuthenticate() async {
         #if DEBUG
-        if DemoMode.holdsLock || DemoMode.simulatesNoPasscode { return }
+        if DemoMode.holdsLock, DemoMode.simulatedDeviceAuth == nil { return }
         #endif
         guard scenePhase == .active, !autoAttempted else { return }
         autoAttempted = true
@@ -259,33 +260,44 @@ struct LockView: View {
         guard !authenticating, !leaving else { return }
         authenticating = true
         defer { authenticating = false }
-        #if DEBUG
-        if DemoMode.simulatesNoPasscode {
-            applyAvailability(canEvaluate: false)
-            return
-        }
-        #endif
+        // SEC-08: sin código ni Face ID en el iPhone NO se desbloquea en silencio. Esta guardia la recorren la app real, la
+        // demo (`-MiBancoDemoNoPasscode`, que solo cambia lo que contesta `currentAvailability()`) y las pruebas.
+        guard applyAvailability(currentAvailability()) else { return }
         let context = LAContext()
-        var error: NSError?
-        // SEC-08: sin código ni Face ID en el iPhone NO se desbloquea en silencio; se muestra el aviso claro.
-        let canEvaluate = context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error)
-        guard applyAvailability(canEvaluate: canEvaluate) else { return }
         let ok = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Para que solo tú veas tu dinero")) ?? false
         if ok { unlockWithFade() } else { failures += 1 }
     }
 
-    @discardableResult
-    private func applyAvailability(canEvaluate: Bool) -> Bool {
-        let decision = LockAuthPolicy.decision(canEvaluateDeviceAuth: canEvaluate)
-        screenMode = LockAuthPolicy.screenMode(for: decision)
-        switch decision {
-        case .evaluateDeviceAuth:
-            return true
-        case .requirePasscodeSetup:
-            // Al volver de Ajustes del iPhone tras configurar un código, permite volver a comprobar.
-            autoAttempted = false
-            return false
+    /// Lo que contesta el sistema real: solo `LAError.passcodeNotSet` cuenta como «sin código».
+    static func systemDeviceAuth() -> DeviceAuthAvailability {
+        let context = LAContext()
+        var error: NSError?
+        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) { return .available }
+        if let error, error.domain == LAError.errorDomain, error.code == LAError.passcodeNotSet.rawValue {
+            return .passcodeNotSet
         }
+        return .unavailable
+    }
+
+    /// Solo en DEBUG, las banderas de demo sustituyen lo que contesta el sistema; el resto del recorrido es el real.
+    private func currentAvailability() -> DeviceAuthAvailability {
+        #if DEBUG
+        if let simulated = DemoMode.simulatedDeviceAuth { return simulated }
+        #endif
+        return deviceAuth()
+    }
+
+    /// Devuelve `true` solo si hay que pedir Face ID/código. Con cualquier otra respuesta nada se desbloquea:
+    /// `passcodeNotSet` enseña la pantalla «sin código»; un fallo distinto deja «Desbloquear» para reintentar.
+    @discardableResult
+    private func applyAvailability(_ availability: DeviceAuthAvailability) -> Bool {
+        let decision = LockAuthPolicy.decision(for: availability)
+        screenMode = LockAuthPolicy.screenMode(for: decision)
+        if LockAuthPolicy.proceedsToEvaluate(decision) { return true }
+        // Al volver de Ajustes del iPhone (o tras un fallo pasajero), permite volver a comprobar.
+        autoAttempted = false
+        if decision == .retryAuthentication { failures += 1 }
+        return false
     }
 
     /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto. El fundido lee `\.motion`:

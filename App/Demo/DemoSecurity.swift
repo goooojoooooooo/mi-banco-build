@@ -1,11 +1,23 @@
 #if DEBUG
 import Foundation
+import MiBancoCore
 
 // Banderas de demo para pruebas y ráfagas de Seguridad Fase 2 (solo DEBUG, no existen en Release).
 extension DemoMode {
     /// `-MiBancoDemoNoPasscode`: simula un iPhone sin código ni Face ID en `LockView` (`SEC-08`).
     /// Mantiene el bloqueo delante sin desbloquear en silencio hasta que el usuario pulsa desactivar a conciencia.
     static var simulatesNoPasscode: Bool { isActive && arguments.contains("-MiBancoDemoNoPasscode") }
+
+    /// `-MiBancoDemoLockAuthError`: simula un fallo de `canEvaluatePolicy` que NO es «sin código» (m-2). El bloqueo debe
+    /// dejar «Desbloquear» para reintentar y no ofrecer desactivarse.
+    static var simulatesAuthError: Bool { isActive && arguments.contains("-MiBancoDemoLockAuthError") }
+
+    /// Lo único que cambian las banderas de demo del bloqueo: lo que «contesta el sistema». La guardia de `LockView` es la real.
+    static var simulatedDeviceAuth: DeviceAuthAvailability? {
+        if simulatesNoPasscode { return .passcodeNotSet }
+        if simulatesAuthError { return .unavailable }
+        return nil
+    }
 
     /// `-MiBancoDemoCloseEyeWhenSpeaking <s>`: cierra el ojo `s` segundos después de empezar a hablar `BriefingSpeaker`
     /// (`SEC-13`), para verificar en pruebas de interfaz que la voz se para de inmediato.

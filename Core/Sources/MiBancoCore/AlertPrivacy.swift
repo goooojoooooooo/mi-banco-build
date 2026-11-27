@@ -45,6 +45,10 @@ public struct PrivateModeTransitionEffects: Equatable, Sendable {
         self.stopBriefingSpeech = stopBriefingSpeech
     }
 
+    /// Al volver a primer plano con el ojo ya cerrado también se retiran los avisos con cifras (por si la app murió justo
+    /// después de cerrar el ojo, antes de que la retirada se ejecutara). Es idempotente.
+    public static func removesDeliveredAlertsOnBecomingActive(eyeClosed: Bool) -> Bool { eyeClosed }
+
     public static func evaluate(wasHidden: Bool, isHidden: Bool) -> PrivateModeTransitionEffects {
         let justClosed = !wasHidden && isHidden
         return PrivateModeTransitionEffects(

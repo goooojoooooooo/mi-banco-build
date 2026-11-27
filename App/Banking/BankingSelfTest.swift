@@ -9,7 +9,11 @@ import SwiftUI
 enum BankingSelfTest {
     static let testService = "com.mibanco.banking.selftest"
 
-    static func run() async -> String {
+    static func run(onStep: (@MainActor @Sendable (String) -> Void)? = nil) async -> String {
+        func step(_ name: String) async {
+            if let onStep { await onStep(name) }
+        }
+        await step("1-clave")
         // 1. Clave RSA-2048 en memoria (no permanente) y su PKCS#1.
         let attributes: [CFString: Any] = [
             kSecAttrKeyType: kSecAttrKeyTypeRSA, kSecAttrKeySizeInBits: 2048,
@@ -52,6 +56,7 @@ enum BankingSelfTest {
         }
 
         // 5. Llavero con otro servicio: guardar, leer, actualizar (verificando kSecAttrAccessible, M-12), borrar.
+        await step("5-llavero-M12")
         let secret = Data("valor-de-prueba".utf8)
         do {
             try KeychainVault.deleteAll(service: testService)
@@ -138,6 +143,7 @@ enum BankingSelfTest {
 
             // 5d. M-1: «Olvidar clave y conexiones» — tras `deleteAll()`, la referencia `SecKey` retenida por el cliente
             // debe seguir firmando el JWT y enviando `DELETE /sessions/...` válido.
+            await step("5d-M1-deleteAll")
             SelfTestURLProtocol.state.reset()
             let forgetTransport = URLSessionTransport(protocolClasses: [SelfTestURLProtocol.self])
             let preDeleteClient = EnableBankingClient(
@@ -192,17 +198,27 @@ enum BankingSelfTest {
         }
 
         // 6. I-3 + M-4: pruebas reales de `URLSessionTransport` (`NoRedirectDelegate` y tope de 10 MB / streaming).
-        if let transportFailure = await verifyTransportPolicy(signer: signer, appID: appID, now: now) {
+        await step("6-transporte-I3")
+        if let transportFailure = await verifyTransportPolicy(signer: signer, appID: appID, now: now, onStep: onStep) {
             return failure(transportFailure)
         }
         _ = URLSessionTransport()
         return "Autoprueba: OK"
     }
 
-    private static func verifyTransportPolicy(signer: RSASigner, appID: String, now: Date) async -> String? {
+    private static func verifyTransportPolicy(
+        signer: RSASigner,
+        appID: String,
+        now: Date,
+        onStep: (@MainActor @Sendable (String) -> Void)?
+    ) async -> String? {
+        func step(_ name: String) async {
+            if let onStep { await onStep(name) }
+        }
         let redirectURL = URL(string: "https://selftest.example.com/redirect")!
 
         // 6a. Control: una URLSession SIN `NoRedirectDelegate` SÍ sigue el 302 hacia `/redirect-target`.
+        await step("6a-control-302")
         SelfTestURLProtocol.state.reset()
         do {
             let controlConfig = URLSessionConfiguration.ephemeral
@@ -219,6 +235,7 @@ enum BankingSelfTest {
         }
 
         // 6b. `URLSessionTransport` CON `NoRedirectDelegate`: devuelve 302 y el destino recibe 0 peticiones.
+        await step("6b-noref-302")
         SelfTestURLProtocol.state.reset()
         let defaultTransport = URLSessionTransport(protocolClasses: [SelfTestURLProtocol.self])
         do {
@@ -251,6 +268,7 @@ enum BankingSelfTest {
         }
 
         // 6d. Tope real de 10 MB por cabecera Content-Length (`10 MB + 1` bytes).
+        await step("6d-tope-10MB")
         let headerTooLargeURL = URL(string: "https://selftest.example.com/too-large-header")!
         do {
             _ = try await defaultTransport.send(HTTPRequest(method: "GET", url: headerTooLargeURL))
@@ -477,6 +495,15 @@ private final class SelfTestURLProtocol: URLProtocol {
             var redirectRequest = URLRequest(url: targetURL)
             redirectRequest.httpMethod = "GET"
             client?.urlProtocol(self, wasRedirectedTo: redirectRequest, redirectResponse: redirectResponse)
+            // Si URLSession sigue el 302 (sin NoRedirectDelegate), CFNetwork llama a `stopLoading()` y abre `targetURL`.
+            // Si `NoRedirectDelegate` rechaza con `completionHandler(nil)`, CFNetwork no para este protocolo y espera
+            // a que entregue la propia respuesta 302 (`didReceive` + `didFinishLoading`).
+            nonisolated(unsafe) let proto = self
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + .milliseconds(30)) {
+                guard !proto.isStopped else { return }
+                proto.client?.urlProtocol(proto, didReceive: redirectResponse, cacheStoragePolicy: .notAllowed)
+                proto.client?.urlProtocolDidFinishLoading(proto)
+            }
             return
 
         case "/redirect-target":
@@ -548,7 +575,11 @@ struct BankingSelfTestView: View {
     var body: some View {
         Text(result)
             .padding()
-            .task { result = await BankingSelfTest.run() }
+            .task {
+                result = await BankingSelfTest.run { step in
+                    result = "Autoprueba: en curso (\(step))"
+                }
+            }
     }
 }
 #endif

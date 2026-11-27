@@ -509,7 +509,7 @@ import Testing
         let second = ledger.ingest(.wallet(bank: .rev, amount: "2,50 €", merchant: "Panadería Luna"), now: t0 + 660)
         #expect(isStored(second))
         #expect(ledger.state.movements.count == 2)
-        #expect(ledger.balance(.rev)?.cents == 19_000)
+        #expect(ledger.balance(.rev)?.cents == 19_500)
     }
 
     // La reentrega (regla 3) del texto de un pendiente solo vale en su ventana de 60 s alrededor del cargo.

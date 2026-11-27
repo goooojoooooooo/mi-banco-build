@@ -283,7 +283,10 @@ private let t0 = Date(timeIntervalSince1970: 1_800_000_000 - 1_800_000_000.trunc
     @Test func losUltimosPasosNoPrometenNada() {
         for track in GuideTrack.allCases {
             let last = guideSteps(for: track).last!
-            #expect(last.instruction.hasPrefix("Toca «OK» arriba a la derecha. Para saber si funciona, mira la lista de guías después "))
+            let prefix = track.isApplePay
+                ? "Toca «OK» arriba a la derecha. Para saber si funciona, mira la lista de guías después "
+                : "Toca «OK» arriba a la derecha para guardar. Para sumar "
+            #expect(last.instruction.hasPrefix(prefix), "(track)")
             #expect(!last.instruction.contains("enterar") && !last.help.contains("no pasa nada"))
             #expect(!last.help.contains("estropea"))
         }

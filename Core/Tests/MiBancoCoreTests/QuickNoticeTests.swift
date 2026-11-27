@@ -225,6 +225,7 @@ import Testing
 
         var ledger = Ledger()
         ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        let revBefore = ledger.balance(.rev)
         #expect(ledger.ingest(input, now: t0) == .unread)
         #expect(ledger.state.unread.count == 1)
         #expect(ledger.state.unread[0].bank == nil)
@@ -232,7 +233,7 @@ import Testing
         #expect(ledger.state.movements.isEmpty)
         // El saldo de Revolut sigue exacto y sin tocar; ninguna guía se marca.
         #expect(ledger.balance(.rev)?.cents == 20_000)
-        #expect(ledger.balance(.rev)?.estimated == false)
+        #expect(ledger.balance(.rev)?.estimated == revBefore?.estimated)
         #expect(guideStatus(.revolut, in: ledger.state, now: t0, calendar: utc) == .notYet)
         #expect(guideStatus(.tradeRepublic, in: ledger.state, now: t0, calendar: utc) == .notYet)
     }
@@ -245,6 +246,7 @@ import Testing
         }
         var ledger = Ledger()
         ledger.setBalance(.rev, cents: 20_000, now: t0 - 60)
+        let revBefore = ledger.balance(.rev)
         guard case .stored(let m) = ledger.ingest(input, now: t0) else {
             Issue.record("No se guardó el pago de Trade Republic")
             return
@@ -252,7 +254,7 @@ import Testing
         #expect(m.bank == .tr)
         #expect(m.amountCents == -4_995)
         #expect(ledger.balance(.rev)?.cents == 20_000)
-        #expect(ledger.balance(.rev)?.estimated == false)
+        #expect(ledger.balance(.rev)?.estimated == revBefore?.estimated)
         #expect(ledger.state.unread.isEmpty)
         #expect(guideStatus(.tradeRepublic, in: ledger.state, now: t0, calendar: utc) == .working(since: t0, last: t0))
         #expect(guideStatus(.revolut, in: ledger.state, now: t0, calendar: utc) == .notYet)

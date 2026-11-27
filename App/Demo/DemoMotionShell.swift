@@ -20,6 +20,46 @@ extension DemoMode {
     /// al azar del barajado o máscara), para las pruebas de privacidad. Sin la bandera no cambia nada.
     static var exposesDrawnText: Bool { isActive && arguments.contains("-MiBancoDrawnText") }
 
+    /// `-MiBancoDemoAutoCloseDetail <s>`: la hoja del movimiento se cierra sola a los `s` segundos reales de abrirse
+    /// (para grabar su cierre desde antes; m-4). Como mucho 60 s.
+    static var autoCloseDetailSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoAutoCloseDetail").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
+    /// `-MiBancoDemoRouteChange <s>`: a los `s` segundos de empezar a leer el resumen, se simula que se desconectan los
+    /// auriculares (I-6: la voz se para). Como mucho 60 s.
+    static var routeChangeSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoRouteChange").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
+    /// `-MiBancoDemoCloseEyeAfter <s>`: a los `s` segundos de arrancar, el ojo se cierra solo (para grabar el cierre
+    /// sobre una cifra que rueda). Como mucho 60 s.
+    static var closeEyeAfterSeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoCloseEyeAfter").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
+    /// `-MiBancoDemoLockFadeWithoutDelay`: el defecto de antes de la ronda 1 (el bloqueo se funde a la vez que se apagan
+    /// sus textos), solo para que la prueba demuestre que lo ve (ronda 2, N-1).
+    static var lockFadeWithoutDelay: Bool { isActive && arguments.contains("-MiBancoDemoLockFadeWithoutDelay") }
+
+    /// `-MiBancoDemoNotMineFails`: «No es mío» desde el aviso dentro de la app no se guarda (M-2: el aviso se queda y lo
+    /// dice).
+    static var notMineFails: Bool { isActive && arguments.contains("-MiBancoDemoNotMineFails") }
+
+    /// `-MiBancoDemoBriefingDelay <s>`: el resumen tarda `s` segundos en llegar a la hoja (I-5 / m-13: la entrada empieza
+    /// cuando llega). Como mucho 60 s.
+    static var briefingDelaySeconds: Double? {
+        guard isActive, let seconds = value(after: "-MiBancoDemoBriefingDelay").flatMap(Double.init), seconds.isFinite,
+              seconds > 0 else { return nil }
+        return min(seconds, 60)
+    }
+
     /// `-MiBancoDemoSharedEyeOpposite`: la copia del ojo en la suite compartida (de la demo) dice lo contrario del ojo
     /// (N-3: los avisos y la Live Activity no deben leerla).
     static var writesOppositeSharedEye: Bool { isActive && arguments.contains("-MiBancoDemoSharedEyeOpposite") }
@@ -104,11 +144,32 @@ extension DemoMode {
     var sharedEye = "-"
     /// B2: la línea del resumen que suena ahora («-» si ninguna).
     var spokenLine = "-"
+    /// Lote final: la línea del resumen que DIBUJA su resalte ahora («-» si ninguna).
+    var drawnLine = "-"
     /// N-3: el ojo con el que se compondría ahora un aviso (texto y carga) y la Live Activity («cerrado»/«abierto»).
     var alertEye = "-"
     var activityEye = "-"
     /// N-2: los botones del aviso dentro de la app reciben toques («1») o no («0»).
     var bannerActions = "0"
+    /// Lote final: cuándo se tapó y cuándo empezó a destaparse la barra de pestañas en el último montaje (s desde 1970).
+    var tabBarCoveredAt: Double?
+    var tabBarUncoveredAt: Double?
+    /// Ronda 1: «No es mío» desde el aviso que no se ha podido guardar (M-2) y cuándo se han ido los textos del bloqueo
+    /// y empezó su fundido (I-1).
+    var notMineFailures = 0
+    /// Ronda 1: cuándo se cerrará solo el ojo (`-MiBancoDemoCloseEyeAfter`).
+    var eyeClosesAt: Double?
+    /// I-4 (ronda 1): cuándo se cerrará sola la hoja del movimiento (`-MiBancoDemoAutoCloseDetail`).
+    var detailCloseAt: Double?
+    /// Ronda 2 (N-1): primer fotograma dibujado con el nombre del bloqueo apagado y primer fotograma en que el bloqueo
+    /// empieza a irse. No observados: los escribe el dibujo; salen en la sonda en su siguiente lectura.
+    @ObservationIgnored var lockTextsGoneAt: Double?
+    @ObservationIgnored var lockFadeBeganAt: Double?
+    /// Solo se apuntan tras un desbloqueo (no en el montaje del bloqueo).
+    @ObservationIgnored var lockFadeArmed = false
+    /// Lote final: pagos llegados (`model.arrival`) y cuántos con el bloqueo delante.
+    var arrivals = 0
+    var arrivalsUnderLock = 0
     /// N-2: el aviso se está desplegando (empezó y aún no ha terminado).
     var bannerUnfolding = false
     /// Cuándo cambia sola de pestaña la demo (`-MiBancoDemoTabSwitch`), en segundos desde 1970.
@@ -138,7 +199,12 @@ extension DemoMode {
             "previo=\(mountedAfterMs.map { String($0) } ?? "-")",
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
-            "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
+            "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "lineaDibujada=\(drawnLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
+            "llegadas=\(arrivals)", "ojoCierraEn=\(eyeClosesAt.map { String(format: "%.3f", $0) } ?? "-")", "cierreDetalle=\(detailCloseAt.map { String(format: "%.3f", $0) } ?? "-")", "noEsMioFallos=\(notMineFailures)",
+            "textosFuera=\(lockTextsGoneAt.map { String(format: "%.3f", $0) } ?? "-")",
+            "fundidoBloqueo=\(lockFadeBeganAt.map { String(format: "%.3f", $0) } ?? "-")",
+            "barraTapada=\(tabBarCoveredAt.map { String(format: "%.3f", $0) } ?? "-")",
+            "barraDestapada=\(tabBarUncoveredAt.map { String(format: "%.3f", $0) } ?? "-")", "llegadasBloqueo=\(arrivalsUnderLock)",
             "ojoAviso=\(alertEye)", "ojoActividad=\(activityEye)",
             "cambioPestana=\(tabSwitchAt.map { String(format: "%.3f", $0) } ?? "-")",
             "empieza=\(startsAt.map { String(format: "%.3f", $0) } ?? "-")",

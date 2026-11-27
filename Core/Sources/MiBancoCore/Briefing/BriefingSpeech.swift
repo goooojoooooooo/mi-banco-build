@@ -103,6 +103,74 @@ public struct SpokenBriefing: Equatable, Sendable {
     public func line(at offset: Int) -> String? {
         lines.first { $0.range.contains(offset) }?.id
     }
+
+    /// Lo que lee de verdad la voz: el texto sin los espacios del principio y del final, con los rangos corregidos (el
+    /// motor da posiciones del texto que lee). Una línea que quedara fuera se recorta al texto.
+    public func trimmed() -> SpokenBriefing {
+        let lead = text.utf16.count - text.drop(while: { $0.isWhitespace }).utf16.count
+        let body = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let count = body.utf16.count
+        let shifted = lines.compactMap { line -> Line? in
+            let lower = max(0, line.range.lowerBound - lead), upper = min(count, line.range.upperBound - lead)
+            return lower < upper ? Line(id: line.id, range: lower..<upper) : nil
+        }
+        return SpokenBriefing(text: body, lines: shifted)
+    }
+}
+
+/// Lote final (privacidad de la voz): por qué ha cambiado la salida de audio, con los mismos casos que
+/// `AVAudioSession.RouteChangeReason` (Core no importa AVFoundation).
+public enum AudioRouteChange: Equatable, Sendable {
+    case unknown, newDeviceAvailable, oldDeviceUnavailable, categoryChange, override, wakeFromSleep
+    case noSuitableRouteForCategory, routeConfigurationChange
+
+    /// El valor bruto de `AVAudioSession.RouteChangeReason`.
+    public init(rawReason: UInt) {
+        switch rawReason {
+        case 1: self = .newDeviceAvailable
+        case 2: self = .oldDeviceUnavailable
+        case 3: self = .categoryChange
+        case 4: self = .override
+        case 6: self = .wakeFromSleep
+        case 7: self = .noSuitableRouteForCategory
+        case 8: self = .routeConfigurationChange
+        default: self = .unknown
+        }
+    }
+
+    /// La voz que lee saldos se para (y no vuelve sola) cuando la salida pasa a ser menos privada: se desconectan los
+    /// auriculares (`oldDeviceUnavailable`), la salida se fuerza al altavoz (`override`) o ya no hay una salida válida.
+    /// Conectar unos auriculares o un cambio de configuración no la paran.
+    public var stopsSpeech: Bool {
+        switch self {
+        case .oldDeviceUnavailable, .override, .noSuitableRouteForCategory: true
+        case .unknown, .newDeviceAvailable, .categoryChange, .wakeFromSleep, .routeConfigurationChange: false
+        }
+    }
+}
+
+/// Ronda 2 (N-4): por dónde sale el audio (los mismos grupos que `AVAudioSession.Port`, sin AVFoundation).
+public enum AudioOutputKind: Equatable, Sendable {
+    /// Auriculares con cable.
+    case headphones
+    /// El auricular del propio teléfono (pegado a la oreja).
+    case receiver
+    /// El altavoz del teléfono.
+    case speaker
+    /// Bluetooth (no se distingue unos auriculares de un altavoz), el coche, AirPlay, HDMI u otro.
+    case bluetooth, car, airPlay, other
+
+    /// Una salida privada: solo la oye quien la lleva puesta.
+    public var isPrivate: Bool { self == .headphones || self == .receiver }
+}
+
+/// Ronda 2 (N-4, privacidad): la voz que lee saldos se para (y no vuelve sola) si la salida deja de ser privada o se
+/// abre a otros: se desconectan los auriculares, se fuerza el altavoz, ya no hay salida, o aparece una salida nueva
+/// que no es privada (un altavoz Bluetooth, el coche, AirPlay…, también unos auriculares Bluetooth, que no se pueden
+/// distinguir de un altavoz). Si sigue saliendo por lo mismo de antes, no se para.
+public func speechStops(_ change: AudioRouteChange, previous: [AudioOutputKind], current: [AudioOutputKind]) -> Bool {
+    if change.stopsSpeech { return true }
+    return current.contains { !$0.isPrivate && $0 != .speaker && !previous.contains($0) }
 }
 
 public func spokenBriefingLines(_ briefing: Briefing, input: BriefingInput, privateMode: Bool, calendar: Calendar) -> SpokenBriefing {

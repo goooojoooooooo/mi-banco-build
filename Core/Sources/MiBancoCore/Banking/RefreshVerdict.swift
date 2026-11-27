@@ -8,6 +8,23 @@ public enum BankRefreshOutcome: Equatable, Sendable {
     case failed(SyncProblem)
 }
 
+/// Lo que dejó una consulta de un banco en la app (`BankSync`): saltada por la política, actualizada con `added`
+/// movimientos nuevos o fallida. Vive en Core para que su reparto a `BankRefreshOutcome` tenga pruebas.
+public enum SyncOutcome: Equatable, Sendable {
+    case skipped(SkipReason)
+    case updated(added: Int)
+    case failed(SyncProblem)
+
+    /// El resultado para el veredicto de «Al día» (cuántos movimientos trajo no importa).
+    public var refreshOutcome: BankRefreshOutcome {
+        switch self {
+        case let .skipped(reason): .skipped(reason)
+        case .updated: .updated
+        case let .failed(problem): .failed(problem)
+        }
+    }
+}
+
 /// ¿Puede Inicio decir «Al día» tras tirar para actualizar? Es una afirmación sobre el dinero del dueño, así que solo
 /// es verdad si hay algún banco conectado y CADA banco conectado se actualizó ahora o se saltó porque ya está al día
 /// de verdad.

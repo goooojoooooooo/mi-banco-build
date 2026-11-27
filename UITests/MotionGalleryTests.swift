@@ -283,6 +283,30 @@ final class MotionGalleryTests: XCTestCase {
         XCTAssertTrue(waitUntil(10) { finished.label == "Terminados: 2 · mal" }, "Tras el error no avisó: «\(finished.label)»")
     }
 
+    /// m-10 (lote final): tras el error, `onFinish(false)` llega cuando el botón ha terminado de reaccionar (sacudida
+    /// acabada), no en el mismo instante en que aparece el error. A ×8 la sacudida dura ~3,4 s.
+    func testMorphingButtonReportsFailureAfterTheShake() throws {
+        launchGallery(["-MiBancoMotionScale", "8"])
+        let finished = any("gallery.morph.finished")
+        let fail = app.buttons["Probar fallo"]
+        revealWhole(fail)
+        fail.tap()
+        let error = app.staticTexts["No se ha podido. Inténtalo otra vez."]
+        XCTAssertTrue(error.waitForExistence(timeout: 20), "No apareció el error")
+        // m-11 (ronda 1): con marcas de tiempo, sin `sleep`: cuánto pasa entre el error y el aviso de fin. A ×8 la
+        // sacudida dura 3,36 s; se exige al menos la mitad (con el simulador cargado no se pierde nada).
+        let errorAt = Date()
+        XCTAssertFalse(finished.label.hasSuffix("mal"), "Avisó del fallo en el mismo instante del error")
+        var finishedAt: Date?
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline, finishedAt == nil {
+            if finished.label.hasSuffix("mal") { finishedAt = Date() } else { Thread.sleep(forTimeInterval: 0.05) }
+        }
+        let done = try XCTUnwrap(finishedAt, "Tras el error no avisó: «\(finished.label)»")
+        XCTAssertGreaterThanOrEqual(done.timeIntervalSince(errorAt), 0.42 * 8 * 0.5,
+                                    "Avisó del fallo con la sacudida a medias (\(done.timeIntervalSince(errorAt)) s)")
+    }
+
     /// K9: a tamaño normal el botón mide su alto de siempre (no se estira con el hueco).
     func testMorphingButtonHeightAtDefaultSize() throws {
         launchGallery()
@@ -883,6 +907,9 @@ final class MotionGalleryTests: XCTestCase {
             let drawn = amount.value as? String ?? ""
             seen.append(drawn)
             XCTAssertFalse(drawn.contains("774"), "Con el ojo cerrándose se dibuja la cifra real: «\(drawn)»")
+            // Lote final (ojo de diseño 2.1): nunca un importe vacío («, €»): siempre cinco casillas con algo dibujado.
+            let cells = drawn.filter { $0 == "•" || $0.isNumber }.count
+            XCTAssertGreaterThanOrEqual(cells, 5, "Cerrando el ojo, el importe se queda sin casillas: «\(drawn)»")
             Thread.sleep(forTimeInterval: 0.1)
         }
         XCTAssertTrue(waitUntil(10) { (amount.value as? String)?.contains("•") == true }, "No acaba en la máscara: \(seen)")

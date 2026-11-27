@@ -11,7 +11,11 @@ struct OnboardingView: View {
     let onFinish: (_ openBanksSettings: Bool) -> Void
 
     @Environment(\.motion) private var motion
-    @Environment(\.presentationGate) private var gate
+    /// El bloqueo y el montaje por capas, tal como los da la carcasa (`RootView`), en vez de deducirlos de la puerta.
+    @Environment(\.shellReveal) private var shell
+    /// El bloqueo de ahora, copiado en estado: lo que lee la tarea tras sus esperas (un valor del entorno copiado en la
+    /// tarea no se actualizaría; el estado sí).
+    @State private var lockedNow = false
     /// Cuándo empieza la bienvenida (`welcomed`: cruzan las bandas y llegan las piezas) y cuándo se dibuja su marca
     /// (`markShown`), según lo que la tapa: el arranque o el bloqueo (Core, `WelcomeReveal`). Si se jugara al montarse,
     /// pasaría entera detrás del bloqueo o del arranque.
@@ -87,24 +91,15 @@ struct OnboardingView: View {
             let launch = LaunchTimeline(motion)
             let stretch = max(motion.timeMultiplier, 0.01)
             try? await Task.sleep(for: .seconds(max(0.05, launch.assembleAt * stretch)))
-            reveal.handle(.launchRevealsBelow(locked: gate?.isLocked == true))
+            reveal.handle(.launchRevealsBelow(locked: lockedNow))
             try? await Task.sleep(for: .seconds(max(0, launch.duration - launch.assembleAt) * stretch))
-            reveal.handle(.launchFinished(locked: gate?.isLocked == true))
-            guard !markShown else { return }
-            // Respaldo (menor m-13 del lote 2): si el aviso del bloqueo no llegara, se mira cada medio segundo (como
-            // mucho 10 min) el bloqueo DE VERDAD (la puerta es un objeto vivo; un `scenePhase` copiado en esta tarea no
-            // lo sería). Nunca se queda sin jugar ni con la marca escondida.
-            for _ in 0..<1_200 {
-                try? await Task.sleep(for: .seconds(0.5))
-                if Task.isCancelled || markShown { return }
-                if gate?.isLocked != true {
-                    unlocked()
-                    return
-                }
-            }
+            reveal.handle(.launchFinished(locked: lockedNow))
+            // Con el bloqueo delante, lo que sigue lo hace su apertura (`onChange` de `shell.locked`, que da la carcasa:
+            // ya no hace falta mirar la puerta cada medio segundo).
         }
-        .onChange(of: gate?.isLocked) { old, locked in
-            guard old == true, locked != true else { return }
+        .onChange(of: shell.locked, initial: true) { old, locked in
+            lockedNow = locked
+            guard old, !locked else { return }
             unlocked()
         }
     }

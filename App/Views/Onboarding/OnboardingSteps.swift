@@ -14,7 +14,8 @@ struct OnboardingBalancesStep: View {
     @Environment(\.motion) private var motion
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.presentationGate) private var gate
+    /// El bloqueo, tal como lo da la carcasa (`RootView`).
+    @Environment(\.shellReveal) private var shell
     @State private var texts: [BankID: String] = [:]
     @State private var errors: [BankID: String] = [:]
     @FocusState private var focused: BankID?
@@ -75,16 +76,23 @@ struct OnboardingBalancesStep: View {
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { focused = nil }
         }
-        .onChange(of: gate?.isLocked) { _, locked in
-            if locked == true { focused = nil }
+        .onChange(of: shell.locked) { _, locked in
+            if locked { focused = nil }
+        }
+        // Al cerrarse el ojo (desde aquí o desde Inicio) un importe en edición suelta el foco en el acto y pasa a máscara, sin
+        // animación: nunca queda una cifra a la vista con el ojo cerrado (lote de cierre, ronda 1, I-3). Lo escrito se
+        // guarda como al soltar el foco.
+        .onChange(of: preferences.privateMode) { _, on in
+            guard on, focused != nil else { return }
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { focused = nil }
         }
     }
 
     private func balanceRow(for bank: BankID) -> some View {
         let stacked = typeSize.isAccessibilitySize
         let isEditing = focused == bank
-        let currentText = texts[bank] ?? ""
-        let masked = preferences.privateMode && !isEditing && !currentText.isEmpty
         let layout = stacked
             ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.small))
             : AnyLayout(HStackLayout(spacing: Theme.Space.row))
@@ -97,10 +105,9 @@ struct OnboardingBalancesStep: View {
                         .foregroundStyle(Theme.label)
                 }
                 if !stacked { Spacer(minLength: Theme.Space.small) }
-                TextField("0,00 €", text: binding(for: bank))
+                MaskedAmountTextField(placeholder: "0,00 €", text: binding(for: bank), hidden: preferences.privateMode, editing: isEditing)
                     .titan(.option)
                     .fontWeight(.semibold)
-                    .maskedAmountField(masked, alignment: stacked ? .leading : .trailing)
                     .multilineTextAlignment(stacked ? .leading : .trailing)
                     .keyboardType(.numbersAndPunctuation)
                     .submitLabel(.done)
@@ -112,7 +119,7 @@ struct OnboardingBalancesStep: View {
                         in: .rect(cornerRadius: Theme.Radius.field)
                     )
                     .accessibilityLabel("Saldo de \(bank.displayName)")
-                    .accessibilityValue(masked ? "importe oculto" : currentText)
+
             }
             if let error = errors[bank] {
                 Text(error)

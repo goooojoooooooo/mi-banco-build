@@ -20,6 +20,10 @@ struct SpendingView: View {
     @State private var entrance = Entrance()
     @State private var tick = 0
     @State private var path: [SpendingRoute] = []
+    /// La hoja única de `RootView` está abierta y tapa Gasto: sus barras no avisan (necesidad del lote 2, ya en el kit).
+    @Environment(\.singleSheetOpen) private var singleSheetOpen
+    /// El cambio de pestaña que anuncia `RootView`: juega la entrada de Gasto.
+    @Environment(\.tabEntrance) private var tabEntrance
 
     var body: some View {
         let snapshot = model.snapshot
@@ -35,12 +39,12 @@ struct SpendingView: View {
                             move(by: step, months: months, from: index)
                         }
                         .padding(.horizontal, 4)
-                        .motionEntrance(0, rise: 8)
+                        .tabGroupEntrance(0, rise: 8)
 
                         SpendingTotal(cents: content.month.totalCents, monthName: content.title)
                             .padding(.horizontal, Theme.Space.gutter)
                             .padding(.top, 2)
-                            .motionEntrance(1)
+                            .tabGroupEntrance(1)
 
                         // Lo que cambia con el mes: se funde y se desliza hacia donde vas; las filas entran escalonadas.
                         VStack(alignment: .leading, spacing: 0) {
@@ -128,7 +132,7 @@ struct SpendingView: View {
                 .padding(.bottom, Theme.Space.section)
                 // Las barras de la raíz solo avisan (ámbar con pulso y vibración) si Gasto es la pestaña que se ve y no
                 // tiene ninguna pantalla empujada encima: la raíz sigue viva debajo y cruzaría el límite a la vez.
-                .environment(\.fillBarsOnScreen, isVisible && path.isEmpty)
+                .environment(\.fillBarsOnScreen, isVisible && !singleSheetOpen && path.isEmpty)
             }
             .scrollIndicators(.hidden)
             .background(Theme.canvas.ignoresSafeArea())
@@ -145,7 +149,7 @@ struct SpendingView: View {
                     }
                 }
                 // Lo mismo para cada pantalla empujada: solo avisa la que está arriba del todo, con Gasto a la vista.
-                .environment(\.fillBarsOnScreen, isVisible && path.last == route)
+                .environment(\.fillBarsOnScreen, isVisible && !singleSheetOpen && path.last == route)
             }
             // Deslizar en horizontal cambia de mes (umbral 60 pt, y más horizontal que vertical).
             .simultaneousGesture(
@@ -183,8 +187,12 @@ struct SpendingView: View {
             openBudgetsRequest = false
             path = [.budgets]
         }
-        .onChange(of: isVisible) { _, visible in
-            guard visible, !motion.reduce else { return }
+        // Al elegir la pestaña (`tabEntrance` de `RootView`, no `isVisible`): el selector de mes y el total entran con la
+        // entrada del kit (`.tabGroupEntrance`); lo que cambia con el mes, con la propia (`motionEntrance`), que es la
+        // misma que repite el cambio de mes. Cada pieza lleva UNA sola entrada: un cambio de mes en mitad de la entrada
+        // de la pestaña la sustituye, nunca suma dos subidas (lote de cierre, ronda 1, m-5).
+        .onChange(of: tabEntrance) { _, now in
+            guard !now.suppressed, now.token > 0, !motion.reduce else { return }
             begin(.assembly)
         }
     }

@@ -26,6 +26,9 @@ struct MiBancoApp: App {
         // Actualización de bancos en segundo plano (tarea 10): mejor esfuerzo, la decide el sistema.
         .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
             await BackgroundRefresh.run()
+            if !Task.isCancelled {
+                _ = await NyxEngine.shared.run(.background)
+            }
         }
     }
 }
@@ -150,7 +153,10 @@ private struct AppShellView: View {
             let layers = shell.layers(liveScene: coverScene)
             return ZStack {
                 #if DEBUG
-                if DemoMode.isActive { LaunchProbeView() }
+                if DemoMode.isActive {
+                    LaunchProbeView()
+                    if DemoMode.nyxScenario != nil { NyxEngineProbeView() }
+                }
                 #endif
                 RootView(model: model, portfolio: portfolio, accountBook: accountBook,
                          briefing: briefing, speaker: speaker,
@@ -221,7 +227,17 @@ private struct AppShellView: View {
             }
             .task {
                 // Arranque en frío (tarea 10): puede que no haya cambio de escena que lo dispare.
-                await MainActor.run { BankSync.refreshOnOpen() }
+                await MainActor.run {
+                    BankSync.refreshOnOpen()
+                    #if DEBUG
+                    if !DemoMode.isActive || !DemoMode.resetsNyxMemory {
+                        NyxState.shared.reloadFromStore()
+                    }
+                    #else
+                    NyxState.shared.reloadFromStore()
+                    #endif
+                    runNyxOnOpenIfReady()
+                }
                 await logos.prewarm(domains: [])
                 #if DEBUG
                 if DemoMode.isActive {
@@ -300,6 +316,7 @@ private struct AppShellView: View {
                         privateMode: preferences.privateMode
                     )
                     BankSync.refreshOnOpen() // tarea 10
+                    runNyxOnOpenIfReady()
                     Task { await portfolio.refreshPrices(force: false) }
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
@@ -338,6 +355,8 @@ private struct AppShellView: View {
                         await AlertPoster.removeDeliveredSensitiveNotifications()
                     }
                     await AlertScheduler.reschedule(for: model.state)
+                    let health = await NyxHealthProbe.current()
+                    await NyxNotifier.scheduleExpiryReminder(expiresAt: health.appExpiresAt, hidden: isHidden)
                 }
             }
             #if DEBUG
@@ -363,7 +382,14 @@ private struct AppShellView: View {
                 }
             }
             .onChange(of: shell.showsLock) { _, isLocked in
-                if isLocked { speaker.stop() }
+                if isLocked {
+                    speaker.stop()
+                } else {
+                    runNyxOnOpenIfReady()
+                }
+            }
+            .onChange(of: model.needsOnboarding) { _, needs in
+                if !needs { runNyxOnOpenIfReady() }
             }
             // La marca de la barra de Inicio se esconde mientras vuela la del arranque (`LaunchAnchor.flying`, que ponen
             // y quitan las propias capas que vuelan). Respaldo: sin ninguna de esas capas, nunca se queda escondida.
@@ -404,6 +430,17 @@ private struct AppShellView: View {
                 exitGeometry = ExitGeometry(id: exit.id, from: from)
             }
         }
+
+    /// Despierta el motor de Nyx en el momento `.open` solo cuando la app está activa, desbloqueada y fuera de la bienvenida.
+    private func runNyxOnOpenIfReady() {
+        guard !shell.showsLock, !model.needsOnboarding, coverScene == .active else { return }
+        #if DEBUG
+        if DemoMode.isActive, DemoMode.nyxScenario == nil { return }
+        #endif
+        Task {
+            _ = await NyxEngine.shared.run(.open(appActive: true))
+        }
+    }
 
     /// SEC-08: desactiva el bloqueo a conciencia cuando el iPhone no tiene código ni Face ID.
     /// Actualiza el ajuste y prepara `ShellState` para aplicarlo en el `unlockSucceeded` inmediato que lanza `LockView`.

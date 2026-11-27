@@ -4,7 +4,7 @@ import Observation
 
 /// Adónde lleva un aviso tocado. Se lee del `userInfo` (claves `route` y `movementID`, que pone la app al publicarlo).
 struct AlertRoute: Equatable, Sendable {
-    enum Destination: Equatable, Sendable { case home, alerts, briefing, bank(BankID) }
+    enum Destination: Equatable, Sendable { case home, alerts, briefing, bank(BankID), nyx(entryID: String) }
     let destination: Destination
     /// Si el aviso habla de un movimiento, se abre su hoja.
     let movementID: UUID?
@@ -34,6 +34,9 @@ struct AlertRoute: Equatable, Sendable {
             } else {
                 destination = .alerts
             }
+        case Keys.nyxRoute:
+            let entryID = (userInfo[Keys.nyxEntryID] as? String) ?? ""
+            destination = .nyx(entryID: entryID)
         default: destination = .alerts
         }
         self.init(destination: destination, movementID: id)
@@ -48,6 +51,8 @@ struct AlertRoute: Equatable, Sendable {
         static let insightRoute = "insight"
         static let briefingRoute = "briefing"
         static let bankRoute = "bank"
+        static let nyxRoute = "nyx"
+        static let nyxEntryID = "nyxEntryID"
     }
 }
 

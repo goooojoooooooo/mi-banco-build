@@ -15,6 +15,7 @@ enum AlertPoster {
             UNNotificationCategory(identifier: InsightNotifier.category, actions: [], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: MorningBriefingNotifier.category, actions: [], intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: BankReminders.category, actions: [], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: NyxNotifier.category, actions: [], intentIdentifiers: [], options: []),
         ])
     }
 
@@ -61,7 +62,7 @@ enum AlertPoster {
         }
         let ids = deliveredAlertIdentifiersToRemoveForPrivacy(
             descriptors,
-            sensitiveCategories: [AlertPoster.category, InsightNotifier.category]
+            sensitiveCategories: [AlertPoster.category, InsightNotifier.category, NyxNotifier.category]
         )
         guard !ids.isEmpty else { return }
         center.removeDeliveredNotifications(withIdentifiers: ids)

@@ -7,7 +7,10 @@ final class ForegroundPresenter: NSObject, UNUserNotificationCenterDelegate, @un
     static let shared = ForegroundPresenter()
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        if notification.request.content.categoryIdentifier == NyxNotifier.category {
+            return []
+        }
+        return [.banner, .list, .sound]
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {

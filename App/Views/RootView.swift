@@ -712,6 +712,11 @@ struct RootView: View {
             briefingTask?.cancel()
             briefingTask = nil
             openBankSettings(bank)
+        case .nyx:
+            briefingRouteWaiting = false
+            suppressBriefingForActivation = true
+            briefingTask?.cancel()
+            briefingTask = nil
         }
         if let id = route.movementID {
             // Tras el cambio de pestaña, para que la hoja suba sobre la pantalla buena.

@@ -51,6 +51,7 @@ struct BriefingSheet: View {
     }()
     @State private var waveInLayout = false
     @State private var waveShown = false
+    @State private var didAutoRead = false
 
     init(
         model: LedgerModel,
@@ -222,8 +223,10 @@ struct BriefingSheet: View {
             }
         }
         #if DEBUG
-        // Para las pruebas (lote final): qué línea dibuja su resalte, dentro de la hoja (el fondo no se ve con ella).
-        .overlay(alignment: .topLeading) { DrawnLineProbe(entranceToken: entranceToken) }
+        // Para las pruebas (lote final y N12): qué línea dibuja su resalte y qué texto entrega la voz, dentro de la hoja.
+        .overlay(alignment: .topLeading) {
+            DrawnLineProbe(entranceToken: entranceToken, spokenText: speaker.lastSpokenText)
+        }
         .task {
             guard let seconds = DemoMode.briefingDelaySeconds else { return }
             try? await Task.sleep(for: .seconds(seconds))
@@ -243,6 +246,15 @@ struct BriefingSheet: View {
         // desde que se abría la hoja y un resumen que llegaba tarde aparecía de golpe, sin entrada.
         .onChange(of: shownBriefing != nil, initial: true) { _, has in
             if has, entranceToken == 0 { startEntrance() }
+            if has, !didAutoRead, entry == .dailyUpdate,
+               let briefing = shownBriefing,
+               briefingModel.assistantPreferences.nyxReadAloudWithHeadphones,
+               BriefingSpeaker.outputIsPrivate {
+                didAutoRead = true
+                if !speaker.isSpeaking {
+                    toggleBriefingSpeech(briefing)
+                }
+            }
         }
         .onDisappear {
             askTask?.cancel()
@@ -261,7 +273,7 @@ struct BriefingSheet: View {
                 briefingModel.resetConversation()
             }
         }
-        .onChange(of: speaker.activeTarget == .briefing) { _, speaking in
+        .onChange(of: speaker.isSpeaking) { _, speaking in
             if speaking {
                 waveInLayout = true
                 withAnimation(motion.fade) { waveShown = true }
@@ -450,7 +462,12 @@ struct BriefingSheet: View {
                     handleMessageAction(action, entryID: focus.id, previousStatus: .seen)
                 },
                 onDismiss: {},
-                onUndo: { performUndo(for: focus.id) }
+                onUndo: { performUndo(for: focus.id) },
+                listenAction: {
+                    let spoken = nyxDisplayText(focus, hidden: preferences.privateMode)
+                    speaker.toggle(spoken, target: .message(focus.id))
+                },
+                isListening: speaker.activeTarget == .message(focus.id)
             )
         }
     }
@@ -834,6 +851,34 @@ struct BriefingSheet: View {
                     .padding(.bottom, 12)
                     .accessibilityIdentifier("answer-note-\(investmentDataOnlyLineID)")
             }
+
+            let speakingAnswer = speaker.activeTarget == .answer
+            HStack {
+                Spacer(minLength: 0)
+                Button {
+                    let spoken = spokenAssistantAnswer(answer, privateMode: preferences.privateMode)
+                    speaker.toggle(spoken, target: .answer)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: speakingAnswer ? "stop.fill" : "speaker.wave.2")
+                            .font(.system(size: 13, weight: .semibold))
+                            .accessibilityHidden(true)
+                        Text(speakingAnswer ? "Parar" : "Escuchar")
+                            .titan(.captionStrong)
+                    }
+                    .foregroundStyle(Theme.label2)
+                    .padding(.horizontal, 12)
+                    .frame(minHeight: 44)
+                    .background(Theme.raised, in: Capsule())
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityLabel(speakingAnswer ? "Parar" : "Escuchar")
+                .accessibilityIdentifier("nyx-listen-answer")
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 10)
+            .padding(.top, 2)
         }
         .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
@@ -920,13 +965,22 @@ struct BriefingSheet: View {
 
     private func toggleBriefingSpeech(_ briefing: Briefing) {
         guard let input = briefingModel.input else { return }
-        // El mismo texto de siempre, con dónde está cada línea dentro de él (B2: resaltar la que suena).
-        let spoken = spokenBriefingLines(
-            briefing,
-            input: input,
-            privateMode: preferences.privateMode,
-            calendar: DateText.madridCalendar
-        )
+        let spoken: SpokenBriefing
+        if let dailyUpdate = briefingModel.dailyUpdate {
+            spoken = nyxSpokenUpdate(
+                dailyUpdate,
+                input: input,
+                privateMode: preferences.privateMode,
+                calendar: DateText.madridCalendar
+            )
+        } else {
+            spoken = spokenBriefingLines(
+                briefing,
+                input: input,
+                privateMode: preferences.privateMode,
+                calendar: DateText.madridCalendar
+            )
+        }
         speaker.toggle(spoken, target: .briefing)
     }
 
@@ -1134,6 +1188,7 @@ extension AssistantTopic {
 /// sonda seguiría diciendo la línea: eso solo lo ve una hoja de capturas.
 private struct DrawnLineProbe: View {
     let entranceToken: Int
+    let spokenText: String
 
     var body: some View {
         ZStack {
@@ -1147,6 +1202,11 @@ private struct DrawnLineProbe: View {
                 .accessibilityElement()
                 .accessibilityIdentifier("briefing-entrance")
                 .accessibilityValue(String(entranceToken))
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("nyx-spoken-text")
+                .accessibilityValue(spokenText)
         }
         .allowsHitTesting(false)
     }

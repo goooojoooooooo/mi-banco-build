@@ -10,10 +10,28 @@ import MiBancoCore
 final class BriefingSpeaker {
     enum Target: Equatable, Sendable {
         case briefing
+        case answer
+        case message(String)
     }
 
     private(set) var activeTarget: Target?
     var isSpeaking: Bool { activeTarget != nil }
+    #if DEBUG
+    /// Solo DEBUG: último texto entregado a la voz, para comprobar privacidad con el ojo cerrado sin audio en simulador.
+    private(set) var lastSpokenText: String = ""
+    #endif
+    /// true solo si la salida de audio activa es privada (auriculares con cable o Bluetooth A2DP/HFP/LE) y sin salida pública.
+    static var outputIsPrivate: Bool {
+        #if DEBUG
+        if DemoMode.isActive {
+            return DemoMode.nyxHeadphonesConnected
+        }
+        #endif
+        let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+        guard !outputs.isEmpty else { return false }
+        let privatePorts: Set<AVAudioSession.Port> = [.headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE]
+        return outputs.allSatisfy { privatePorts.contains($0.portType) }
+    }
     /// B2: la línea del resumen que suena ahora (su `BriefingLine.id`; la frase principal es "headline"), según el
     /// progreso REAL de la voz (`willSpeakRangeOfSpeechString`). nil cuando no suena ninguna línea (el saludo, entre
     /// frases o callada). Con el modo privado no hay líneas (la voz no lee ninguna).
@@ -28,6 +46,7 @@ final class BriefingSpeaker {
     private let delegateProxy: DelegateProxy
     private var generation = 0
     private var demoTimer: Task<Void, Never>?
+    private var demoRouteTask: Task<Void, Never>?
 
     init() {
         let proxy = DelegateProxy()
@@ -43,18 +62,27 @@ final class BriefingSpeaker {
             guard began else { return }
             MainActor.assumeIsolated { self?.stop() }
         }
-        // I-6 (privacidad): si la salida pasa a ser menos privada (se desconectan los auriculares, se fuerza el
-        // altavoz), la voz que lee saldos se para y no vuelve sola. La regla está en Core (`AudioRouteChange`).
+        // I-6 + N12 (privacidad): cualquier cambio de salida de audio mientras Nyx habla detiene la lectura al instante
+        // (desconectar auriculares, altavoz, Bluetooth, CarPlay, AirPlay…), salvo `.categoryChange` del propio arranque.
         routeObserver = NotificationCenter.default.addObserver(
             forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main
         ) { [weak self] note in
             let raw = note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt ?? 0
+            let reason = AVAudioSession.RouteChangeReason(rawValue: raw)
+            guard reason != .categoryChange else { return }
             let previous = (note.userInfo?[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription)?
                 .outputs.map { Self.kind(of: $0.portType) } ?? []
             let current = AVAudioSession.sharedInstance().currentRoute.outputs.map { Self.kind(of: $0.portType) }
-            // Ronda 2 (N-4): también al aparecer una salida nueva que no es privada (Bluetooth, coche, AirPlay…).
-            guard speechStops(AudioRouteChange(rawReason: raw), previous: previous, current: current) else { return }
-            MainActor.assumeIsolated { self?.stop() }
+            let shouldStop = speechStops(AudioRouteChange(rawReason: raw), previous: previous, current: current)
+                || reason == .newDeviceAvailable
+                || reason == .oldDeviceUnavailable
+                || reason == .override
+                || reason == .routeConfigurationChange
+                || reason == .noSuitableRouteForCategory
+            guard shouldStop else { return }
+            MainActor.assumeIsolated {
+                if self?.isSpeaking == true { self?.stop() }
+            }
         }
     }
 
@@ -105,6 +133,9 @@ final class BriefingSpeaker {
         activeTarget = target
         // La voz lee el texto recortado; los rangos de las líneas son de ese texto (`SpokenBriefing.trimmed`).
         self.spoken = spoken
+        #if DEBUG
+        self.lastSpokenText = spoken.text
+        #endif
 
         #if DEBUG
         if DemoMode.isActive {
@@ -114,8 +145,9 @@ final class BriefingSpeaker {
             let steps = spoken.lines
             if let seconds = DemoMode.routeChangeSeconds {
                 // I-6, solo demo: a los `s` segundos se desconectan unos auriculares «de mentira».
-                Task {
+                demoRouteTask = Task {
                     try? await Task.sleep(for: .seconds(seconds))
+                    guard !Task.isCancelled else { return }
                     NotificationCenter.default.post(
                         name: AVAudioSession.routeChangeNotification, object: nil,
                         userInfo: [AVAudioSessionRouteChangeReasonKey: AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue])
@@ -165,6 +197,8 @@ final class BriefingSpeaker {
         generation += 1
         demoTimer?.cancel()
         demoTimer = nil
+        demoRouteTask?.cancel()
+        demoRouteTask = nil
         let wasActive = activeTarget != nil || synthesizer.isSpeaking || synthesizer.isPaused
         activeTarget = nil
         currentLine = nil

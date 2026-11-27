@@ -30,6 +30,9 @@ extension DemoMode {
     /// `-MiBancoDemoNyxNoSpeech`: simula que la transcripción local de voz no está disponible en este iPhone.
     static var nyxSpeechUnavailable: Bool { isActive && arguments.contains("-MiBancoDemoNyxNoSpeech") }
 
+    /// `-MiBancoDemoHeadphones`: simula salida de audio privada (auriculares conectados) para lectura automática.
+    static var nyxHeadphonesConnected: Bool { isActive && arguments.contains("-MiBancoDemoHeadphones") }
+
     /// Carpeta aislada para la persistencia de Nyx en pruebas de reinicio (nunca toca `SharedStore`).
     static var nyxDemoDirectory: URL {
         URL.applicationSupportDirectory.appendingPathComponent("NyxDemoMemory", isDirectory: true)

@@ -18,13 +18,23 @@ struct LockView: View {
     var leaveOnUnlock: () -> LockLeave = { .fades(handsMark: false) }
     /// Aviso a la carcasa, justo después de desbloquear: cuánto dura el fundido con el que se va este bloqueo (0 si se
     /// quita de golpe). Hasta entonces Inicio no recibe toques.
-    var fadeStarted: (_ seconds: Double) -> Void = { _ in }
+    /// El fundido empieza: cuánto dura y si este bloqueo se funde con su marca dibujada (nada la recoge para volar).
+    var fadeStarted: (_ seconds: Double, _ keepsItsMark: Bool) -> Void = { _, _ in }
+    /// SEC-08: desactivar el bloqueo a conciencia cuando el iPhone no tiene código ni Face ID.
+    var disableLock: () -> Void = {}
+    /// SEC-08: lo que contesta el sistema a «¿puedo autenticar al dueño?». Se inyecta para que lo único que cambia entre
+    /// la app real, la demo sin código y las pruebas sea ESTE valor: la guardia de `authenticate()` es siempre la misma.
+    var deviceAuth: () -> DeviceAuthAvailability = LockView.systemDeviceAuth
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motion) private var motion
     @State private var authenticating = false
+    /// SEC-08 (m-3): desactivar el bloqueo pide confirmación; Onyx se abrirá sin protección.
+    @State private var confirmingDisable = false
     /// Un intento automático por bloqueo (esta vista solo existe mientras está bloqueado).
     @State private var autoAttempted = false
     @State private var failures = 0
+    /// SEC-08: estado del bloqueo según si el iPhone tiene código/biometría o no.
+    @State private var screenMode: LockScreenMode = .authenticate
     /// Solo dibujo: cuándo empezó a montarse la marca, si ya ha terminado (o se saltó con un toque) y dónde está.
     @State private var launchStart = LaunchClock.startDate()
     @State private var launchFinished = false
@@ -39,6 +49,8 @@ struct LockView: View {
     /// doble toque) y `unlock()` no hace nada, así que no vuelve a pedir Face ID. Los toques tampoco llegan a Inicio:
     /// la carcasa no se los da hasta que este fundido termina (`ShellState.homeTakesTouches`).
     @State private var leaving = false
+    /// Retoque 1: el nombre, el lema y el botón ya se han apagado (0,12 s) al desbloquear.
+    @State private var textsAway = false
 
     /// Lo que recibe `accessibilityHidden`: VoiceOver deja de ver el bloqueo (y su «Desbloquear») en cuanto se va.
     private var hiddenFromVoiceOver: Bool { leaving }
@@ -50,6 +62,14 @@ struct LockView: View {
     #endif
 
     private static let markSize: CGFloat = 76
+    /// Lo que tardan en apagarse el nombre, el lema y el botón al desbloquear (s a nivel Equilibrado; retoque 1).
+    static let textsAwaySeconds = 0.12
+
+    /// Esos 0,12 s con la intensidad y la cámara lenta (con Reducir, solo la cámara lenta): lo que dura la animación de
+    /// los textos y lo que espera el fundido del bloqueo.
+    private var textsAwayDuration: Double {
+        motion.reduce ? motion.pause(Self.textsAwaySeconds) : motion.seconds(Self.textsAwaySeconds)
+    }
 
     /// La marca ya no se mueve: no es un arranque en frío, o ya se montó.
     private var markSettled: Bool { !playsLaunch || launchFinished }
@@ -63,17 +83,24 @@ struct LockView: View {
         ) { frame in
             LockFace(
                 nameOpacity: textsDropped ? 0 : frame.name, nameSpread: CGFloat(1 - frame.name),
-                taglineOpacity: textsDropped ? 0 : frame.name
+                taglineOpacity: textsDropped ? 0 : frame.name,
+                textsAway: textsAway,
+                awayAnimation: .easeOut(duration: textsAwayDuration),
+                awayDrop: motion.distance(8)
             ) {
                 LaunchMark(frame: frame, size: Self.markSize)
                     .opacity(markHandedOff ? 0 : frame.mark)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { markFrame = $0 }
             } action: {
-                Button(action: unlock) {
-                    UnlockLabel(failures: failures)
+                if screenMode == .noPasscode {
+                    noPasscodeActions
+                } else {
+                    Button(action: unlock) {
+                        UnlockLabel(failures: failures)
+                    }
+                    .buttonStyle(.pressable)
+                    .disabled(authenticating)
                 }
-                .buttonStyle(.pressable)
-                .disabled(authenticating)
             }
             // Las líneas de velocidad van por detrás de todo y las mitades de la ola por delante de la marca; los dos
             // lienzos ocupan la pantalla entera, no reciben toques y solo existen mientras la marca se monta.
@@ -109,7 +136,7 @@ struct LockView: View {
         .task { await assembleMark(timeline) }
         .task {
             #if DEBUG
-            if DemoMode.holdsLock {
+            if DemoMode.holdsLock, DemoMode.simulatedDeviceAuth == nil {
                 // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación. (Si una prueba
                 // retrasa el arranque para grabarlo, el bloqueo de demo espera lo mismo; la espera es exacta para que
                 // las grabaciones sepan cuándo ocurre.)
@@ -130,10 +157,95 @@ struct LockView: View {
             await autoAuthenticate()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await autoAuthenticate() } }
+            if phase == .active {
+                Task { await autoAuthenticate() }
+            }
         }
     }
 
+    /// SEC-08: aviso claro y botón consciente para desactivar el bloqueo cuando el iPhone no tiene código ni Face ID.
+    private var noPasscodeActions: some View {
+        VStack(spacing: Theme.Space.gutter) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "lock.trianglebadge.exclamationmark")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+                    .frame(width: 24, height: 24)
+                    .accessibilityHidden(true)
+                Text(LockAuthPolicy.noPasscodeMessage)
+                    .titan(.callout)
+                    .foregroundStyle(Theme.label)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("lock-no-passcode-message")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+
+            if confirmingDisable {
+                disableConfirmation
+            } else {
+                Button { confirmingDisable = true } label: {
+                    Text(LockAuthPolicy.disableLockButtonTitle)
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.label)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(Theme.raised, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("lock-disable-button")
+            }
+        }
+    }
+
+    /// SEC-08 (m-3): confirmación en el propio bloqueo (la regla U55 solo permite presentaciones en `RootView`, que queda
+    /// por debajo del bloqueo). Explica que Onyx se abrirá sin protección; Cancelar deja el bloqueo puesto.
+    private var disableConfirmation: some View {
+        VStack(spacing: 12) {
+            Text(LockAuthPolicy.disableConfirmationTitle)
+                .titan(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.label)
+                .multilineTextAlignment(.center)
+            Text(LockAuthPolicy.disableConfirmationMessage)
+                .titan(.callout)
+                .foregroundStyle(Theme.label)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("lock-disable-confirmation-message")
+            Button(action: disableLockAndUnlock) {
+                Text(LockAuthPolicy.disableConfirmationButtonTitle)
+                    .titan(.option)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.warning)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(Theme.raised, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("lock-confirm-disable-button")
+            Button { confirmingDisable = false } label: {
+                Text("Cancelar")
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("lock-cancel-disable-button")
+        }
+    }
     /// Solo dibujo: espera a que las piezas encajen (golpe háptico) y a que la marca quede montada, y para el reloj.
     /// Los tiempos salen del guion por el multiplicador de grabación (intensidad, Reducir movimiento, cámara lenta).
     private func assembleMark(_ timeline: LaunchTimeline) async {
@@ -167,10 +279,17 @@ struct LockView: View {
         Task { await authenticate() }
     }
 
+    /// SEC-08: desactiva el bloqueo de Onyx a conciencia y solo entonces deja pasar limpiamente.
+    private func disableLockAndUnlock() {
+        guard !leaving else { return }
+        disableLock()
+        unlockWithFade()
+    }
+
     /// Solo en primer plano y una vez por bloqueo; si se cancela, queda el botón.
     private func autoAuthenticate() async {
         #if DEBUG
-        if DemoMode.holdsLock { return }
+        if DemoMode.holdsLock, DemoMode.simulatedDeviceAuth == nil { return }
         #endif
         guard scenePhase == .active, !autoAttempted else { return }
         autoAttempted = true
@@ -178,18 +297,47 @@ struct LockView: View {
     }
 
     private func authenticate() async {
-        guard !authenticating else { return }
+        guard !authenticating, !leaving else { return }
         authenticating = true
         defer { authenticating = false }
+        // SEC-08: sin código ni Face ID en el iPhone NO se desbloquea en silencio. Esta guardia la recorren la app real, la
+        // demo (`-MiBancoDemoNoPasscode`, que solo cambia lo que contesta `currentAvailability()`) y las pruebas.
+        guard applyAvailability(currentAvailability()) else { return }
         let context = LAContext()
-        var error: NSError?
-        // Sin código en el iPhone no hay con qué autenticar: se deja pasar en vez de dejarte fuera.
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            unlockWithFade()
-            return
-        }
         let ok = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Para que solo tú veas tu dinero")) ?? false
         if ok { unlockWithFade() } else { failures += 1 }
+    }
+
+    /// Lo que contesta el sistema real: solo `LAError.passcodeNotSet` cuenta como «sin código».
+    nonisolated static func systemDeviceAuth() -> DeviceAuthAvailability {
+        let context = LAContext()
+        var error: NSError?
+        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) { return .available }
+        if let error, error.domain == LAError.errorDomain, error.code == LAError.passcodeNotSet.rawValue {
+            return .passcodeNotSet
+        }
+        return .unavailable
+    }
+
+    /// Solo en DEBUG, las banderas de demo sustituyen lo que contesta el sistema; el resto del recorrido es el real.
+    private func currentAvailability() -> DeviceAuthAvailability {
+        #if DEBUG
+        if let simulated = DemoMode.simulatedDeviceAuth { return simulated }
+        #endif
+        return deviceAuth()
+    }
+
+    /// Devuelve `true` solo si hay que pedir Face ID/código. Con cualquier otra respuesta nada se desbloquea:
+    /// `passcodeNotSet` enseña la pantalla «sin código»; un fallo distinto deja «Desbloquear» para reintentar.
+    @discardableResult
+    private func applyAvailability(_ availability: DeviceAuthAvailability) -> Bool {
+        let decision = LockAuthPolicy.decision(for: availability)
+        screenMode = LockAuthPolicy.screenMode(for: decision)
+        if LockAuthPolicy.proceedsToEvaluate(decision) { return true }
+        // Al volver de Ajustes del iPhone (o tras un fallo pasajero), permite volver a comprobar.
+        autoAttempted = false
+        if decision == .retryAuthentication { failures += 1 }
+        return false
     }
 
     /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto. El fundido lee `\.motion`:
@@ -240,12 +388,31 @@ struct LockView: View {
         case .refused:
             return false
         case .fades:
+            // Retoque 1: nombre, lema y botón se van en 0,12 s, antes que el resto del bloqueo; nunca flotan sobre
+            // Inicio ni pisan la barra de pestañas.
+            textsAway = true
+            // I-1 (ronda 1): los dos fundidos van en orden, a todos los niveles: el bloqueo (lo que destapa Inicio)
+            // empieza a irse cuando los textos y el botón ya se han ido. `locked` cambia YA (la carcasa desbloquea en
+            // este instante, como siempre); solo el DIBUJO del fundido espera.
+            var away = textsAwayDuration
+            #if DEBUG
+            // Solo para la prueba que demuestra su propio rojo (ronda 2, N-1): el defecto de antes, sin retardo.
+            if DemoMode.lockFadeWithoutDelay { away = 0 }
+            #endif
             // La misma duración que el fundido: `motion.fade` dura 0,22 s (× cámara lenta). Es una curva con final
             // (no un muelle, que a su duración nominal aún deja el bloqueo a un par de puntos de opacidad): cuando la
             // carcasa devuelve los toques a Inicio, del bloqueo no queda ni un píxel.
             let seconds = motion.reduce ? 0.22 * motion.timeMultiplier : motion.seconds(0.3)
-            withAnimation(motion.reduce ? motion.fade : .easeOut(duration: seconds)) { locked = false }
-            fadeStarted(seconds)
+            withAnimation((motion.reduce ? motion.fade : .easeOut(duration: seconds)).delay(away)) { locked = false }
+            // (Los textos siguen apagándose en `textsAwayDuration`.)
+            fadeStarted(away + seconds, !takesTheMark)
+            #if DEBUG
+            // Ronda 2 (N-1): las sondas las escribe lo DIBUJADO (`DrawnOpacityProbe` en el nombre y en el fundido del
+            // bloqueo), fotograma a fotograma; aquí solo se vacían para este desbloqueo.
+            LaunchProbe.shared.lockTextsGoneAt = nil
+            LaunchProbe.shared.lockFadeBeganAt = nil
+            LaunchProbe.shared.lockFadeArmed = true
+            #endif
         case .covered:
             // La escena no está activa (Face ID aún la tiene): la tapa se pone encima en esta misma actualización y este
             // bloqueo se quita de golpe, sin fundido. Si se fundiera debajo, al volver la escena a activa antes de
@@ -253,7 +420,7 @@ struct LockView: View {
             var atOnce = Transaction()
             atOnce.disablesAnimations = true
             withTransaction(atOnce) { locked = false }
-            fadeStarted(0)
+            fadeStarted(0, !takesTheMark)
         }
         return true
     }
@@ -297,6 +464,11 @@ struct LockFace<Mark: View, Action: View>: View {
     var nameSpread: CGFloat = 0
     /// El lema aparece con el nombre mientras la marca se monta; la tapa del selector de apps no lo enseña (0).
     var taglineOpacity: Double = 1
+    /// Retoque 1 (desbloqueo limpio): al desbloquear, el nombre, el lema y el botón se apagan solos (el botón bajando
+    /// 8 pt) con `awayAnimation`, antes de que Inicio empiece a verse. La marca no: es de quien vuela o del fundido.
+    var textsAway = false
+    var awayAnimation: Animation? = nil
+    var awayDrop: CGFloat = 0
     @ViewBuilder let mark: Mark
     @ViewBuilder let action: Action
     @Environment(\.launchAnchor) private var anchor
@@ -311,6 +483,8 @@ struct LockFace<Mark: View, Action: View>: View {
                 .titan(.sheetTitle)
                 .foregroundStyle(Theme.label)
                 .opacity(nameOpacity)
+                .modifier(DrawnOpacityProbe(opacity: textsAway ? 0 : 1, mark: .lockTextsGone))
+                .animation(awayAnimation, value: textsAway)
                 .padding(.top, Theme.Space.gutter)
                 .accessibilityAddTraits(.isHeader)
             Text("Tu dinero, solo para ti.")
@@ -319,8 +493,13 @@ struct LockFace<Mark: View, Action: View>: View {
                 .multilineTextAlignment(.center)
                 .padding(.top, 6)
                 .opacity(taglineOpacity)
+                .opacity(textsAway ? 0 : 1)
+                .animation(awayAnimation, value: textsAway)
             Spacer()
             action
+                .opacity(textsAway ? 0 : 1)
+                .offset(y: textsAway ? awayDrop : 0)
+                .animation(awayAnimation, value: textsAway)
                 .padding(.horizontal, Theme.Space.gutter + 8)
                 .padding(.bottom, Theme.Space.gutter)
         }
@@ -354,4 +533,39 @@ private struct LockVoiceOverHidden: ViewModifier {
             .onAppear { LaunchProbe.shared.lockVoiceOver = hidden ? "oculto" : "visible" }
             #endif
     }
+}
+
+/// Ronda 2 (N-1): una opacidad animable que, en DEBUG, apunta en `LaunchProbe` el primer fotograma DIBUJADO en que cruza
+/// su umbral: el nombre del bloqueo ya apagado (≤ 0,02) o el bloqueo empezando a irse (< 0,99). Así la prueba compara lo
+/// que se ve, no lo que se programó. En Release solo es una opacidad.
+struct DrawnOpacityProbe: ViewModifier, Animatable {
+    enum Mark { case lockTextsGone, lockFadeBegan }
+
+    var opacity: Double
+    let mark: Mark
+
+    nonisolated var animatableData: Double {
+        get { opacity }
+        set { opacity = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        note()
+        #endif
+        return content.opacity(opacity)
+    }
+
+    #if DEBUG
+    private func note() {
+        let probe = LaunchProbe.shared
+        let now = Date().timeIntervalSince1970
+        switch mark {
+        case .lockTextsGone:
+            if opacity <= 0.02, probe.lockTextsGoneAt == nil, probe.lockFadeArmed { probe.lockTextsGoneAt = now }
+        case .lockFadeBegan:
+            if opacity < 0.99, probe.lockFadeBeganAt == nil, probe.lockFadeArmed { probe.lockFadeBeganAt = now }
+        }
+    }
+    #endif
 }

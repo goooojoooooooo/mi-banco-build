@@ -51,11 +51,7 @@ struct URLSessionTransport: HTTPTransport {
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = request.method
         urlRequest.httpBody = request.body
-        urlRequest.httpShouldHandleCookies = false
-        urlRequest.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        for (name, value) in request.headers.sorted(by: { $0.key < $1.key }) {
-            urlRequest.setValue(value, forHTTPHeaderField: name)
-        }
+        for (name, value) in request.headers { urlRequest.setValue(value, forHTTPHeaderField: name) }
         do {
             let (bytes, response) = try await session.bytes(for: urlRequest, delegate: Self.noRedirectDelegate)
             guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }

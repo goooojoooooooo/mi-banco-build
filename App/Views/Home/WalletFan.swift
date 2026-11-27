@@ -1,6 +1,13 @@
 import SwiftUI
 import MiBancoCore
 
+/// Con Reducir movimiento, solo fundidos, y en dos tiempos que apenas se tocan (s, a velocidad real): el negro tapa
+/// Inicio en 0,16 s (`easeOut`) y el abanico empieza a los 0,13 s, cuando Inicio ya está por debajo del 4 %; cuando el
+/// abanico llega al 20 % (~0,15 s) Inicio está por debajo del 0,5 %. Ni dos títulos legibles a la vez ni un fotograma
+/// en negro (el solape de los dos es de ~10 ms).
+private let fanReduceDark = 0.16
+private let fanReduceDelay = 0.13
+
 /// De dónde sale el abanico: el marco en pantalla de la tarjeta levantada (o `nil` si no se conoce).
 struct WalletFanRequest: Equatable {
     var origin: CGRect?
@@ -42,7 +49,24 @@ struct WalletFan: View {
     /// Alto reservado para la cabecera: 92 pt, o lo que mida si es más (texto muy grande): la primera tarjeta nunca la tapa.
     private var headerHeight: CGFloat { max(92, headerContent + 12) }
 
+    private var reduceDelay: Double {
+        #if DEBUG
+        if DemoMode.oldReduceFan { return 0 }
+        #endif
+        return fanReduceDelay
+    }
+
+    private var probesReduceOpacity: Bool {
+        #if DEBUG
+        return motion.reduce && DemoMode.exposesHomeProbes
+        #else
+        return false
+        #endif
+    }
+
     var body: some View {
+        let probeActive = probesReduceOpacity
+        let recording = !closing && picked == nil
         GeometryReader { geo in
             let frame = geo.frame(in: .global)
             let count = max(cards.count, 1)
@@ -53,13 +77,13 @@ struct WalletFan: View {
             ZStack(alignment: .top) {
                 // Negro del todo: Inicio no se transparenta bajo el título ni entre las tarjetas.
                 Color.black
-                    .opacity(dark ? 1 : 0)
+                    .modifier(FanDrawnOpacity(opacity: dark ? 1 : 0, layer: .backdrop, active: probeActive, recording: recording))
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture(perform: close)
                     .accessibilityHidden(true)
                 header
-                    .opacity(headerIn && picked == nil ? 1 : 0)
+                    .modifier(FanDrawnOpacity(opacity: headerIn && picked == nil ? 1 : 0, layer: .fan, active: probeActive, recording: recording))
                     .offset(y: headerIn ? 0 : motion.distance(6))
                 ForEach(Array(cards.enumerated()), id: \.element) { index, card in
                     FanCard(card: card, cents: cents(for: card), labelDelay: labelDelay(index, step: step),
@@ -70,7 +94,8 @@ struct WalletFan: View {
                         .modifier(FanPlacement(
                             index: index, fanned: fanned,
                             state: picked == nil ? .fanned : (picked == card ? .chosen : .dropped),
-                            startY: startY, slotY: headerHeight + CGFloat(index) * step))
+                            startY: startY, slotY: headerHeight + CGFloat(index) * step,
+                            reduceDelay: reduceDelay))
                         .zIndex(Double(index))
                         .disabled(picked != nil || closing)
                 }
@@ -83,6 +108,7 @@ struct WalletFan: View {
             #if DEBUG
             HomeProbe.shared.fanOpen = true
             HomeProbe.shared.fanOpenings += 1
+            if motion.reduce { HomeProbe.shared.resetFanReduceProbe() }
             #endif
             open()
         }
@@ -99,10 +125,14 @@ struct WalletFan: View {
         // Con Reducir movimiento, dos fundidos que se solapan: el abanico empieza cuando el negro ya tapa la mayor
         // parte de Inicio (nunca dos cabeceras legibles a la vez) y antes de que acabe (nunca un fotograma en negro).
         if motion.reduce {
-            withAnimation(motion.fade) { dark = true }
-            withAnimation(motion.fade.delay(motion.pause(0.12))) {
+            withAnimation(.easeOut(duration: motion.pause(fanReduceDark))) { dark = true }
+            withAnimation(motion.fade.delay(motion.pause(reduceDelay))) {
                 fanned = true
                 headerIn = true
+            } completion: {
+                #if DEBUG
+                HomeProbe.shared.finishFanReduceProbe()
+                #endif
             }
             return
         }
@@ -227,6 +257,7 @@ private struct FanPlacement: ViewModifier {
     let state: Phase
     let startY: CGFloat
     let slotY: CGFloat
+    let reduceDelay: Double
 
     @Environment(\.motion) private var motion
     @State private var placed = false
@@ -263,7 +294,7 @@ private struct FanPlacement: ViewModifier {
             // Aparece en un instante (opaca) y se abre con su escalón.
             // Con Reducir movimiento, cuando el negro ya tapa casi todo Inicio (ver `WalletFan.open`).
             let appear: Animation = motion.reduce
-                ? motion.fade.delay(motion.pause(0.12)) : .linear(duration: motion.seconds(0.05))
+                ? motion.fade.delay(motion.pause(reduceDelay)) : .linear(duration: motion.seconds(0.05))
             withAnimation(appear) { visible = true }
             withAnimation(openSpring.delay(motion.stagger(index, firstGap: 0.06, decay: 1))) { placed = true }
         } else {
@@ -331,3 +362,45 @@ private struct FanCard: View {
         .accessibilityIdentifier("wallet-card-\(card.rawValue)")
     }
 }
+
+/// Opacidad del abanico (m-7 punto 9): en Release es solo `.opacity(opacity)` sin trabajo por fotograma. En DEBUG,
+/// con `-MiBancoDemoHomeProbes` y Reducir movimiento, lee el valor interpolado de cada fotograma dibujado del telón
+/// negro (`1 - opacidad` de Inicio) y de la cabecera del abanico.
+private struct FanDrawnOpacity: ViewModifier {
+    let opacity: Double
+    let layer: FanReduceAudit.Layer
+    let active: Bool
+    let recording: Bool
+
+    func body(content: Content) -> some View {
+        #if DEBUG
+        if active {
+            content.modifier(FanAnimatableOpacity(opacity: opacity, layer: layer, recording: recording))
+        } else {
+            content.opacity(opacity)
+        }
+        #else
+        content.opacity(opacity)
+        #endif
+    }
+}
+
+#if DEBUG
+private struct FanAnimatableOpacity: ViewModifier, Animatable {
+    var opacity: Double
+    let layer: FanReduceAudit.Layer
+    let recording: Bool
+
+    nonisolated var animatableData: Double {
+        get { opacity }
+        set { opacity = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        if recording {
+            HomeProbe.shared.recordFanFrame(layer: layer, opacity: opacity)
+        }
+        return content.opacity(opacity)
+    }
+}
+#endif

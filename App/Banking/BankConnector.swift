@@ -90,13 +90,8 @@ final class BankConnector {
     func refreshASPSPList() async {
         guard let client = try? BankingCredentials.client(),
               let list = try? await client.aspsps(country: BankingConstants.country) else { return }
-        cacheASPSPs(list)
-        NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
-    }
-
-    func cacheASPSPs(_ list: [EBASPSP]) {
         cachedASPSPs = list
-        BankSyncStatus.shared.reloadRequiredPSUHeaders(cachedASPSPs: list)
+        NotificationCenter.default.post(name: .ledgerDidSyncFromBank, object: nil)
     }
 
     // MARK: - Conectar
@@ -156,8 +151,7 @@ final class BankConnector {
         }
         let until = consentValidUntil(for: chosen, now: Date())
         let pending = PendingAuth(
-            state: state, bank: bank, aspspName: chosen.name, aspspCountry: chosen.country, startedAt: Date(),
-            requiredPSUHeaders: chosen.requiredPSUHeaders ?? [])
+            state: state, bank: bank, aspspName: chosen.name, aspspCountry: chosen.country, startedAt: Date())
         do { try KeychainVault.setCodable(pending, for: .pendingAuth) } catch {
             fail(bank, ConnectMessage.storeFailed)
             return
@@ -213,7 +207,6 @@ final class BankConnector {
         closeWebSession()
         deletePending()
         cachedASPSPs = nil
-        BankSyncStatus.shared.clearRequiredPSUHeaders()
         run(flow.handle(.forgetAll))
     }
 
@@ -228,6 +221,15 @@ final class BankConnector {
 
     // MARK: - La vuelta del banco
 
+    /// SEC-11: comprueba síncronamente si una URL externa de `onOpenURL` corresponde a una conexión pendiente.
+    /// Si no hay intento pendiente, se ignora de inmediato sin lanzar flujo, tarea ni error.
+    func shouldHandleExternalCallback(_ url: URL) -> Bool {
+        #if DEBUG
+        if DemoMode.isActive { return false }
+        #endif
+        return shouldHandleIncomingBankCallback(url, pending: pendingCheck())
+    }
+
     func handle(url: URL, fromWebSession: Bool = false) async {
         #if DEBUG
         if DemoMode.isActive { return }
@@ -241,6 +243,8 @@ final class BankConnector {
         // vuelta falsa por `onOpenURL` no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora);
         // si vino del propio cierre de la hoja web (`fromWebSession: true`), falla con `foreignLink` (R43).
         let pending = loadPending()
+        // SEC-11: sin intento pendiente, una vuelta externa (`onOpenURL`) se ignora de inmediato sin tocar el flujo ni mostrar error.
+        if !fromWebSession, pending == nil { return }
         let check: PendingCheck
         if let pending {
             check = pending.isExpired(now: Date()) ? .expired(pending.bank) : .valid(pending.bank)
@@ -276,12 +280,13 @@ final class BankConnector {
             fail(bank, ConnectMessage.missingCredentials)
             return
         }
-        let session: EBSession
-        do { session = try await client.createSession(code: code) } catch {
+        let authorization: EBSessionAuthorization
+        do { authorization = try await client.authorizeSession(code: code) } catch {
             guard attempt == mine else { return }
             fail(bank, connectMessage(for: error))
             return
         }
+        let session = authorization.session
         // Desde aquí hasta escribir no hay más `await`: lo que se comprueba ahora sigue valiendo al escribir.
         guard attempt == mine, flow.phase == .finishing(bank) else {
             try? await client.deleteSession(id: session.sessionID)
@@ -297,14 +302,9 @@ final class BankConnector {
         let fallback = EBASPSP(name: pending.aspspName, country: pending.aspspCountry)
         let now = Date()
         let until = session.validUntil ?? requestedUntil ?? consentValidUntil(for: fallback, now: now)
-        let resolvedRequiredPSU: [String]? = pending.requiredPSUHeaders
-            ?? cachedASPSPs.flatMap {
-                findASPSP(name: pending.aspspName, country: pending.aspspCountry, bank: bank, in: $0)
-            }.map { $0.requiredPSUHeaders ?? [] }
         let stored = StoredSession(
             sessionID: session.sessionID, accountUIDs: accounts.map(\.uid), validUntil: until,
-            aspspName: pending.aspspName, aspspCountry: pending.aspspCountry,
-            requiredPSUHeaders: resolvedRequiredPSU)
+            aspspName: pending.aspspName, aspspCountry: pending.aspspCountry)
         // La sesión que funcionaba hasta ahora (si la hay) se guarda: si algo falla se deja todo como estaba.
         let item = KeychainVault.session(for: bank)
         let previous = (try? KeychainVault.codable(StoredSession.self, for: item)) ?? nil
@@ -334,7 +334,11 @@ final class BankConnector {
         }
         authURL = nil
         requestedUntil = nil
-        BankSyncStatus.shared.updateRequiredPSUHeaders(bank, resolvedRequiredPSU)
+        // IBAN propio (si vino validado e inequívoco): va directo a la libreta del Llavero solo si estaba vacío,
+        // nunca a `StoredSession`, `ledger.json` ni Trade Republic.
+        if bank != .tr, let iban = authorization.primaryEuroIBAN {
+            _ = AccountBookStore.fillIBANIfEmpty(iban, for: bank)
+        }
         flow.handle(.succeeded(bank))
         NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
         NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
@@ -371,7 +375,6 @@ final class BankConnector {
                     }
                 }
                 await MainActor.run {
-                    BankSyncStatus.shared.updateRequiredPSUHeaders(bank, nil)
                     NotificationCenter.default.post(name: .ledgerDidChange, object: nil)
                     NotificationCenter.default.post(name: .bankLinkDidChange, object: nil, userInfo: ["bank": bank.rawValue])
                 }

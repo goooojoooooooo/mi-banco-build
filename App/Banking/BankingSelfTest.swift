@@ -8,6 +8,7 @@ import SwiftUI
 /// Se abre con el argumento de lanzamiento `-MiBancoSelfTest`. Las claves se generan en ejecución.
 enum BankingSelfTest {
     static let testService = "com.mibanco.banking.selftest"
+    static let accountTestService = "com.mibanco.accounts.selftest"
 
     static func run(onStep: (@MainActor @Sendable (String) -> Void)? = nil) async -> String {
         func step(_ name: String) async {
@@ -190,6 +191,14 @@ enum BankingSelfTest {
                   verifyJWT(String(auth.dropFirst("Bearer ".count)), publicKey: publicKey) else {
                 return failure("M-1 (cabecera DELETE remota)")
             }
+
+            // 5e. Libreta de IBAN en el Llavero: rellena solo vacío, no pisa, rechaza inválido/enmascarado y Trade Republic,
+            // recarga antes de escribir en `AccountBookModel` (M2), recuerda IBAN borrado sin guardarlo (M5)
+            // y sobrevive a `KeychainVault.deleteAll` («Olvidar clave y conexiones»).
+            await step("5e-libreta-IBAN")
+            if let bookFailure = try await verifyAccountBookInKeychain(secret: secret) {
+                return failure(bookFailure)
+            }
         } catch {
             try? KeychainVault.deleteAll(service: testService)
             // El código del sistema (OSStatus) no es secreto y dice por qué falla el Llavero.
@@ -203,7 +212,120 @@ enum BankingSelfTest {
             return failure(transportFailure)
         }
         _ = URLSessionTransport()
+
+        // 7. SEC-11: sin intento pendiente, una URL externa de vuelta bancaria se ignora sin lanzar flujo ni error.
+        if let strayURL = URL(string: "\(BankingConstants.callbackScheme)://cb?code=fake&state=fake") {
+            let connector = await MainActor.run { BankConnector.shared }
+            let accepted = await MainActor.run { connector.shouldHandleExternalCallback(strayURL) }
+            guard !accepted else { return failure("callback sin pendiente aceptado") }
+            await connector.handle(url: strayURL)
+            let phase = await MainActor.run { connector.phase }
+            guard phase == .idle else { return failure("callback sin pendiente cambio fase") }
+        }
         return "Autoprueba: OK"
+    }
+
+    @MainActor
+    private static func verifyAccountBookInKeychain(secret: Data) throws -> String? {
+        let deleteAccountTestItem = {
+            let query: [CFString: Any] = [
+                kSecClass: kSecClassGenericPassword,
+                kSecAttrService: accountTestService,
+                kSecAttrAccount: AccountBookStore.account,
+                kSecAttrSynchronizable: false,
+            ]
+            _ = SecItemDelete(query as CFDictionary)
+        }
+        deleteAccountTestItem()
+        defer { deleteAccountTestItem() }
+
+        let sampleES = "ES9121000418450200051332"
+        let sampleES2 = "ES7921000813610123456789"
+        let sampleDE = "DE89370400440532013000"
+
+        let model = AccountBookModel(service: accountTestService)
+        guard model.book.ibans.isEmpty else {
+            return "libreta (estado inicial no vacio)"
+        }
+
+        guard AccountBookStore.fillIBANIfEmpty("es91 2100 0418 4502 0005 1332", for: .ima, service: accountTestService),
+              !AccountBookStore.fillIBANIfEmpty(sampleES2, for: .ima, service: accountTestService),
+              !AccountBookStore.fillIBANIfEmpty("ES9221000418450200051332", for: .rev, service: accountTestService),
+              !AccountBookStore.fillIBANIfEmpty("ES12 **** 1234", for: .rev, service: accountTestService),
+              !AccountBookStore.fillIBANIfEmpty(sampleDE, for: .tr, service: accountTestService)
+        else {
+            return "libreta (reglas de relleno)"
+        }
+
+        // M2: `model` sigue con la copia anterior en memoria, pero escribir otro campo recarga del Llavero y no pisa el IBAN.
+        guard model.book.ibans[.ima] == nil else {
+            return "libreta (M2 precondicion)"
+        }
+        try model.setFloor(25_000, for: .rev)
+        guard model.book.ibans[.ima] == sampleES,
+              model.book.floors[.rev] == 25_000 else {
+            return "libreta (M2 escritura piso IBAN)"
+        }
+
+        // M5: el dueño borra a propósito el IBAN de imagin; no se vuelve a rellenar y el Llavero no guarda ningún IBAN.
+        try model.setIBAN(nil, for: .ima)
+        guard model.book.ibans[.ima] == nil,
+              model.book.autoIBANDismissed == [.ima] else {
+            return "libreta (M5 borrado no marcado)"
+        }
+        guard let rawStored = rawAccountBookKeychainData(service: accountTestService) else {
+            return "libreta (M5 lectura cruda Llavero)"
+        }
+        let rawText = String(decoding: rawStored, as: UTF8.self)
+        guard !rawText.contains("ES91"), !rawText.contains("21000418"), !rawText.contains("1332") else {
+            return "libreta (M5 IBAN quedo en Llavero)"
+        }
+        guard !AccountBookStore.fillIBANIfEmpty(sampleES, for: .ima, service: accountTestService),
+              !AccountBookStore.fillIBANIfEmpty(sampleES2, for: .ima, service: accountTestService) else {
+            return "libreta (M5 volvio a rellenar tras borrar)"
+        }
+        let afterDismiss = try AccountBookStore.loadThrowing(service: accountTestService)
+        guard afterDismiss.ibans[.ima] == nil,
+              afterDismiss.autoIBANDismissed == [.ima],
+              afterDismiss.floors[.rev] == 25_000 else {
+            return "libreta (M5 persistencia tras borrar)"
+        }
+
+        // Si el dueño escribe después un IBAN manual, quita la marca de borrado y tampoco se pisa al renovar.
+        try model.setIBAN(sampleES2, for: .ima)
+        guard model.book.ibans[.ima] == sampleES2,
+              model.book.autoIBANDismissed.isEmpty,
+              !AccountBookStore.fillIBANIfEmpty(sampleES, for: .ima, service: accountTestService) else {
+            return "libreta (M5 escritura manual posterior)"
+        }
+
+        // Borrar las credenciales bancarias («Olvidar clave y conexiones») no debe tocar la libreta de cuentas.
+        try KeychainVault.set(secret, for: .appID, service: testService)
+        try KeychainVault.deleteAll(service: testService)
+        let reloadedBook = try AccountBookStore.loadThrowing(service: accountTestService)
+        guard reloadedBook.ibans[.ima] == sampleES2,
+              reloadedBook.floors[.rev] == 25_000,
+              reloadedBook.ibans[.rev] == nil,
+              reloadedBook.ibans[.tr] == nil,
+              reloadedBook.autoIBANDismissed.isEmpty
+        else {
+            return "libreta (lectura tras olvidar credenciales)"
+        }
+        return nil
+    }
+
+    private static func rawAccountBookKeychainData(service: String) -> Data? {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: AccountBookStore.account,
+            kSecAttrSynchronizable: false,
+            kSecReturnData: true,
+            kSecMatchLimit: kSecMatchLimitOne,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
     }
 
     private static func verifyTransportPolicy(
@@ -337,75 +459,6 @@ enum BankingSelfTest {
         } catch {
             return "I-3 (error en respuesta 200)"
         }
-
-        // 6h. L1: cabeceras PSU locales reales en `URLSessionTransport` + `EnableBankingClient` (sin IP ni cookies),
-        // ausencia total en segundo plano / `GET /aspsps`, y manejo limpio de 422 PSU / 429 rate-limit.
-        await step("6h-psu-headers")
-        SelfTestURLProtocol.state.reset()
-        let localPSU = BankSync.localPSUHeaders()
-        guard let ua = localPSU["Psu-User-Agent"],
-              ua.hasPrefix("\(AppIdentity.displayName)/"),
-              ua.contains("(iOS "),
-              localPSU["Psu-Ip-Address"] == nil else {
-            return "L1 (cabeceras PSU locales invalidas)"
-        }
-        do {
-            _ = try await client.balances(accountUID: "selftest-psu", psuHeaders: localPSU)
-            guard let sent = SelfTestURLProtocol.state.headers(for: "/accounts/selftest-psu/balances") else {
-                return "L1 (faltan cabeceras grabadas en balances PSU)"
-            }
-            let lower = Dictionary(uniqueKeysWithValues: sent.map { ($0.key.lowercased(), $0.value) })
-            guard lower["psu-user-agent"] == ua,
-                  lower["psu-ip-address"] == nil,
-                  lower["cookie"] == nil,
-                  lower["authorization"]?.hasPrefix("Bearer ") == true else {
-                return "L1 (cabeceras PSU en URLRequest incorrectas)"
-            }
-            if let lang = localPSU["Psu-Accept-language"], lower["psu-accept-language"] != lang {
-                return "L1 (Psu-Accept-language no llego intacta)"
-            }
-        } catch {
-            return "L1 (error en balances con PSU)"
-        }
-        do {
-            _ = try await client.balances(accountUID: "selftest-bg", psuHeaders: nil)
-            guard let bgHeaders = SelfTestURLProtocol.state.headers(for: "/accounts/selftest-bg/balances"),
-                  !bgHeaders.keys.contains(where: { $0.lowercased().hasPrefix("psu-") }) else {
-                return "L1 (segundo plano envio cabecera PSU)"
-            }
-        } catch {
-            return "L1 (error en balances sin PSU)"
-        }
-        do {
-            let aspsps = try await client.aspsps(country: "ES")
-            guard let aspspHeaders = SelfTestURLProtocol.state.headers(for: "/aspsps"),
-                  !aspspHeaders.keys.contains(where: { $0.lowercased().hasPrefix("psu-") }),
-                  aspsps.count == 2,
-                  aspsps[0].requiredPSUHeaders == [],
-                  aspsps[1].requiredPSUHeaders == ["Psu-Ip-Address"] else {
-                return "L1 (GET /aspsps envio PSU o no decodifico required_psu_headers)"
-            }
-        } catch {
-            return "L1 (error en GET /aspsps)"
-        }
-        do {
-            _ = try await client.balances(accountUID: "selftest-422-psu", psuHeaders: localPSU)
-            return "L1 (422 PSU no fallo)"
-        } catch let error as BankingClientError {
-            guard error == .api(.unknown, code: "PSU_HEADER_NOT_PROVIDED"), isPSUHeaderRejection(error) else {
-                return "L1 (422 PSU mal clasificado)"
-            }
-        } catch {
-            return "L1 (error inesperado en 422 PSU)"
-        }
-        do {
-            _ = try await client.balances(accountUID: "selftest-429-psu", psuHeaders: localPSU)
-            return "L1 (429 no fallo)"
-        } catch BankingClientError.api(.rateLimited, code: "ASPSP_RATE_LIMIT_EXCEEDED") {
-            // OK
-        } catch {
-            return "L1 (429 mal clasificado)"
-        }
         return nil
     }
 
@@ -493,26 +546,12 @@ private final class SelfTestURLProtocol: URLProtocol {
         private let lock = NSLock()
         private var redirectTargetHits = 0
         private var deleteSessionAuthHeaders: [String] = []
-        private var headersByPath: [String: [String: String]] = [:]
 
         func reset() {
             lock.lock()
             defer { lock.unlock() }
             redirectTargetHits = 0
             deleteSessionAuthHeaders = []
-            headersByPath = [:]
-        }
-
-        func recordHeaders(_ headers: [String: String], for path: String) {
-            lock.lock()
-            defer { lock.unlock() }
-            headersByPath[path] = headers
-        }
-
-        func headers(for path: String) -> [String: String]? {
-            lock.lock()
-            defer { lock.unlock() }
-            return headersByPath[path]
         }
 
         func recordRedirectTargetHit() {
@@ -613,25 +652,6 @@ private final class SelfTestURLProtocol: URLProtocol {
         case "/sessions/selftest-s1" where request.httpMethod == "DELETE":
             Self.state.recordDeleteSessionAuth(request.value(forHTTPHeaderField: "Authorization"))
             sendResponse(url: url, status: 204, headers: nil, body: nil)
-
-        case "/accounts/selftest-psu/balances", "/accounts/selftest-bg/balances":
-            Self.state.recordHeaders(request.allHTTPHeaderFields ?? [:], for: url.path)
-            sendResponse(url: url, status: 200, headers: ["Content-Type": "application/json"], body: Data(#"{"balances":[]}"#.utf8))
-
-        case "/aspsps":
-            Self.state.recordHeaders(request.allHTTPHeaderFields ?? [:], for: url.path)
-            let body = #"{"aspsps":[{"name":"Revolut","country":"ES","required_psu_headers":[]},{"name":"imaginBank","country":"ES","required_psu_headers":["Psu-Ip-Address"]}]}"#
-            sendResponse(url: url, status: 200, headers: ["Content-Type": "application/json"], body: Data(body.utf8))
-
-        case "/accounts/selftest-422-psu/balances":
-            sendResponse(
-                url: url, status: 422, headers: ["Content-Type": "application/json"],
-                body: Data(#"{"error":"PSU_HEADER_NOT_PROVIDED"}"#.utf8))
-
-        case "/accounts/selftest-429-psu/balances":
-            sendResponse(
-                url: url, status: 429, headers: ["Content-Type": "application/json"],
-                body: Data(#"{"error":"ASPSP_RATE_LIMIT_EXCEEDED"}"#.utf8))
 
         default:
             client?.urlProtocol(self, didFailWithError: URLError(.unsupportedURL))

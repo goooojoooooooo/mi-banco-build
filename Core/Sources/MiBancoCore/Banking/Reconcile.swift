@@ -88,6 +88,9 @@ extension Ledger {
                     changed = true
                 }
                 if applyName(r.merchant, to: i) { changed = true }
+                // La señal de persona y el MCC solo se añaden/conservan (como `isShop`); no cuentan como cambio en el informe.
+                if r.personPayment { state.movements[i].personPayment = true }
+                if let mcc = r.merchantCategoryCode { state.movements[i].merchantCategoryCode = mcc }
                 if changed { report.updated += 1 } else { report.unchanged += 1 }
                 continue
             }
@@ -103,6 +106,8 @@ extension Ledger {
                 state.movements[i].bankStatus = .booked
                 state.movements[i].bookedDay = r.bookedDay
                 _ = applyName(r.merchant, to: i)
+                if r.personPayment { state.movements[i].personPayment = true }
+                if let mcc = r.merchantCategoryCode { state.movements[i].merchantCategoryCode = mcc }
                 report.updated += 1
                 continue
             }
@@ -123,7 +128,14 @@ extension Ledger {
                 if state.movements[i].source.isBankSourced == false, let name = r.merchant, !name.isEmpty {
                     state.movements[i].bankMerchant = name
                 }
-                state.movements[i].isShop = state.movements[i].isShop || r.isShop
+                // Un nombre que solo se parece a una marca no le quita la señal a un aviso de Bizum (M-10).
+                if !(r.shopFromName && state.movements[i].personPayment == true) {
+                    state.movements[i].isShop = state.movements[i].isShop || r.isShop
+                }
+                if r.personPayment { state.movements[i].personPayment = true }
+                if let mcc = r.merchantCategoryCode, state.movements[i].merchantCategoryCode == nil || channel == .bank {
+                    state.movements[i].merchantCategoryCode = mcc
+                }
                 state.movements[i].excludedFromSpending = state.movements[i].excludedFromSpending || r.excludedFromSpending
                 report.linked += 1
                 continue
@@ -136,7 +148,8 @@ extension Ledger {
                 bankRef: channel == .bank ? r.ref : nil, statementRef: channel == .statement ? r.ref : nil,
                 bankStatus: channel == .bank ? r.status : .booked, importedAt: now, dayOnly: !r.timing.isExact,
                 excludedFromSpending: r.excludedFromSpending, firstSeenStatus: channel == .bank ? r.status : nil,
-                bookedDay: channel == .bank ? r.bookedDay : nil)
+                bookedDay: channel == .bank ? r.bookedDay : nil, personPayment: r.personPayment ? true : nil,
+                merchantCategoryCode: r.merchantCategoryCode)
             state.movements.append(movement)
             report.added += 1
             if r.excludedFromSpending { report.addedInvestments += 1 }
@@ -171,6 +184,8 @@ extension Ledger {
                         if state.movements[i].statementRef == nil { state.movements[i].statementRef = row.statementRef }
                         if let name = row.merchant, !name.isEmpty { state.movements[i].bankMerchant = name }
                         state.movements[i].isShop = state.movements[i].isShop || row.isShop
+                        if row.personPayment == true { state.movements[i].personPayment = true }
+                        if let mcc = row.merchantCategoryCode { state.movements[i].merchantCategoryCode = mcc }
                         state.movements[i].excludedFromSpending =
                             state.movements[i].excludedFromSpending || row.excludedFromSpending
                         toDelete.insert(row.id)

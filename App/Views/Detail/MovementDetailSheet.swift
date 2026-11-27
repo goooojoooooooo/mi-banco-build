@@ -73,6 +73,11 @@ private struct DetailContent: View {
     /// nunca enseña su cifra final antes de contar.
     @State private var amountShown = false
     @State private var amountLanded = false
+    /// m-9: cuándo se posa el importe (s desde que se pide); lo cumple un `.task(id:)`, que se cancela con la hoja.
+    @State private var landingDue: Double?
+    /// Lote final: los grupos de debajo del importe no entran mientras el importe vuela por encima de ellos (si vuela
+    /// desde la fila); entran en cuanto se posa. Sin vuelo (o con Reducir movimiento), como siempre.
+    private var groupsReleased: Bool { amountOrigin == nil || motion.reduce || amountLanded }
     /// D1: el vuelo del importe desde la fila (0 = donde estaba en la fila, 1 = en su sitio), desde dónde sale y a qué
     /// escala, y dónde está su sitio en la pantalla (se mide; solo se lee al empezar el vuelo).
     // Empieza en 0: sin origen (y con el desplazamiento a cero) es la identidad; con origen, el vuelo es un cambio de 0 a 1
@@ -108,12 +113,12 @@ private struct DetailContent: View {
                         .foregroundStyle(Theme.label)
                         .multilineTextAlignment(.center)
                         .padding(.top, 12)
-                        .staggeredEntrance(0, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(0, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
                     Text("\(DateText.moment(movement.date, dayOnly: movement.dayOnly)) · \(movement.bank.displayName)")
                         .titan(.subtitle)
                         .foregroundStyle(Theme.label2)
                         .padding(.top, 3)
-                        .staggeredEntrance(1, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(1, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
                     // El importe rueda (`RollingAmount` ya oculta las cifras con el ojo cerrado y se encoge si no cabe).
                     RollingAmount(cents: movement.amountCents, style: .plain(sign: true))
                         .font(.system(size: amountSize, weight: .semibold))
@@ -191,16 +196,22 @@ private struct DetailContent: View {
                     }
                     OwnTransferRow(movement: movement, isOn: snapshot.ownTransfers.contains(movement.id), model: model)
                 }
-                .staggeredEntrance(2, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                .staggeredEntrance(2, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
+
+                .modifier(HeldUntilLanded(released: groupsReleased, index: 0))
 
                 if movement.kind == .payment, let key = merchantKey, let history = snapshot.histories[key] {
                     MerchantHistoryGroup(history: history, recent: snapshot.recentPayments[key] ?? [], current: movement.id)
-                        .staggeredEntrance(3, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(3, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
+
+                        .modifier(HeldUntilLanded(released: groupsReleased, index: 1))
                 }
 
                 if editingNote || movement.note != nil {
                     noteGroup
-                        .staggeredEntrance(4, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                        .staggeredEntrance(4, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
+
+                        .modifier(HeldUntilLanded(released: groupsReleased, index: 2))
                         .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
@@ -218,11 +229,15 @@ private struct DetailContent: View {
                         }
                     }
                 }
-                .staggeredEntrance(5, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                .staggeredEntrance(5, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
+
+                .modifier(HeldUntilLanded(released: groupsReleased, index: 3))
 
                 SlideToConfirm(title: "Desliza para borrar el movimiento", action: onDelete)
                     .padding(.top, 6)
-                    .staggeredEntrance(6, rise: 16, lead: 0.15, firstGap: 0.055, decay: 0.82)
+                    .staggeredEntrance(6, rise: 16, lead: Self.linesLead, firstGap: Self.linesGap, decay: Self.linesDecay)
+
+                    .modifier(HeldUntilLanded(released: groupsReleased, index: 4))
             }
             .padding(.horizontal, 22)
             .padding(.bottom, 32)
@@ -257,6 +272,12 @@ private struct DetailContent: View {
         .onAppear(perform: landAmount)
         .task { await backstop() }
         .task(id: flightArmed) { await flightAfterPresentation() }
+        .task(id: landingDue) {
+            guard let due = landingDue else { return }
+            try? await Task.sleep(for: .seconds(due))
+            guard !Task.isCancelled else { return }
+            amountLanded = true
+        }
     }
 
     /// D1. El importe sale volando desde donde estaba en la fila (si se abrió desde una fila de Inicio y se conocen
@@ -282,18 +303,27 @@ private struct DetailContent: View {
             flyDelta = start.delta
             flyScale = start.scale
             amountShown = true
-            withAnimation(motion.animation(.fly).delay(motion.seconds(0.05)), completionCriteria: .logicallyComplete) {
-                flight = 1
-            } completion: {
-                amountLanded = true
-            }
+            withAnimation(motion.animation(.fly).delay(motion.seconds(0.05))) { flight = 1 }
+            landingDue = motion.seconds(0.05) + flightSettle
             return
         }
-        withAnimation(motion.animation(.fly).delay(motion.seconds(0.3)), completionCriteria: .logicallyComplete) {
-            amountShown = true
-        } completion: {
-            amountLanded = true
-        }
+        withAnimation(motion.animation(.fly).delay(motion.seconds(0.3))) { amountShown = true }
+        // m-1: con Reducir es un fundido: se posa cuando acaba (no tras la espera del muelle).
+        landingDue = motion.seconds(0.3) + (motion.reduce ? motion.fadeDuration : flightSettle)
+    }
+
+    /// La entrada escalonada de las líneas del detalle: desde 0,15 s, 55 ms × 0,82ⁿ (la usan también los grupos que
+    /// esperan a que el importe se pose).
+    static let linesLead = 0.15
+    static let linesGap = 0.055
+    static let linesDecay = 0.82
+
+    /// I-1 (ronda 1): cuándo se VE posado el importe que vuela: la envolvente de su muelle `fly` (con la intensidad y la
+    /// cámara lenta) baja del 5 % (`MotionMath.visibleSettle`, ~0,28 s en Equilibrado). Antes no se suelta nada: la
+    /// garantía de m-12 sigue (es una pausa que lee `\.motion`, no una `completion`).
+    private var flightSettle: Double {
+        MotionMath.visibleSettle(
+            MotionMath.scaled(SpringToken.fly.base, level: motion.level, timeMultiplier: motion.timeMultiplier))
     }
 
     /// La espera del vuelo: la presentación de la hoja la lleva el sistema a su velocidad (no va a cámara lenta), así
@@ -474,5 +504,62 @@ private struct DetailAction: View {
                 Rectangle().fill(Theme.separator).frame(height: 0.5).padding(.leading, 54)
             }
         }
+    }
+}
+
+/// Lote final: un grupo del detalle que espera a que el importe se pose (`released`) para entrar: sube 16 pt y aparece
+/// con el muelle `enter`, escalonado (55 ms × 0,82ⁿ). Si ya estaba suelto al aparecer, está desde el principio.
+private struct HeldUntilLanded: ViewModifier {
+    let released: Bool
+    let index: Int
+    @Environment(\.motion) private var motion
+    @State private var shown: Bool?
+    /// Ronda 2 (N-2): recibe toques solo cuando YA se ve (tras su retardo escalonado y su entrada), no en el instante de
+    /// soltarse. Lote final p2, ronda 1: lo decide una tarea ATADA a la vista (`.task(id: released)`), no una `Task`
+    /// suelta: vuelve a correr cada vez que el grupo aparece o cambia `released`, así que con la hoja quieta y el grupo a
+    /// la vista nunca se queda en `false` (batería 46005608063: la ficha «Categoría» a la vista no respondía).
+    @State private var touchable = false
+
+    func body(content: Content) -> some View {
+        let visible = shown ?? released
+        // Se tapa con una máscara (no con `opacity`): mientras espera sigue a la vista de VoiceOver y de las pruebas, que
+        // leen «Te quedaban» desde que se abre la hoja.
+        content
+            .mask { Color.black.opacity(visible ? 1 : 0) }
+            // I-2 (ronda 1): mientras espera no recibe toques (no se cambia nada que no se ve).
+            .allowsHitTesting(touchable && !Self.demoStaysLocked)
+            .offset(y: visible ? 0 : motion.distance(16))
+            .onAppear {
+                if shown == nil { shown = released }
+            }
+            .task(id: released) {
+                guard released else {
+                    touchable = false
+                    return
+                }
+                if shown != true {
+                    let delay = motion.stagger(index, firstGap: DetailContent.linesGap, decay: DetailContent.linesDecay)
+                    withAnimation(motion.animation(.enter).delay(delay)) { shown = true }
+                    // Se puede tocar cuando la entrada ya se ve (su retardo y el muelle `enter` posado a la vista).
+                    let settle = motion.reduce
+                        ? motion.fadeDuration
+                        : MotionMath.visibleSettle(MotionMath.scaled(SpringToken.enter.base, level: motion.level,
+                                                                     timeMultiplier: motion.timeMultiplier))
+                    try? await Task.sleep(for: .seconds(delay + settle))
+                    // Si la vista se fue a mitad, la tarea vuelve a correr al aparecer y entonces ya está a la vista.
+                    guard !Task.isCancelled else { return }
+                }
+                touchable = true
+            }
+    }
+
+    /// Solo demo (`-MiBancoDemoHeldGroupsStayLocked`): el defecto que se vio en la batería (el grupo a la vista sin
+    /// recibir toques), para ver en rojo su prueba. En Release, siempre `false`.
+    private static var demoStaysLocked: Bool {
+        #if DEBUG
+        DemoMode.heldGroupsStayLocked
+        #else
+        false
+        #endif
     }
 }

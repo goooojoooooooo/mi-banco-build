@@ -21,6 +21,8 @@ struct MorphingButton: View {
     @State private var errorShown = false
     @State private var doneCount = 0
     @State private var failCount = 0
+    /// m-5: cada intento lleva su número; el aviso de fin de un intento viejo no llega si ya empezó otro.
+    @State private var attempt = 0
     @Environment(\.motion) private var motion
     /// Ancho máximo de la cápsula: crece con el tamaño de texto, pero el contenedor manda.
     @ScaledMetric(relativeTo: .body) private var width = 220.0
@@ -31,6 +33,8 @@ struct MorphingButton: View {
     @State private var idleTitleWidth: CGFloat?
 
     private static let minHeight: CGFloat = 52
+    /// Lo que dura la sacudida del error (s, sin cámara lenta).
+    private static let shakeSeconds = 0.42
 
     private var isCircle: Bool { phase != .idle && !motion.reduce }
 
@@ -51,12 +55,14 @@ struct MorphingButton: View {
         .keyframeAnimator(initialValue: 0.0, trigger: motion.reduce ? 0 : failCount) { content, x in
             content.offset(x: x)
         } keyframes: { _ in
+            // La sacudida dura `shakeSeconds` (con la cámara lenta de las grabaciones).
+            let m = motion.pause(1)
             KeyframeTrack {
-                LinearKeyframe(6.0, duration: 0.06)
-                LinearKeyframe(-6.0, duration: 0.10)
-                LinearKeyframe(6.0, duration: 0.10)
-                LinearKeyframe(-6.0, duration: 0.10)
-                LinearKeyframe(0.0, duration: 0.06)
+                LinearKeyframe(6.0, duration: 0.06 * m)
+                LinearKeyframe(-6.0, duration: 0.10 * m)
+                LinearKeyframe(6.0, duration: 0.10 * m)
+                LinearKeyframe(-6.0, duration: 0.10 * m)
+                LinearKeyframe(0.0, duration: 0.06 * m)
             }
         }
         .sensoryFeedback(Haptics.success, trigger: doneCount)
@@ -106,6 +112,8 @@ struct MorphingButton: View {
     }
 
     private func run() async {
+        attempt += 1
+        let mine = attempt
         errorShown = false
         withAnimation(motion.animation(.snap)) { phase = .loading }
         let began = Date()
@@ -128,8 +136,13 @@ struct MorphingButton: View {
             withAnimation(motion.animation(.snap)) { phase = .idle }
             failCount += 1
             withAnimation(motion.fade) { errorShown = true }
-            onFinish?(false)
-            try? await Task.sleep(for: .seconds(motion.pause(2.5)))
+            // m-10: avisa cuando ha TERMINADO de reaccionar (la sacudida acabada y la cápsula de vuelta), no en el mismo
+            // instante del fallo. Una pausa, no la `completion` de una animación (en una vista que no se dibuja acaba
+            // al instante). Con Reducir movimiento no hay sacudida: lo que tarda el fundido.
+            let settle = motion.reduce ? motion.fadeDuration : motion.pause(Self.shakeSeconds)
+            try? await Task.sleep(for: .seconds(settle))
+            if attempt == mine { onFinish?(false) }
+            try? await Task.sleep(for: .seconds(max(0, motion.pause(2.5) - settle)))
             withAnimation(motion.fade) { errorShown = false }
         }
     }

@@ -9,6 +9,9 @@ struct MiBancoApp: App {
         UNUserNotificationCenter.current().delegate = ForegroundPresenter.shared
         #if DEBUG
         LaunchProbe.shared.appInitAt = Date().timeIntervalSince1970
+        if DemoMode.isActive, DemoMode.resetsLogoDownloadsDefault {
+            UserDefaults.standard.removeObject(forKey: MerchantLogos.downloadsKey)
+        }
         #endif
     }
 
@@ -46,6 +49,8 @@ private struct AppShellView: View {
     #if DEBUG
     /// Solo demo (`-MiBancoDemoUnlockInactive`): la carcasa hace como que la escena está inactiva tras desbloquear.
     @State private var simulatedInactive = false
+    /// Solo demo (`-MiBancoDemoNoPasscode`): desactivar el bloqueo a conciencia sin escribir en `UserDefaults.standard`.
+    @State private var demoLockDisabled = false
     #endif
     /// Costura de movimiento (F1): dónde está la ranura de la marca en Inicio. Vive aquí, por encima del bloqueo, el telón
     /// y `RootView`, para que todos vean el mismo objeto.
@@ -56,13 +61,19 @@ private struct AppShellView: View {
     /// El ajuste del bloqueo tal como lo entiende `ShellState`: si el bloqueo se enseña cuando la app está bloqueada y
     /// si la app se bloquea al ir a segundo plano. En la app real, los dos son el ajuste; en la demo, el bloqueo solo se
     /// enseña con su bandera.
-    private static func lockSetting(enabled: Bool) -> (applies: Bool, relocks: Bool) {
+    private static func lockSetting(enabled: Bool, demoNoPasscodeDisabled: Bool = false) -> (applies: Bool, relocks: Bool) {
         #if DEBUG
-        // Con el bloqueo de demo, la app SIEMPRE se re-bloquea al ir a segundo plano: no depende del «Bloquear con Face
-        // ID» guardado en el simulador, que otra prueba (OnboardingUITests toca ese interruptor) puede haber dejado
-        // apagado en el mismo clon — así fallaban, solo en paralelo, las pruebas de volver de segundo plano
-        // (run 45603017151: OnboardingUITests y luego MotionShellTests en el clon 1).
-        if DemoMode.isActive { return (DemoMode.holdsLock, DemoMode.holdsLock || enabled) }
+        if DemoMode.isActive {
+            if DemoMode.simulatedDeviceAuth != nil {
+                let active = !demoNoPasscodeDisabled
+                return (active, active)
+            }
+            // Con el bloqueo de demo, la app SIEMPRE se re-bloquea al ir a segundo plano: no depende del «Bloquear con Face
+            // ID» guardado en el simulador, que otra prueba (OnboardingUITests toca ese interruptor) puede haber dejado
+            // apagado en el mismo clon — así fallaban, solo en paralelo, las pruebas de volver de segundo plano
+            // (run 45603017151: OnboardingUITests y luego MotionShellTests en el clon 1).
+            return (DemoMode.holdsLock, DemoMode.holdsLock || enabled)
+        }
         #endif
         return (enabled, enabled)
     }
@@ -109,9 +120,15 @@ private struct AppShellView: View {
 
     /// Cómo entra y sale una capa: lo dice `ShellState` (solo se anima el bloqueo al quitarse; todo lo demás, de golpe).
     private func transition(of layer: ShellState.Layer) -> AnyTransition {
-        .asymmetric(
+        // El bloqueo se va con la misma opacidad de siempre, pero dibujada por `DrawnOpacityProbe` (ronda 2, N-1: en
+        // DEBUG apunta el primer fotograma en que empieza a irse).
+        let removal: AnyTransition = layer == .lock
+            ? .modifier(active: DrawnOpacityProbe(opacity: 0, mark: .lockFadeBegan),
+                        identity: DrawnOpacityProbe(opacity: 1, mark: .lockFadeBegan))
+            : .opacity
+        return .asymmetric(
             insertion: ShellState.animatesInsertion(of: layer) ? .opacity : .identity,
-            removal: ShellState.animatesRemoval(of: layer) ? .opacity : .identity)
+            removal: ShellState.animatesRemoval(of: layer) ? removal : .identity)
     }
 
     var body: some View {
@@ -167,7 +184,8 @@ private struct AppShellView: View {
                     // escena no está activa se quita de golpe y lo releva la tapa (`ShellState.lockExitOnUnlock`).
                     // En el arranque en frío monta las piezas sobre su propia marca; en un re-bloqueo, la marca está quieta.
                     LockView(locked: unlockBinding, playsLaunch: shell.lockPlaysLaunch,
-                             leaveOnUnlock: lockLeave, fadeStarted: lockFadeStarted)
+                             leaveOnUnlock: lockLeave, fadeStarted: { lockFadeStarted($0, keepsItsMark: $1) },
+                             disableLock: disableLockConsciously)
                         .transition(transition(of: .lock))
                         .zIndex(ShellState.zIndex(of: .lock))
                 } else if layers.contains(.launch) {
@@ -202,13 +220,21 @@ private struct AppShellView: View {
                 shell.apply(.safetyFired)
             }
             .task {
-                // Arranque en frío (tarea 10): solo tras superar el bloqueo y en primer plano.
-                await MainActor.run { BankSync.refreshOnOpen(isUnlocked: !shell.showsLock) }
+                // Arranque en frío (tarea 10): puede que no haya cambio de escena que lo dispare.
+                await MainActor.run { BankSync.refreshOnOpen() }
                 await logos.prewarm(domains: [])
                 #if DEBUG
                 if DemoMode.isActive {
                     if DemoMode.simulatesArrival {
                         try? await Task.sleep(for: .seconds(4))
+                        // Lote final: durante el arranque no se pide el aviso dentro de la app; a cámara lenta el
+                        // arranque dura más de 4 s, así que el pago de demo espera a que acabe (con el bloqueo puesto
+                        // el arranque no se ve y llega igual, debajo del bloqueo).
+                        // M-8: con tope (el arranque siempre acaba; el tope es por si una prueba lo deja colgado).
+                        let limit = Date().addingTimeInterval(120)
+                        while shell.showsLaunch, !Task.isCancelled, Date() < limit {
+                            try? await Task.sleep(for: .milliseconds(200))
+                        }
                         model.demoSimulateArrival()
                     }
                     return
@@ -235,16 +261,16 @@ private struct AppShellView: View {
             .environment(preferences)
             .preferredColorScheme(.dark)
             .environment(\.locale, Locale(identifier: "es_ES"))
-            // Conexión bancaria (tarea 9): solo `mibanco://cb`; cualquier otra dirección se ignora sin ruido.
+            // Conexión bancaria (tarea 9, SEC-11): solo `mibanco://cb` y solo si existe una conexión pendiente;
+            // cualquier otra dirección o una vuelta sin intento pendiente se ignora de inmediato sin lanzar flujo ni error.
             .onOpenURL { url in
-                guard isBankCallbackURL(url) else { return }
+                guard isBankCallbackURL(url), BankConnector.shared.shouldHandleExternalCallback(url) else { return }
                 Task { await BankConnector.shared.handle(url: url) }
             }
             // Bancos (tarea 10): una conexión cambió (conectar, renovar, desconectar).
             .onReceive(NotificationCenter.default.publisher(for: .bankLinkDidChange)) { note in
                 let bank = (note.userInfo?["bank"] as? String).flatMap(BankID.init(rawValue:))
-                let unlocked = !shell.showsLock
-                Task { await BankSync.shared.linkDidChange(bank, isUnlocked: unlocked) }
+                Task { await BankSync.shared.linkDidChange(bank) }
             }
             .onChange(of: scenePhase) { _, phase in
                 // Conexión bancaria (tarea 9): el conector decide con su propio estado; el bloqueo no interviene.
@@ -273,10 +299,20 @@ private struct AppShellView: View {
                         book: accountBook.book,
                         privateMode: preferences.privateMode
                     )
-                    BankSync.refreshOnOpen(isUnlocked: !shell.showsLock) // tarea 10
+                    BankSync.refreshOnOpen() // tarea 10
                     Task { await portfolio.refreshPrices(force: false) }
                     Task { await MorningBriefingNotifier.reschedule(settings: model.state.alertSettings, shownToday: briefing.shownToday) }
                     Task { await LiveActivityController.endStale() }
+                    // SEC-06 (m-5): con el ojo ya cerrado, retira otra vez los avisos con cifras (la app pudo morir justo
+                    // después de cerrarlo, antes de que la retirada se ejecutara). Es idempotente.
+                    if PrivateModeTransitionEffects.removesDeliveredAlertsOnBecomingActive(eyeClosed: preferences.privateMode) {
+                        #if DEBUG
+                        let isDemo = DemoMode.isActive
+                        #else
+                        let isDemo = false
+                        #endif
+                        if !isDemo { Task { await AlertPoster.removeDeliveredSensitiveNotifications() } }
+                    }
                 case .background:
                     speaker.stop()
                     BackgroundRefresh.schedule() // tarea 10
@@ -285,32 +321,57 @@ private struct AppShellView: View {
                     speaker.stop()
                 }
             }
-            // Avisos con el ojo cerrado: los programados de antemano (resumen semanal, suscripciones) llevan su texto
-            // fijado; al cambiar el ojo se vuelven a programar con el texto que toca (sin cifras con el ojo cerrado).
-            .onChange(of: preferences.privateMode) { _, _ in
+            // Avisos y voz al cambiar el ojo (SEC-06 y SEC-13):
+            // - al pasar a modo privado (`false -> true`), la voz del resumen se para de inmediato y se retiran
+            //   del Centro de Notificaciones los avisos ya entregados con cifras (`MOVEMENT` e `INSIGHT`);
+            // - los avisos programados de antemano se reprograman con el texto que toca (sin cifras con el ojo cerrado).
+            .onChange(of: preferences.privateMode) { wasHidden, isHidden in
+                let effects = PrivateModeTransitionEffects.evaluate(wasHidden: wasHidden, isHidden: isHidden)
+                if effects.stopBriefingSpeech {
+                    speaker.stop()
+                }
                 #if DEBUG
                 if DemoMode.isActive { return }
                 #endif
-                Task { await AlertScheduler.reschedule(for: model.state) }
+                Task {
+                    if effects.removeDeliveredSensitiveAlerts {
+                        await AlertPoster.removeDeliveredSensitiveNotifications()
+                    }
+                    await AlertScheduler.reschedule(for: model.state)
+                }
             }
+            #if DEBUG
+            .onChange(of: speaker.isSpeaking) { _, speaking in
+                guard DemoMode.isActive, speaking, let seconds = DemoMode.closeEyeWhenSpeakingSeconds else { return }
+                Task {
+                    try? await Task.sleep(for: .seconds(seconds))
+                    guard !Task.isCancelled, speaker.isSpeaking else { return }
+                    preferences.privateMode = true
+                }
+            }
+            #endif
             .onChange(of: lockEnabled) { _, enabled in
                 // Cambiar el ajuste solo es posible con la app ya desbloqueada: no volver a pedir Face ID.
-                let setting = Self.lockSetting(enabled: enabled)
+                let setting: (applies: Bool, relocks: Bool)
+                #if DEBUG
+                setting = Self.lockSetting(enabled: enabled, demoNoPasscodeDisabled: demoLockDisabled)
+                #else
+                setting = Self.lockSetting(enabled: enabled)
+                #endif
                 withAnimation(Theme.Motion.unlock) {
                     shell.apply(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
                 }
             }
             .onChange(of: shell.showsLock) { _, isLocked in
-                if isLocked {
-                    speaker.stop()
-                } else if scenePhase == .active {
-                    BankSync.refreshOnOpen(isUnlocked: true)
-                }
+                if isLocked { speaker.stop() }
             }
             // La marca de la barra de Inicio se esconde mientras vuela la del arranque (`LaunchAnchor.flying`, que ponen
             // y quitan las propias capas que vuelan). Respaldo: sin ninguna de esas capas, nunca se queda escondida.
             .onChange(of: layers.contains(.launch) || layers.contains(.exit)) { _, flying in
-                if !flying { launchAnchor.flying = nil }
+                if !flying {
+                    launchAnchor.flying = nil
+                    launchAnchor.flyingToWelcome = false
+                }
             }
             #if DEBUG
             .onChange(of: launchAnchor.flying) { _, flying in
@@ -343,6 +404,22 @@ private struct AppShellView: View {
                 exitGeometry = ExitGeometry(id: exit.id, from: from)
             }
         }
+
+    /// SEC-08: desactiva el bloqueo a conciencia cuando el iPhone no tiene código ni Face ID.
+    /// Actualiza el ajuste y prepara `ShellState` para aplicarlo en el `unlockSucceeded` inmediato que lanza `LockView`.
+    private func disableLockConsciously() {
+        #if DEBUG
+        if DemoMode.isActive {
+            demoLockDisabled = true
+            let setting = Self.lockSetting(enabled: false, demoNoPasscodeDisabled: true)
+            shell.apply(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
+            return
+        }
+        #endif
+        lockEnabled = false
+        let setting = Self.lockSetting(enabled: false)
+        shell.apply(.lockSettingChanged(lockApplies: setting.applies, relocksOnBackground: setting.relocks))
+    }
 
     /// El bloqueo solo escribe `false` aquí (la autenticación ha salido bien), dentro de su animación de salida. Bloquear
     /// lo decide `ShellState` al ir a segundo plano. En esa misma transacción se da por terminado el arranque: su capa
@@ -388,7 +465,10 @@ private struct AppShellView: View {
     /// Lo avisa el bloqueo justo después de desbloquear: su fundido dura `seconds` (0 si se quitó de golpe). Cuando
     /// acaba, `ShellState` devuelve los toques a Inicio. El aviso de fin va SIEMPRE, se funda o no, para que Inicio no
     /// pueda quedarse sin toques.
-    private func lockFadeStarted(_ seconds: Double) {
+    private func lockFadeStarted(_ seconds: Double, keepsItsMark: Bool) {
+        // Una sola marca en cada fotograma, a todos los niveles: si el bloqueo se va con su marca dibujada, la ranura de
+        // Inicio no se dibuja mientras se funde (lo decide `ShellState.hidesBrandSlot`, en esta misma actualización).
+        shell.apply(.lockKeepsItsMark(keepsItsMark))
         #if DEBUG
         LaunchProbe.shared.lockFading = shell.lockFading
         // Para las pruebas: el bloqueo se funde dibujando su marca, nada la esconde en la ranura de Inicio (ni la marca

@@ -18,8 +18,7 @@ enum BackgroundRefresh {
     /// El Plan 4 añade aquí su tarea de precios.
     static func run() async {
         schedule()
-        // Segundo plano: nunca envía cabeceras PSU (cupo de 4 cada 24 h).
-        _ = await BankSync.shared.refresh(trigger: .background, isUnlocked: false)
+        _ = await BankSync.shared.refresh(trigger: .background)
         if !Task.isCancelled {
             await PortfolioModel.refreshPricesInBackground()
         }

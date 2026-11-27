@@ -17,8 +17,6 @@ public enum SyncPolicy {
     public static let perDay = 4
     public static let autoSpacing: TimeInterval = 10_800
     public static let manualSpacing: TimeInterval = 120
-    /// Separación mínima entre consultas por banco cuando el usuario está presente (con cabeceras PSU).
-    public static let userPresentSpacing: TimeInterval = 120
     /// Espera tras «demasiadas peticiones».
     public static let backoff: TimeInterval = 21_600
     public static let overlapDays = 7
@@ -28,8 +26,7 @@ public enum SyncPolicy {
     public static let pendingReachDays = 45
 
     public static func decide(
-        _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar, oldestPending: Date? = nil,
-        hasPSUHeaders: Bool = false
+        _ link: BankLinkInfo?, trigger: SyncTrigger, now: Date, calendar: Calendar, oldestPending: Date? = nil
     ) -> SyncDecision {
         guard let link else { return .skip(.notConnected) }
         if now >= link.consentValidUntil || link.problem == .consentExpired || link.problem == .keyRejected {
@@ -39,24 +36,17 @@ public enum SyncPolicy {
         if trigger == .afterConnect {
             return .fetch(dateFrom: dayStart(daysBefore: firstHistoryDays, of: now, calendar), strategy: .longest)
         }
-        let userPresent = hasPSUHeaders && (trigger == .appOpen || trigger == .manual)
-        if userPresent {
-            // Usuario presente con cabeceras PSU: sin cupo diario de 4/24 h, mínimo 120 s entre consultas por banco.
-            let lastTouch = [link.lastAttemptAt, link.lastSuccessAt].compactMap { $0 }.max()
-            if let lastTouch, now.timeIntervalSince(lastTouch) < userPresentSpacing { return .skip(.fresh) }
-        } else {
-            let recent = link.fetchLog.filter { now.timeIntervalSince($0) < 24 * 3600 }
-            if recent.count >= perDay, let oldest = recent.min() {
-                return .skip(.budgetUsed(nextAt: oldest.addingTimeInterval(24 * 3600)))
-            }
-            switch trigger {
-            case .appOpen, .background:
-                if let ok = link.lastSuccessAt, now.timeIntervalSince(ok) < autoSpacing { return .skip(.fresh) }
-            case .manual:
-                if let last = link.lastAttemptAt, now.timeIntervalSince(last) < manualSpacing { return .skip(.fresh) }
-            case .afterConnect:
-                break
-            }
+        let recent = link.fetchLog.filter { now.timeIntervalSince($0) < 24 * 3600 }
+        if recent.count >= perDay, let oldest = recent.min() {
+            return .skip(.budgetUsed(nextAt: oldest.addingTimeInterval(24 * 3600)))
+        }
+        switch trigger {
+        case .appOpen, .background:
+            if let ok = link.lastSuccessAt, now.timeIntervalSince(ok) < autoSpacing { return .skip(.fresh) }
+        case .manual:
+            if let last = link.lastAttemptAt, now.timeIntervalSince(last) < manualSpacing { return .skip(.fresh) }
+        case .afterConnect:
+            break
         }
         let base = link.lastSuccessAt.map { calendar.startOfDay(for: $0) }
             ?? dayStart(daysBefore: firstHistoryDays, of: now, calendar)
@@ -79,12 +69,9 @@ public enum SyncPolicy {
 }
 
 extension BankLinkInfo {
-    /// Anota el inicio de una consulta. Solo las consultas sin usuario presente (`countsTowardDailyBudget == true`)
-    /// consumen el cupo diario de 4 cada 24 h; `lastAttemptAt` se actualiza siempre (para la separación mínima).
-    public func recordingAttempt(at: Date, countsTowardDailyBudget: Bool = true) -> BankLinkInfo {
+    public func recordingAttempt(at: Date) -> BankLinkInfo {
         var copy = self
-        let pruned = fetchLog.filter { at.timeIntervalSince($0) < 24 * 3600 }
-        copy.fetchLog = countsTowardDailyBudget ? pruned + [at] : pruned
+        copy.fetchLog = (fetchLog + [at]).filter { at.timeIntervalSince($0) < 24 * 3600 }
         copy.lastAttemptAt = at
         return copy
     }
@@ -139,13 +126,11 @@ public struct BankFetchPlan: Equatable, Sendable {
 /// Bancos a consultar ahora, en orden estable (el de `BankID.allCases`). La app solo ejecuta esta lista.
 public func banksToFetch(
     links: [BankID: BankLinkInfo], trigger: SyncTrigger, now: Date, calendar: Calendar,
-    oldestPending: [BankID: Date] = [:],
-    hasPSUHeaders: [BankID: Bool] = [:]
+    oldestPending: [BankID: Date] = [:]
 ) -> [BankFetchPlan] {
     BankID.allCases.compactMap { bank in
         guard case let .fetch(dateFrom, strategy) = SyncPolicy.decide(
-            links[bank], trigger: trigger, now: now, calendar: calendar, oldestPending: oldestPending[bank],
-            hasPSUHeaders: hasPSUHeaders[bank] ?? false)
+            links[bank], trigger: trigger, now: now, calendar: calendar, oldestPending: oldestPending[bank])
         else { return nil }
         return BankFetchPlan(bank: bank, dateFrom: dateFrom, strategy: strategy)
     }

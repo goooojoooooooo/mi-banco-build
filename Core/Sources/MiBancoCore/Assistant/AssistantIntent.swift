@@ -86,7 +86,7 @@ private func compatNormalized(_ text: String) -> String {
     withoutFormatCharacters(text).decomposedStringWithCompatibilityMapping
 }
 
-private func foldedQuery(_ text: String) -> String {
+func foldedQuery(_ text: String) -> String {
     compatNormalized(text)
         .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
         .replacingOccurrences(of: "\u{00A0}", with: " ")
@@ -1058,7 +1058,7 @@ private let spanishMonthNames: [(name: String, month: Int)] = [
     ("noviembre", 11), ("diciembre", 12),
 ]
 
-private func extractMonth(tokens: [String], joined: String, rawFolded: String, now: Date, calendar: Calendar) -> AssistantMonth {
+func extractMonth(tokens: [String], joined: String, rawFolded: String, now: Date, calendar: Calendar) -> AssistantMonth {
     if joined.contains(" mes pasado ") || joined.contains(" mes anterior ") || joined.contains(" ultimo mes ") {
         return .previous
     }
@@ -1113,7 +1113,7 @@ private func hasUnsupportedPeriodCue(tokens: [String], joined: String) -> Bool {
     return tokens.contains("hoy") || tokens.contains("ayer") || tokens.contains("anteayer")
 }
 
-private func extractBank(tokens: [String], joined: String) -> BankID? {
+func extractBank(tokens: [String], joined: String) -> BankID? {
     if tokens.contains("revolut") { return .rev }
     if tokens.contains("imagin") || tokens.contains("caixabank") || tokens.contains("caixa") { return .ima }
     if joined.contains(" trade republic ") || tokens.contains("traderepublic") { return .tr }
@@ -1139,7 +1139,7 @@ private let categoryKeywordWords: Set<String> = Set(
     categoryMatchers.flatMap { $0.phrases.flatMap { $0.split(separator: " ").map(String.init) } }
 )
 
-private func extractCategory(joined: String) -> SpendingCategory? {
+func extractCategory(joined: String) -> SpendingCategory? {
     for entry in categoryMatchers {
         for phrase in entry.phrases where joined.contains(" " + phrase + " ") {
             return entry.category
@@ -1197,7 +1197,7 @@ private func foldedJoinedContains(_ joined: String, _ needle: String) -> Bool {
 private let nonMerchantTargets: Set<String> = [
     "total", "general", "mes", "meses", "este", "pasado", "anterior", "ultimo", "ultimos", "hoy", "ayer",
     "semana", "semanas", "dia", "dias", "ano", "anos", "va", "cuenta", "cuentas", "tarjeta", "tarjetas",
-    "banco", "bancos", "revolut", "imagin", "caixabank", "caixa", "trade", "republic", "traderepublic",
+    "banco", "bancos", "conectado", "conectada", "conectados", "conectadas", "revolut", "imagin", "caixabank", "caixa", "trade", "republic", "traderepublic",
     "inversiones", "inversion", "cartera", "bolsa", "acciones", "fondos", "cripto", "presupuesto", "presupuestos",
     "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "setiembre",
     "octubre", "noviembre", "diciembre",
@@ -1226,8 +1226,8 @@ private func originalWordMatching(_ target: String, in rawQuestion: String) -> S
 }
 
 /// Busca un comercio conocido del libro o uno nombrado explícitamente tras «en …» en una pregunta de gasto.
-private func extractMerchant(rawQuestion: String, joined: String, tokens: [String], state: LedgerState,
-                             category: SpendingCategory?, bank: BankID?) -> String? {
+func extractMerchant(rawQuestion: String, joined: String, tokens: [String], state: LedgerState,
+                     category: SpendingCategory?, bank: BankID?) -> String? {
     // 1. Coincidencia con un comercio ya existente en los pagos del libro (gana la más larga; U2: también «Dia» y por dominio).
     var seenKeys = Set<String>()
     var known: [(key: String, display: String)] = []

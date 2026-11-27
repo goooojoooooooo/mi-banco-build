@@ -11,13 +11,31 @@ struct OnboardingView: View {
     let onFinish: (_ openBanksSettings: Bool) -> Void
 
     @Environment(\.motion) private var motion
-    @Environment(\.presentationGate) private var gate
+    /// El bloqueo y el montaje por capas, tal como los da la carcasa (`RootView`), en vez de deducirlos de la puerta.
+    @Environment(\.shellReveal) private var shell
+    /// Costura de la carcasa (`AppShellView`): si la marca del primer arranque vuela hasta aquí, la propia espera
+    /// escondida por `.launchWelcomeMark()` y aparece en el mismo fotograma del aterrizaje (nunca dos marcas ni parpadeo).
+    @Environment(\.launchAnchor) private var launchAnchor
+    /// El bloqueo de ahora, copiado en estado: lo que lee la tarea tras sus esperas (un valor del entorno copiado en la
+    /// tarea no se actualizaría; el estado sí).
+    @State private var lockedNow = false
     /// Cuándo empieza la bienvenida (`welcomed`: cruzan las bandas y llegan las piezas) y cuándo se dibuja su marca
     /// (`markShown`), según lo que la tapa: el arranque o el bloqueo (Core, `WelcomeReveal`). Si se jugara al montarse,
     /// pasaría entera detrás del bloqueo o del arranque.
     @State private var reveal = WelcomeReveal()
+    /// La marca del primer arranque ya vuela hacia `.launchWelcomeMark()`: la marca propia queda lista a opacidad 1
+    /// (enmascarada por `LaunchWelcomeMark` hasta el aterrizaje exacto) para el relevo sin fundido ni hueco.
+    @State private var handedOffFromLaunch = false
     private var welcomed: Bool { reveal.welcomed }
     private var markShown: Bool { reveal.markShown }
+
+    private var usesWelcomeMarkHook: Bool {
+        #if DEBUG
+        return !DemoMode.skipsWelcomeMarkHook
+        #else
+        return true
+        #endif
+    }
 
     @State private var step: Int = {
         #if DEBUG
@@ -37,13 +55,23 @@ struct OnboardingView: View {
             VStack(spacing: 0) {
                 topBar
 
-                // La marca propia no se dibuja mientras la del arranque (o la del bloqueo) sigue en pantalla volando:
-                // nunca dos marcas a la vez (ojo de diseño 18.1). Aparece con un fundido corto cuando la otra se ha ido.
-                AppMark(size: 58, drawn: drawn)
-                    .opacity(markShown ? 1 : 0)
-                    .animation(motion.reduce ? motion.fade : .easeOut(duration: motion.seconds(0.12)), value: markShown)
-                    .padding(.top, 12)
-                    .padding(.bottom, 16)
+                // Con piezas, `.launchWelcomeMark()` apunta este marco para que la marca del primer arranque aterrice
+                // encima (sin «ONYX») y enmascara esta marca hasta el fotograma exacto del relevo (una sola marca en
+                // cada fotograma, sin parpadeo). Con solo fundido o tras el bloqueo, sigue mandando `WelcomeReveal`.
+                let markVisible = markShown || handedOffFromLaunch
+                Group {
+                    if usesWelcomeMarkHook {
+                        AppMark(size: 58, drawn: drawn)
+                            .launchWelcomeMark()
+                    } else {
+                        AppMark(size: 58, drawn: drawn)
+                    }
+                }
+                .opacity(markVisible ? 1 : 0)
+                .animation(handedOffFromLaunch ? nil : (motion.reduce ? motion.fade : .easeOut(duration: motion.seconds(0.12))),
+                           value: markVisible)
+                .padding(.top, 12)
+                .padding(.bottom, 16)
 
                 ZStack {
                     if step == 1 {
@@ -86,25 +114,34 @@ struct OnboardingView: View {
             // ha terminado. Con el bloqueo delante, todo empieza al abrirse (ver `onChange`).
             let launch = LaunchTimeline(motion)
             let stretch = max(motion.timeMultiplier, 0.01)
-            try? await Task.sleep(for: .seconds(max(0.05, launch.assembleAt * stretch)))
-            reveal.handle(.launchRevealsBelow(locked: gate?.isLocked == true))
+            #if DEBUG
+            let hold = DemoMode.launchHoldSeconds
+            #else
+            let hold = 0.0
+            #endif
+            try? await Task.sleep(for: .seconds(hold + max(0.05, launch.assembleAt * stretch)))
+            reveal.handle(.launchRevealsBelow(locked: lockedNow))
             try? await Task.sleep(for: .seconds(max(0, launch.duration - launch.assembleAt) * stretch))
-            reveal.handle(.launchFinished(locked: gate?.isLocked == true))
-            guard !markShown else { return }
-            // Respaldo (menor m-13 del lote 2): si el aviso del bloqueo no llegara, se mira cada medio segundo (como
-            // mucho 10 min) el bloqueo DE VERDAD (la puerta es un objeto vivo; un `scenePhase` copiado en esta tarea no
-            // lo sería). Nunca se queda sin jugar ni con la marca escondida.
-            for _ in 0..<1_200 {
-                try? await Task.sleep(for: .seconds(0.5))
-                if Task.isCancelled || markShown { return }
-                if gate?.isLocked != true {
-                    unlocked()
-                    return
-                }
+            reveal.handle(.launchFinished(locked: lockedNow))
+            // Con el bloqueo delante, lo que sigue lo hace su apertura (`onChange` de `shell.locked`, que da la carcasa:
+            // ya no hace falta mirar la puerta cada medio segundo).
+        }
+        .onChange(of: shell.token) { _, token in
+            // Sincroniza el inicio de bandas y piezas con el instante exacto en que `LaunchSequence` llama a `onAssemble`
+            // (también tras un toque que salta el arranque o con `-MiBancoDemoLaunchHold`).
+            guard token > 0, !welcomed else { return }
+            reveal.handle(.launchRevealsBelow(locked: lockedNow))
+        }
+        .onChange(of: launchAnchor?.flyingToWelcome, initial: true) { _, flying in
+            if flying == true {
+                var still = Transaction()
+                still.disablesAnimations = true
+                withTransaction(still) { handedOffFromLaunch = true }
             }
         }
-        .onChange(of: gate?.isLocked) { old, locked in
-            guard old == true, locked != true else { return }
+        .onChange(of: shell.locked, initial: true) { old, locked in
+            lockedNow = locked
+            guard old, !locked else { return }
             unlocked()
         }
     }

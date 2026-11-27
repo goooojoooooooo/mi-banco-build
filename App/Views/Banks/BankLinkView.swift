@@ -171,6 +171,9 @@ struct BankLinkView: View {
             guard !motion.reduce else { return }
             try? await Task.sleep(for: .seconds(motion.seconds(1.0)))
             guard run == finishRun, progress.showsSuccess else { return }
+            // EXCEPCIÓN DECLARADA a «solo transformación, opacidad y color»: soltar el hueco anima el alto de la cabecera
+            // (maquetación). Es un único muelle de la hoja, acotado a este momento, sin bucle y nunca con Reducir
+            // movimiento (aceptado en la re-revisión del lote 3).
             withAnimation(motion.animation(.sheet)) { reservedHeight = 0 }
         }
     }
@@ -220,10 +223,21 @@ struct BankLinkView: View {
     }
 
     private func dismissSuccess() {
-        finishRun += 1
-        clearing = false
-        reservedHeight = 0
-        progress.dismissSuccess()
+        let close = {
+            finishRun += 1
+            clearing = false
+            reservedHeight = 0
+            progress.dismissSuccess()
+        }
+        // Con Reducir movimiento cerrar «conectado» no tiene recorrido: el cambio de alto (y lo que entra) es en el acto,
+        // sin la animación de la cabecera (lote de cierre, re-revisión del lote 3).
+        if motion.reduce {
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still, close)
+        } else {
+            close()
+        }
     }
 
     #if DEBUG
@@ -326,6 +340,16 @@ struct BankLinkView: View {
             }
         }
         .onChange(of: stage) { _, new in stageChanged(to: new) }
+        #if DEBUG
+        // `-MiBancoDemoConnectedDoneAfter <s>`: «conectado» se cierra solo, como con «Listo» (para grabar desde antes).
+        .onChange(of: progress.showsSuccess) { _, shown in
+            guard shown, let seconds = DemoMode.connectedDoneAfterSeconds else { return }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                if progress.showsSuccess { dismissSuccess() }
+            }
+        }
+        #endif
         .sensoryFeedback(Haptics.error, trigger: errorTick)
         .onAppear {
             #if DEBUG
@@ -338,11 +362,13 @@ struct BankLinkView: View {
                 importPreview = try? model.previewImport(DemoMode.sampleRevolutStatementData(), bank: .rev)
             }
             #endif
-            // Solo espera a la tarjeta si de verdad se pidió un vuelo hacia ESTE banco y aún no ha aterrizado. El plazo
-            // (0,9 s del kit) garantiza que la cabecera nunca se queda escondida si el vuelo no llega.
+            // Solo espera a la tarjeta si de verdad se pidió un vuelo hacia ESTE banco y aún no ha aterrizado. La
+            // cabecera entra cuando la tarjeta aterriza (`CardFlight.landed`, lo pone `CardFlightLayer`); el plazo es
+            // solo un respaldo para que nunca se quede escondida si el vuelo no llega (línea C, C8: era 0,9 s y
+            // ganaba al aterrizaje; ahora 2 s, más que todo el vuelo).
             if let request = flight?.request, request.bank == bank, flight?.landed != true, !flightTimedOut {
                 awaitsFlight = true
-                let deadline = motion.seconds(0.9)
+                let deadline = motion.seconds(2.0)
                 Task {
                     try? await Task.sleep(for: .seconds(deadline))
                     withAnimation(motion.fade) { flightTimedOut = true }
@@ -820,6 +846,10 @@ struct BankLinkView: View {
                 guard (gate?.generation ?? 0) == generation else { return }
                 importError = error.message
                 errorTick += 1
+            } catch let error as CSVLimitError {
+                guard (gate?.generation ?? 0) == generation else { return }
+                importError = csvLimitErrorMessage(error)
+                errorTick += 1
             } catch let error as StatementError {
                 guard (gate?.generation ?? 0) == generation else { return }
                 importError = Self.errorMessage(for: error, bank: targetBank)
@@ -849,13 +879,16 @@ struct BankLinkView: View {
     nonisolated private static func readStatementData(from url: URL) throws -> Data {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
-            throw StatementFileError.unreadable
-        }
-        guard size <= maxStatementBytes else {
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxStatementBytes {
             throw StatementFileError.tooLarge
         }
-        guard let data = try? Data(contentsOf: url) else { throw StatementFileError.unreadable }
+        // SEC-11: con o sin tamaño conocido se lee con tope (`maxStatementBytes + 1`), nunca el fichero entero.
+        let data: Data
+        do {
+            data = try readFileCapped(url, limit: maxStatementBytes)
+        } catch {
+            throw StatementFileError.unreadable
+        }
         guard data.count <= maxStatementBytes else { throw StatementFileError.tooLarge }
         return data
     }

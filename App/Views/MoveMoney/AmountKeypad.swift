@@ -163,8 +163,14 @@ struct KeypadAmountDisplay: View {
     private var glyphs: [Glyph] {
         // Con el ojo cerrado, siempre «••• €»: ni cuántas cifras lleva ni dónde va el punto de millar (eso ya dice el
         // tamaño del importe). Que se teclea se ve por el latido de cada tecla (`KeyBeat`).
+        // Sin nada tecleado, la misma máscara atenuada (como el «0 €» vacío): se distingue «vacío» de «tecleado».
         if hidden {
-            return (0..<3).map { Glyph(id: "h\($0)", text: "•", kind: .digit) } + [Glyph(id: "e", text: "€", kind: .euro)]
+            var empty = amount.eurosText.isEmpty && !amount.hasDecimal
+            #if DEBUG
+            if DemoMode.oldKeypadMask { empty = false }
+            #endif
+            let kind: Kind = empty ? .placeholder : .digit
+            return (0..<3).map { Glyph(id: "h\($0)", text: "•", kind: kind) } + [Glyph(id: "e", text: "€", kind: .euro)]
         }
         var out: [Glyph] = []
         let empty = amount.eurosText.isEmpty
@@ -189,6 +195,11 @@ struct KeypadAmountDisplay: View {
 
     private var drawnText: String { glyphs.map(\.text).joined() }
 
+    #if DEBUG
+    /// Se está dibujando la máscara atenuada de «nada tecleado» (solo para las pruebas).
+    private var isEmptyMask: Bool { glyphs.contains { $0.kind == .placeholder } && hidden }
+    #endif
+
     var body: some View {
         let spoken = hidden ? "importe oculto" : amount.typedText
         // Si el importe no cabe a su tamaño (texto muy grande), se dibuja más pequeño: nunca se corta.
@@ -206,7 +217,7 @@ struct KeypadAmountDisplay: View {
                 #if DEBUG
                 // Solo las pruebas (`-MiBancoDemoDrawnText`): lo que se ha DIBUJADO, para comprobar que con el ojo
                 // cerrado no cambia con el número de cifras.
-                .accessibilityValue(DemoMode.auditsDrawnText ? drawnText : "")
+                .accessibilityValue(DemoMode.auditsDrawnText ? drawnText + (isEmptyMask ? " (vacío)" : "") : "")
                 #endif
         }
         #if DEBUG

@@ -39,6 +39,7 @@ private struct PulseRing: ViewModifier {
                             CubicKeyframe(1, duration: half)
                             CubicKeyframe(0.5, duration: half)
                             CubicKeyframe(1, duration: half)
+                            CubicKeyframe(1, duration: half)
                         }
                         KeyframeTrack(\.scale) {
                             CubicKeyframe(1, duration: half)
@@ -46,6 +47,7 @@ private struct PulseRing: ViewModifier {
                             CubicKeyframe(1, duration: half)
                             CubicKeyframe(1.04, duration: half)
                             CubicKeyframe(1, duration: half)
+                            CubicKeyframe(1.04, duration: half)
                             CubicKeyframe(1, duration: half)
                         }
                     }

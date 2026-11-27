@@ -63,5 +63,50 @@ extension DemoMode {
     /// `-MiBancoDemoImportSlow`: los pasos de «Importar extracto» duran 8 s cada uno (en vez de 0,35 s), para poder
     /// verlos desde una prueba de toque (que tarda unos segundos en empezar a mirar).
     static var slowsImportSteps: Bool { isActive && arguments.contains("-MiBancoDemoImportSlow") }
+
+    /// `-MiBancoDemoRegressMaskedField`: SOLO para demostrar que la prueba de privacidad falla con el defecto de antes: el
+    /// campo de importe enmascarado vuelve a llevar la cifra real dentro, pintada en transparente.
+    static var regressesMaskedField: Bool { isActive && arguments.contains("-MiBancoDemoRegressMaskedField") }
+
+    /// `-MiBancoDemoSettingsCloseEyeAfter <s>` (o `-MiBancoDemoCloseEyeAfter <s>`): Ajustes cierra el ojo solo (como el
+    /// interruptor) a los segundos dados (reales) desde que aparece «Modo privado». Usar el nombre propio evita chocar
+    /// con `-MiBancoDemoCloseEyeAfter` de `RootView`, que cuenta desde el arranque.
+    static var closesEyeAfterSeconds: Double? {
+        guard isActive,
+              let raw = value(after: "-MiBancoDemoSettingsCloseEyeAfter") ?? value(after: "-MiBancoDemoCloseEyeAfter"),
+              let seconds = Double(raw), seconds.isFinite, seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
+
+    /// `-MiBancoDemoFocusBalanceAfter <s>`: Ajustes enfoca el saldo de Trade Republic solo, a los segundos dados (reales),
+    /// como si se tocara. Para grabar desde ANTES del toque lo que enseña el campo al editarlo con el ojo cerrado.
+    static var focusesBalanceAfterSeconds: Double? {
+        guard isActive, let raw = value(after: "-MiBancoDemoFocusBalanceAfter"), let seconds = Double(raw),
+              seconds.isFinite, seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
+
+    /// `-MiBancoDemoConnectedDoneAfter <s>`: en la pantalla de un banco, «banco conectado» se cierra solo (como «Listo»)
+    /// a los segundos dados (reales) desde que aparece. Para grabar desde ANTES del cierre.
+    static var connectedDoneAfterSeconds: Double? {
+        guard isActive, let raw = value(after: "-MiBancoDemoConnectedDoneAfter"), let seconds = Double(raw),
+              seconds.isFinite, seconds > 0 else { return nil }
+        return min(seconds, 120)
+    }
+
+    /// `-MiBancoDemoNoWelcomeMark`: quita el gancho `.launchWelcomeMark()` en la bienvenida para ver en rojo la prueba
+    /// del aterrizaje de la marca del primer arranque.
+    static var skipsWelcomeMarkHook: Bool { isActive && arguments.contains("-MiBancoDemoNoWelcomeMark") }
+
+    /// `-MiBancoDemoOldSubscriptionRoll`: deja los totales de Suscripciones con `length: nil` (`.brief`) en vez de
+    /// `.seconds(0.45)`, para ver en rojo la prueba de 16.2.
+    static var oldSubscriptionRoll: Bool { isActive && arguments.contains("-MiBancoDemoOldSubscriptionRoll") }
+
+    /// `-MiBancoDemoRollTiming`: expone la duración real (ms) calculada por `RollingDigits.roll` en Suscripciones.
+    static var exposesRollTiming: Bool { isActive && arguments.contains("-MiBancoDemoRollTiming") }
+
+    /// `-MiBancoDemoKeepFocusOnEyeClose`: no suelta el foco al cerrar el ojo en Ajustes, para ver en rojo la
+    /// comprobación del teclado de N-1.
+    static var keepsFocusOnEyeClose: Bool { isActive && arguments.contains("-MiBancoDemoKeepFocusOnEyeClose") }
 }
 #endif

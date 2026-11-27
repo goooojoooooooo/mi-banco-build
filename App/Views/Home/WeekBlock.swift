@@ -11,19 +11,33 @@ struct WeekBlock: View {
 
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.entrance) private var entrance
+    @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .caption) private var barArea: CGFloat = 40
 
-    /// Cuenta desde 0 solo dentro del montaje de Inicio; en un cambio de tarjeta (o fuera de una entrada) sale con su cifra.
-    private var countsOnAssembly: Bool { entrance.active && entrance.scope == .assembly }
+    /// Cuenta desde 0 solo dentro del montaje de Inicio y con el ojo abierto; en un cambio de tarjeta, fuera de una
+    /// entrada o con el ojo cerrado sale con su cifra (la máscara). Así, si el ojo se abre a mitad del montaje, la cifra
+    /// aparece en el acto (barajado → cifra) y no se queda invisible esperando a una cuenta que no empezó.
+    private var countsOnAssembly: Bool {
+        var eyeOpen = !preferences.privateMode
+        #if DEBUG
+        if DemoMode.oldWeekCount { eyeOpen = true }
+        #endif
+        return entrance.active && entrance.scope == .assembly && eyeOpen
+    }
 
     var body: some View {
         let hidden = preferences.privateMode
+        let stacked = typeSize.isAccessibilitySize
+        let headerLayout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: Theme.Space.row))
+            : AnyLayout(HStackLayout(alignment: .bottom, spacing: Theme.Space.row))
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .bottom, spacing: Theme.Space.row) {
+            headerLayout {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(card.bank.map { "Gastado en 7 días · \($0.shortName)" } ?? "Gastado en 7 días")
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
+                        .fixedSize(horizontal: false, vertical: true)
                     // Un importe por tarjeta (`.id(card)`): al cambiar de tarjeta se monta de nuevo y sale ya con el suyo,
                     // con la lista (nunca enseña un instante la cifra de la otra tarjeta, ni rueda de una a otra, ni un
                     // «0,00 €»). Al montarse Inicio (arranque o desbloqueo) cuenta desde 0 como las cifras de la tarjeta
@@ -32,11 +46,17 @@ struct WeekBlock: View {
                     RollingAmount(cents: week.totalCents, countsUp: countsOnAssembly)
                         .titan(.week)
                         .id(card)
+                        #if DEBUG
+                        // Sonda: un importe que espera a contar con el ojo cerrado se quedaría invisible al abrirlo.
+                        .onChange(of: countsOnAssembly && preferences.privateMode, initial: true) { _, waitsHidden in
+                            if waitsHidden { HomeProbe.shared.weekCountsWhileHidden += 1 }
+                        }
+                        #endif
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("Gastado en 7 días: \(spokenAmount(week.totalCents, hidden: hidden)). \(hidden ? "" : week.summary)")
-                Spacer(minLength: 0)
-                WeekBars(week: week, barArea: barArea)
+                if !stacked { Spacer(minLength: 0) }
+                WeekBars(week: week, barArea: barArea, stacked: stacked)
                     .accessibilityHidden(true)
             }
             Rectangle()
@@ -102,13 +122,66 @@ private struct PaceLineSwap: View {
 }
 
 /// "Este mes 412,30 €, 85,70 € menos que en octubre": la diferencia en blanco. Con el ojo cerrado los dos importes son
-/// su máscara («•••,•• €»): la cifra no se monta bajo un desenfoque.
+/// su máscara («•••,•• €»): la cifra no se monta bajo un desenfoque. Va en un solo `Text` fluido para que, con texto
+/// grande, salte por palabras completas sin partir ningún importe en columnas estrechas («287,5 / 2 €»).
 private struct PaceSentence: View {
     let pace: PaceLine
     @Environment(AppPreferences.self) private var preferences
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var usesLegacyColumns: Bool {
+        #if DEBUG
+        return DemoMode.oldHomeAX
+        #else
+        return false
+        #endif
+    }
 
     var body: some View {
         let hidden = preferences.privateMode
+        let stacked = typeSize.isAccessibilitySize
+        let monthText = hidden ? maskedEUR(pace.thisMonthCents, sign: false) : formatEUR(pace.thisMonthCents)
+        let diffText = pace.differenceCents.map { diff in
+            hidden ? maskedEUR(abs(diff), sign: false) : formatEUR(abs(diff))
+        }
+        Group {
+            if usesLegacyColumns {
+                legacyColumns
+            } else {
+                flowingText(monthText: monthText, diffText: diffText)
+                    .contentTransition(.identity)
+                    .privacySensitive()
+                    .lineLimit(stacked ? nil : 2)
+                    .minimumScaleFactor(stacked ? 1 : 0.85)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .auditDrawnAmount(monthText, hidden: hidden)
+                    .auditDrawnAmount(diffText, hidden: hidden)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken(hidden: hidden))
+        .accessibilityIdentifier("home-pace-sentence")
+        #if DEBUG
+        .onAppear { HomeProbe.shared.paceSingleBlock = !usesLegacyColumns }
+        #endif
+    }
+
+    private func flowingText(monthText: String, diffText: String?) -> Text {
+        if let diff = pace.differenceCents {
+            if diff == 0 {
+                return Text("Este mes \(Text(verbatim: monthText)), igual que en \(pace.previousMonthName)")
+            }
+            let shownDiff = diffText ?? ""
+            let tail = diff < 0 ? " menos que en \(pace.previousMonthName)" : " más que en \(pace.previousMonthName)"
+            return Text("Este mes \(Text(verbatim: monthText)), \(Text(verbatim: shownDiff).foregroundStyle(Theme.label))\(tail)")
+        }
+        return Text("Este mes \(Text(verbatim: monthText))")
+    }
+
+    /// Solo para `-MiBancoDemoOldHomeAX` (DEBUG): el `HStack` de antes que partía los importes en columnas estrechas.
+    @ViewBuilder
+    private var legacyColumns: some View {
         HStack(spacing: 0) {
             Text("Este mes ")
             MaskedAmountText(formatEUR(pace.thisMonthCents), masked: maskedEUR(pace.thisMonthCents, sign: false))
@@ -125,8 +198,6 @@ private struct PaceSentence: View {
         }
         .lineLimit(2)
         .minimumScaleFactor(0.85)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(spoken(hidden: hidden))
     }
 
     private func spoken(hidden: Bool) -> String {
@@ -143,41 +214,78 @@ private struct PaceSentence: View {
 private struct WeekBars: View {
     let week: WeekSpend
     let barArea: CGFloat
+    var stacked = false
     @Environment(\.motion) private var motion
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 9) {
-            ForEach(week.days) { day in
-                let isToday = day.id == 6
-                VStack(spacing: 6) {
-                    ZStack(alignment: .bottom) {
-                        Color.clear.frame(width: 14, height: barArea)
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(isToday ? Theme.label : Theme.barIdle)
-                            .frame(width: 10, height: height(day))
-                            .overlay(alignment: .top) {
-                                if day.id == week.peakID {
-                                    MaskedAmountText(roundedEUR(day.cents), masked: "•••")
-                                        .titan(.captionStrong)
-                                        .foregroundStyle(Theme.label2)
-                                        .fixedSize()
-                                        .offset(y: -18)
-                                }
+        if stacked {
+            HStack(alignment: .bottom, spacing: 6) {
+                ForEach(week.days) { day in
+                    let isToday = day.id == 6
+                    VStack(spacing: 6) {
+                        Group {
+                            if day.id == week.peakID {
+                                MaskedAmountText(roundedEUR(day.cents), masked: "•••")
+                                    .titan(.captionStrong)
+                                    .foregroundStyle(Theme.label2)
+                                    .lineLimit(1)
+                                    .fixedSize()
+                            } else {
+                                Text(" ")
+                                    .titan(.captionStrong)
+                                    .hidden()
                             }
+                        }
+                        ZStack(alignment: .bottom) {
+                            Color.clear.frame(height: min(barArea, 64))
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(isToday ? Theme.label : Theme.barIdle)
+                                .frame(width: 12, height: height(day, maxArea: min(barArea, 64)))
+                        }
+                        Text(day.initial)
+                            .titan(.captionStrong)
+                            .foregroundStyle(isToday ? Theme.label : Theme.label3)
+                            .lineLimit(1)
                     }
-                    Text(day.initial)
-                        .titan(.captionStrong)
-                        .foregroundStyle(isToday ? Theme.label : Theme.label3)
+                    .frame(maxWidth: .infinity)
                 }
             }
+            .dynamicTypeSize(...DynamicTypeSize.accessibility1)
+            .animation(motion.calmAnimation(.row), value: week)
+        } else {
+            HStack(alignment: .bottom, spacing: 9) {
+                ForEach(week.days) { day in
+                    let isToday = day.id == 6
+                    VStack(spacing: 6) {
+                        ZStack(alignment: .bottom) {
+                            Color.clear.frame(width: 14, height: barArea)
+                            RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                .fill(isToday ? Theme.label : Theme.barIdle)
+                                .frame(width: 10, height: height(day, maxArea: barArea))
+                                .overlay(alignment: .top) {
+                                    if day.id == week.peakID {
+                                        MaskedAmountText(roundedEUR(day.cents), masked: "•••")
+                                            .titan(.captionStrong)
+                                            .foregroundStyle(Theme.label2)
+                                            .fixedSize()
+                                            .offset(y: -18)
+                                    }
+                                }
+                        }
+                        Text(day.initial)
+                            .titan(.captionStrong)
+                            .foregroundStyle(isToday ? Theme.label : Theme.label3)
+                    }
+                }
+            }
+            // Las barras cambian de alto con el muelle de fila, sin rebote (con Reducir movimiento, un fundido).
+            .animation(motion.calmAnimation(.row), value: week)
         }
-        // Las barras cambian de alto con el muelle de fila, sin rebote (con Reducir movimiento, un fundido).
-        .animation(motion.calmAnimation(.row), value: week)
     }
 
-    private func height(_ day: WeekSpend.Day) -> CGFloat {
+    private func height(_ day: WeekSpend.Day, maxArea: CGFloat) -> CGFloat {
         guard week.maxCents > 0 else { return 3 }
-        return max(3, barArea * CGFloat(day.cents) / CGFloat(week.maxCents))
+        return max(3, maxArea * CGFloat(day.cents) / CGFloat(week.maxCents))
     }
 
     /// "73 €" (redondeado a partir de 10 €), "4,50 €" por debajo.

@@ -55,6 +55,13 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     /// Día en que el banco APUNTÓ el registro enlazado (`booking_date`, a mediodía de Madrid), si lo dio. `date` es el día
     /// del pago, que puede ser anterior: un cierre contabilizado de D mira este día (R54). nil = no se sabe.
     public var bookedDay: Date?
+    /// true = alguna fuente sabe que es un pago A UNA PERSONA (aviso de Bizum o de envío, código de comercio de
+    /// transferencia del banco, «Transfer»/«To X» del extracto de Revolut). nil = sin señal (los libros de antes no lo
+    /// traen). Al enlazar fuentes, un true no se pierde. Ver `isPersonPayment`.
+    public var personPayment: Bool?
+    /// Código de categoría de comercio ISO 18245 (4 dígitos) que da el banco o el extracto (p. ej. «5812» restaurante,
+    /// «5945» juguetería/videojuegos). nil = no llegó (los libros de antes no lo traen y no se escribe si es nil).
+    public var merchantCategoryCode: String?
 
     /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
     public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
@@ -69,7 +76,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
                 importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
                 excludedFromSpending: Bool = false, linkedAt: Date? = nil, firstSeenStatus: BankStatus? = nil,
-                bookedDay: Date? = nil) {
+                bookedDay: Date? = nil, personPayment: Bool? = nil, merchantCategoryCode: String? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -95,13 +102,15 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.linkedAt = linkedAt
         self.firstSeenStatus = firstSeenStatus
         self.bookedDay = bookedDay
+        self.personPayment = personPayment
+        self.merchantCategoryCode = merchantCategoryCode
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
         case note, flaggedNotMine, category, ownTransfer
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
-        case firstSeenStatus, bookedDay
+        case firstSeenStatus, bookedDay, personPayment, merchantCategoryCode
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -132,6 +141,8 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         linkedAt = try c.decodeIfPresent(Date.self, forKey: .linkedAt)
         firstSeenStatus = try c.decodeIfPresent(BankStatus.self, forKey: .firstSeenStatus)
         bookedDay = try c.decodeIfPresent(Date.self, forKey: .bookedDay)
+        personPayment = try c.decodeIfPresent(Bool.self, forKey: .personPayment)
+        merchantCategoryCode = try c.decodeIfPresent(String.self, forKey: .merchantCategoryCode)
     }
 }
 
@@ -515,7 +526,8 @@ public struct Ledger: Sendable {
                     amountCents: m.amountCents,
                     merchant: sanitizeMerchant(m.merchant),
                     reportedBalanceCents: m.reportedBalanceCents,
-                    merchantIsShop: m.merchantIsShop
+                    merchantIsShop: m.merchantIsShop,
+                    personPayment: m.personPayment
                 )
             }
         case let .wallet(b, amount, merchant):
@@ -583,12 +595,14 @@ public struct Ledger: Sendable {
             setMerchantKeepingCategory(richerMerchant(captured: parsed.merchant, bank: bankName), at: i)
             state.movements[i].bankMerchant = bankName
             state.movements[i].isShop = state.movements[i].isShop || parsed.merchantIsShop
+            if parsed.personPayment { state.movements[i].personPayment = true }
             return .merged(state.movements[i])
         }
 
         // date == now y balance solo suma date > setAt: no se cuenta dos veces.
         let movement = Movement(bank: bank, amountCents: signed, merchant: parsed.merchant, kind: parsed.kind, source: source,
-                                date: now, fingerprint: fingerprint, isShop: parsed.merchantIsShop)
+                                date: now, fingerprint: fingerprint, isShop: parsed.merchantIsShop,
+                                personPayment: parsed.personPayment ? true : nil)
         state.movements.append(movement)
         return .stored(movement)
     }

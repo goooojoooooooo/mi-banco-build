@@ -49,6 +49,10 @@ struct CardFlightLayer: View {
             guard let request, current == nil else { return }
             start(request)
         }
+        // Ronda 1 (m-7): si la capa se monta con una petición ya puesta (`onChange` no salta), también la atiende.
+        .onAppear {
+            if let request = flight.request, current == nil { start(request) }
+        }
         .onChange(of: blocked) { _, now in if now { cancel() } }
         .task(id: run) { await fly() }
     }
@@ -89,12 +93,16 @@ struct CardFlightLayer: View {
             try? await Task.sleep(for: .milliseconds(16))
             if Task.isCancelled { return }
         }
-        guard let destination = flight.destination else {
+        var destination = flight.destination
+        #if DEBUG
+        if DemoMode.flightIgnoresDestination { destination = nil }
+        #endif
+        guard let destination else {
             // Sin cabecera a la que ir: la copia se funde donde está y la cabecera (si llega) aparece igual.
             target = current?.source
             withAnimation(motion.fade) { fading = true }
             try? await Task.sleep(for: .seconds(motion.fadeDuration))
-            land()
+            land(onHeader: false)
             return
         }
         target = destination
@@ -104,16 +112,22 @@ struct CardFlightLayer: View {
         // llegar al instante con la app cargada).
         try? await Task.sleep(for: .seconds(spec.response))
         guard !Task.isCancelled else { return }
-        land()
+        land(onHeader: true)
     }
 
-    private func land() {
+    /// `onHeader`: la copia voló hasta el sitio de la cabecera; si no, se fundió donde estaba (respaldo sin destino).
+    private func land(onHeader: Bool) {
         flight.landed = true
         flight.request = nil
         current = nil
         target = nil
         #if DEBUG
-        LaunchProbe.shared.cardLandings += 1
+        // Ronda 1 (I-4): aparte, los aterrizajes en la cabecera y los fundidos sin destino.
+        if onHeader {
+            LaunchProbe.shared.cardLandings += 1
+        } else {
+            LaunchProbe.shared.cardFadesWithoutDestination += 1
+        }
         #endif
     }
 

@@ -843,10 +843,11 @@ final class MotionHomeTests: XCTestCase {
         tapFanCard("rev")
         XCTAssertTrue(app.navigationBars["Revolut"].waitForExistence(timeout: 10) || app.staticTexts["Revolut"].exists,
                       "Tocar la tarjeta de Revolut no abrió su pantalla")
-        // Línea C (C8 / 9.5, cambio mínimo): el banco se abre ENCIMA de Inicio, con «Inicio» para volver; Inicio sigue
-        // debajo, así que lo que se comprueba es que la pantalla del banco está delante.
+        XCTAssertFalse(app.staticTexts["Tu dinero"].exists, "Sigue en Inicio tras tocar la tarjeta de Revolut")
+        // Línea C (C8 / 9.5, cambio mínimo): el banco se abre ENCIMA de Inicio, con «Inicio» para volver (Inicio, debajo,
+        // queda fuera del árbol de accesibilidad: la aserción de arriba sigue valiendo).
         XCTAssertTrue(app.buttons["bank-over-home-back"].waitForExistence(timeout: 5),
-                      "Sigue en Inicio tras tocar la tarjeta de Revolut")
+                      "La pantalla del banco no está encima de Inicio con «Inicio» para volver")
         // La sonda de Inicio se lee volviendo a su pestaña: la tarjeta elegida, su vuelo apuntado y el abanico quitado.
         backToHomeTab()
         XCTAssertTrue(waitUntil(6) { self.homeProbe()["elegida"] == "rev" }, "Tocar la tarjeta de Revolut no la eligió: \(homeProbe())")

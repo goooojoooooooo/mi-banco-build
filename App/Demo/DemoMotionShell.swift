@@ -69,6 +69,18 @@ extension DemoMode {
 
     /// `-MiBancoDemoTabSwitch <s>`: a los `s` segundos reales de arrancar, la app cambia sola de Inicio a Gasto (para
     /// grabar la entrada de la pestaña desde ANTES del cambio: un toque de la prueba espera a que la app quede quieta).
+    /// `-MiBancoDemoFlightNoDestination` (lote final p2, ronda 1, I-4): el vuelo de la tarjeta no espera a la cabecera
+    /// (hace como si no apuntara su sitio) y la copia se funde donde está. Solo para ver en rojo la prueba del vuelo.
+    static var flightIgnoresDestination: Bool { isActive && arguments.contains("-MiBancoDemoFlightNoDestination") }
+
+    /// `-MiBancoDemoBankStaysOverTabs` (ronda 1, I-1): vuelve el defecto de antes, el banco encima de Inicio no se
+    /// cierra al cambiar de pestaña. Solo para ver en rojo su prueba.
+    static var bankStaysOverTabs: Bool { isActive && arguments.contains("-MiBancoDemoBankStaysOverTabs") }
+
+    /// `-MiBancoDemoHomeReadableUnderBank` (ronda 1, I-6): vuelve el defecto de antes, Inicio sigue en el árbol de
+    /// accesibilidad con el banco encima. Solo para ver en rojo su prueba.
+    static var homeReadableUnderBank: Bool { isActive && arguments.contains("-MiBancoDemoHomeReadableUnderBank") }
+
     static var tabSwitchSeconds: Double? {
         guard isActive, let seconds = value(after: "-MiBancoDemoTabSwitch").flatMap(Double.init), seconds.isFinite,
               seconds > 0 else { return nil }
@@ -159,6 +171,12 @@ extension DemoMode {
     var tabBarUncoveredAt: Double?
     /// C8: cuántas tarjetas han aterrizado en la cabecera de su banco.
     var cardLandings = 0
+    /// Lote final p2, ronda 1 (I-4): cuántas copias se fundieron donde estaban porque la cabecera no apuntó su sitio.
+    var cardFadesWithoutDestination = 0
+    /// Lote final p2, ronda 1 (m-3): cuántas veces la demo quitó las pestañas con la barra tapada por el velo.
+    var tabsRemovedWhileCovered = 0
+    /// Lote final p2, ronda 1 (m-4): la pestaña marcada ahora («home», «spending», «alerts», «settings»).
+    var currentTab = "home"
     /// Ronda 1: «No es mío» desde el aviso que no se ha podido guardar (M-2) y cuándo se han ido los textos del bloqueo
     /// y empezó su fundido (I-1).
     var notMineFailures = 0
@@ -205,7 +223,8 @@ extension DemoMode {
             "fondos=\(backgrounds)", "escena=\(scene)", "vozBloqueo=\(lockVoiceOver)",
             "ranuraBloqueo=\(slotHiddenByLock ? 1 : 0)",
             "ojoCompartido=\(sharedEye)", "estadoViejo=\(Self.legacyActivityStateDecodes)", "lineaLeida=\(spokenLine)", "lineaDibujada=\(drawnLine)", "accionesAviso=\(bannerActions)", "desplegandoAviso=\(bannerUnfolding ? 1 : 0)",
-            "llegadas=\(arrivals)", "aterrizajesTarjeta=\(cardLandings)",
+            "llegadas=\(arrivals)", "aterrizajesTarjeta=\(cardLandings)", "vuelosSinDestino=\(cardFadesWithoutDestination)",
+            "pestanasQuitadasTapada=\(tabsRemovedWhileCovered)", "pestana=\(currentTab)",
             "ojoCierraEn=\(eyeClosesAt.map { String(format: "%.3f", $0) } ?? "-")", "cierreDetalle=\(detailCloseAt.map { String(format: "%.3f", $0) } ?? "-")", "noEsMioFallos=\(notMineFailures)",
             "textosFuera=\(lockTextsGoneAt.map { String(format: "%.3f", $0) } ?? "-")",
             "fundidoBloqueo=\(lockFadeBeganAt.map { String(format: "%.3f", $0) } ?? "-")",

@@ -178,14 +178,22 @@ private func drawLaunchBands(_ frame: LaunchFrame, center: CGPoint, in context: 
         path.move(to: from)
         path.addLine(to: CGPoint(x: from.x + (to.x - from.x) * drawn, y: from.y + (to.y - from.y) * drawn))
         var layer = context
-        // Retoque 2: las bandas solo se ven sobre el negro (nunca por encima de la tarjeta ni del título de Inicio que
-        // se enciende debajo) y, al ensancharse, como mucho a 0,35.
-        layer.opacity = min(0.75 * pow(1 - widen, 1.6), widen > 0 ? 0.35 : 0.75) * frame.black
+        // Retoque 2: las bandas solo se ven sobre el negro ENTERO (nunca por encima de la tarjeta ni del título de Inicio
+        // que se enciende debajo) y, al ensancharse, como mucho a 0,35. Ronda 1 (I-2): multiplicar por el negro aún las
+        // dejaba ver sobre la tarjeta a medio encender; ahora se apagan del todo antes de que el negro baje de 0,85.
+        layer.opacity = min(0.75 * pow(1 - widen, 1.6), widen > 0 ? 0.35 : 0.75) * launchBandVisibility(black: frame.black)
         layer.stroke(
             path,
             with: .linearGradient(gradient, startPoint: .zero, endPoint: CGPoint(x: size.width, y: size.height)),
             style: StrokeStyle(lineWidth: CGFloat(1 + 120 * widen), lineCap: .butt))
     }
+}
+
+/// Cuánto se ven las bandas según el negro que tienen debajo: enteras con el negro entero y nada en cuanto el negro baja
+/// de 0,85 (debajo ya empieza a verse Inicio).
+func launchBandVisibility(black: Double) -> Double {
+    let k = min(1, max(0, (black - 0.85) / 0.15))
+    return k * k * (3 - 2 * k)
 }
 
 /// Las dos mitades de la ola (la curva partida por su punto medio, 12–14): cada una viene de una esquina, girada, con

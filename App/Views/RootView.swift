@@ -69,9 +69,11 @@ struct RootView: View {
     @State private var cardFlight = CardFlight()
     /// Alguna pantalla a la vista ha pedido que la barra de pestañas no se encoja (`.keepsTabBarExpanded()`).
     @State private var keepsTabBarExpanded = false
+    #if DEBUG
     /// Solo demo (`-MiBancoDemoHideTabsDuringCurtain`, N-9): las pestañas desaparecen un momento mientras el velo tapa
-    /// la barra. Siempre `false` fuera de la demo.
+    /// la barra.
     @State private var demoHidesTabs = false
+    #endif
     /// C8 / 9.5: el banco abierto desde el abanico de Inicio, encima de Inicio (sin cambiar de pestaña).
     @State private var bankOverHome: BankID?
     /// Ronda 2 (M-10): el velo de la barra de pestañas la tapa ahora (la pestaña no se puede cambiar).
@@ -156,6 +158,7 @@ struct RootView: View {
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(150))
                 demoHidesTabs = true
+                if tabBarCovered { LaunchProbe.shared.tabsRemovedWhileCovered += 1 }
                 try? await Task.sleep(for: .milliseconds(200))
                 demoHidesTabs = false
             }
@@ -195,11 +198,17 @@ struct RootView: View {
         // Entrar en Avisos (o ver avisos nuevos estando en ella) los da por vistos: la insignia se va.
         .onChange(of: tab) { old, new in
             if new == .alerts && !isLocked { seen.markSeen(warnings) }
+            // Ronda 1 (I-1): el banco abierto encima de Inicio es de Inicio: cualquier cambio a otra pestaña (la barra
+            // de cristal, una ruta, la demo) lo cierra; no se queda tapando la pestaña nueva.
+            if new != .home, !demoBankStaysOverTabs { bankOverHome = nil }
             // T1: la entrada de la pestaña ya empezó en el mismo instante del cambio (`entrance(for:)`); aquí solo se
             // fija, sin cambiar su valor, para el siguiente cambio.
             tabDirection = Self.direction(from: old, to: new)
             tabChanges += 1
             lastTab = new
+            #if DEBUG
+            LaunchProbe.shared.currentTab = "\(new)"
+            #endif
         }
         .onChange(of: warnings) { _, new in
             if tab == .alerts && !isLocked { seen.markSeen(new) }
@@ -216,7 +225,9 @@ struct RootView: View {
                 if isLocked { LaunchProbe.shared.arrivalsUnderLock += 1 }
             }
             #endif
-            guard let arrival, tab != .home, sheet == nil, !isLocked, scenePhase == .active else { return }
+            // Ronda 1 (m-6): con el banco encima de Inicio, Inicio está tapado y no lo cuenta: se pide el aviso.
+            guard let arrival, tab != .home || bankOverHome != nil, sheet == nil, !isLocked,
+                  scenePhase == .active else { return }
             bannerArrival = arrival
             requestBanner()
         }
@@ -307,10 +318,7 @@ struct RootView: View {
             if model.needsOnboarding {
                 OnboardingView(model: model, onFinish: completeOnboarding)
                     .transition(.opacity)
-            } else if demoHidesTabs {
-                // Solo demo (N-9): las pestañas se quitan un momento a mitad del tapado de la barra.
-                Color.clear
-            } else {
+            } else if !tabsHiddenForDemo {
                 // Ronda 2 (M-10): mientras el velo tapa la barra, tocar una pestaña no cambia de pestaña.
                 TabView(selection: Binding(get: { tab }, set: { new in if !tabBarCovered { tab = new } })) {
                     Tab("Inicio", systemImage: "house", value: AppTab.home) {
@@ -329,6 +337,9 @@ struct RootView: View {
                                  openAccounts: openAccounts,
                                  selectCardRequest: $selectHomeCard)
                             .id(restoreToken)
+                            // Ronda 1 (I-6): con el banco encima, Inicio queda fuera del árbol de accesibilidad
+                            // (VoiceOver no llega a «Tu dinero» ni a las filas de debajo).
+                            .accessibilityHidden(bankOverHome != nil && !demoHomeReadableUnderBank)
                             .tabContentEntrance()
                             .environment(\.tabEntrance, entrance(for: .home))
                     }
@@ -370,6 +381,32 @@ struct RootView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    /// Solo demo (ronda 1): vuelven los defectos de I-1 / I-6 para ver sus pruebas en rojo. En Release, siempre `false`.
+    private var demoBankStaysOverTabs: Bool {
+        #if DEBUG
+        DemoMode.bankStaysOverTabs
+        #else
+        false
+        #endif
+    }
+
+    private var demoHomeReadableUnderBank: Bool {
+        #if DEBUG
+        DemoMode.homeReadableUnderBank
+        #else
+        false
+        #endif
+    }
+
+    /// Solo demo (N-9): las pestañas se quitan un momento a mitad del tapado de la barra. En Release, siempre `false`.
+    private var tabsHiddenForDemo: Bool {
+        #if DEBUG
+        demoHidesTabs
+        #else
+        false
+        #endif
     }
 
     /// T1: la entrada de cada pestaña. La elegida lleva un `token` nuevo DESDE el instante en que se elige (se calcula
@@ -649,6 +686,8 @@ struct RootView: View {
     private func applyRoute() {
         guard !isLocked, let route = router.pending else { return }
         router.pending = nil
+        // Ronda 1 (I-1): una ruta siempre se ve: el banco que estaba encima de Inicio se cierra antes de aplicarla.
+        if !demoBankStaysOverTabs { bankOverHome = nil }
         switch route.destination {
         case .home:
             briefingRouteWaiting = false

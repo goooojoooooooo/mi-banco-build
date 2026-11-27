@@ -872,6 +872,8 @@ final class MotionShellTests: XCTestCase {
         waitForLaunchToEnd(30)
         XCTAssertTrue(waitUntil(15) { (self.probe()["barraDestapada"] ?? "-") != "-" || self.app.tabBars.buttons["Gasto"].isHittable },
                       "La barra no llegó a estar a la vista")
+        // Ronda 1 (m-3): las pestañas se quitaron DE VERDAD con la barra tapada (si no, la prueba no diría nada).
+        XCTAssertEqual(probe()["pestanasQuitadasTapada"], "1", "La demo no quitó las pestañas con la barra tapada: \(probe())")
         Thread.sleep(forTimeInterval: 2)
         let spendingTab = app.tabBars.buttons["Gasto"]
         XCTAssertTrue(spendingTab.waitForExistence(timeout: 10), "Falta la pestaña «Gasto»")
@@ -996,7 +998,20 @@ final class MotionShellTests: XCTestCase {
     /// «Inicio») y la tarjeta vuela hasta la cabecera: la cabecera solo se ve cuando la tarjeta ha aterrizado (sonda
     /// `aterrizajesTarjeta`), no tras un plazo. «Inicio» vuelve a Inicio. A ×10 el vuelo dura varios segundos.
     func testCardFlightLandsOnBankHeader() throws {
-        launch(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoMotionScale", "10"])
+        flyToTheBankHeader()
+        let back = app.buttons["bank-over-home-back"]
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "Falta «Inicio» para volver")
+        back.tap()
+        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "«Inicio» no volvió a Inicio")
+        XCTAssertTrue(waitUntil(10) { app.tabBars.buttons["Inicio"].isSelected }, "Al volver no está en «Inicio»")
+    }
+
+    /// Abre el abanico (a ×10), toca la tarjeta de Revolut y comprueba que la copia VUELA hasta la cabecera del banco:
+    /// la cabecera no se ve antes de posarse la tarjeta, hay un aterrizaje en la cabecera (`aterrizajesTarjeta`) y
+    /// ningún fundido sin destino (`vuelosSinDestino`, ronda 1 I-4: el respaldo en que la copia se funde donde está ya
+    /// no cuenta como aterrizaje). La pestaña marcada sigue siendo Inicio (sonda `pestana`, m-4).
+    private func flyToTheBankHeader(_ extra: [String] = []) {
+        launch(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoMotionScale", "10"] + extra)
         waitForLaunchToEnd(90)
         let carousel = app.descendants(matching: .any).matching(NSPredicate(format: "label ENDSWITH %@", " de 4")).firstMatch
         XCTAssertTrue(carousel.waitForExistence(timeout: 20), "Falta el carrusel")
@@ -1015,17 +1030,72 @@ final class MotionShellTests: XCTestCase {
         }
         XCTAssertTrue(landed, "La tarjeta no aterrizó en la cabecera: \(probe())")
         XCTAssertFalse(seenBeforeLanding, "La cabecera del banco se vio antes de que aterrizara la tarjeta")
+        XCTAssertEqual(probe()["vuelosSinDestino"], "0", "La copia se fundió sin llegar a la cabecera: \(probe())")
         XCTAssertTrue(waitUntil(15) { header.exists }, "Aterrizada la tarjeta, la cabecera no aparece")
-        // 9.5: la pestaña marcada no ha cambiado.
-        let homeTab = app.tabBars.buttons["Inicio"]
-        if homeTab.exists { XCTAssertTrue(homeTab.isSelected, "Abrir el banco desde el abanico cambió de pestaña") }
-        XCTAssertFalse(app.tabBars.buttons["Ajustes"].exists && app.tabBars.buttons["Ajustes"].isSelected,
-                       "Abrir el banco desde el abanico llevó a «Ajustes»")
+        // 9.5: la pestaña marcada no ha cambiado (se lee de la app: con el banco delante la barra puede estar tapada).
+        XCTAssertEqual(probe()["pestana"], "home", "Abrir el banco desde el abanico cambió de pestaña: \(probe())")
+    }
+
+    /// Ronda 1 (I-4): la prueba del vuelo se pone roja si la copia no vuela. Con `-MiBancoDemoFlightNoDestination` la
+    /// capa hace como si la cabecera no apuntara su sitio y la copia se funde donde está: la cabecera aparece igual,
+    /// pero no hay aterrizaje en la cabecera. Se espera exactamente ese fallo (estricto; cualquier otro, no).
+    func testCardFlightTestFailsWhenTheCardDoesNotFly() throws {
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = { issue in
+            issue.compactDescription.contains("La tarjeta no aterrizó en la cabecera")
+                || issue.compactDescription.contains("La cabecera del banco se vio antes de que aterrizara la tarjeta")
+                || issue.compactDescription.contains("La copia se fundió sin llegar a la cabecera")
+        }
+        continueAfterFailure = true
+        XCTExpectFailure("Sin destino la tarjeta no vuela: la prueba del vuelo debe fallar", options: options) {
+            flyToTheBankHeader(["-MiBancoDemoFlightNoDestination"])
+        }
+        XCTAssertNotEqual(probe()["vuelosSinDestino"] ?? "0", "0", "Con la bandera, la copia debía fundirse: \(probe())")
+    }
+
+    /// Ronda 1 (I-1): el banco abierto encima de Inicio es de Inicio. Si la pestaña cambia con él delante (aquí la demo
+    /// pasa a Gasto a los 40 s; en el iPhone, la barra de cristal o la ruta de un aviso), el banco se cierra y Gasto se
+    /// ve y se toca.
+    func testBankOverHomeClosesWhenTheTabChanges() throws {
+        bankOverHomeThenTabSwitch()
+    }
+
+    /// Ronda 1 (I-1, I-6): con los dos defectos de antes de vuelta (`-MiBancoDemoBankStaysOverTabs`,
+    /// `-MiBancoDemoHomeReadableUnderBank`) la prueba se pone roja por los dos sitios, y solo por ellos (estricto).
+    func testBankOverHomeTestFailsWithTheOldDefects() throws {
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = { issue in
+            issue.compactDescription.contains("Con el banco encima, Inicio sigue al alcance de VoiceOver")
+                || issue.compactDescription.contains("El banco se quedó tapando Gasto tras cambiar de pestaña")
+                || issue.compactDescription.contains("Gasto está tapado")
+        }
+        continueAfterFailure = true
+        XCTExpectFailure("Con los defectos de antes, la prueba del banco encima de Inicio debe fallar", options: options) {
+            bankOverHomeThenTabSwitch(["-MiBancoDemoBankStaysOverTabs", "-MiBancoDemoHomeReadableUnderBank"])
+        }
+    }
+
+    /// Abre el banco encima de Inicio desde el abanico; comprueba que Inicio queda fuera del árbol de accesibilidad
+    /// (I-6) y que, cuando la demo cambia a Gasto a los 40 s, el banco se cierra y Gasto se ve y se toca (I-1).
+    private func bankOverHomeThenTabSwitch(_ extra: [String] = []) {
+        launch(["-MiBancoDemoCardElements", "-MiBancoDemoHomeProbes", "-MiBancoDemoTabSwitch", "40"] + extra)
+        waitForLaunchToEnd(30)
+        let carousel = app.descendants(matching: .any).matching(NSPredicate(format: "label ENDSWITH %@", " de 4")).firstMatch
+        XCTAssertTrue(carousel.waitForExistence(timeout: 20), "Falta el carrusel")
+        carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).press(forDuration: 1.6)
+        XCTAssertTrue(app.staticTexts["Tus tarjetas"].waitForExistence(timeout: 10), "No se abrió el abanico")
+        let card = app.buttons["wallet-card-rev"]
+        XCTAssertTrue(waitUntil(10) { card.exists && card.isHittable }, "La tarjeta de Revolut no se puede tocar")
+        card.tap()
         let back = app.buttons["bank-over-home-back"]
-        XCTAssertTrue(back.waitForExistence(timeout: 10), "Falta «Inicio» para volver")
-        back.tap()
-        XCTAssertTrue(app.staticTexts["Tu dinero"].waitForExistence(timeout: 20), "«Inicio» no volvió a Inicio")
-        XCTAssertTrue(waitUntil(10) { app.tabBars.buttons["Inicio"].isSelected }, "Al volver no está en «Inicio»")
+        XCTAssertTrue(back.waitForExistence(timeout: 10), "El banco no se abrió encima de Inicio")
+        XCTAssertEqual(probe()["pestana"], "home", "El banco se abrió con la demo ya en Gasto: la prueba no dice nada")
+        XCTAssertFalse(app.staticTexts["Tu dinero"].exists, "Con el banco encima, Inicio sigue al alcance de VoiceOver")
+        XCTAssertTrue(waitUntil(60) { self.probe()["pestana"] == "spending" }, "La demo no cambió a Gasto: \(probe())")
+        XCTAssertTrue(waitUntil(5) { !back.exists }, "El banco se quedó tapando Gasto tras cambiar de pestaña")
+        let total = element("gasto.total")
+        XCTAssertTrue(total.waitForExistence(timeout: 10), "Gasto no se ve tras cambiar de pestaña con el banco encima")
+        XCTAssertTrue(waitUntil(5) { total.isHittable }, "Gasto está tapado")
     }
 
     // MARK: C8 · Recorridos finales
@@ -1067,6 +1137,21 @@ final class MotionShellTests: XCTestCase {
         }
     }
 
+    /// Ronda 1 (I-3): el recorrido de privacidad mira también lo DIBUJADO. Con `-MiBancoDrawnText` cada importe que
+    /// rueda publica como valor el texto que dibuja; con el ojo ABIERTO esos valores tienen forma de importe, así que la
+    /// comprobación del recorrido (sobre los valores dibujados) se pone roja: se espera exactamente ese fallo.
+    func testPrivateWalkSeesDrawnDigitsWithTheEyeOpen() throws {
+        launch(["-MiBancoDrawnText", "-MiBancoDemoCardElements"])
+        XCTAssertTrue(homeIsUp(), "No se ve Inicio")
+        let drawn = NSPredicate(format: "value MATCHES %@ AND NOT (identifier CONTAINS %@)", Self.moneyShape, "probe")
+        let values = app.descendants(matching: .any).matching(drawn).allElementsBoundByIndex.compactMap { $0.value as? String }
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = { $0.compactDescription.contains("Se dibujan importes") }
+        XCTExpectFailure("Con el ojo abierto se dibujan cifras: la comprobación debe fallar", options: options) {
+            XCTAssertEqual(values, [], "Se dibujan importes")
+        }
+    }
+
     /// C8 (recorrido de privacidad final): con el ojo cerrado, ningún texto con cifras de importe en NINGUNA pantalla:
     /// Inicio, el reverso de la tarjeta, el detalle de un movimiento, Gasto y el detalle de una categoría, Presupuestos,
     /// Suscripciones, Avisos, la pantalla del banco, el resumen, el aviso dentro de la app y Ajustes. Mira todas y falla
@@ -1082,7 +1167,7 @@ final class MotionShellTests: XCTestCase {
         let cardAnchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
 
         // Inicio, el reverso de la tarjeta y el detalle.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoCardElements"])
+        launch(["-MiBancoDemoPrivate", "-MiBancoDrawnText", "-MiBancoDemoCardElements"])
         XCTAssertTrue(homeIsUp(), "No se ve Inicio")
         look("Inicio")
         let carousel = app.descendants(matching: .any).matching(cardAnchor).firstMatch
@@ -1103,7 +1188,7 @@ final class MotionShellTests: XCTestCase {
         app.terminate()
 
         // Gasto, una categoría, Suscripciones y Presupuestos.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoScreen", "gasto"])
+        launch(["-MiBancoDemoPrivate", "-MiBancoDrawnText", "-MiBancoDemoScreen", "gasto"])
         if element("gasto.total").waitForExistence(timeout: 30) {
             look("Gasto")
             let rows = NSPredicate(format: "identifier BEGINSWITH %@", "gasto.fila.")
@@ -1132,14 +1217,17 @@ final class MotionShellTests: XCTestCase {
         app.terminate()
 
         // Avisos.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoScreen", "avisos"])
+        launch(["-MiBancoDemoPrivate", "-MiBancoDrawnText", "-MiBancoDemoScreen", "avisos"])
         waitForLaunchLayerToGo(40)
-        Thread.sleep(forTimeInterval: 2)
-        look("Avisos")
+        // Ronda 1 (m-5): solo cuenta como visitada si Avisos está delante de verdad.
+        if app.navigationBars["Avisos"].waitForExistence(timeout: 10) {
+            Thread.sleep(forTimeInterval: 2)
+            look("Avisos")
+        }
         app.terminate()
 
         // Ajustes y la pantalla del banco.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
+        launch(["-MiBancoDemoPrivate", "-MiBancoDrawnText", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
         let bankRow = app.buttons["settings-bank-rev"]
         if bankRow.waitForExistence(timeout: 30) {
             look("Ajustes")
@@ -1152,7 +1240,7 @@ final class MotionShellTests: XCTestCase {
         app.terminate()
 
         // El resumen.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoBriefing", "busy"])
+        launch(["-MiBancoDemoPrivate", "-MiBancoDrawnText", "-MiBancoDemoBriefing", "busy"])
         if app.buttons["Vale"].waitForExistence(timeout: 30) {
             Thread.sleep(forTimeInterval: 2)
             look("Resumen")
@@ -1160,7 +1248,7 @@ final class MotionShellTests: XCTestCase {
         app.terminate()
 
         // El aviso dentro de la app.
-        launch(["-MiBancoDemoPrivate", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "6"])
+        launch(["-MiBancoDemoPrivate", "-MiBancoDrawnText", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto", "-MiBancoMotionScale", "6"])
         let banner = element("in-app-banner")
         if banner.waitForExistence(timeout: 40) {
             Thread.sleep(forTimeInterval: 8)
@@ -1182,6 +1270,22 @@ final class MotionShellTests: XCTestCase {
         var reached: [String] = []
         launch(["-MiBancoReduceMotion", "-MiBancoDemoCardElements"])
         if homeIsUp() { reached.append("Inicio") }
+        // Ronda 1 (I-5): el reverso de la tarjeta también gira con Reducir, sin recorrido: la tarjeta no se mueve.
+        let cardAnchor = NSPredicate(format: "label ENDSWITH %@", " de 4")
+        let carousel = app.descendants(matching: .any).matching(cardAnchor).firstMatch
+        if carousel.waitForExistence(timeout: 10) {
+            let before = carousel.frame
+            carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+            if app.buttons["Editar saldos"].waitForExistence(timeout: 8) {
+                let after = carousel.frame
+                if abs(after.minY - before.minY) <= 1, abs(after.minX - before.minX) <= 1 {
+                    reached.append("Reverso")
+                } else {
+                    XCTFail("Con Reducir la tarjeta se movió al girar: \(before) → \(after)")
+                }
+            }
+            carousel.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)).tap()
+        }
         let row = app.buttons.matching(identifier: "movementRow").firstMatch
         if row.waitForExistence(timeout: 10), waitUntil(15, { row.isHittable }) {
             row.tap()
@@ -1199,6 +1303,16 @@ final class MotionShellTests: XCTestCase {
         launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "gasto"])
         if element("gasto.total").waitForExistence(timeout: 30) {
             reached.append("Gasto")
+            // Ronda 1 (I-5): el detalle de una categoría.
+            let rows = NSPredicate(format: "identifier BEGINSWITH %@", "gasto.fila.")
+            let category = app.descendants(matching: .any).matching(rows).firstMatch
+            if category.waitForExistence(timeout: 5) {
+                scroll(to: category)
+                category.tap()
+                let total = element("categoria.total")
+                if total.waitForExistence(timeout: 8), waitUntil(5, { total.isHittable }) { reached.append("Categoría") }
+                navigateBack()
+            }
             let subscriptions = element("gasto.suscripciones")
             scroll(to: subscriptions)
             if subscriptions.exists {
@@ -1218,8 +1332,27 @@ final class MotionShellTests: XCTestCase {
 
         launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "avisos"])
         waitForLaunchLayerToGo(40)
+        // Ronda 1 (I-5): un ancla del contenido de Avisos, no solo la pestaña marcada.
         let alertsTab = app.tabBars.buttons["Avisos"]
-        if alertsTab.waitForExistence(timeout: 10), alertsTab.isSelected { reached.append("Avisos") }
+        if alertsTab.waitForExistence(timeout: 10), alertsTab.isSelected,
+           app.navigationBars["Avisos"].waitForExistence(timeout: 10) { reached.append("Avisos") }
+        app.terminate()
+
+        // Ronda 1 (I-5): el aviso dentro de la app con Reducir aparece en su sitio, sin caer (mismo marco al aparecer y
+        // un segundo después).
+        launch(["-MiBancoReduceMotion", "-MiBancoDemoArrival", "-MiBancoDemoScreen", "gasto"])
+        let banner = element("in-app-banner")
+        if banner.waitForExistence(timeout: 40) {
+            let first = banner.frame
+            Thread.sleep(forTimeInterval: 1)
+            if banner.exists {
+                if abs(banner.frame.minY - first.minY) <= 1 {
+                    reached.append("Aviso")
+                } else {
+                    XCTFail("Con Reducir el aviso dentro de la app se movió: \(first) → \(banner.frame)")
+                }
+            }
+        }
         app.terminate()
 
         launch(["-MiBancoReduceMotion", "-MiBancoDemoScreen", "ajustes", "-MiBancoDemoBanks"])
@@ -1239,8 +1372,8 @@ final class MotionShellTests: XCTestCase {
             if waitUntil(8, { !done.exists }) { reached.append("Resumen cerrado") }
         }
 
-        let expected = ["Inicio", "Detalle", "Gasto", "Suscripciones", "Presupuestos", "Avisos",
-                        "Ajustes", "Banco", "Resumen", "Resumen cerrado"]
+        let expected = ["Inicio", "Reverso", "Detalle", "Gasto", "Categoría", "Suscripciones", "Presupuestos", "Avisos",
+                        "Aviso", "Ajustes", "Banco", "Resumen", "Resumen cerrado"]
         XCTAssertEqual(reached, expected, "Con Reducir movimiento no se llega a todo")
     }
 

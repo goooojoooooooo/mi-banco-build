@@ -378,12 +378,16 @@ enum LaunchGeometry {
         CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * k)
     }
 
-    /// Retoque 2 (el vuelo de la marca sin cruzar nada): primero SUBE y después se desliza. La altura llega a la de la
-    /// ranura hacia el 60 % del vuelo (y no se pasa); lo horizontal avanza con el vuelo entero y termina después. Así la
-    /// marca va por la franja vacía de arriba y no pasa por encima de la tarjeta ni del título.
+    /// Retoque 2 (el vuelo de la marca sin cruzar nada): primero SUBE en vertical y después se desliza. La altura llega
+    /// a la de la ranura al 40 % del vuelo (al principio, con el negro aún casi entero: la tarjeta de debajo todavía no
+    /// se ve); lo horizontal no empieza hasta el 30 % y va por la franja de la ranura, por encima del título. Ronda 1
+    /// (I-2): antes lo horizontal avanzaba con el vuelo entero y la marca iba en diagonal por encima del título.
     static func riseThenSlide(_ a: CGPoint, _ b: CGPoint, _ k: CGFloat) -> CGPoint {
-        let up = min(1, max(0, k) / 0.6)
+        let t = min(1, max(0, k))
+        let up = min(1, t / 0.4)
         let rise = 1 - (1 - up) * (1 - up)
-        return CGPoint(x: a.x + (b.x - a.x) * k, y: a.y + (b.y - a.y) * rise)
+        let across = min(1, max(0, (t - 0.3) / 0.7))
+        let slide = across * across * (3 - 2 * across)
+        return CGPoint(x: a.x + (b.x - a.x) * slide, y: a.y + (b.y - a.y) * rise)
     }
 }

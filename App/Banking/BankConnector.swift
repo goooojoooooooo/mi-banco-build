@@ -221,6 +221,15 @@ final class BankConnector {
 
     // MARK: - La vuelta del banco
 
+    /// SEC-11: comprueba síncronamente si una URL externa de `onOpenURL` corresponde a una conexión pendiente.
+    /// Si no hay intento pendiente, se ignora de inmediato sin lanzar flujo, tarea ni error.
+    func shouldHandleExternalCallback(_ url: URL) -> Bool {
+        #if DEBUG
+        if DemoMode.isActive { return false }
+        #endif
+        return shouldHandleIncomingBankCallback(url, pending: pendingCheck())
+    }
+
     func handle(url: URL, fromWebSession: Bool = false) async {
         #if DEBUG
         if DemoMode.isActive { return }
@@ -234,6 +243,8 @@ final class BankConnector {
         // vuelta falsa por `onOpenURL` no debe cerrar la hoja del banco ni borrar el intento verdadero (la máquina la ignora);
         // si vino del propio cierre de la hoja web (`fromWebSession: true`), falla con `foreignLink` (R43).
         let pending = loadPending()
+        // SEC-11: sin intento pendiente, una vuelta externa (`onOpenURL`) se ignora de inmediato sin tocar el flujo ni mostrar error.
+        if !fromWebSession, pending == nil { return }
         let check: PendingCheck
         if let pending {
             check = pending.isExpired(now: Date()) ? .expired(pending.bank) : .valid(pending.bank)

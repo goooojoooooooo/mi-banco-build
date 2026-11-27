@@ -20,12 +20,21 @@ struct LockView: View {
     /// quita de golpe). Hasta entonces Inicio no recibe toques.
     /// El fundido empieza: cuánto dura y si este bloqueo se funde con su marca dibujada (nada la recoge para volar).
     var fadeStarted: (_ seconds: Double, _ keepsItsMark: Bool) -> Void = { _, _ in }
+    /// SEC-08: desactivar el bloqueo a conciencia cuando el iPhone no tiene código ni Face ID.
+    var disableLock: () -> Void = {}
+    /// SEC-08: lo que contesta el sistema a «¿puedo autenticar al dueño?». Se inyecta para que lo único que cambia entre
+    /// la app real, la demo sin código y las pruebas sea ESTE valor: la guardia de `authenticate()` es siempre la misma.
+    var deviceAuth: () -> DeviceAuthAvailability = LockView.systemDeviceAuth
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motion) private var motion
     @State private var authenticating = false
+    /// SEC-08 (m-3): desactivar el bloqueo pide confirmación; Onyx se abrirá sin protección.
+    @State private var confirmingDisable = false
     /// Un intento automático por bloqueo (esta vista solo existe mientras está bloqueado).
     @State private var autoAttempted = false
     @State private var failures = 0
+    /// SEC-08: estado del bloqueo según si el iPhone tiene código/biometría o no.
+    @State private var screenMode: LockScreenMode = .authenticate
     /// Solo dibujo: cuándo empezó a montarse la marca, si ya ha terminado (o se saltó con un toque) y dónde está.
     @State private var launchStart = LaunchClock.startDate()
     @State private var launchFinished = false
@@ -83,11 +92,15 @@ struct LockView: View {
                     .opacity(markHandedOff ? 0 : frame.mark)
                     .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { markFrame = $0 }
             } action: {
-                Button(action: unlock) {
-                    UnlockLabel(failures: failures)
+                if screenMode == .noPasscode {
+                    noPasscodeActions
+                } else {
+                    Button(action: unlock) {
+                        UnlockLabel(failures: failures)
+                    }
+                    .buttonStyle(.pressable)
+                    .disabled(authenticating)
                 }
-                .buttonStyle(.pressable)
-                .disabled(authenticating)
             }
             // Las líneas de velocidad van por detrás de todo y las mitades de la ola por delante de la marca; los dos
             // lienzos ocupan la pantalla entera, no reciben toques y solo existen mientras la marca se monta.
@@ -123,7 +136,7 @@ struct LockView: View {
         .task { await assembleMark(timeline) }
         .task {
             #if DEBUG
-            if DemoMode.holdsLock {
+            if DemoMode.holdsLock, DemoMode.simulatedDeviceAuth == nil {
                 // Demo: sin Face ID; tras ~4 s, la misma salida que usa el éxito de la autenticación. (Si una prueba
                 // retrasa el arranque para grabarlo, el bloqueo de demo espera lo mismo; la espera es exacta para que
                 // las grabaciones sepan cuándo ocurre.)
@@ -144,10 +157,95 @@ struct LockView: View {
             await autoAuthenticate()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { Task { await autoAuthenticate() } }
+            if phase == .active {
+                Task { await autoAuthenticate() }
+            }
         }
     }
 
+    /// SEC-08: aviso claro y botón consciente para desactivar el bloqueo cuando el iPhone no tiene código ni Face ID.
+    private var noPasscodeActions: some View {
+        VStack(spacing: Theme.Space.gutter) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "lock.trianglebadge.exclamationmark")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(Theme.warning)
+                    .frame(width: 24, height: 24)
+                    .accessibilityHidden(true)
+                Text(LockAuthPolicy.noPasscodeMessage)
+                    .titan(.callout)
+                    .foregroundStyle(Theme.label)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("lock-no-passcode-message")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(16)
+            .background(Theme.grouped, in: RoundedRectangle(cornerRadius: Theme.Radius.group, style: .continuous))
+
+            if confirmingDisable {
+                disableConfirmation
+            } else {
+                Button { confirmingDisable = true } label: {
+                    Text(LockAuthPolicy.disableLockButtonTitle)
+                        .titan(.option)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(Theme.label)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .frame(maxWidth: .infinity, minHeight: 52)
+                        .background(Theme.raised, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(.pressable)
+                .accessibilityIdentifier("lock-disable-button")
+            }
+        }
+    }
+
+    /// SEC-08 (m-3): confirmación en el propio bloqueo (la regla U55 solo permite presentaciones en `RootView`, que queda
+    /// por debajo del bloqueo). Explica que Onyx se abrirá sin protección; Cancelar deja el bloqueo puesto.
+    private var disableConfirmation: some View {
+        VStack(spacing: 12) {
+            Text(LockAuthPolicy.disableConfirmationTitle)
+                .titan(.callout)
+                .fontWeight(.semibold)
+                .foregroundStyle(Theme.label)
+                .multilineTextAlignment(.center)
+            Text(LockAuthPolicy.disableConfirmationMessage)
+                .titan(.callout)
+                .foregroundStyle(Theme.label)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("lock-disable-confirmation-message")
+            Button(action: disableLockAndUnlock) {
+                Text(LockAuthPolicy.disableConfirmationButtonTitle)
+                    .titan(.option)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(Theme.warning)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .background(Theme.raised, in: Capsule())
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("lock-confirm-disable-button")
+            Button { confirmingDisable = false } label: {
+                Text("Cancelar")
+                    .titan(.option)
+                    .foregroundStyle(Theme.label)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 14)
+                    .frame(maxWidth: .infinity, minHeight: 52)
+                    .contentShape(Capsule())
+            }
+            .buttonStyle(.pressable)
+            .accessibilityIdentifier("lock-cancel-disable-button")
+        }
+    }
     /// Solo dibujo: espera a que las piezas encajen (golpe háptico) y a que la marca quede montada, y para el reloj.
     /// Los tiempos salen del guion por el multiplicador de grabación (intensidad, Reducir movimiento, cámara lenta).
     private func assembleMark(_ timeline: LaunchTimeline) async {
@@ -181,10 +279,17 @@ struct LockView: View {
         Task { await authenticate() }
     }
 
+    /// SEC-08: desactiva el bloqueo de Onyx a conciencia y solo entonces deja pasar limpiamente.
+    private func disableLockAndUnlock() {
+        guard !leaving else { return }
+        disableLock()
+        unlockWithFade()
+    }
+
     /// Solo en primer plano y una vez por bloqueo; si se cancela, queda el botón.
     private func autoAuthenticate() async {
         #if DEBUG
-        if DemoMode.holdsLock { return }
+        if DemoMode.holdsLock, DemoMode.simulatedDeviceAuth == nil { return }
         #endif
         guard scenePhase == .active, !autoAttempted else { return }
         autoAttempted = true
@@ -192,18 +297,47 @@ struct LockView: View {
     }
 
     private func authenticate() async {
-        guard !authenticating else { return }
+        guard !authenticating, !leaving else { return }
         authenticating = true
         defer { authenticating = false }
+        // SEC-08: sin código ni Face ID en el iPhone NO se desbloquea en silencio. Esta guardia la recorren la app real, la
+        // demo (`-MiBancoDemoNoPasscode`, que solo cambia lo que contesta `currentAvailability()`) y las pruebas.
+        guard applyAvailability(currentAvailability()) else { return }
         let context = LAContext()
-        var error: NSError?
-        // Sin código en el iPhone no hay con qué autenticar: se deja pasar en vez de dejarte fuera.
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) else {
-            unlockWithFade()
-            return
-        }
         let ok = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Para que solo tú veas tu dinero")) ?? false
         if ok { unlockWithFade() } else { failures += 1 }
+    }
+
+    /// Lo que contesta el sistema real: solo `LAError.passcodeNotSet` cuenta como «sin código».
+    nonisolated static func systemDeviceAuth() -> DeviceAuthAvailability {
+        let context = LAContext()
+        var error: NSError?
+        if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &error) { return .available }
+        if let error, error.domain == LAError.errorDomain, error.code == LAError.passcodeNotSet.rawValue {
+            return .passcodeNotSet
+        }
+        return .unavailable
+    }
+
+    /// Solo en DEBUG, las banderas de demo sustituyen lo que contesta el sistema; el resto del recorrido es el real.
+    private func currentAvailability() -> DeviceAuthAvailability {
+        #if DEBUG
+        if let simulated = DemoMode.simulatedDeviceAuth { return simulated }
+        #endif
+        return deviceAuth()
+    }
+
+    /// Devuelve `true` solo si hay que pedir Face ID/código. Con cualquier otra respuesta nada se desbloquea:
+    /// `passcodeNotSet` enseña la pantalla «sin código»; un fallo distinto deja «Desbloquear» para reintentar.
+    @discardableResult
+    private func applyAvailability(_ availability: DeviceAuthAvailability) -> Bool {
+        let decision = LockAuthPolicy.decision(for: availability)
+        screenMode = LockAuthPolicy.screenMode(for: decision)
+        if LockAuthPolicy.proceedsToEvaluate(decision) { return true }
+        // Al volver de Ajustes del iPhone (o tras un fallo pasajero), permite volver a comprobar.
+        autoAttempted = false
+        if decision == .retryAuthentication { failures += 1 }
+        return false
     }
 
     /// Solo la salida se anima (un fundido breve); con Reducir movimiento, uno aún más corto. El fundido lee `\.motion`:

@@ -846,6 +846,10 @@ struct BankLinkView: View {
                 guard (gate?.generation ?? 0) == generation else { return }
                 importError = error.message
                 errorTick += 1
+            } catch let error as CSVLimitError {
+                guard (gate?.generation ?? 0) == generation else { return }
+                importError = csvLimitErrorMessage(error)
+                errorTick += 1
             } catch let error as StatementError {
                 guard (gate?.generation ?? 0) == generation else { return }
                 importError = Self.errorMessage(for: error, bank: targetBank)
@@ -875,13 +879,16 @@ struct BankLinkView: View {
     nonisolated private static func readStatementData(from url: URL) throws -> Data {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize else {
-            throw StatementFileError.unreadable
-        }
-        guard size <= maxStatementBytes else {
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxStatementBytes {
             throw StatementFileError.tooLarge
         }
-        guard let data = try? Data(contentsOf: url) else { throw StatementFileError.unreadable }
+        // SEC-11: con o sin tamaño conocido se lee con tope (`maxStatementBytes + 1`), nunca el fichero entero.
+        let data: Data
+        do {
+            data = try readFileCapped(url, limit: maxStatementBytes)
+        } catch {
+            throw StatementFileError.unreadable
+        }
         guard data.count <= maxStatementBytes else { throw StatementFileError.tooLarge }
         return data
     }

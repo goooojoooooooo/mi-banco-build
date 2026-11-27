@@ -21,7 +21,7 @@ struct SettingsView: View {
     var importTradeRepublic: () -> Void = {}
 
     @AppStorage("lockEnabled") private var lockEnabled = true
-    @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = true
+    @AppStorage(MerchantLogos.downloadsKey) private var logoDownloads = LogoCachePolicy.defaultDownloadsEnabled
     @Environment(MerchantLogos.self) private var logos
     @Environment(AppPreferences.self) private var preferences
     /// El movimiento tal como lo ve el kit: la fila «Animaciones» dice el nivel que de verdad está en uso.
@@ -227,15 +227,20 @@ struct SettingsView: View {
 
                 Section {
                     Toggle(isOn: $logoDownloads) {
-                        OptionLabel(title: "Descargar logos que falten", detail: "Para tiendas que la app no conoce", systemImage: "arrow.down.to.line")
+                        OptionLabel(
+                            title: "Descargar logos que falten",
+                            detail: "Si lo activas, consulta el nombre del comercio en Google. Nunca envía importes.",
+                            systemImage: "arrow.down.to.line"
+                        )
                     }
                     .toggleStyle(TitanToggleStyle())
+                    .accessibilityIdentifier("settings-logo-downloads")
                     .listRowBackground(Theme.grouped)
                 } header: {
                     SettingsHeader("Logos")
                 } footer: {
                     VStack(alignment: .leading, spacing: Theme.Space.gutter) {
-                        SettingsFooter("\(AppIdentity.displayName) busca en internet el logo de las tiendas donde pagas y que no conoce. El servicio de logos ve la web de la tienda, nunca tus importes ni a quién envías dinero.")
+                        SettingsFooter("Si lo activas, \(AppIdentity.displayName) consulta en Google el nombre de las tiendas que no conoce para buscar su logo. Nunca envía tus importes, tus saldos ni a quién envías dinero.")
                         Text(diagnostics)
                             .titan(.caption)
                             .foregroundStyle(Theme.label3)

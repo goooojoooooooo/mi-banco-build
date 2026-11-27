@@ -543,7 +543,7 @@ struct GuideIllustrationView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 4)
-                MockRow(text: target, symbol: "bolt.fill", highlighted: true)
+                MockRow(text: target, symbol: track.isApplePay ? "wallet.pass" : "bell.badge", highlighted: true)
                 MockRow()
                 Spacer(minLength: 0)
             }
@@ -600,7 +600,7 @@ struct GuideIllustrationView: View {
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 4)
-                MockRow(text: GuideNames.quickNoticeAction, symbol: "bolt.fill", highlighted: true)
+                MockRow(text: GuideNames.quickNoticeAction, symbol: "bell.badge", highlighted: true)
                 Spacer(minLength: 0)
             }
         case .quickNoticeInput:

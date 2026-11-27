@@ -439,7 +439,7 @@ struct UnreadRowView: View {
                             .foregroundStyle(Theme.label3)
                             .lineLimit(expanded ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("\(notice.bank.displayName) · \(DateText.time(notice.date))")
+                        Text("\(notice.bank?.displayName ?? "Banco sin identificar") · \(DateText.time(notice.date))")
                             .titan(.meta)
                             .foregroundStyle(Theme.label3)
                     }
@@ -483,7 +483,7 @@ struct UnreadRowView: View {
                         .foregroundStyle(Theme.label3)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("\(notice.bank.displayName) · \(DateText.time(notice.date))")
+                    Text("\(notice.bank?.displayName ?? "Banco sin identificar") · \(DateText.time(notice.date))")
                         .titan(.meta)
                         .foregroundStyle(Theme.label3)
                 }
@@ -491,7 +491,7 @@ struct UnreadRowView: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("No se pudo leer este aviso. \(spokenText). \(notice.bank.displayName), \(DateText.moment(notice.date))")
+        .accessibilityLabel("No se pudo leer este aviso. \(spokenText). \(notice.bank?.displayName ?? "Banco sin identificar"), \(DateText.moment(notice.date))")
         .accessibilityAddTraits(.isButton)
         .accessibilityHint(expanded ? "Toca para resumir" : "Toca para ver el aviso entero")
         .accessibilityAction(.default) { toggle() }

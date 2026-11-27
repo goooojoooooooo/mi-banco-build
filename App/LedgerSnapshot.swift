@@ -11,7 +11,8 @@ enum LedgerItem: Identifiable, Equatable, Sendable {
         case .unread(let n): return n.id
         }
     }
-    var bank: BankID {
+    /// nil = aviso sin leer del que no se supo el banco (solo sale en la vista de todos los bancos).
+    var bank: BankID? {
         switch self {
         case .movement(let m): return m.bank
         case .unread(let n): return n.bank
@@ -369,7 +370,7 @@ struct LedgerSnapshot: Sendable {
             if m.bankStatus == .pending { parts.append("Pendiente") }
             return parts.joined(separator: " · ")
         case .unread(let n):
-            return showsBank ? "\(n.bank.displayName) · \(n.text)" : n.text
+            return showsBank ? "\(n.bank?.displayName ?? "Banco sin identificar") · \(n.text)" : n.text
         }
     }
 

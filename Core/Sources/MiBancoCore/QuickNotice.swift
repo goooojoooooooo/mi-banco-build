@@ -55,7 +55,7 @@ public func sanitizeQuickNoticeText(_ raw: String, maxLength: Int = QuickNoticeL
 /// Deduce el banco de un aviso recibido en bloque:
 /// 1. Cabecera explícita de la app en la primera línea (o prefijo `Banco: ...`, `Banco · ...`, `App: Banco`) o pie exacto en la última línea.
 /// 2. Mención explícita del banco fuera de una referencia a contraparte («a imagin», «de Revolut», «to ...», «from ...»).
-/// 3. Patrones propios de Revolut (`Paid €… at …`, `Spent today`, `Gastado hoy`, `Available balance`, `Saldo disponible`, `RevPoints`)
+/// 3. Patrones propios de Revolut (`Paid €… at …`, `Spent today`, `RevPoints`; una línea de saldo disponible SOLA no vale)
 ///    o de Trade Republic (`Saveback`, `Round up`, `Card payment`).
 /// Si no puede deducirse de forma fiable o hay señales enfrentadas, devuelve `nil` sin adivinar.
 public func detectQuickNoticeBank(_ raw: String) -> BankID? {
@@ -69,7 +69,8 @@ public func detectQuickNoticeBank(_ raw: String) -> BankID? {
 
 /// Convierte el texto entero de una notificación (variable «Notificación» de Atajos) en un `IngestInput.notification`
 /// listo para `IngestRunner.run(...)` y `Ledger.ingest(...)`.
-/// Devuelve `nil` si el texto queda vacío tras sanearlo o si el banco no se puede deducir de forma fiable.
+/// Si el banco no se puede deducir devuelve `.unattributedNotice` (se guarda como aviso sin leer, nunca se tira en silencio),
+/// salvo que el lector lo ignore (código, aprobación, rechazo o sin importe). `nil` si el texto queda vacío tras sanearlo.
 public func parseQuickNotice(_ raw: String) -> IngestInput? {
     let clean = sanitizeQuickNoticeText(raw)
     let lines = splitQuickLines(clean)
@@ -77,7 +78,9 @@ public func parseQuickNotice(_ raw: String) -> IngestInput? {
 
     let (headerBank, contentLines) = extractBankHeader(from: lines)
     guard !contentLines.isEmpty else { return nil }
-    guard let bank = headerBank ?? detectBankFromContent(contentLines) else { return nil }
+    guard let bank = headerBank ?? detectBankFromContent(contentLines) else {
+        return unattributedQuickNotice(contentLines)
+    }
 
     let rawTitle: String?
     let rawBody: String
@@ -212,9 +215,9 @@ private func detectBankFromContent(_ lines: [String]) -> BankID? {
     // 3. Patrones propios de cada banco cuando el nombre de la app no viene en el texto.
     let joined = foldedLines.joined(separator: "\n")
     let hasRevolutStrong = [
-        "spent today", "gastado hoy", "available balance", "saldo disponible", "revpoints",
+        "spent today", "revpoints",
     ].contains { joined.contains($0) }
-    let hasRevolutPaid = joined.contains(try! Regex(#"\bpaid\s+(?:€|eur)\s*\d|\bpaid\s+\d+(?:[.,]\d+)*\s*(?:€|eur)"#))
+    let hasRevolutPaid = joined.contains(revolutPaidPattern)
         && joined.contains(" at ")
     let hasTRStrong = [
         "saveback", "round up", "roundup", "card payment",
@@ -224,4 +227,17 @@ private func detectBankFromContent(_ lines: [String]) -> BankID? {
     if hasTRStrong { return .tr }
     if hasRevolutStrong || hasRevolutPaid { return .rev }
     return nil
+}
+
+/// Frase propia de Revolut («Paid €5.50 at …» / «Paid 5,50 € at …»), compilada una sola vez. Se busca en texto ya plegado.
+private let revolutPaidPattern = #/\bpaid\s+(?:€|eur)\s*\d|\bpaid\s+\d+(?:[.,]\d+)*\s*(?:€|eur)/#
+
+/// Un aviso del que no se puede deducir el banco no se tira: si tiene pinta de movimiento o no se entiende, se guarda
+/// para que el dueño lo vea (sin saldo ni guía de ningún banco). Lo que el lector ignora (códigos, aprobaciones,
+/// rechazos o textos sin importe) no se guarda: no hay ningún pago que perder.
+private func unattributedQuickNotice(_ contentLines: [String]) -> IngestInput? {
+    let text = capQuickScalars(contentLines.joined(separator: "\n"), maxLength: QuickNoticeLimits.fieldMaxLength)
+    guard !isBlankQuickText(text) else { return nil }
+    if case .ignore = parseNotification(bank: .rev, title: nil, subtitle: nil, body: text) { return nil }
+    return .unattributedNotice(text: text)
 }

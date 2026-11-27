@@ -59,10 +59,11 @@ enum AlertPoster {
     }
 
     /// Sin importes ni texto del aviso.
-    static func postUnread(bank: BankID) async {
+    static func postUnread(bank: BankID?) async {
         let content = UNMutableNotificationContent()
         content.title = "Aviso sin leer"
-        content.body = "\(AppIdentity.displayName) no ha entendido un aviso de \(bank.displayName). Ábrelo para revisarlo."
+        let from = bank.map { "un aviso de \($0.displayName)" } ?? "un aviso sin saber de qué banco es"
+        content.body = "\(AppIdentity.displayName) no ha entendido \(from). Ábrelo para revisarlo."
         content.interruptionLevel = .active
         await add(content, id: UUID().uuidString)
     }

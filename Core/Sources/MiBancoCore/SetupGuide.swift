@@ -293,9 +293,9 @@ private func quickBankGuideSteps(for track: GuideTrack) -> [GuideStep] {
         "Solo hay que rellenar este campo. Si en vez de «\(N.notificationVariable)» ves «\(N.shortcutInput)», tócala: lleva el aviso entero.",
         focus: N.notificationField)
     add(4, "Guarda y suma \(otherBank)",
-        "Toca «\(N.ok)» arriba a la derecha. Para saber si funciona, mira la lista de guías después del próximo aviso de \(bank). Si usas \(otherBank), súmalo al mismo atajo.",
+        "Toca «\(N.ok)» arriba a la derecha para guardar. Para sumar \(otherBank) al mismo atajo, abre esta automatización en «\(N.automationTab)», toca «\(N.appField)» y marca también «\(otherBank)».",
         N.ok, "arriba a la derecha", .quickDone,
-        "En iOS 27 puedes apilar el aviso de \(otherBank) en este mismo atajo para tener los dos en 1 minuto. Si tu versión no te deja apilarlos, repite estos pasos eligiendo «\(otherBank)».")
+        "Una automatización de «\(N.notificationTrigger)» admite varias aplicaciones: déjala con \(bank) y \(otherBank) marcadas, sin tocar los demás filtros. \(guideAppName) detecta el banco de cada aviso. Si tu iPhone no te deja marcar las dos, repite estos pasos eligiendo «\(otherBank)». Para saber si funciona, mira la lista de guías después del próximo aviso.")
 
     return out
 }
@@ -415,6 +415,8 @@ extension GuideTrack {
             }
         case .wallet(let bank, _, _):
             .applePay(for: bank)
+        case .unattributedNotice:
+            nil
         }
     }
 }
@@ -426,6 +428,7 @@ extension IngestInput {
         switch self {
         case .notification(_, let title, let subtitle, let body): return empty(title) && empty(subtitle) && empty(body)
         case .wallet(_, let amount, _): return empty(amount)
+        case .unattributedNotice(let text): return empty(text)
         }
     }
 }

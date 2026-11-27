@@ -59,6 +59,8 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
     /// transferencia del banco, «Transfer»/«To X» del extracto de Revolut). nil = sin señal (los libros de antes no lo
     /// traen). Al enlazar fuentes, un true no se pierde. Ver `isPersonPayment`.
     public var personPayment: Bool?
+    /// true = el aviso que lo creó decía «pendiente»: si luego llega el aviso del cargo, es el mismo pago (ver `ingest`).
+    public var noticePending: Bool?
 
     /// Nombre para mostrar: el capturado, salvo que esté vacío o sea genérico.
     public var displayMerchant: String? { richerMerchant(captured: merchant, bank: bankMerchant) }
@@ -73,7 +75,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
                 bankRef: String? = nil, statementRef: String? = nil, bankStatus: BankStatus? = nil,
                 importedAt: Date? = nil, dayOnly: Bool = false, bankMerchant: String? = nil,
                 excludedFromSpending: Bool = false, linkedAt: Date? = nil, firstSeenStatus: BankStatus? = nil,
-                bookedDay: Date? = nil, personPayment: Bool? = nil) {
+                bookedDay: Date? = nil, personPayment: Bool? = nil, noticePending: Bool? = nil) {
         self.id = id
         self.bank = bank
         self.amountCents = amountCents
@@ -100,13 +102,14 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         self.firstSeenStatus = firstSeenStatus
         self.bookedDay = bookedDay
         self.personPayment = personPayment
+        self.noticePending = noticePending
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, bank, amountCents, merchant, kind, source, date, pairedAcrossSources, fingerprint, pairedFingerprint, isShop
         case note, flaggedNotMine, category, ownTransfer
         case bankRef, statementRef, bankStatus, importedAt, dayOnly, bankMerchant, excludedFromSpending, linkedAt
-        case firstSeenStatus, bookedDay, personPayment
+        case firstSeenStatus, bookedDay, personPayment, noticePending
     }
 
     /// Los libros guardados antes de estos campos no los traen: se leen con sus valores por defecto.
@@ -138,6 +141,7 @@ public struct Movement: Codable, Equatable, Identifiable, Sendable {
         firstSeenStatus = try c.decodeIfPresent(BankStatus.self, forKey: .firstSeenStatus)
         bookedDay = try c.decodeIfPresent(Date.self, forKey: .bookedDay)
         personPayment = try c.decodeIfPresent(Bool.self, forKey: .personPayment)
+        noticePending = try c.decodeIfPresent(Bool.self, forKey: .noticePending)
     }
 }
 
@@ -217,11 +221,12 @@ public struct ManualBalance: Codable, Equatable, Sendable {
 
 public struct UnreadNotice: Codable, Equatable, Identifiable, Sendable {
     public var id: UUID
-    public var bank: BankID
+    /// nil = no se pudo deducir de qué banco es (aviso rápido sin nombre de app): se enseña igualmente al dueño.
+    public var bank: BankID?
     public var text: String
     public var date: Date
 
-    public init(id: UUID = UUID(), bank: BankID, text: String, date: Date) {
+    public init(id: UUID = UUID(), bank: BankID?, text: String, date: Date) {
         self.id = id
         self.bank = bank
         self.text = text
@@ -293,6 +298,8 @@ public struct LedgerState: Codable, Equatable, Sendable {
 
 public enum IngestInput: Sendable {
     case notification(bank: BankID, title: String?, subtitle: String?, body: String?)
+    /// Aviso rápido cuyo banco no se pudo deducir: se guarda como aviso sin leer, sin tocar ningún saldo ni guía.
+    case unattributedNotice(text: String)
     case wallet(bank: BankID, amount: String, merchant: String?)
 }
 
@@ -324,6 +331,8 @@ public struct Ledger: Sendable {
     static let duplicateWindow: TimeInterval = 180
     /// El mismo texto de la misma fuente dentro de esta ventana = una reentrega, no otro pago.
     static let redeliveryWindow: TimeInterval = 60
+    /// Cuánto puede tardar el aviso del cargo tras el aviso «pendiente» del mismo pago.
+    static let pendingSettleWindow: TimeInterval = 30 * 60
     /// Lo que se guarda, como mucho, del texto de un aviso sin leer.
     static let unreadTextLimit = 500
 
@@ -506,6 +515,9 @@ public struct Ledger: Sendable {
         let parsed: ParsedMovement
         let source: Movement.Source
         switch input {
+        case let .unattributedNotice(text):
+            // Sin banco no hay saldo ni movimiento que tocar: solo se guarda para que el dueño lo vea.
+            return storeUnread(bank: nil, text: text, now: now)
         case let .notification(b, title, subtitle, body):
             bank = b
             source = .notification
@@ -540,6 +552,26 @@ public struct Ledger: Sendable {
                 && abs($0.date.timeIntervalSince(now)) <= Self.redeliveryWindow
         }
         if redelivered { return .duplicate }
+
+        // 1b. «Pendiente» y luego «cargado» (o al revés) por aviso: mismo banco, importe y comercio en pocos minutos es UN
+        // pago. Solo si uno de los dos dice «pendiente»: dos compras iguales ya cargadas son dos compras.
+        if source == .notification, let key = parsed.merchant.map(normalizeMerchant), !key.isEmpty {
+            let twin = state.movements.firstIndex {
+                $0.bank == bank && $0.source == .notification && $0.amountCents == signed
+                    && $0.fingerprint != fingerprint && ($0.noticePending == true) != parsed.isPending
+                    && normalizeMerchant($0.merchant ?? "") == key
+                    && abs($0.date.timeIntervalSince(now)) <= Self.pendingSettleWindow
+            }
+            if let twin {
+                if state.movements[twin].noticePending == true {
+                    // El cargo sustituye al pendiente: su huella sirve para reconocer su reentrega.
+                    state.movements[twin].noticePending = nil
+                    state.movements[twin].fingerprint = fingerprint
+                    state.movements[twin].date = now
+                }
+                return .duplicate
+            }
+        }
 
         // 2. El mismo pago visto por la otra fuente: cada movimiento se empareja una sola vez.
         let partner = state.movements.firstIndex {
@@ -588,7 +620,8 @@ public struct Ledger: Sendable {
         // date == now y balance solo suma date > setAt: no se cuenta dos veces.
         let movement = Movement(bank: bank, amountCents: signed, merchant: parsed.merchant, kind: parsed.kind, source: source,
                                 date: now, fingerprint: fingerprint, isShop: parsed.merchantIsShop,
-                                personPayment: parsed.personPayment ? true : nil)
+                                personPayment: parsed.personPayment ? true : nil,
+                                noticePending: parsed.isPending ? true : nil)
         state.movements.append(movement)
         return .stored(movement)
     }
@@ -607,7 +640,7 @@ public struct Ledger: Sendable {
     }
 
     /// Un aviso sin leer idéntico dentro de la ventana de reentrega no se guarda dos veces.
-    private mutating func storeUnread(bank: BankID, text raw: String, now: Date) -> IngestOutcome {
+    private mutating func storeUnread(bank: BankID?, text raw: String, now: Date) -> IngestOutcome {
         let text = String(raw.prefix(Self.unreadTextLimit))
         let repeated = state.unread.contains {
             $0.bank == bank && $0.text == text && abs($0.date.timeIntervalSince(now)) <= Self.redeliveryWindow
@@ -810,6 +843,8 @@ func ingestFingerprint(_ input: IngestInput) -> String {
         key = "\(bank.rawValue)|n|" + normalizedForFingerprint([title, subtitle, body].compactMap { $0 }.joined(separator: " "))
     case let .wallet(bank, amount, merchant):
         key = "\(bank.rawValue)|w|" + normalizedForFingerprint(amount) + "|" + normalizedForFingerprint(merchant ?? "")
+    case let .unattributedNotice(text):
+        key = "?|u|" + normalizedForFingerprint(text)
     }
     var hash: UInt64 = 0xcbf2_9ce4_8422_2325
     for byte in key.utf8 {

@@ -15,15 +15,18 @@ public struct ParsedMovement: Equatable, Sendable {
     /// true solo si es un PAGO que el aviso dice que es un envío a alguien (Bizum, transferencia, «has enviado»): la
     /// señal de pago a persona (`Movement.personPayment`), aunque el comercio guardado sea solo «Ana».
     public let personPayment: Bool
+    /// true si el aviso dice «pendiente»/«pending» (un pago retenido que luego llega como cargo: ver `Ledger.ingest`).
+    public let isPending: Bool
 
     public init(kind: MovementKind, amountCents: Int, merchant: String?, reportedBalanceCents: Int? = nil,
-                merchantIsShop: Bool = false, personPayment: Bool = false) {
+                merchantIsShop: Bool = false, personPayment: Bool = false, isPending: Bool = false) {
         self.kind = kind
         self.amountCents = amountCents
         self.merchant = merchant
         self.reportedBalanceCents = reportedBalanceCents
         self.merchantIsShop = merchantIsShop
         self.personPayment = personPayment
+        self.isPending = isPending
     }
 }
 
@@ -67,10 +70,10 @@ let notificationSendWords: Set<String> = personPaymentWords.union(["enviaste", "
 private let explicitPaymentStems = ["has pagado", "has enviado", "recibo de", "cargado", "pago con tarjeta"]
 private let incomeStems = [
     "has recibido", "recibido", "recibiste", "received", "te han enviado", "te ha enviado", "bizum de",
-    "ingreso", "reembolso", "devoluci", "devuelto", "refund", "abono de",
+    "nomina", "salario", "salary", "payroll", "ingreso", "reembolso", "devoluci", "devuelto", "refund", "abono de",
 ]
 private let genericPaymentStems = [
-    "pagado", "pagaste", "pago en", "pago pendiente", "pago de ", "autorizacion pendiente",
+    "pagado", "pagaste", "pago en", "pago pendiente", "autorizacion pendiente",
     "paid", "compra", "cargo", "retirada", "retirado", "spent", "payment",
 ]
 
@@ -183,5 +186,6 @@ public func parseNotification(bank: BankID, title: String?, subtitle: String?, b
     let paidAtShop = hit.map { $0.0 == " en " || $0.0 == " at " } ?? false
     let personPayment = kind == .payment && isTransfer && !paidAtShop && !mentionsOwnAccount(merchant)
     return .movement(ParsedMovement(kind: kind, amountCents: pay.cents, merchant: merchant, reportedBalanceCents: balance,
-                                    merchantIsShop: isShop, personPayment: personPayment))
+                                    merchantIsShop: isShop, personPayment: personPayment,
+                                    isPending: words.contains { $0 == "pendiente" || $0 == "pending" }))
 }

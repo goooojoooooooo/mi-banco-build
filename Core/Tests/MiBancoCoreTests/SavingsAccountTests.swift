@@ -188,7 +188,7 @@ private func ledger(baseline: Int, at: Date, rate: Int? = nil, movements: [Movem
         var l = Ledger(state: LedgerState(balances: [.rev: ManualBalance(cents: 34_020, setAt: nov(10, 8), origin: .manual)]))
         #expect(l.total(now: nov(10, 20)) == 34_020)
         l.setSavings(balanceCents: 500_000, annualRateBasisPoints: nil, now: nov(10, 9))
-        #expect(l.total() == 34_020)
+        #expect(l.banksTotal() == 34_020)
         #expect(l.total(now: nov(10, 20)) == 534_020)
         // Sin ningún saldo de banco, el total es la cuenta remunerada.
         #expect(ledger(baseline: 500_000, at: nov(10, 9)).total(now: nov(10, 20)) == 500_000)

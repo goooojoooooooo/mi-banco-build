@@ -49,13 +49,13 @@ import Testing
         var l = Ledger()
         _ = l.ingest(notice("Paid €12.50 at Mercadona"), now: t0)
         #expect(l.balance(.rev) == nil)
-        #expect(l.total() == nil)
+        #expect(l.banksTotal() == nil)
     }
 
     @Test func totalSumaLosBancosConSaldo() {
         var l = ledgerWithRev()
         l.setBalance(.ima, cents: 1000, now: t0)
-        #expect(l.total() == 35020)
+        #expect(l.banksTotal() == 35020)
     }
 
     @Test func duplicadoDeWalletYAvisoDentroDeLaVentana() {

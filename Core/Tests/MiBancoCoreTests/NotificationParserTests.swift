@@ -172,12 +172,8 @@ import Testing
         "Pago en Payroll Cafe 9,99 €",
         "Compra en Nómina Express por 12,00 €",
         "Paid at Salary Bar €9.99",
-        "Compra
-Payroll Cafe
-9,99 €",
-        "Compra con tarjeta
-Salario Bar
-9,99 €",
+        "Compra\nPayroll Cafe\n9,99 €",
+        "Compra con tarjeta\nSalario Bar\n9,99 €",
     ])
     func comercioConPalabraDeIngresoEnOtraPosicionSiguiendoSiendoPago(_ body: String) {
         #expect(kind(parse(nil, body)) == .payment, "\(body)")

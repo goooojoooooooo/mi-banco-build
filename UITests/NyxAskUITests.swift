@@ -80,8 +80,10 @@ final class NyxAskUITests: XCTestCase {
         ask("¿y el mes pasado?")
         XCTAssertTrue(waitUntil(10) {
             let text = self.answerCardText()
-            return text.localizedCaseInsensitiveContains("octubre") && text.localizedCaseInsensitiveContains("Mercadona")
-        }, "La pregunta seguida no mantuvo Mercadona en octubre: \(answerCardText())")
+            return text.localizedCaseInsensitiveContains("El mes pasado")
+                && text.localizedCaseInsensitiveContains("oct")
+                && text.localizedCaseInsensitiveContains("Mercadona")
+        }, "La pregunta seguida no mantuvo Mercadona en el mes anterior: \(answerCardText())")
     }
 
     /// N11: «¿Qué has visto?» contesta con los mensajes de «Lo que he visto».

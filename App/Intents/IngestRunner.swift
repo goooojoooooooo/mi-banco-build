@@ -17,14 +17,15 @@ enum IngestRunner {
 
     /// Si el almacén falla, lanza el error para que Atajos lo muestre.
     static func run(_ input: IngestInput) async throws {
-        let bank: BankID
+        let bank: BankID?
         switch input {
         case .notification(let b, _, _, _), .wallet(let b, _, _): bank = b
+        case .unattributedNotice: bank = nil
         }
         let snap = try SharedStore.make().update { ledger -> Snapshot in
-            let before = ledger.balance(bank)
+            let before = bank.flatMap { ledger.balance($0) }
             let outcome = ledger.ingest(input, now: Date())
-            let after = ledger.balance(bank)
+            let after = bank.flatMap { ledger.balance($0) }
             var balances: [String: Int] = [:]
             for b in BankID.allCases { if let c = ledger.balance(b)?.cents { balances[b.rawValue] = c } }
             return Snapshot(outcome: outcome, before: before?.cents, beforeEstimated: before?.estimated ?? false,
@@ -59,7 +60,7 @@ enum IngestRunner {
             await AlertPoster.postUnread(bank: bank)
         case .duplicate:
             // Un duplicado puede traer el saldo del banco: se corrige la Live Activity sin avisar ni sonar.
-            if snap.after != snap.before || snap.afterEstimated != snap.beforeEstimated {
+            if let bank, snap.after != snap.before || snap.afterEstimated != snap.beforeEstimated {
                 await LiveActivityController.updateBalance(bank: bank, balance: snap.after, estimated: snap.afterEstimated, total: snap.total)
             }
         case .ignored:

@@ -73,6 +73,43 @@ private func obs(_ subject: String, _ situation: NyxSituation = .shortfall, merc
         #expect(m.actions["unusualPayment"] == [nov(26, 11)] && m.merchantActions["mercadona"] == [nov(26, 11)])
     }
 
+    @Test func marcarRepetidoSeIgnoraYDeshacerLimpiaElDescarte() {
+        var m = NyxMemory()
+        let o = obs("x", .unusualPayment, merchant: "Mercadona")
+        m.record(o, delivery: .list, now: nov(26, 9))
+
+        m.mark(o.id, .dismissed, now: nov(26, 10))
+        m.mark(o.id, .dismissed, now: nov(26, 10, 5))
+        #expect(m.dismissals["unusualPayment"] == [nov(26, 10)])
+        #expect(m.merchantDismissals["mercadona"] == [nov(26, 10)])
+        #expect(m.entries[0].statusAt == nov(26, 10))
+
+        // Deshacer vuelve a `.seen` y quita la fecha de ese descarte para no apilar al volver a descartar.
+        m.mark(o.id, .seen, now: nov(26, 10, 10))
+        #expect(m.entries[0].status == .seen)
+        #expect((m.dismissals["unusualPayment"] ?? []).isEmpty)
+        #expect((m.merchantDismissals["mercadona"] ?? []).isEmpty)
+
+        m.mark(o.id, .dismissed, now: nov(26, 10, 20))
+        #expect(m.dismissals["unusualPayment"] == [nov(26, 10, 20)])
+        #expect(m.merchantDismissals["mercadona"] == [nov(26, 10, 20)])
+
+        // Re-marcar como `.done` tampoco duplica fechas de acción.
+        m.mark(o.id, .done, now: nov(26, 11))
+        m.mark(o.id, .done, now: nov(26, 11, 5))
+        #expect(m.actions["unusualPayment"] == [nov(26, 11)])
+        #expect(m.merchantActions["mercadona"] == [nov(26, 11)])
+    }
+
+    @Test func descartarSuggestMuteNoAlimentaMerchantDismissals() {
+        var m = NyxMemory()
+        let suggestion = obs("glovo|2026-11", .suggestMute, merchant: "Glovo")
+        m.record(suggestion, delivery: .list, now: nov(26, 9))
+        m.mark(suggestion.id, .dismissed, now: nov(26, 10))
+        #expect((m.merchantDismissals["glovo"] ?? []).isEmpty)
+        #expect(m.dismissals["suggestMute"] == [nov(26, 10)])
+    }
+
     @Test func pruneRespetaPlazosYTope() {
         var m = NyxMemory()
         m.record(obs("old", at: nov(1)), delivery: .list, now: nov(1))
@@ -94,10 +131,14 @@ private func obs(_ subject: String, _ situation: NyxSituation = .shortfall, merc
 
     @Test func pruneQuitaFechasFuturas() {
         var m = NyxMemory()
+        m.record(obs("futura", at: nov(28)), delivery: .list, now: nov(26))
+        m.record(obs("actual", at: nov(26)), delivery: .list, now: nov(26))
         m.interruptions = [nov(28)]
         m.dismissals["shortfall"] = [nov(29)]
         m.lastInterruption["shortfall"] = nov(29)
         m.prune(now: nov(26))
+        #expect(!m.knows(obs("futura", at: nov(28)).id))
+        #expect(m.knows(obs("actual", at: nov(26)).id))
         #expect(m.interruptions.isEmpty && (m.dismissals["shortfall"] ?? []).isEmpty && m.lastInterruption["shortfall"] == nil)
     }
 

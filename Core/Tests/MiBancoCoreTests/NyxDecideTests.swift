@@ -22,10 +22,12 @@ private func ob(_ situation: NyxSituation, _ subject: String, _ priority: NyxPri
 }
 
 private func decide(_ o: [NyxObservation], _ m: NyxMemory = NyxMemory(), talk: NyxTalkLevel = .whenItMatters,
-                    moment: NyxMoment = .background, active: Bool = false, now: Date = nov(26, 12),
-                    settings: AlertSettings = AlertSettings(), muted: Set<String> = []) -> [String: NyxDelivery] {
+                    moment: NyxMoment = .background, active: Bool = false, notificationsAllowed: Bool = true,
+                    now: Date = nov(26, 12), settings: AlertSettings = AlertSettings(),
+                    muted: Set<String> = []) -> [String: NyxDelivery] {
     Dictionary(uniqueKeysWithValues: nyxDecide(o, memory: m, talk: talk, moment: moment, appActive: active,
-                                               mutedMerchants: muted, alertSettings: settings, now: now, calendar: cal)
+                                               notificationsAllowed: notificationsAllowed, mutedMerchants: muted,
+                                               alertSettings: settings, now: now, calendar: cal)
         .map { ($0.observation.id, $0.delivery) })
 }
 
@@ -38,6 +40,87 @@ private func decide(_ o: [NyxObservation], _ m: NyxMemory = NyxMemory(), talk: N
         #expect(decide([o], now: nov(27, 7, 59))[o.id] == .silentNotification)
         #expect(decide([ob(.notificationsOff, "w", .normal)])[ob(.notificationsOff, "w", .normal).id] == .list)
         #expect(decide([ob(.notificationsOff, "w", .normal)], active: true)[ob(.notificationsOff, "w", .normal).id] == .banner)
+
+        // Bordes exactos de horas tranquilas (23:00–08:00).
+        #expect(!nyxIsQuietHour(nov(26, 22, 59), calendar: cal))
+        #expect(nyxIsQuietHour(nov(26, 23, 0), calendar: cal))
+        #expect(nyxIsQuietHour(nov(27, 7, 59), calendar: cal))
+        #expect(!nyxIsQuietHour(nov(27, 8, 0), calendar: cal))
+        #expect(decide([o], now: nov(26, 22, 59))[o.id] == .notification)
+        #expect(decide([o], now: nov(26, 23, 0))[o.id] == .silentNotification)
+        #expect(decide([o], now: nov(27, 7, 59))[o.id] == .silentNotification)
+        #expect(decide([o], now: nov(27, 8, 0))[o.id] == .notification)
+    }
+
+    @Test func unSoloBannerPorTandaConLaAppAbierta() {
+        let u = ob(.shortfall, "u", .urgent)
+        let n1 = ob(.budgetOffPace, "n1", .normal)
+        let n2 = ob(.salary, "n2", .normal)
+        let decisions = nyxDecide([n2, u, n1], memory: NyxMemory(), talk: .whenItMatters, moment: .open, appActive: true,
+                                  mutedMerchants: [], alertSettings: AlertSettings(), now: nov(26, 12), calendar: cal)
+        let byID = Dictionary(uniqueKeysWithValues: decisions.map { ($0.observation.id, $0.delivery) })
+        #expect(byID[u.id] == .banner)
+        #expect(byID[n1.id] == .list)
+        #expect(byID[n2.id] == .list)
+
+        var mem = NyxMemory()
+        mem.apply(decisions, now: nov(26, 12))
+        #expect(mem.interruptions.count == 1)
+        #expect(Set(mem.lastInterruption.keys) == ["shortfall"])
+        #expect(mem.entry(n1.id)?.delivery == .list)
+        #expect(mem.entry(n2.id)?.delivery == .list)
+    }
+
+    @Test func sinPermisoDeAvisosBajaAListaSinGastarCupoNiPausa() {
+        let u = ob(.shortfall, "u", .urgent)
+        let n = ob(.budgetOffPace, "n", .normal)
+        let dayDecisions = nyxDecide([u, n], memory: NyxMemory(), talk: .whenItMatters, moment: .background, appActive: false,
+                                     notificationsAllowed: false, mutedMerchants: [], alertSettings: AlertSettings(),
+                                     now: nov(26, 12), calendar: cal)
+        #expect(dayDecisions.allSatisfy { $0.delivery == .list })
+
+        let quietDecisions = nyxDecide([u], memory: NyxMemory(), talk: .whenItMatters, moment: .background, appActive: false,
+                                       notificationsAllowed: false, mutedMerchants: [], alertSettings: AlertSettings(),
+                                       now: nov(26, 23, 30), calendar: cal)
+        #expect(quietDecisions.map(\.delivery) == [.list])
+
+        var mem = NyxMemory()
+        mem.apply(dayDecisions, now: nov(26, 12))
+        #expect(mem.interruptions.isEmpty)
+        #expect(mem.lastInterruption.isEmpty)
+        #expect(mem.entry(u.id)?.delivery == .list)
+        #expect(mem.entry(n.id)?.delivery == .list)
+
+        // Ni cupo ni pausa quedaron gastados: otra observación de la misma situación entra normal si ya hay permiso o app abierta.
+        let later = ob(.budgetOffPace, "n2", .normal)
+        #expect(decide([later], mem, active: false, notificationsAllowed: true, now: nov(26, 12, 30))[later.id] == .notification)
+        // Con la app abierta el aviso interno `.banner` sigue saliendo aunque los avisos del sistema estén apagados.
+        #expect(decide([later], mem, active: true, notificationsAllowed: false, now: nov(26, 12, 30))[later.id] == .banner)
+    }
+
+    @Test func descartarSuggestMuteNoVuelveAProponerSilenciar() {
+        var m = NyxMemory()
+        let p1 = NyxObservation(situation: .unusualPayment, subject: "p1", priority: .normal, observedAt: date(9, 20),
+                                facts: NyxFacts(merchant: "Glovo"))
+        let p2 = NyxObservation(situation: .unusualPayment, subject: "p2", priority: .normal, observedAt: date(10, 15),
+                                facts: NyxFacts(merchant: "Glovo"))
+        m.record(p1, delivery: .list, now: date(9, 20))
+        m.mark(p1.id, .dismissed, now: date(9, 20))
+        m.record(p2, delivery: .list, now: date(10, 15))
+        m.mark(p2.id, .dismissed, now: date(10, 15))
+
+        let first = nyxLearningObservations(memory: m, alertSettings: AlertSettings(), mutedMerchants: [],
+                                            now: date(10, 16), calendar: cal)
+        let suggestion = first.first { $0.situation == .suggestMute }
+        #expect(suggestion != nil)
+        if let suggestion {
+            m.apply([NyxDecision(observation: suggestion, delivery: .list)], now: date(10, 16))
+            m.mark(suggestion.id, .dismissed, now: date(10, 17))
+        }
+        // Pasados > 30 días de la sugerencia y > 60 del primer descarte real: solo queda 1 descarte real, no debe repetirse.
+        let later = nyxLearningObservations(memory: m, alertSettings: AlertSettings(), mutedMerchants: [],
+                                            now: nov(26), calendar: cal)
+        #expect(!later.contains { $0.situation == .suggestMute })
     }
 
     @Test func nivelDeHabla() {

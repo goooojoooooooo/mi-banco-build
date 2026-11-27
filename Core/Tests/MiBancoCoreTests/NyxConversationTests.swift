@@ -67,16 +67,29 @@ private func follow(_ q: String, _ prev: AssistantIntent) -> AssistantIntent? {
         #expect(none.question == .seen && none.answer.lines.map { render($0.parts, .plain) } == ["No he visto nada nuevo desde la última vez."])
 
         var mem = NyxMemory()
-        mem.lastLookAt = nov(25, 10)
-        mem.record(NyxObservation(situation: .lowBalance, subject: "rev|2026-11-26", priority: .normal, observedAt: nov(26, 9),
+        mem.lastLookAt = nov(26, 11, 59)
+        mem.record(NyxObservation(situation: .lowBalance, subject: "rev|2026-11-25", priority: .normal, observedAt: nov(25, 9),
                                   facts: NyxFacts(bank: .rev, balanceCents: 4500)),
+                   delivery: .list, now: nov(25, 9))
+        mem.record(NyxObservation(situation: .lowBalance, subject: "rev|2026-11-26", priority: .normal, observedAt: nov(26, 9),
+                                  facts: NyxFacts(bank: .rev, balanceCents: 3500)),
                    delivery: .list, now: nov(26, 9))
         let some = nyxAnswer("¿Qué me he perdido?", conversation: &conv, modelIntent: nil, memory: mem, health: [],
                              state: s, portfolio: nil, book: AccountBook(), now: nov(26, 12), calendar: cal)
         #expect(some.question == .seen && some.answer.intent == .unknown)
-        #expect(some.answer.lines.count == 2)
+        #expect(some.answer.lines.count == 3)
+        // Usa la fecha de la entrada más antigua listada (`nov(25)` → ayer), no `lastLookAt` (`nov(26, 11:59)`).
         #expect(render(some.answer.lines[0].parts, .plain) == "Esto es lo que he visto desde ayer:")
         #expect(some.answer.lines[1].id == "seen-lowBalance|rev|2026-11-26")
+
+        var olderMem = NyxMemory()
+        olderMem.lastLookAt = nov(26, 11, 59)
+        olderMem.record(NyxObservation(situation: .lowBalance, subject: "rev|2026-11-22", priority: .normal, observedAt: nov(22, 9),
+                                       facts: NyxFacts(bank: .rev, balanceCents: 4500)),
+                        delivery: .list, now: nov(22, 9))
+        let olderSeen = nyxAnswer("¿Qué has visto?", conversation: &conv, modelIntent: nil, memory: olderMem, health: [],
+                                  state: s, portfolio: nil, book: AccountBook(), now: nov(26, 12), calendar: cal)
+        #expect(render(olderSeen.answer.lines[0].parts, .plain) == "Esto es lo que he visto desde el 22 nov:")
 
         let ok = nyxAnswer("¿Va todo bien con la app?", conversation: &conv, modelIntent: nil, memory: NyxMemory(), health: [],
                            state: s, portfolio: nil, book: AccountBook(), now: nov(26), calendar: cal)
@@ -88,6 +101,63 @@ private func follow(_ q: String, _ prev: AssistantIntent) -> AssistantIntent? {
                             state: s, portfolio: nil, book: AccountBook(), now: nov(26), calendar: cal)
         #expect(bad.question == .appStatus && bad.answer.intent == .unknown)
         #expect(render(bad.answer.lines[0].parts, .plain) == "La conexión con Revolut ha caducado. Renuévala para volver a ver su saldo al día.")
+    }
+
+    @Test func preguntasPropiasConOjoCerradoUsanTextoCerradoSinDigitos() {
+        var conv = NyxConversation()
+        var mem = NyxMemory()
+        mem.record(NyxObservation(situation: .largePayment, subject: "p1", priority: .normal, observedAt: nov(20, 9),
+                                  facts: NyxFacts(merchant: "Tienda 24", bank: .rev, cents: 20_000)),
+                   delivery: .list, now: nov(20, 9))
+        mem.record(NyxObservation(situation: .unusualPayment, subject: "p2", priority: .normal, observedAt: nov(24, 9),
+                                  facts: NyxFacts(merchant: "Mercadona", bank: .rev, cents: 7000, usualCents: 2000)),
+                   delivery: .list, now: nov(24, 9))
+        mem.record(NyxObservation(situation: .shortfall, subject: "rev|spotify|2026-11-26", priority: .normal, observedAt: nov(24, 10),
+                                  facts: NyxFacts(merchant: "Spotify", bank: .rev, otherBank: .ima, cents: 1099,
+                                                  balanceCents: 3000, suggestedCents: 1000, day: nov(26))),
+                   delivery: .list, now: nov(24, 10))
+        let seen = nyxAnswer("¿Qué has visto?", conversation: &conv, modelIntent: nil, memory: mem, health: [],
+                             state: s, portfolio: nil, book: AccountBook(), privateMode: true, now: nov(24, 12), calendar: cal)
+        let seenTexts = seen.answer.lines.map { render($0.parts, .plain) }
+        #expect(seenTexts[0] == "Esto es lo que he visto desde el viernes:")
+        #expect(seenTexts.contains("Pago grande con Revolut."))
+        #expect(seenTexts.contains("Un pago en Mercadona más alto de lo habitual."))
+        #expect(seenTexts.contains("Pasado mañana te cobran Spotify en Revolut y la cuenta se queda corta."))
+        for line in seenTexts {
+            #expect(!line.contains { $0.isNumber }, "Línea con dígito en ojo cerrado: \(line)")
+        }
+
+        let healthObs = [
+            NyxObservation(situation: .bankExpiring, subject: "rev|2026-11-27|tarde", priority: .normal, observedAt: nov(24, 12),
+                           facts: NyxFacts(bank: .rev, day: nov(27), days: 3)),
+            NyxObservation(situation: .alertsSilent, subject: "revolut|2026-11-10", priority: .quiet, observedAt: nov(24, 12),
+                           facts: NyxFacts(bank: .rev, day: nov(10), days: 14, track: GuideTrack.revolut.rawValue)),
+        ]
+        let status = nyxAnswer("¿Va todo bien con la app?", conversation: &conv, modelIntent: nil, memory: NyxMemory(),
+                               health: healthObs, state: s, portfolio: nil, book: AccountBook(),
+                               privateMode: true, now: nov(24, 12), calendar: cal)
+        let statusTexts = status.answer.lines.map { render($0.parts, .plain) }
+        #expect(statusTexts.contains("La conexión con Revolut caduca pronto. Si la renuevas antes, su saldo sigue al día."))
+        #expect(statusTexts.contains("Hace días que no me llega ningún aviso de Revolut. Si has pagado con Revolut desde entonces, repasa la guía."))
+        for line in statusTexts {
+            #expect(!line.contains { $0.isNumber }, "Salud con dígito en ojo cerrado: \(line)")
+        }
+    }
+
+    @Test func preguntasNormalesConPalabrasParecidasNoSeDesvianAPropias() {
+        let conv = NyxConversation()
+        #expect(nyxRouteQuestion("¿Cuánto tengo en la cuenta conectada?", conversation: conv, state: s, portfolio: nil,
+                                 now: nov(26), calendar: cal) == .assistant(.balances(bank: nil)))
+        #expect(nyxRouteQuestion("¿Has visto cuánto gasté?", conversation: conv, state: s, portfolio: nil,
+                                 now: nov(26), calendar: cal)
+                == .assistant(.spending(month: .current, category: nil, merchant: nil, bank: nil)))
+        #expect(nyxRouteQuestion("¿Cómo funciona mi presupuesto?", conversation: conv, state: s, portfolio: nil,
+                                 now: nov(26), calendar: cal) == .assistant(.budgets(category: nil)))
+        // Las preguntas propias reales siguen yendo a `.seen` y `.appStatus`.
+        #expect(nyxRouteQuestion("¿Qué has visto?", conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal) == .seen)
+        #expect(nyxRouteQuestion("¿Hay novedades?", conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal) == .seen)
+        #expect(nyxRouteQuestion("¿Están conectados los bancos?", conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal) == .appStatus)
+        #expect(nyxRouteQuestion("¿Llegan los avisos?", conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal) == .appStatus)
     }
 
     @Test func laConversacionRecuerdaYSeBorra() {

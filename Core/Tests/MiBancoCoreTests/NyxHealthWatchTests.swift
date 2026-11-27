@@ -39,6 +39,20 @@ private func health(_ s: LedgerState, _ h: NyxAppHealth = NyxAppHealth(), memory
         #expect(!health(linked(date(12, 10))).contains { $0.situation == .bankExpiring })
         #expect(health(linked(date(12, 10), problem: .consentExpired)).contains { $0.situation == .bankExpired && $0.priority == .urgent })
         #expect(health(linked(nov(25))).contains { $0.situation == .bankExpired })
+
+        // Día 0 antes de la hora exacta de caducidad: sigue válida y avisa «hoy» sin hueco ciego con `bankExpired`.
+        let sameDayLater = health(linked(nov(26, 20)), now: nov(26, 12))
+        let expiringToday = sameDayLater.first { $0.id == "bankExpiring|rev|2026-11-26|tarde" && $0.priority == .normal }
+        #expect(expiringToday != nil)
+        #expect(!sameDayLater.contains { $0.situation == .bankExpired })
+        if let expiringToday {
+            let text = render(nyxMessage(for: expiringToday, now: nov(26, 12), calendar: cal).open, .plain)
+            #expect(text.contains("caduca hoy"))
+        }
+        // En el instante exacto de caducidad pasa directamente a `bankExpired`.
+        let exactExpiry = health(linked(nov(26, 12)), now: nov(26, 12))
+        #expect(exactExpiry.contains { $0.situation == .bankExpired && $0.priority == .urgent })
+        #expect(!exactExpiry.contains { $0.situation == .bankExpiring })
     }
 
     @Test func bancoSinActualizar() {

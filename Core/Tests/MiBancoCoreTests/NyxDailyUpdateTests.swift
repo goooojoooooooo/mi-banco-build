@@ -58,6 +58,66 @@ private func ob(_ situation: NyxSituation, _ subject: String, _ priority: NyxPri
         #expect(c.map(\.situation) == [.shortfall, .budgetOffPace, .subscriptionDown])
     }
 
+    @Test func candidatasExcluyenDiasPasadosYPrefierenObservacionActual() {
+        let now = nov(26, 9)
+        let input = BriefingInput(now: now, since: nov(25, 9), isFirst: false)
+        let briefing = makeNyxBriefing(input, calendar: cal)
+
+        let pastShortfall = NyxObservation(
+            situation: .shortfall, subject: "rev|spotify|2026-11-24", priority: .urgent, observedAt: nov(23, 9),
+            facts: NyxFacts(merchant: "Spotify", bank: .rev, cents: 1099, balanceCents: 3000, suggestedCents: 1000,
+                            day: cal.startOfDay(for: nov(24))))
+        let pastBankExpiring = NyxObservation(
+            situation: .bankExpiring, subject: "ima|2026-11-25|tarde", priority: .normal, observedAt: nov(24, 9),
+            facts: NyxFacts(bank: .ima, day: nov(25, 18), days: 1))
+        let pastAppExpiring = NyxObservation(
+            situation: .appExpiring, subject: "2026-11-25|tarde", priority: .urgent, observedAt: nov(24, 20),
+            facts: NyxFacts(day: nov(25, 20)))
+        let staleLowBalance = NyxObservation(
+            situation: .lowBalance, subject: "rev|2026-11-24", priority: .normal, observedAt: nov(24, 12),
+            facts: NyxFacts(bank: .rev, balanceCents: 4500))
+        let oldBudgetNear = NyxObservation(
+            situation: .budgetNear, subject: "month|2026-11", priority: .normal, observedAt: nov(24, 12),
+            facts: NyxFacts(remainingCents: 8000, percent: 81, budgetScope: "del mes"))
+        let staleBank = NyxObservation(
+            situation: .bankStale, subject: "tr|2026-11-22", priority: .quiet, observedAt: nov(25, 12),
+            facts: NyxFacts(bank: .tr, day: nov(22)))
+
+        var mem = NyxMemory()
+        for item in [pastShortfall, pastBankExpiring, pastAppExpiring, staleLowBalance, oldBudgetNear, staleBank] {
+            mem.record(item, delivery: .list, now: item.observedAt)
+        }
+
+        let freshLowBalance = NyxObservation(
+            situation: .lowBalance, subject: "rev|2026-11-26", priority: .normal, observedAt: now,
+            facts: NyxFacts(bank: .rev, balanceCents: 1500))
+        let freshBudgetNear = NyxObservation(
+            situation: .budgetNear, subject: "month|2026-11", priority: .normal, observedAt: now,
+            facts: NyxFacts(remainingCents: 2000, percent: 95, budgetScope: "del mes"))
+
+        let candidates = nyxFocusCandidates(
+            current: [freshLowBalance, freshBudgetNear], memory: mem, briefing: briefing, input: input,
+            now: now, calendar: cal)
+
+        #expect(!candidates.contains { $0.id == pastShortfall.id })
+        #expect(!candidates.contains { $0.id == pastBankExpiring.id })
+        #expect(!candidates.contains { $0.id == pastAppExpiring.id })
+        #expect(!candidates.contains { $0.id == staleLowBalance.id })
+        #expect(candidates.first { $0.situation == .lowBalance }?.facts.balanceCents == 1500)
+        #expect(candidates.first { $0.situation == .budgetNear }?.facts.remainingCents == 2000)
+        // Las observaciones con fecha histórica de referencia (como `bankStale`) NO se excluyen.
+        #expect(candidates.contains { $0.id == staleBank.id })
+
+        // Un `shortfall` que cae HOY sí sigue siendo candidato.
+        let todayShortfall = NyxObservation(
+            situation: .shortfall, subject: "rev|spotify|2026-11-26", priority: .urgent, observedAt: now,
+            facts: NyxFacts(merchant: "Spotify", bank: .rev, cents: 1099, balanceCents: 3000, suggestedCents: 1000,
+                            day: cal.startOfDay(for: now)))
+        let withToday = nyxFocusCandidates(
+            current: [todayShortfall], memory: NyxMemory(), briefing: briefing, input: input, now: now, calendar: cal)
+        #expect(withToday.map(\.id) == [todayShortfall.id])
+    }
+
     @Test func elModeloSoloEligeUnNumero() {
         let c = [ob(.shortfall, "s", .urgent, merchant: "Netflix"), ob(.budgetOffPace, "b", .normal)]
         let p = nyxFocusPrompt(c)

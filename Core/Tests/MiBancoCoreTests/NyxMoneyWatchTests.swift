@@ -74,6 +74,17 @@ private func ledger(_ movements: [Movement], balances: [BankID: ManualBalance] =
         #expect(!run(25_000, day: 7))
         #expect(!run(50_000, day: 10))
         #expect(run(45_000, day: 20))
+        #expect(run(47_000, day: 21))
+        #expect(!run(47_900, day: 22))
+        #expect(!run(47_000, day: 28))
+        #expect(!run(47_000, day: 29))
+        // Ventana de días del diseño §6.3: del día 8 al antepenúltimo (`daysInMonth - 2`).
+        #expect(!nyxIsBudgetOffPaceDay(7, daysInMonth: 30))
+        #expect(nyxIsBudgetOffPaceDay(8, daysInMonth: 30))
+        #expect(nyxIsBudgetOffPaceDay(28, daysInMonth: 30))
+        #expect(!nyxIsBudgetOffPaceDay(29, daysInMonth: 30))
+        #expect(nyxIsBudgetOffPaceDay(29, daysInMonth: 31))
+        #expect(!nyxIsBudgetOffPaceDay(30, daysInMonth: 31))
     }
 
     @Test func masDeLoHabitualSinPresupuesto() {
@@ -91,8 +102,27 @@ private func ledger(_ movements: [Movement], balances: [BankID: ManualBalance] =
         #expect(!run(13_500, budget: true))
         let baselines = nyxBaselines(in: ledger(history, overrides: overrides), now: nov(20), calendar: cal)
         #expect(baselines.categoryAverageCents[.comerFuera] == 10_000)
-        #expect(baselines.fullMonths == 3)
+        #expect(baselines.fullMonths == 2)
         #expect(baselines.merchantUsualCents["la tasca"] == 5000)
+    }
+
+    @Test func fullMonthsSoloCuentaMesInicialSiEmpiezaElDiaUno() {
+        let overrides: [String: SpendingCategory] = ["la tasca": .comerFuera]
+        let lateStart = [pay(6000, "La Tasca", date(9, 28)), pay(10_000, "La Tasca", date(10, 15))]
+        let lateBaselines = nyxBaselines(in: ledger(lateStart, overrides: overrides), now: nov(20), calendar: cal)
+        #expect(lateBaselines.fullMonths == 1)
+        #expect(!nyxMoneyObservations(
+            state: ledger(lateStart + [pay(15_000, "La Tasca", nov(20, 9))], overrides: overrides),
+            book: AccountBook(), newMovementIDs: [], moment: .open, now: nov(20, 12), calendar: cal
+        ).contains { $0.situation == .categoryAboveNormal })
+
+        let firstDayStart = [pay(10_000, "La Tasca", date(9, 1)), pay(10_000, "La Tasca", date(10, 15))]
+        let firstDayBaselines = nyxBaselines(in: ledger(firstDayStart, overrides: overrides), now: nov(20), calendar: cal)
+        #expect(firstDayBaselines.fullMonths == 2)
+        #expect(nyxMoneyObservations(
+            state: ledger(firstDayStart + [pay(13_500, "La Tasca", nov(20, 9))], overrides: overrides),
+            book: AccountBook(), newMovementIDs: [], moment: .open, now: nov(20, 12), calendar: cal
+        ).contains { $0.id == "categoryAboveNormal|comerFuera|2026-11" })
     }
 
     @Test func comercioSilenciadoYNoEsMioNoObservan() {

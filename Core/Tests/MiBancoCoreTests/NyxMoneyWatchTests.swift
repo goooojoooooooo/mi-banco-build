@@ -125,6 +125,26 @@ private func ledger(_ movements: [Movement], balances: [BankID: ManualBalance] =
         ).contains { $0.id == "categoryAboveNormal|comerFuera|2026-11" })
     }
 
+    @Test func laMediaSoloUsaMesesCompletosSiElPrimerMesEstaAMedias() {
+        // Primer pago el 28 ago (mes a medias, 60 €), sep y oct con 100 €: la media real de meses completos es 100 €.
+        let overrides: [String: SpendingCategory] = ["la tasca": .comerFuera]
+        let history = [pay(6000, "La Tasca", date(8, 28)), pay(10_000, "La Tasca", date(9, 15)),
+                       pay(10_000, "La Tasca", date(10, 15))]
+        let baselines = nyxBaselines(in: ledger(history, overrides: overrides), now: nov(20), calendar: cal)
+        #expect(baselines.fullMonths == 2)
+        #expect(baselines.categoryAverageCents[.comerFuera] == 10_000)
+        // 115 € no supera 100 € x 1,3: no sale «Más de lo habitual» (con la media diluida de 86,67 € sí saldría).
+        #expect(!nyxMoneyObservations(
+            state: ledger(history + [pay(11_500, "La Tasca", nov(20, 9))], overrides: overrides),
+            book: AccountBook(), newMovementIDs: [], moment: .open, now: nov(20, 12), calendar: cal
+        ).contains { $0.situation == .categoryAboveNormal })
+        // 135 € sí la supera.
+        #expect(nyxMoneyObservations(
+            state: ledger(history + [pay(13_500, "La Tasca", nov(20, 9))], overrides: overrides),
+            book: AccountBook(), newMovementIDs: [], moment: .open, now: nov(20, 12), calendar: cal
+        ).contains { $0.id == "categoryAboveNormal|comerFuera|2026-11" })
+    }
+
     @Test func comercioSilenciadoYNoEsMioNoObservan() {
         let prior = [pay(2000, "Mercadona", nov(2)), pay(2000, "Mercadona", nov(9)), pay(2000, "Mercadona", nov(16))]
         let new = pay(7000, "Mercadona", nov(26, 10))

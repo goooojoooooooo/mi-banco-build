@@ -160,6 +160,21 @@ private func follow(_ q: String, _ prev: AssistantIntent) -> AssistantIntent? {
         #expect(nyxRouteQuestion("¿Llegan los avisos?", conversation: conv, state: s, portfolio: nil, now: nov(26), calendar: cal) == .appStatus)
     }
 
+    @Test func preguntasPropiasConLaPalabraPagoVanASusPreguntas() {
+        let conv = NyxConversation()
+        #expect(nyxRouteQuestion("¿Llegan los avisos de los pagos?", conversation: conv, state: s, portfolio: nil,
+                                 now: nov(26), calendar: cal) == .appStatus)
+        #expect(nyxRouteQuestion("¿Has visto algún pago raro?", conversation: conv, state: s, portfolio: nil,
+                                 now: nov(26), calendar: cal) == .seen)
+        // Las preguntas de dinero reales siguen yendo al asistente normal.
+        let money1 = nyxRouteQuestion("¿Cuántos pagos tengo este mes?", conversation: conv, state: s, portfolio: nil,
+                                      now: nov(26), calendar: cal)
+        #expect(money1 != .appStatus && money1 != .seen)
+        let money2 = nyxRouteQuestion("¿Has visto cuánto llevo pagado?", conversation: conv, state: s, portfolio: nil,
+                                      now: nov(26), calendar: cal)
+        #expect(money2 != .appStatus && money2 != .seen)
+    }
+
     @Test func laConversacionRecuerdaYSeBorra() {
         var conv = NyxConversation()
         _ = nyxAnswer("¿Cuánto llevo en Mercadona?", conversation: &conv, modelIntent: nil, memory: NyxMemory(), health: [],

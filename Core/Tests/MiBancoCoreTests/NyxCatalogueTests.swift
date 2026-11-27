@@ -129,10 +129,10 @@ private func everySituationFixture() -> [NyxObservation] {
         let base = NyxFacts(merchant: "Spotify", bank: .rev, otherBank: .ima, cents: 1099, balanceCents: 3000,
                             suggestedCents: 1000, day: nov(25))
         let cases: [(day: Date, openPrefix: String, closedPrefix: String)] = [
-            (nov(25), "El miércoles 25 te cobran", "Ayer te cobran"),
-            (nov(21), "El sábado 21 te cobran", "Hace unos días te cobran"),
-            (nov(15), "El 15 nov te cobran", "La semana pasada te cobran"),
-            (date(10, 20), "El 20 oct te cobran", "El mes pasado te cobran"),
+            (nov(25), "El miércoles 25 te cobraron", "Ayer te cobraron"),
+            (nov(21), "El sábado 21 te cobraron", "Hace unos días te cobraron"),
+            (nov(15), "El 15 nov te cobraron", "La semana pasada te cobraron"),
+            (date(10, 20), "El 20 oct te cobraron", "El mes pasado te cobraron"),
         ]
         for item in cases {
             var f = base
@@ -145,6 +145,54 @@ private func everySituationFixture() -> [NyxObservation] {
             #expect(!m.neutral.hasPrefix("Hoy") && m.neutral.hasPrefix(item.closedPrefix), "\(item.day): \(m.neutral)")
             let notif = nyxNotificationText(m, hidden: true)
             #expect(!notif.title.contains { $0.isNumber } && !notif.body.contains { $0.isNumber })
+            #expect(notif.body != "Tengo algo que contarte.")
+        }
+    }
+
+    @Test func cobroPasadoSeEscribeEnPasadoYNoOfreceTraspaso() {
+        let base = NyxFacts(merchant: "Spotify", bank: .rev, otherBank: .ima, cents: 1099, balanceCents: 3000,
+                            suggestedCents: 1000, day: nov(25))
+        func isTransfer(_ a: NyxAction) -> Bool {
+            if case .prepareTransfer = a { return true }
+            return false
+        }
+        // Mismo mes y más de 13 días atrás: no puede leerse «Este mes te cobran…» (futuro).
+        var far = base
+        far.day = nov(2)
+        let sameMonthFarBack = msg(.shortfall, far, now: nov(26, 12))
+        #expect(sameMonthFarBack.closed.hasPrefix("Este mes te cobraron"), "\(sameMonthFarBack.closed)")
+        #expect(sameMonthFarBack.neutral.hasPrefix("Este mes"), "\(sameMonthFarBack.neutral)")
+        for diff in [-1, -3, -9, -24] {
+            var f = base
+            f.day = cal.date(byAdding: .day, value: diff, to: nov(26, 12))!
+            let m = msg(.shortfall, f, now: nov(26, 12))
+            let open = render(m.open, .plain)
+            for text in [open, m.closed, m.neutral] {
+                #expect(!text.contains("te cobran "), "\(diff): \(text)")
+                #expect(!text.contains("se queda"), "\(diff): \(text)")
+                #expect(text.contains("te cobraron") || text.contains("tuviste"), "\(diff): \(text)")
+            }
+            // Con el ojo abierto no hay oferta de traspaso calculada con un saldo viejo.
+            #expect(!open.contains("traspaso") && !open.contains("pásale") && !open.contains("tienes"), "\(diff): \(open)")
+            #expect(!m.actions.contains(where: isTransfer), "\(diff)")
+            #expect(!nyxActionTitles(m, hidden: false).contains { $0.lowercased().contains("traspaso") }, "\(diff)")
+        }
+        // Un cobro futuro conserva el presente y la oferta.
+        var future = base
+        future.day = nov(28)
+        let fm = msg(.shortfall, future, now: nov(26, 12))
+        #expect(render(fm.open, .plain).contains("te cobran") && render(fm.open, .plain).contains("traspaso"))
+        #expect(fm.actions.contains(where: isTransfer))
+    }
+
+    @Test func cobroPasadoCerradoNoLlevaDigitos() {
+        var f = NyxFacts(merchant: "Spotify", bank: .rev, otherBank: .ima, cents: 1099, balanceCents: 3000,
+                         suggestedCents: 1000, day: nov(2))
+        for day in [nov(25), nov(21), nov(15), nov(2), date(10, 20)] {
+            f.day = day
+            let m = msg(.shortfall, f, now: nov(26, 12))
+            let notif = nyxNotificationText(m, hidden: true)
+            #expect(!notif.body.contains { $0.isNumber } && !notif.body.contains("te cobran "), "\(day): \(notif.body)")
             #expect(notif.body != "Tengo algo que contarte.")
         }
     }
@@ -183,6 +231,13 @@ private func everySituationFixture() -> [NyxObservation] {
     }
 
     @Test func catalogoCompletoSinConsejosNiCifrasCerradas() {
+        // La línea de novedades de la puesta al día tampoco lleva ningún dígito con el ojo cerrado.
+        for count in [1, 2, 3, 10, 25] {
+            let line = nyxSeenLine(count, hidden: true)
+            #expect(line != nil && !(line ?? "").contains { $0.isNumber }, "nyxSeenLine(\(count)): \(line ?? "nil")")
+        }
+        #expect(nyxSeenLine(0, hidden: true) == nil)
+
         let banned = ["conviene", "deberias", "tranquil", "calma", "no te preocupes", "todo bien",
                       "buenas noticias", "bienvenid", "encantad", " listo", " lista"]
         for f in everySituationFixture() {

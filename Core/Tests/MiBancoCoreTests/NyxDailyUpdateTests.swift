@@ -142,6 +142,9 @@ private func ob(_ situation: NyxSituation, _ subject: String, _ priority: NyxPri
         #expect(nyxSeenLine(0) == nil)
         #expect(nyxSeenLine(1) == "He visto una cosa desde la última vez.")
         #expect(nyxSeenLine(3) == "He visto 3 cosas desde la última vez.")
+        #expect(nyxSeenLine(0, hidden: true) == nil)
+        #expect(nyxSeenLine(1, hidden: true) == "He visto una cosa desde la última vez.")
+        #expect(nyxSeenLine(3, hidden: true) == "He visto algunas cosas desde la última vez.")
         #expect(nyxFocusHeader == "Para tener en cuenta")
         let two = [ob(.shortfall, "s", .urgent), ob(.budgetOffPace, "b", .normal)]
         #expect(nyxDailyUpdate(input: input, candidates: two, focusChoice: 2, openingChoice: nil, seenSinceLastLook: 0,

@@ -59,6 +59,10 @@ targets:
         LSApplicationQueriesSchemes: [revolut, imagin, traderepublic, shortcuts]
         ALTAppGroups: [group.com.mibanco.shared]
         UIUserInterfaceStyle: Dark
+        # 120 Hz en los iPhone con ProMotion: sin esta clave, las animaciones propias (Core Animation, SwiftUI,
+        # `TimelineView(.animation)`) quedan a 60 Hz aunque la pantalla vaya a 120. En reposo no gasta: el sistema baja
+        # la frecuencia cuando nada se mueve.
+        CADisableMinimumFrameDurationOnPhone: true
         # Pantalla de lanzamiento del sistema: negro liso (color `LaunchBlack` del catálogo), también con el iPhone en
         # modo claro; así no hay un destello blanco antes del arranque negro de la app.
         UILaunchScreen:

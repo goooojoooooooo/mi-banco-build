@@ -262,7 +262,7 @@ struct LockView: View {
         defer { authenticating = false }
         // SEC-08: sin código ni Face ID en el iPhone NO se desbloquea en silencio. Esta guardia la recorren la app real, la
         // demo (`-MiBancoDemoNoPasscode`, que solo cambia lo que contesta `currentAvailability()`) y las pruebas.
-        guard applyAvailability(currentAvailability()) else { return }
+        guard applyAvailability(currentAvailability()) else { unlockWithFade(); return }
         let context = LAContext()
         let ok = (try? await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Para que solo tú veas tu dinero")) ?? false
         if ok { unlockWithFade() } else { failures += 1 }

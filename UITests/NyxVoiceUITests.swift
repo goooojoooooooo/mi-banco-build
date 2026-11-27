@@ -35,12 +35,27 @@ final class NyxVoiceUITests: XCTestCase {
         return condition()
     }
 
-    private func scrollTo(_ target: XCUIElement, swipes: Int = 10) {
+    private func isClearlyVisible(_ target: XCUIElement) -> Bool {
+        guard target.exists, target.isHittable else { return false }
+        let frame = target.frame
+        guard !frame.isEmpty else { return false }
+        let done = app.buttons["briefing-done"]
+        let bottomLimit = (done.exists && !done.frame.isEmpty) ? done.frame.minY - 16 : app.windows.firstMatch.frame.height - 140
+        return frame.minY > 110 && frame.maxY < bottomLimit
+    }
+
+    private func scrollTo(_ target: XCUIElement, swipes: Int = 8) {
         let scroller = app.scrollViews["briefing-scroll"].exists ? app.scrollViews["briefing-scroll"] : app.scrollViews.firstMatch
-        for _ in 0..<swipes where !(target.exists && target.isHittable) {
-            scroller.swipeUp()
+        for _ in 0..<swipes {
+            if isClearlyVisible(target) { return }
+            if target.exists && !target.frame.isEmpty && target.frame.minY <= 110 {
+                scroller.swipeDown()
+            } else {
+                scroller.swipeUp()
+            }
         }
-        for _ in 0..<swipes where !(target.exists && target.isHittable) {
+        for _ in 0..<swipes {
+            if isClearlyVisible(target) { return }
             scroller.swipeDown()
         }
     }
@@ -97,11 +112,11 @@ final class NyxVoiceUITests: XCTestCase {
         XCTAssertTrue(focusListen.waitForExistence(timeout: 8), "Falta nyx-listen-focus")
         XCTAssertEqual(focusListen.label, "Escuchar")
         focusListen.tap()
-        XCTAssertTrue(waitUntil(6) { focusListen.label == "Parar" }, "nyx-listen-focus no pasó a Parar")
+        XCTAssertTrue(waitUntil(6) { focusListen.exists && focusListen.label == "Parar" }, "nyx-listen-focus no pasó a Parar")
         XCTAssertTrue(spokenTextValue().localizedCaseInsensitiveContains("Netflix"),
                       "El foco hablado no menciona Netflix: \(spokenTextValue())")
         focusListen.tap()
-        XCTAssertTrue(waitUntil(6) { focusListen.label == "Escuchar" }, "nyx-listen-focus no volvió a Escuchar")
+        XCTAssertTrue(waitUntil(6) { focusListen.exists && focusListen.label == "Escuchar" }, "nyx-listen-focus no volvió a Escuchar")
 
         let field = app.textFields["assistant-question-field"]
         scrollTo(field)
@@ -116,11 +131,11 @@ final class NyxVoiceUITests: XCTestCase {
         XCTAssertTrue(answerListen.waitForExistence(timeout: 10), "Falta nyx-listen-answer")
         scrollTo(answerListen)
         answerListen.tap()
-        XCTAssertTrue(waitUntil(6) { answerListen.label == "Parar" }, "nyx-listen-answer no pasó a Parar")
+        XCTAssertTrue(waitUntil(6) { answerListen.exists && answerListen.label == "Parar" }, "nyx-listen-answer no pasó a Parar")
         XCTAssertTrue(spokenTextValue().localizedCaseInsensitiveContains("Mercadona"),
                       "La respuesta hablada no menciona Mercadona: \(spokenTextValue())")
         answerListen.tap()
-        XCTAssertTrue(waitUntil(6) { answerListen.label == "Escuchar" }, "nyx-listen-answer no volvió a Escuchar")
+        XCTAssertTrue(waitUntil(6) { answerListen.exists && answerListen.label == "Escuchar" }, "nyx-listen-answer no volvió a Escuchar")
     }
 
     /// N12: con el ojo cerrado, la voz nunca lee importes, «€», «euros» ni «%» (ni en la puesta al día, ni en el foco ni en una respuesta).
@@ -152,7 +167,7 @@ final class NyxVoiceUITests: XCTestCase {
         scrollTo(focusListen)
         XCTAssertTrue(focusListen.waitForExistence(timeout: 8), "Falta nyx-listen-focus en privado")
         focusListen.tap()
-        XCTAssertTrue(waitUntil(6) { focusListen.label == "Parar" })
+        XCTAssertTrue(waitUntil(6) { focusListen.exists && focusListen.label == "Parar" })
         let focusSpoken = spokenTextValue()
         XCTAssertFalse(focusSpoken.isEmpty, "El foco hablado privado está vacío")
         XCTAssertFalse(focusSpoken.contains(where: \.isNumber), "El foco hablado privado contiene dígitos: \(focusSpoken)")
@@ -160,7 +175,7 @@ final class NyxVoiceUITests: XCTestCase {
         XCTAssertFalse(focusSpoken.localizedCaseInsensitiveContains("euros"), "El foco hablado privado contiene euros: \(focusSpoken)")
         XCTAssertFalse(focusSpoken.contains("%"), "El foco hablado privado contiene %: \(focusSpoken)")
         focusListen.tap()
-        XCTAssertTrue(waitUntil(6) { focusListen.label == "Escuchar" })
+        XCTAssertTrue(waitUntil(6) { focusListen.exists && focusListen.label == "Escuchar" })
 
         // 3. Respuesta con el ojo cerrado: cero dígitos, cero €, cero euros.
         let field = app.textFields["assistant-question-field"]
@@ -174,7 +189,7 @@ final class NyxVoiceUITests: XCTestCase {
         XCTAssertTrue(answerListen.waitForExistence(timeout: 10), "Falta nyx-listen-answer en privado")
         scrollTo(answerListen)
         answerListen.tap()
-        XCTAssertTrue(waitUntil(6) { answerListen.label == "Parar" })
+        XCTAssertTrue(waitUntil(6) { answerListen.exists && answerListen.label == "Parar" })
         let answerSpoken = spokenTextValue()
         XCTAssertFalse(answerSpoken.isEmpty, "La respuesta hablada privada está vacía")
         XCTAssertFalse(answerSpoken.contains(where: \.isNumber), "La respuesta hablada privada contiene dígitos: \(answerSpoken)")
